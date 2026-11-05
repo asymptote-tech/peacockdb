@@ -1,13 +1,13 @@
 """A laptop and the VMs it provisions, for provision-vm.sh's tests.
 
-The laptop is a home with a git identity and a clone of the scripts whose origin is the GitHub
-repository. `ssh` is a fake that records each call's argv and stdin and runs the remote command in
-a fake VM: a directory per address holding passwd, group, the users' homes, and `root/` for what
-is written under /etc and /var. A user is reached only with an authorized_keys. On a VM, sudo runs
-its command as the caller; getent, groupadd, useradd, usermod and install act on that directory;
-gh keeps its login in ~/.config/gh/hosts.yml on the laptop and on a VM alike. The clone's
-bootstrap-vm.sh is a stub that records its user and arguments, installs a fake claude, makes an
-empty clone on the --ref branch and writes the machine marker.
+The laptop is a home with a git identity and a clone of the scripts whose origin is GitHub. `ssh`
+is a fake that records argv and stdin and runs the remote command in a fake VM, a directory per
+address: passwd, group, homes, and `root/` for /etc and /var. A user is reached with an
+authorized_keys holding the `.pub` of the key `-i` names (any file stands for the laptop's key); a
+host with a `password` file lets a call without BatchMode in; `drop_on` and `exit_on` end a command.
+A host's `bin/` is first on PATH, its `environment` in every session, its `next_session.sh` run as
+the next session starts; stdin streams. sudo, getent, groupadd, useradd, usermod, install and gh act
+on the VM; bootstrap-vm.sh is a stub.
 """
 import json
 import os
@@ -21,14 +21,15 @@ from machine import KEYS, REPO, git
 LAPTOP_FILES = [
     "scripts/env/provision-vm.sh", "scripts/env/up.sh", "scripts/env/down.sh",
     "scripts/lib/peacock-config.sh", "scripts/lib/board.sh", "scripts/lib/image-inputs.sh",
-    "scripts/lib/data-inputs.sh", "scripts/lib/machine.sh",
+    "scripts/lib/data-inputs.sh", "scripts/lib/machine.sh", "scripts/lib/host.sh", "scripts/lib/portable.sh",
+    "scripts/env/host/ssh.sh", "scripts/env/host/nebius.sh",
 ]
 ORIGIN = "git@github.com:asymptote-tech/peacockdb.git"
 PAT = "github_pat_11FAKETOKEN0value_Zq81"
 LAPTOP_GITCONFIG = "[user]\n\tname = Ada Laptop\n\temail = ada@example.test\n"
 
 FAKE_SSH = r'''#!/usr/bin/env python3
-import json, os, pathlib, subprocess, sys
+import json, os, pathlib, subprocess, sys, threading
 args = sys.argv[1:]
 WITH_VALUE = {"-o", "-i", "-p", "-l", "-F", "-E", "-J", "-b", "-c", "-D", "-L", "-R", "-W", "-w", "-e", "-m"}
 i, opts = 0, []
@@ -40,23 +41,76 @@ while i < len(args) and args[i].startswith("-"):
     opts += args[i:i + step]
     i += step
 target, command = args[i], " ".join(args[i + 1:])
-stdin = b"" if "-n" in opts else sys.stdin.buffer.read()
-with open(os.environ["FAKE_SSH_LOG"], "a") as f:
-    f.write(json.dumps({"argv": args, "stdin": stdin.decode(errors="replace")}) + "\n")
 user, _, address = target.rpartition("@")
 vm = pathlib.Path(os.environ["FAKE_VMS"]) / address
-if not vm.is_dir() or address in os.environ.get("FAKE_SSH_DOWN", "").split():
-    print(f"ssh: connect to host {address} port 22: No route to host", file=sys.stderr)
-    sys.exit(255)
-homes = {ln.split(":")[0]: ln.split(":")[5] for ln in (vm / "passwd").read_text().splitlines() if ln}
-home = homes.get(user)
-if home is None or not (pathlib.Path(home) / ".ssh" / "authorized_keys").is_file():
-    print(f"{target}: Permission denied (publickey).", file=sys.stderr)
+reachable = vm.is_dir() and address not in os.environ.get("FAKE_SSH_DOWN", "").split()
+home, authorized, password = None, False, False
+if reachable:
+    homes = {ln.split(":")[0]: ln.split(":")[5] for ln in (vm / "passwd").read_text().splitlines() if ln}
+    home = homes.get(user)
+    keys = pathlib.Path(home or "/nonexistent") / ".ssh" / "authorized_keys"
+    # With -i, that key's .pub must be authorized; without, the laptop's own key, which any file stands for.
+    key = opts[opts.index("-i") + 1] if "-i" in opts else None
+    authorized = keys.is_file() and (key is None or pathlib.Path(key + ".pub").read_text().strip()
+                                     in keys.read_text().splitlines())
+    batch = any(opts[k + 1] == "BatchMode=yes" for k, o in enumerate(opts) if o == "-o")
+    if home is not None and not authorized and not batch and (vm / "password").is_file():
+        authorized = password = True  # the person types the password at ssh's prompt
+drop = vm / "drop_on"
+dropped = reachable and drop.is_file() and drop.read_text().strip() in command
+# exit_on: `<words> <status>`, a command holding <words> ends with <status> without running.
+forced = None
+if reachable and (vm / "exit_on").is_file():
+    words, _, code = (vm / "exit_on").read_text().strip().rpartition(" ")
+    forced = int(code) if words in command else None
+def log(stdin):
+    with open(os.environ["FAKE_SSH_LOG"], "a") as f:
+        f.write(json.dumps({"argv": args, "stdin": stdin.decode(errors="replace"), "password": password}) + "\n")
+# As ssh, a session that never runs its command reads none of its stdin.
+if authorized and forced is not None:
+    log(b"")
+    sys.exit(forced)
+if not reachable or not authorized or dropped:
+    log(b"")
+    if not reachable:
+        print(f"ssh: connect to host {address} port 22: No route to host", file=sys.stderr)
+    elif dropped:
+        print(f"Connection to {address} closed by remote host.", file=sys.stderr)
+    else:
+        print(f"{target}: Permission denied (publickey).", file=sys.stderr)
     sys.exit(255)
 env = {k: v for k, v in os.environ.items() if k.startswith("FAKE_")}
+own_bin = f"{vm / 'bin'}:" if (vm / "bin").is_dir() else ""
 env.update(HOME=home, USER=user, LOGNAME=user, FAKE_VM=str(vm), FAKE_USER_NAME=user, LANG="C.UTF-8",
-           PATH=f"{os.environ['FAKE_VM_BIN']}:{os.environ['FAKE_BASE_PATH']}")
-sys.exit(subprocess.run(["bash", "-c", command], input=stdin, env=env, cwd=home).returncode)
+           PATH=f"{own_bin}{os.environ['FAKE_VM_BIN']}:{os.environ['FAKE_BASE_PATH']}")
+if (vm / "environment").is_file():  # what the host's sshd puts in every session
+    env.update(ln.split("=", 1) for ln in (vm / "environment").read_text().splitlines() if "=" in ln)
+# What takes effect only at a new login, a group joined among them: run once, as this session starts.
+if (vm / "next_session.sh").is_file():
+    subprocess.run(["bash", str(vm / "next_session.sh")], check=True)
+    (vm / "next_session.sh").unlink()
+# stdin streams to the remote command, as ssh's does: a session can be held open by its caller.
+child = subprocess.Popen(["bash", "-c", command], stdin=subprocess.PIPE, env=env, cwd=home)
+seen = bytearray()
+def pump():
+    try:
+        while "-n" not in opts:
+            chunk = os.read(0, 65536)
+            if not chunk:
+                break
+            seen.extend(chunk)
+            child.stdin.write(chunk)
+            child.stdin.flush()
+    except (BrokenPipeError, ValueError, OSError):
+        pass
+    try:
+        child.stdin.close()
+    except (BrokenPipeError, OSError):
+        pass
+threading.Thread(target=pump, daemon=True).start()
+code = child.wait()
+log(bytes(seen))
+os._exit(code)
 '''
 
 FAKE_GH = r'''#!/usr/bin/env python3
@@ -250,6 +304,14 @@ class Laptop:
         (vm / "passwd").write_text(f"root:x:0:0::/root:/bin/bash\n{login}:x:1000:1000::{home}:/bin/bash\n")
         (vm / "group").write_text(f"root:x:0:\n{login}:x:1000:\n")
         return vm
+
+    def add_gpu_host(self, address, user="ubuntu"):
+        """A GPU host that takes only a password for <user>: no authorized_keys yet."""
+        host = self.vms / address
+        (host / "home" / user).mkdir(parents=True)
+        (host / "passwd").write_text(f"root:x:0:0::/root:/bin/bash\n{user}:x:1000:1000::{host / 'home' / user}:/bin/bash\n")
+        (host / "password").write_text("")
+        return host
 
     def provision(self, *args, stdin="", env=None):
         cmd = [str(self.clone / "scripts" / "env" / "provision-vm.sh"), *map(str, args)]

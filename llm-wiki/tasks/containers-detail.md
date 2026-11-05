@@ -13,7 +13,7 @@
 - The benchmark today times 26 hand-listed cases (`corpus_benchmark_cases.inc`); the registry
   enables about 534 tpch and tpcds device cells. The H200 run of the 26 took 3,602 s, 96 % of it the
   six rowgroup cases. The benchmark pool is a fixed 69 GiB.
-- Deferred to Task 11, the human's: the rowgroup modes for every query, and the source of tpcds
+- Decided at Task 11's run: the rowgroup modes for every query, and the source of tpcds
   sf40 (15 GB, in no bucket).
 
 
@@ -83,7 +83,7 @@ Steps 3–6 are verified (below).
 **The pins added to pins.env.**
 - `CMAKE_SHA256`: the `linux-x86_64.tar.gz` line of Kitware's `cmake-4.2.3-SHA-256.txt`.
 - `DUCKDB_SHA256`: GitHub's asset digest of `duckdb_cli-linux-amd64.zip` v1.5.4. It equals the
-  sha256 of `/build/peacock/duckdb-1.5.4/duckdb.zip`, the CLI the committed data came from.
+  sha256 of the CLI zip the committed data came from.
 - `NINJA_SHA256` and `AWS_CLI_SHA256` are measured on a download: ninja publishes no checksum and
   GitHub has no digest for its 2024 assets; AWS signs with PGP only.
 - `PYTHON_STANDALONE_TAG` 20241008 and `PYTHON_SHA256`: Python 3.13.0 is python-build-standalone's
@@ -234,7 +234,7 @@ the sha256 of the one wheel pip installs (cp313 manylinux x86_64, or py3).
   hashed and that the lock agrees with pins.env.
 - **What the lock holds.**
   - numpy 2.5.4, pandas 3.0.6, pyarrow 25.0.1, python-dateutil 2.9.0.post0 and six 1.17.0 are
-    `pip freeze` of `/build/peacock/venv-exec-model-313`, the venv the committed costs ran in.
+    `pip freeze` of the venv the committed costs ran in.
     Its `dist-info/WHEEL` tags are the same wheels the lock names.
   - matplotlib 3.11.2 and duckdb 1.5.4, with contourpy 1.4.0, cycler 0.12.1, fonttools 4.67.0,
     kiwisolver 1.5.1, packaging 26.3, pillow 13.0.0 and pyparsing 3.3.3, are what `62b78a38` held
@@ -244,8 +244,8 @@ the sha256 of the one wheel pip installs (cp313 manylinux x86_64, or py3).
   2026-10-23 (`03b4e3d6`, `e114cb9d`) picked python-dateutil 3.0.0 and a new tzdata 2026.5.
 - The venv belongs to root, so nothing at run time moves a pin.
 
-**Claude Code is not in the image**, and neither is the plugin. This is the human's decision of
-2026-10-23, in the spec's "The images". The native binary is proprietary and the images are
+**Claude Code is not in the image**, and neither is the plugin. The spec's "The images" says
+so. The native binary is proprietary and the images are
 public. A login belongs to the machine, not to a container. So Claude Code, the
 `superpowers@claude-plugins-official` plugin and gh's login live on the machine, installed once
 by Task 6's `bootstrap-vm.sh`. The container runs the machine's install, mounted read-only, with
@@ -265,7 +265,7 @@ by Task 6's `bootstrap-vm.sh`. The container runs the machine's install, mounted
     successfully.
   - Claude Code's `install.sh` is not pinned by hash. It checks the binary it downloads against
     the release manifest. It first runs the latest release, and that release installs the pinned
-    version (round-1 review).
+    version.
 - gh stays in the image, since agents run it inside. Its login is the machine's mounted config,
   and the image deletes the device id `gh --version` writes at build.
 
@@ -276,7 +276,7 @@ image depends on being `peacock`:
 - **Rust.** `RUSTUP_HOME=/opt/rust/rustup` is root's and readable by all. Writable by any uid:
   `CARGO_HOME=/opt/rust/cargo` itself, for cargo's caches and its package lock
   `$CARGO_HOME/.package-cache`, and its `registry/` and `git/`. `bin/` stays root's.
-  - For Task 6 (the reviewer's note): the package lock lies outside `registry/`. So a lock per
+  - For Task 6: the package lock lies outside `registry/`. So a lock per
     container plus the machine's registry mounted `:ro` is safe.
   - A crate missing from that registry fails the build, so bootstrap must fill it with
     `cargo fetch` in the build image.
@@ -328,8 +328,7 @@ without the arg must stop. Line 1 skips that one rule.
 
 ## Task 2: what was built and verified
 
-Host: the developer's. Docker data root `/build/docker-data`. All output is under
-`/build/peacock/containers/` and the logs under `/build/peacock/tmp/containers/`.
+Host: the developer's, building under `/build` as build-test.md says, the Docker data root there too.
 
 **Images.** Both are tagged `:cudf-<v>` only, because the tree was dirty. Four builds so far:
 
@@ -338,7 +337,7 @@ Host: the developer's. Docker data root `/build/docker-data`. All output is unde
 | `c83f7208` | 25.02 | 10.26 GB | about 260 s + 184 s | the first build, across two attempts (the mirror fix in between) |
 | `62b78a38` | 25.02 | 10.26 GB | 420 s | the math-library headers in `/opt/nvcc`: cold from that layer on |
 | `ae80842c` | 26.02 | 9.97 GB | 456 s | the first 26.02 build: cold apart from the `ubuntu:24.04` layer |
-| `acb5ff44` | 25.02 | 10.35 GB | 255 s | after the review: the wrapper, nebius, labels, gh state. Cold from the wrapper `COPY` on |
+| `acb5ff44` | 25.02 | 10.35 GB | 255 s | the wrapper, nebius, labels, gh state. Cold from the wrapper `COPY` on |
 | `8f929fc0` | 26.02 | 10.05 GB | 165 s | the same changes for 26.02 |
 | `03b4e3d6` | 25.02 | 10.0 GB | 119 s | no Claude Code; any uid. Cold from the prefetch stage's last step on |
 | `e114cb9d` | 26.02 | 9.74 GB | 116 s | the same for 26.02 |
@@ -411,7 +410,7 @@ The last two are the images now on the host. The others are deleted.
 - FFI build: green, 13 min 22 s cold.
 - `--features gpu --tests`: green, 1 min 47 s.
 
-**After the review, on the final images, network off.**
+**On the final images, network off.**
 - **`acb5ff44` (25.02).** The run started from an empty target dir, an empty `cpp/build` and no
   sf1.
   - sf1 tpch and tpcds generated in 49 s. All 32 files are identical to the primary checkout's.
@@ -428,7 +427,7 @@ The last two are the images now on the host. The others are deleted.
   rapids-cmake from the copy, flatbuffers from the mirror, gtest from the CPM cache.
   `no-static-cudart.sh` passes on the `libpeacock_gpu.so` built on `ae80842c`. The toolchain
   layers are unchanged between the two images.
-- **Kept for Task 3.** In `/build/peacock/containers/26.02/keep/` (4.8 GB), built on `ae80842c`:
+- **Kept for Task 3**, on the build host (4.8 GB), built on `ae80842c`:
   - `rust-tests/`: `peacockdb_core-…`, `test_gpu_corpus-…`, `test_node_timing-…` and
     `peacock_gpu_benchmarks-…`;
   - `lib/`: `libpeacock_gpu.so` with the libraries the FFI build bundles beside it.
@@ -581,7 +580,7 @@ each pin.
 **Inputs, staged in each build image the way `build-test-shadgpu.sh --build` stages them**
 (`--network none --cpuset-cpus 0-3 --memory 10g`; worktree at `/work` read-only, the primary
 checkout's `third_party/cudf` at `43505bb9`, the cargo target at `/cache/target/cudf`, the
-registry and ccache from `/build/peacock/containers/`):
+registry and ccache on the build host):
 - `scripts/build.sh --configure`, `--build`, `--install` into `cpp/install`: 145 s (25.02), 165 s
   (26.02), from configured build trees.
 - 25.02: `test_gpu_corpus`, `test_node_timing`, `peacock_gpu_benchmarks` (`--test`) and the lib
@@ -589,8 +588,8 @@ registry and ccache from `/build/peacock/containers/`):
   read off cargo's json lines. All four were fresh in Task 2's target: 12 s.
 - 26.02: the same four from `26.02/keep/rust-tests/`, renamed to their target names.
 - Every staged rust binary `strip --strip-debug`, as `--push-binaries` does: about 110–120 MB each.
-- Result: `/build/peacock/containers/<v>/install` (549 MB each), linked as
-  `/build/peacock/containers/staged/cudf-<v>`, the `PEACOCK_STAGED_INSTALLS` the image tests read.
+- Result: a staged install per version (549 MB each), in a directory holding `cudf-<v>/`, the
+  `PEACOCK_STAGED_INSTALLS` the image tests read.
   The 25.02 cargo target (16 GB) is deleted.
 
 **Images.**
@@ -600,9 +599,9 @@ registry and ccache from `/build/peacock/containers/`):
 | `29b4b139` | 25.02 | 6.27 GB | 242 s | first build, cold prefix; with the static archives; deleted |
 | `d7bf7329` | 25.02 | 5.09 GB | 48 s | `*.a` deleted (the create layer cached) |
 | `a2806c31` | 26.02 | 6.17 GB | 256 s | cold prefix; deleted |
-| `ec9eca70` | 25.02 | 5.09 GB | 373 s | round 1: per-version driver label, N8, the new `run-tests.sh`; cold prefix |
+| `ec9eca70` | 25.02 | 5.09 GB | 373 s | per-version driver label, N8, the new `run-tests.sh`; cold prefix |
 | `1a4cd591` | 26.02 | 6.17 GB | 251 s | the same for 26.02 |
-| `8d283e66` | 25.02 | 5.09 GB | 2 s | round 2: the record message; only the script layer rebuilt |
+| `8d283e66` | 25.02 | 5.09 GB | 2 s | the record message; only the script layer rebuilt |
 | `f753b6cf` | 26.02 | 6.17 GB | under 1 s | the same for 26.02 |
 
 Every image but the last two is deleted. The two on the host are `8d283e66` (label 535.104.05) and
@@ -610,7 +609,7 @@ Every image but the last two is deleted. The two on the host are `8d283e66` (lab
 
 `/opt/cudf` is 4.7 GB in 25.02 and 5.8 GB in 26.02 (6.8 GB in the 25.02 build image).
 
-**Tests, round 0** (before review). `PEACOCK_STAGED_INSTALLS=/build/peacock/containers/staged`:
+**Tests on the first images**, `PEACOCK_STAGED_INSTALLS` naming the staged installs:
 - `test_run_image.py`: 9 passed. Both versions: `no-static-cudart.sh` passes on the staged
   `libpeacock_gpu.so`; `ldd` in the run image (`--network none`, the library path
   `run-tests.sh` gives) over `libpeacock_gpu.so`, the six `bin/peacock_*_tests` and the four rust
@@ -634,7 +633,7 @@ Every image but the last two is deleted. The two on the host are `8d283e66` (lab
   `-e LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib`, since the shipped binaries carry no
   RUNPATH.
 
-## Task 3: review round 1
+## Task 3: the driver minimum, the record refusal, the checks
 
 - I1: the driver minimum rested on a false premise (the L40S JITs nothing, above). Two pins, each
   image its own, the test reading the spec's cudart. The Task 2 note is corrected.
@@ -656,7 +655,7 @@ Every image but the last two is deleted. The two on the host are `8d283e66` (lab
   record was 8.71 GB, so 2.6 GB less for 26.02. 25.02's earlier records (the create with the package
   cache and the archives, then a separate `*.a` deletion on top) were pruned before they were
   measured. The image sizes do not change, since the final stage only ever copied `/opt/cudf`.
-- Round 2: `test_both_images_carry_the_committed_script` also runs each image's own entrypoint,
+- `test_both_images_carry_the_committed_script` also runs each image's own entrypoint,
   unmounted, as uid 4242 with no network: `--help` exits 0 with the usage, a bare run exits 2 with
   one line. The rung check requires exactly one rung line in `gpu-host-test.sh`. The record refusal
   says "pull it home, then remove it". All ten files green again on `8d283e66` and `f753b6cf`.
@@ -681,7 +680,7 @@ image, compared by `RootFS.Layers`. The predecessors are deleted.
 
 `image.sh push <kind> <v> --dry-run` prints, for each, `docker push` of the commit tag and then of
 the version tag, and exits 0. Every file in `scripts/env/tests/` is green on these four (the run
-image tests with `PEACOCK_STAGED_INSTALLS=/build/peacock/containers/staged`).
+image tests with `PEACOCK_STAGED_INSTALLS` naming the staged installs).
 
 **The commit tag must be HEAD's at the push.** `c0c7b9cdc210` is Task 3's commit. Once Task 4 is
 committed, `image.sh push` refuses until the images are built again at the new HEAD, from a clean
@@ -700,7 +699,7 @@ of every URL):
 - Not measured: a runner whose Docker keeps images in the containerd store also keeps the
   compressed blobs. This host uses overlay2, where a push compresses as it streams.
 
-**The runner-disk finding.** GitHub documents 14 GB of disk for a standard Linux runner, and the
+**The runner's disk.** GitHub documents 14 GB of disk for a standard Linux runner, and the
 OS and the preinstalled tools share it with Docker. 12.2 GB does not fit beside them with any
 margin, and the build images' 10.6 GB barely. So every job frees the disk first: it removes the
 preinstalled Android SDK, .NET, GHC, ghcup and CodeQL, and prunes the preinstalled images. Then it
@@ -739,11 +738,11 @@ comment and build-test.md must then say which.
   (`--features rust-only`, target under `/build`).
 
 **build-test.md** gains "Images" and an `images.yml` line under CI structure. Its counts had never
-held `scripts/env/tests/` (100 cases in 11 files after round 1) or `scripts/gpu-host/tests/` (104 in
+held `scripts/env/tests/` (100 cases in 11 files then) or `scripts/gpu-host/tests/` (104 in
 6 files, by the files' own harness, which the cost-report job runs). Both are rows now: Python 1246,
 the total 5888, the header the sum of the rows.
 
-**What remains for the push** (Task 4 Step 1, the human's token):
+**What remains for the push** (Task 4 Step 1, with a token holding `write:packages`):
 1. commit Task 4, then rebuild the four images at that HEAD from a clean tree;
 2. `gh auth refresh -s write:packages`, `gh auth token | docker login ghcr.io -u <user> --password-stdin`;
 3. `scripts/env/image.sh push <kind> <v>` for the four;
@@ -755,7 +754,7 @@ the total 5888, the header the sum of the rows.
   uncompressed (25.02); it is pushed compressed, and on a slow link it is the one at risk. A push
   that dies there is rerun: `docker push` skips the layers the registry already holds.
 
-## Task 4: review round 1
+## Task 4: the dispatch and the step shapes
 
 - **Dispatch wording**: images.yml, build-test.md (CI structure, "Images") now say GitHub can
   dispatch it only once master holds it, and a dispatch runs the ref it names and moves
@@ -809,17 +808,17 @@ the total 5888, the header the sum of the rows.
   sf1 prefix gate over `deep_base.sf1.fbin`'s pin; `--from-s3` needs a whole-file pin for
   `deep_base.sf<SF>.fbin`, so it serves sf1 only until another slice is pinned.
 - The bucket is one value, `EMBEDDINGS_BUCKET=embeddings` in `scripts/lib/embeddings-bucket.sh`
-  (sourced by both scripts, as `calibration-bucket.sh` is), keys `<sha256>/<file>`. Not yet
-  confirmed by the human, and the bucket does not exist yet. The alternative is the existing
+  (sourced by both scripts, as `calibration-bucket.sh` is), keys `<sha256>/<file>`. The bucket
+  does not exist yet. The alternative is the existing
   `calibration` bucket with an `embeddings/` key prefix, a one-line change to `embeddings_key`.
 - The guard: CI and GITHUB_ACTIONS refuse the origins only; PEACOCK_NO_FETCH ("no fetch")
   refuses both sources. ssh and docker bootstraps do not carry CI/GITHUB_ACTIONS anyway, so what
   the exemption admits is a CI job reading our own pinned bucket.
 - Origin byte-identity: the old and new script run over a copy of the real sf1 cache, with a
-  curl that fails loudly. Corrected in round 2, which compared HEAD's script with round 2's:
+  curl that fails loudly. HEAD's script compared with the new one:
   all cached, a bad flag and a damaged query file (the refetch attempt and its exit status)
-  print identical output. `CI=1` differs by design since round 1, in the refusal's third line.
-  GloVe extraction (the text removed, the zip cached) was not compared before round 2; it
+  print identical output. `CI=1` differs by design, in the refusal's third line.
+  GloVe extraction (the text removed, the zip cached)
   extracts the same bytes, sha256 95dde4df…, and differs only in the text's mtime: `unzip -o -d`
   restored the archive's (2014), `unzip -p` and a move leave the time of extraction.
 - Red on each mutation (19): the key without the sha, a call without the endpoint, the download
@@ -830,10 +829,10 @@ the total 5888, the header the sum of the rows.
   dropped, a stray argument accepted, no `--help`; a line dropped from the pin.
 - Step 2's upload and the pin's commit, and step 3, are open.
 
-## Task 5: review round 1
+## Task 5: the symlinked script and the origin path
 
 - Run through a symlink: the lib and the pin are found from `realpath "${BASH_SOURCE[0]}"`, the
-  cache stays beside `$0` (how `/build/peacock/embeddings` was made). Tests through a link in
+  cache stays beside `$0`, as a cache reached through a link is made. Tests through a link in
   another directory, for both sources.
 - The origin path past the guard, tested: a full cache whose base slice is a sparse file of the
   real 307200008 bytes (the fixture pins its sha) fetches nothing, four `cached+verified` lines;
@@ -856,17 +855,17 @@ the total 5888, the header the sum of the rows.
   ignored, CI refusing `--from-s3`, PEACOCK_NO_FETCH refusing the origins only, the other-SF
   message reverted to the broken-pin one, unzip straight into place, a failed unzip leaving its
   partial.
-- Open: the bucket choice and the plan's Interfaces wording (with the human), the upload, the
+- Open: the bucket choice and the plan's Interfaces wording, the upload, the
   pin's commit, step 3.
 
-## Task 5: review round 2
+## Task 5: the guard's wording and pipeline.yml's comment
 
 - build-test.md's cache bullet says what the guard is: by hand only from the origins; CI,
   GITHUB_ACTIONS and PEACOCK_NO_FETCH refuse it; the check is on the environment, so a manual
   run on shad-gpu passes and automation that shells in sets PEACOCK_NO_FETCH=1.
 - Not corrected everywhere: `.github/workflows/pipeline.yml`'s comment on `test_stats_embeddings.py`
   still says "which no CI host may fetch". It is left as is, because the spec's restriction keeps
-  `pipeline.yml` unchanged and the human agreed to leave it.
+  `pipeline.yml` unchanged.
 - The byte-identity record above is corrected (`CI=1`, GloVe extraction).
 - The unzip test now interrupts: the fake writes part of the member and SIGKILLs the shell
   running the script, so no handler runs; the final text must not exist (a `.partial` may), and a
@@ -874,7 +873,7 @@ the total 5888, the header the sum of the rows.
   `|| rm` handler, the old `unzip -o -d`, the move dropped, unzip straight into place. The
   `|| { rm -f …partial; … }` handler is gone: a failed unzip stops the script by `set -e`, and
   the partial it leaves, as a kill does, is never accepted and is overwritten by the next run.
-- `testdata/tpch-vec-queries/NOTICE`'s last sentence (the human's wording): not in git; a copy
+- `testdata/tpch-vec-queries/NOTICE`'s last sentence: not in git; a copy
   verified against the pin is in the project's private bucket, fetched by `--from-s3`.
 - Still 20 tests; the counts do not move.
 
@@ -894,7 +893,7 @@ the total 5888, the header the sum of the rows.
 - **`scripts/lib/machine.sh`** holds what `bootstrap-vm.sh` and `up.sh` share. Its step functions
   are called as plain statements: set -e is off inside `$(…)` and before `||`, so a function
   called there runs on past a failed step. Results come back in globals (`DATA_SET`).
-- **Trust (round 1).** An instance writes the clone's `.git`, so every git call on the machine
+- **Trust.** An instance writes the clone's `.git`, so every git call on the machine
   goes through `machine_git` (`-c core.hooksPath=/dev/null -c core.fsmonitor=false`); bootstrap
   has a copy, `safe_git`, for the calls before the clone exists. `up.sh` also refuses a clone with
   a hook or either key in `.git/config`. The `-c` is the guard: it also covers an `include.path`
@@ -925,8 +924,8 @@ the total 5888, the header the sum of the rows.
 - **third_party/cudf.** One checkout a commit, `<data dir>/cudf/<commit>/`, fetched by
   `machine_cudf_source` (bootstrap for the clone, `up.sh` for a worktree) from `.gitmodules`' URL,
   sparse with the prefetch's paths, under a lock, renamed from `.partial` when whole. Each
-  instance mounts the one its gitlink names, read-only. A single checkout in the clone, the round-1
-  design, would have moved under every running instance when one needed another commit. The
+  instance mounts the one its gitlink names, read-only. A single checkout in the clone
+  would have moved under every running instance when one needed another commit. The
   clone's own `third_party/cudf` is never read, so a human's `git submodule update --init` (a
   gitfile into `.git/modules`) cannot confuse it. Step 3 must show the sparse paths are enough
   for the FFI build, not only for a configure.
@@ -1055,12 +1054,224 @@ the total 5888, the header the sum of the rows.
   - sshd accepting a key login for the new user, whose password useradd leaves locked, on an
     image whose sshd has `UsePAM no`.
 
+## Task 7: host adapters and the device run (steps 1 and 2's code; no GPU host yet)
+
+- **Where gpu.sh runs.** Where the built tree is: in an instance, whose container `up.sh` gives
+  `PEACOCK_INSTANCE=<user>-<chain>` and `PEACOCK_IMAGE_TAG`, or on any machine with a built tree,
+  the host file and `GPU_SSH_KEY_FILE`, where `--instance` names the dir and is required.
+  `--instance` and `--image` inside an instance are refused, so one tree never ships into two dirs
+  or runs an image other than its instance's. The image tag decides the cuDF version; `--cudf`
+  beside a tag is refused.
+- **A gpu.sh host is a VM of its own.** The old path on nebius-gpu (`scripts/gpu-host.sh`, its idle
+  watcher, `gpu-host-test.sh`) knows neither `.device.lock` nor `.activity.lock`: CI's run and a
+  gpu.sh run would share the L40S, and the old watcher could stop the VM under a run that waits. The
+  old path is not changed, so the two are kept apart by host.
+- **The key goes on a host at provisioning, never in prepare.** An agent cannot type a password, so
+  `provision-vm.sh --gpu-host` makes the one interactive ssh, with no `-i` and no BatchMode, the
+  key's `.pub` on its stdin, appended unless the line is there. It checks the key login before and
+  after. `PASSWORD_FIRST_LOGIN` is not a host-file key and is refused by name.
+- **What an adapter takes** is its own answer, so `provision-vm.sh` names no provider: `--needs`
+  (`INSTANCE_ID` maps to `--instance-id`; a key with no flag is refused) and `--config-name`
+  (`--provider-config` is refused for an adapter with none). Power is the adapter's `powers` verb:
+  `ssh.sh` never powers; `nebius.sh` powers when `hosts/<name>/config.yaml` is there and the CLI is
+  on PATH. The nebius CLI is pinned in the build image (`NEBIUS_VERSION`, `NEBIUS_SHA256`), so an
+  instance has it; the config comes through `hosts/`, so it reaches every instance read-only.
+- **nebius start and stop** follow `scripts/gpu-host.sh`: `--async`, and each wait a `$SECONDS`
+  deadline `PEACOCK_HOST_WAIT` (900 s) after it began, `PEACOCK_HOST_POLL` (10 s) between gets: a
+  poll is a CLI call and an ssh with a 20 s connect timeout, so counting polls would overrun. start
+  skips RUNNING and STARTING, waits out STOPPING (the API rejects a start then), and waits for the
+  key to log in; a host it started that never reaches RUNNING or ssh is stopped again, one it found
+  running is not. stop waits for STOPPED, and stops a host still STARTING after its wait, as
+  gpu-host.sh does. The fake CLI holds STARTING and STOPPING for two gets, the first of them the
+  adapter's own state read, so a start that does not wait out STOPPING fails against it.
+- **ssh to a host** is `-i $GPU_SSH_KEY_FILE -o IdentitiesOnly=yes -o BatchMode=yes
+  -o StrictHostKeyChecking=accept-new -o HostKeyAlias=peacock-<name>`. The alias keeps one host key
+  per host name, so a nebius address that moves on every start still matches. The key path may hold
+  no space: rsync's `-e` is split on spaces. A failed login is reported with ssh's own last line.
+- **gpu.sh's own side** is `on-gpu-host.sh`, shipped by `prepare` and `ship` with tar over ssh
+  (rsync may not be on a fresh host yet; `prepare` installs it), `--unlink-first`, so a runner bash
+  is still reading keeps its own script. With it go `peacock-config.sh` (the storage keys' names),
+  `machine.sh`, `data-inputs.sh`, `s3.sh`, `generate_testdata.sh` and `pins.env`. `busy` and `hold`
+  are sent on ssh's stdin (`bash -s`), so a soft stop and a command's hold need nothing shipped:
+  bash reads a script from a pipe no further than the command it runs, so `hold`'s own reads of
+  stdin get what follows the script. The sf1 hash is computed over the instance dir, so it equals
+  the tree's. `scripts/lib/portable.sh` gives gpu.sh and the adapters `sha256sum` (through
+  `shasum`), a `timeout` and a version comparison on a macOS laptop; paste is called with `-`, and
+  sort never with `-V`.
+- **Exit codes.** 3 is the driver's alone. On the host, `set -E` and `trap 'exit 1' ERR` make every
+  failure that is not a `die` (2) exit 1, so a tool's own status (aws's 255 or 2) never reaches
+  gpu.sh as a lost connection or a refusal. On gpu.sh's side, the adapter, the provider CLI, rsync,
+  ssh's 255 and a step on the host map to 1 and name what failed: the scripts' tar, `sf40-missing`,
+  ship's `mkdir`, the hold, and the driver and label reads all go through it. A login sshd refuses
+  (the key) is 2; one that gets no answer is 1. An adapter's `powers` is 0 or 1; any other answer is
+  said and stops gpu.sh, never read as "powered by hand". `run` keeps the run's 0, 1 or 2, anything
+  else 1.
+- **The image ID and its label are one read.** `label` reads the ID the tag names once, then the
+  label of that ID; gpu.sh compares the label with `image_inputs_differ` over the tree and passes
+  the ID to `run`. A tag another tree's `prepare` moves between the two reads, or while a run waits
+  for the device lock, does not change what is checked or run. The fake docker answers for an ID as
+  the image it was, and its `move.json` moves a tag right after an ID is read.
+- **The driver check** reads `DRIVER_MINIMUM_<v>` and `DRIVER_MINIMUM_PTX` from the tree's
+  `pins.env`, before anything is shipped or pulled, in `prepare` and in a `run` that starts one.
+  Every line of `nvidia-smi --query-gpu=driver_version,compute_cap` must be
+  `<version>, <major>.<minor>`; a card below 8.0 is refused (exit 2), one of major 8 or 9 needs the
+  version's minimum, any other the newer of it and the PTX minimum (575.51.03, 12.9 GA's driver: a
+  card it has no SASS for JIT-compiles the PTX). `DRIVER_MINIMUM_PTX` is a pin no image reads;
+  test_image.py lists it with the machine's.
+- **The data directory** is `/var/lib/peacock`, made by `install` with
+  `sudo install -d -o <user> -g docker -m 2775` when missing, so every user of the host, all in the
+  docker group, shares one set of data and one device lock. `PEACOCK_DATA_DIR`, set in the host's
+  `/etc/environment` for every user's non-interactive ssh, names another, which must be absolute and
+  there: it is never made, since a missing one is most likely a disk that is not mounted. A user
+  who has just joined the docker group has it only from the next ssh session, which is every later
+  step's; so `install` leaves the check that needs the group to them.
+- **The activity lock.** `<data dir>/.activity.lock`. Every on-gpu-host.sh step but `busy` and
+  `fetch` takes it shared, read-only; a runner inherits it from the `run` that started it. gpu.sh
+  also holds it for its whole command through `hold`, from right after its login, before the driver
+  check and the install: an ssh session in a coproc that gets the script and then a heartbeat line
+  every `PEACOCK_HOLD_BEAT` (60) seconds; the host side reads with `read -t PEACOCK_HOLD_TIMEOUT`
+  (300) and lets go when the beat stops, so a half-open session holds the lock for minutes, not
+  ssh's hours. The heartbeat beats only while gpu.sh lives (`kill -0 $$`), so a gpu.sh killed alone,
+  with no EXIT trap, lets go within the timeout too. A ship's hold does not: its rsync outlives the
+  killed gpu.sh, so the hold waits on past its read while an rsync server of this user receives into
+  the instance's dir (`pgrep -f "rsync --server .* \. <dir>/"`, the dir's dots escaped; a pull's
+  server, a `--sender`, is not counted), and its run and activity locks go only with the transfer
+  done. Ship's rsyncs pass `--timeout=PEACOCK_HOLD_TIMEOUT`, which rsync hands its server: the
+  server then writes a keepalive every half of it, so one whose client vanished ends when the host's
+  TCP gives up on those writes, about 15 minutes with Linux's defaults, where a silent server waits
+  for TCP keepalive, about 2 hours. They pass `RSYNC_PROTECT_ARGS=0` too: protected args would keep
+  the dir out of the server's argv. A hold that ends before gpu.sh releases it, its ssh lost or its
+  read timed out, is said at release, whatever its status. `PEACOCK_HOLD_BEAT` and
+  `PEACOCK_HOLD_TIMEOUT` are whole seconds, the beat below the timeout, checked before anything
+  runs; the heartbeat's sleep is killed with it. `hold` answers `unheld` on a data directory this
+  user cannot write yet, a new user's before the install puts them in the docker group, as on one
+  that is missing. `hold` exits once its read ends: read from stdin, bash would otherwise go on to
+  read its next command there and keep the lock with it. On a host with no data directory yet the
+  session holds nothing and says `unheld`; a first `prepare` takes the hold again after its install
+  made the directory. The lock files and `runs/` are made under umask 002, so another user of the
+  host takes them under any umask of their own. The fake ssh streams stdin for the hold. `busy`
+  tests it exclusively (`flock -n -x`), beside the compute processes and the device lock, and says
+  `idle` or `busy: <why>`; a busy that answers neither declines the stop. Unreachable over ssh, the
+  soft stop asks the adapter's `status`: it stops only a host reported STOPPED or STOPPING, and
+  otherwise declines, naming `stop --force`, in the EXIT trap too, since a running host that does
+  not answer may still run a detached run.
+- **Power on every exit.** On a powered host, gpu.sh starts the host and sets `started`; an EXIT
+  trap releases the hold and then soft-stops, so a refusal, exit 3 and a failure stop the host as a
+  green run does. The trap's own failure is said and keeps the status. A sequence of commands starts
+  and stops the host once each. `stop` without `--force` stops unchecked only when the adapter
+  reports STOPPED or STOPPING.
+- **The detached run.** `run` on the host takes the instance's lock (`<data dir>/runs/<host
+  user>-<instance>.lock`, keyed by the host user as run/state is), then starts
+  `setsid nohup bash on-gpu-host.sh runner …` in the background, which inherits that lock and the
+  activity lock (flock belongs to the open file), and follows the log with `tail --pid`. The state
+  is `run/state`, `<pid> <mode> <log> <stamp> <digest> <envhash>`, written whole after the start;
+  the digest is of `cpp/install`'s names, sizes and mtimes, the envhash of the `NAME=value`s passed
+  through, which `run/env` lists. With the lock held, the run is going only when its state's pid is
+  alive and has no status yet; a lock held otherwise, by a ship or a run being started (whose state
+  is waited for up to 10 s), is "busy", refused: no rerun follows a dead pid. The container is
+  `peacock-run-<host user>-<instance>`, and a run is refused while one of that name exists: a runner
+  killed with its container alive lets go of both locks, and the name keeps a second container of
+  the same instance off the card. It is no lock for other instances: once the runner and its client
+  are gone, the device lock is free, and another instance's runner starts its container beside the
+  orphan (on the real-host list). The runner takes `<data dir>/.device.lock` (saying
+  `waiting on <host>` into the log), runs the container, renames a bench's `records.tsv` to
+  `records-<stamp>.tsv`, and writes its status to `<log>.status`, which stays beside the log for
+  pull and for a later follow. gpu.sh's `run` reads `run-state` first: a run still going is
+  followed, with no driver or image check, when it is of the same mode, the same environment and the
+  same digest; another mode or environment is refused, both named, and so are changed binaries,
+  since the status would not be theirs. `follow` takes the stamp `run-state` gave: a run that ended
+  in between gives its own log and status, or, not being this run, is refused saying it ended, with
+  its status and log, and that the command now starts the run asked for. `ship` holds the instance's
+  run lock through its whole rsync, so it is refused while the run is going and no run starts under
+  it. A run killed without a status (a reboot, a kill) is reported as ended with no status, exit 1.
+  The test drops the session by killing gpu.sh's process group and checks one container, the lock
+  held, and the rerun following; without `setsid` it fails. The fake run is held by a file until the
+  test has seen what it waits for: a fixed sleep raced each gpu.sh call (about 1.5 s here).
+- **A killed bench's record.** A run killed mid-bench leaves `records.tsv` at run-tests.sh's one
+  path. The next `pull` (its `settle` step) or `run` renames it `records-<the killed run's
+  stamp>-interrupted.tsv`, from the old `run/state`, under the instance's run lock, so `pull` brings
+  it home and the new bench starts clean.
+- **One card, one run.** The fake docker refuses a device run beside another (an `O_EXCL` marker),
+  so a runner that says it waits and does not fails the lock test every time; the test gives such a
+  run two seconds to reach docker before it lets the first run end.
+- **sf40.** `prepare` needs the four `AWS_*` values whatever the host holds, so it refuses before
+  its first side effect. It asks the host which sets are missing first (`sf40-missing`, no key
+  sent), and sends the keys only when one is. On the host they go from ssh's stdin into a bash
+  array, checked against `PEACOCK_STORAGE_KEYS`, then by `printf` (a builtin) into `docker run -i`'s
+  stdin; the container exports them and runs `aws s3 cp --recursive` through `s3_args`. Not
+  `docker run -e NAME`: the daemon writes a container's environment to its config on disk. The set
+  is staged in `<set>.partial`, checked against `manifest.json` (name and size), summed into
+  `SHA256SUMS`, and renamed. A set whose sums and sizes hold is skipped; hashing about 30 GB costs a
+  minute or two a `prepare`.
+- **pull** makes its three sources on the host first and rsyncs whole directories, since macOS's
+  rsync (2.6.9, or openrsync) has no `--ignore-missing-args`; the fake rsync refuses it. It stages
+  in `.gpu-test/<name>/pull` (gitignored) and merges. Records (`records-*.tsv`, under
+  `testdata/calibration/`, gitignored) are never replaced: a local one that differs is kept and
+  named. Results and logs: a local file newer and different is kept and named. Either is exit 1.
+  Joining a run's segments into one record per dataset is Task 11's. `pull` removes nothing on the
+  host.
+- **Docker, rsync and the toolkit** install one prepare at a time on the host, under a flock on
+  `PEACOCK_INSTALL_LOCK` (`/run/lock/peacock-install.lock`; the rig's own in the tests); a second
+  says `waiting on <host>`. They install only when `docker`, `rsync` or `nvidia-ctk` is missing;
+  docker restarts only after the toolkit was just installed.
+- **Fakes.** The host is a directory reached through laptop.py's fake ssh, which checks that `-i`'s
+  `.pub` is authorized, takes a password login only without BatchMode on a host with a `password`
+  file, drops a command matching `drop_on` with 255, and streams stdin; the host's `bin/` comes
+  first and `environment` names its data directory. The fake rsync maps `<user>@<address>:<path>`
+  and runs the real rsync. nvidia-smi and `docker image inspect` answer only the exact queries made.
+- **For the real host (Step 3, on a GPU VM of its own, never nebius-gpu), what the fakes cannot
+  show:**
+  - `provision-vm.sh --gpu-host` against a password-only host: ssh's password prompt with the key on
+    its stdin; sshd taking the key afterwards;
+  - `HostKeyAlias` with `accept-new` inside an instance, whose `~/.ssh/known_hosts` is the
+    instance's home; the key file mounted read-only accepted by ssh (owner and mode 600);
+  - `sudo` without a password for the host's user; `apt-get install docker.io rsync`, the NVIDIA apt
+    repository, `nvidia-ctk runtime configure`, `install -d -g docker -m 2775`, and a user who has
+    just joined the docker group finishing `prepare` in one pass;
+  - `PEACOCK_DATA_DIR` in `/etc/environment` reaching a non-interactive ssh session;
+  - `setsid nohup` on the host: the runner surviving sshd closing the session, `tail --pid`
+    following it, and the inherited flocks held across `exec`; a host reboot mid-run reported as no
+    status; what a killed `docker run` client leaves of its container on the card;
+  - the hold: `bash -s` reading the script from a pipe no further than it runs, sshd delivering the
+    heartbeat and EOF, the `read -t` timeout releasing a half-open session, and bash's coproc fds as
+    gpu.sh closes them;
+  - `--name peacock-run-<user>-<instance>` and `docker container inspect` of a container a killed
+    client left;
+  - gpu.sh on a macOS laptop: bash 5 from Homebrew, `shasum`, BSD paste and sort, and the portable
+    timeout around the nebius CLI;
+  - `docker run --gpus all` by image ID, as a uid the image does not know, and `--hostname` written
+    as `host=`; `docker image inspect --format '{{.Id}}'` giving `sha256:<64 hex>`, and the label
+    read by that ID;
+  - `nvidia-smi --query-gpu=driver_version,compute_cap` answering `<version>, <major>.<minor>` on
+    the driver there, and `--query-compute-apps=pid` empty on an idle card;
+  - the build image's `aws` reading the keys from the environment the container exported, against
+    the real endpoint; `manifest.json` as upload_datasets.sh wrote it parsed by the tr pipeline;
+    the time to hash both sf40 sets;
+  - sf1 generation in the build image on the host with `--network none`;
+  - the nebius CLI: `--config <file>` and `--no-check-update` as global flags, the config on a
+    read-only mount (the CLI may want to write a token cache beside it); the JSON of
+    `compute instance get`; `start --async` and `stop --async`; the profile recipe in build-test.md,
+    made with `nebius --config <file> profile create … --private-key-file`;
+  - the rsync server's argv on the host, `rsync --server … . <dir>/`, which a ship's hold waits on
+    after a gpu.sh killed alone, and a pull's with `--sender`, which it does not; a half-open ship
+    server ending when the host's TCP gives up, not at `--timeout`;
+  - pull from a macOS laptop with its own rsync, and ship, whose `--relative --delete` and
+    `--timeout` must hold on openrsync and on rsync 2.6.9, which also must ignore
+    `RSYNC_PROTECT_ARGS`;
+  - two first `prepare`s at once on a fresh host: the install lock in `/run/lock` serialising apt,
+    the toolkit's keyring and its sources list;
+  - an orphan container of one instance beside another instance's run, once both runner and client
+    of the first are gone;
+  - the read-only opens of the shared locks by a second Unix user;
+  - two chains' `run` on one real card: the second waits for the first's container to exit;
+  - the device tiers' counts equal the latest `GPU Tests (nebius-gpu)` run's.
+
 ## Task 8: provenance and the per-device tree
 
 Worked in its own worktree, branch `ENS-containers-task8` from `0d9e1dc4`, to be replayed onto
 `ENS-containers` after Task 5. Built and tested in `peacockdb-build:cudf-25.02` with no network.
 
-**Where each of the five comes from** (as of review round 1):
+**Where each of the five comes from**:
 - `device`, `cuda`: one additive ABI symbol, `peacock_device_info(PeacockDeviceInfo*)`
   (`cpp/include/peacock_gpu.h`), the name and `runtime`. It reads `cudaGetDevice`,
   `cudaGetDeviceProperties` and `cudaRuntimeGetVersion`. No existing read gives either:
@@ -1111,7 +1322,7 @@ on the same card rewrites the files, and `git diff` with the trailers' `cudf=` i
 Its spec's step 4 and Scope row say so, and its impl plan's Task 5 carries a note that Steps 1 and
 3 are superseded.
 
-**#226** stays open (the human's call, round 1): it now lists what remains, the first run with
+**#226** stays open: it lists what remains, the first run with
 the five lines (Task 11) and the H200 migration with its two hazards. `nsys_hbm.py` compares a
 capture's GPUs with the record's `device=`.
 
@@ -1156,9 +1367,7 @@ device the runtime refuses first. It was dropped, and the refusal is asserted in
 `provenance::of_this_run`, a `bench_` case writing under `benchmark-results/<slug>/` with the five
 lines, and `host=` inside the run image.
 
-## Task 8: review round 1
-
-Every finding was applied. The human decided I2 and I4.
+## Task 8: the five keys' sources
 
 - **I1, `cudf=` with the patch level.** `cudf_release()` beside `cudf_version()`, one header
   reader (`config_field`) for both. It writes `25.02.02`, or `26.02.01` on 26.02. The
@@ -1176,8 +1385,8 @@ Every finding was applied. The human decided I2 and I4.
 - **I4.** #226 is reopened: back in `tickets/benchmarks.md` and the index, out of the archive. The
   links from `tasks.md`, `containers.md` and build-test.md resolve again.
 - **`nsys_hbm.py`.** A join refuses a capture unless every row of its `TARGET_INFO_GPU` has the
-  slug of the record heading's `device=`. A record with no `device=` was refused too; round 2
-  takes it as the H200's instead. The
+  slug of the record heading's `device=`. A record with no `device=` is
+  taken as the H200's. The
   comparison is by slug, the name the results tree files a device under: a spelling difference
   between nsys and the runtime is not a refusal, and a different card always is. Every row is
   checked, since a host with two kinds of card cannot say which ran the calls. Not seen against a real
@@ -1213,7 +1422,7 @@ Each mutation turned its cases red, and the code was then restored:
 
 `test_hbm.py`'s two device cases failed before `check_device` existed.
 
-**Results, round 1**, in `peacockdb-build:cudf-25.02`, network off:
+**Results**, in `peacockdb-build:cudf-25.02`, network off:
 - `cargo test --features rust-only -p peacockdb-core`: lib 777 passed and 2 ignored (779),
   `test_cpu_corpus` 2009, `test_corpus_goldens` 28, `test_cost_model` 4, `test_ci_coverage` 11,
   `test_module_layout` 18, `test_golden_format` 43. No warnings.
@@ -1227,14 +1436,11 @@ Each mutation turned its cases red, and the code was then restored:
 - Not exercised: anything on a device, now including the driver file inside the run image and
   `check_device` against a real Nsight export.
 
-## Task 8: review round 2
-
-Every finding was applied. The human decided item 1.
+## Task 8: records that predate provenance
 
 - **A record naming no device is the H200's.** `nsys_hbm.py` has the constant
   `PREDATES_PROVENANCE = "NVIDIA H200"`, with its reason: both hosts that ran the benchmark
-  before provenance, shad-gpu and verda-gpu, are H200s, and only shad-gpu published (worded
-  so in round 3). The refusal text says when it was assumed. The
+  before provenance, shad-gpu and verda-gpu, are H200s, and only shad-gpu published. The refusal text says when it was assumed. The
   capture is still held to it, every `TARGET_INFO_GPU` row. So the pending HBM pass on shad-gpu
   over the two pinned records can run. The docstring's usage example names the per-device record
   path and says where the H200's lie. A capture with no `TARGET_INFO_GPU` table is a one-line
@@ -1270,7 +1476,7 @@ Every finding was applied. The human decided item 1.
 Before the change, three nsys cases failed. The device-less H200 join and the foreign capture
 were refused under the old rule. The missing table raised `OperationalError`.
 
-**Results, round 2**, in `peacockdb-build:cudf-25.02`, network off:
+**Results**, in `peacockdb-build:cudf-25.02`, network off:
 - rust-only, every target: lib 777 passed and 2 ignored, `test_cpu_corpus` 2009,
   `test_corpus_goldens` 29, `test_cost_model` 4, `test_ci_coverage` 11, `test_module_layout` 18,
   `test_golden_format` 43. No warnings.
@@ -1279,7 +1485,7 @@ were refused under the old rule. The missing table raised `OperationalError`.
   `peacock_cpu_tests` 15 passed.
 - `scripts/calibration/tests/`: 40 passed (calls 6, fetch 3, hbm 13, plot 7, split 11).
 
-## Task 8: review round 3
+## Task 8: the slug comparison
 
 - **I1, the slug comparison and the accept path are now reached.**
   - `synthesized_tree` copies one committed `h200/` file into a temp tree under a device
@@ -1297,14 +1503,14 @@ were refused under the old rule. The missing table raised `OperationalError`.
   trees. One with only some of the five, or out of order, names its keys.
 - **N3.** The reason everywhere is now: both hosts that ran the benchmark before provenance,
   shad-gpu and verda-gpu, are H200s, and only shad-gpu published. That covers the golden's
-  constant, `nsys_hbm.py`'s constant and refusal, build-test.md, and the round-2 entry above.
+  constant, `nsys_hbm.py`'s constant and refusal, build-test.md, and "records that predate provenance" above.
   #226 states no reason.
 - **N4.** An empty GPU table is refused naming the table, with its own case. It is red with the
   old merged `not gpus or …` condition put back.
 - **N5.** Line lengths: `provenance.rs`, `nsys_hbm.py`'s docstring paragraph, and build-test.md's
   Corpus goldens paragraph.
 
-**Results, round 3** (build image 25.02, network off):
+**Results** (build image 25.02, network off):
 - rust-only `test_corpus_goldens`: 31 passed.
 - `--lib`: 777 passed and 2 ignored.
 - `test_module_layout`: 18 passed.
@@ -1331,8 +1537,8 @@ registry with that command.
   the registry is held to that file only on the device rung.
 
 **Which trees the list is held to.** A new device's tree is held to the whole list; a tree in
-`PREDATES_PROVENANCE` (`h200/`) is held to the list it was measured from, `h200/cases.inc`
-(round 1). The spec asks for "the benchmark of
+`PREDATES_PROVENANCE` (`h200/`) is held to the list it was measured from, `h200/cases.inc`.
+The spec asks for "the benchmark of
 every tpch and tpcds query the registry enables on the device" (Done-when 3), so the whole list is
 what a new tree must hold. And it puts the H200 out of this task ("The L40S and the H200 are out
 of this task"), so `h200/` can never gain the 508 cases it lacks here; holding it to the list
@@ -1363,13 +1569,13 @@ becomes the case's section:
     device=… driver=… cuda=… cudf=… host=…   (five lines, as in a trailer)
 
 Then the test fails naming the file and the reason, and libtest goes on to the next case. The
-record's rows are appended before the section is written (round 2), so a failed case appends
+record's rows are appended before the section is written, so a failed case appends
 none. A captured run does not go through `measure_into`: it writes no section,
 so a panic there is only a panic. The checks before the boundary are the run's, not a case's:
 caught, one refusal would be written into every section of the tree. `device_tree_problem` holds a
 failed record to its status line and the five, under `h200/` too.
 
-**A rerun** (round 1: only under `PEACOCK_BENCH_RESUME=1`). `measure_into` keeps a section whose `--- run ---` trailer ends with this run's five
+**A rerun** (only under `PEACOCK_BENCH_RESUME=1`). `measure_into` keeps a section whose `--- run ---` trailer ends with this run's five
 lines exactly, and skips the case (`CaseOutcome::Held`, printed). It runs again a failed case,
 one never reached, and one another device, driver, CUDA, cuDF or host measured. So a 26.02 rerun
 on the same card (verify-26.02) measures everything again. `merge_section` publishes by rename, so
@@ -1425,9 +1631,7 @@ cells not listed. Then:
 card: a real refusal recorded, a held case printed, the pre-flight refusals, and a capture pass.
 It also covers a run killed mid-case and its rerun.
 
-## Task 9: review round 1
-
-Every finding was applied. The human decided I1 (option 1).
+## Task 9: resume and failed cases
 
 - **I1, a section is kept only on resume.**
   - `PEACOCK_BENCH_RESUME` (`RESUME_ENV`): `1` keeps a section whose trailer ends with this
@@ -1491,9 +1695,7 @@ Every finding was applied. The human decided I1 (option 1).
 The calls in `benchmark_case` itself are device code: the refusals' placement before the
 boundary and the kept line were compiled and not run.
 
-## Task 9: review round 2
-
-Every finding was applied, N-a in code, as the human approved.
+## Task 9: the H200's list
 
 - **R1.** The H200's list is named by `02f6a4d8` ("benchmarks: 26 device-enabled cases at sf40,
   the per-call record in S3 by its content"), an ancestor of ENS-optimizer, PR #165's head, so
@@ -1527,9 +1729,7 @@ code.
 | the hook called outside `catch_unwind` | `a_case_whose_rows_the_record_refuses_is_recorded_as_failed` |
 | the refusal prints `{:?}` of `to_str()` | `the_resume_variable_is_unset_zero_or_one` |
 
-## Task 9: review round 3
-
-Both nits were applied, as the human approved.
+## Task 9: a refused append
 
 - **N2, a refused append leaves no rows.** `append_records` writes through `append_whole(file,
   text, write)`. It reads the file's length first, and on a write error `set_len`s back to it,

@@ -1,32 +1,37 @@
 #!/usr/bin/env bash
-# Ready a VM for one developer, run on their own machine (llm-wiki/build-test.md, "A fresh VM").
+# Ready a VM, or record a GPU host, for one developer, from their own machine (llm-wiki/build-test.md).
 #
 #   provision-vm.sh <login>@<address> [--env <file>] [--user <name>] [--name <vm>] [--ref <branch>] [--new-pat]
 #   provision-vm.sh --new-pat
+#   provision-vm.sh --gpu-host <name> <user>@<address> [--provider <p>] [--instance-id <id>] [--provider-config <file>]
 #
-# <login> has sudo on the VM. The developer's Linux user there is --user, this machine's by default,
-# and bootstrap-vm.sh runs as it at --ref. --env is needed until ~/.config/peacock holds the storage
-# keys. The PAT, asked for once, and the GPU key reach the VM on ssh's stdin alone. The VM becomes
-# up.sh's default as --name, its address by default. --new-pat replaces the PAT here and on every
-# recorded VM it reaches. A rerun skips what is done.
+# A VM: <login> has sudo; bootstrap-vm.sh runs as --user, this machine's, at --ref; --env is needed until
+# ~/.config/peacock holds the storage keys; the PAT and GPU key go on ssh's stdin; --name, the address by
+# default, is up.sh's default VM. --new-pat replaces the PAT on every recorded VM. A GPU host: hosts/<name>.env
+# and the provider CLI's config written, the GPU key put there once (its password typed), hosts/ copied to every VM.
 [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; } || {
   echo "${0##*/}: this machine's bash is $BASH_VERSION, older than 4.4: install a current one (on macOS, brew install bash)" >&2; exit 2; }
 # Above, in bash 3.2's syntax and before any source: macOS ships 3.2, and what follows needs 4.4.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$here/../lib/peacock-config.sh"
+. "$here/../lib/host.sh"
 shopt -s inherit_errexit
 
 die() { echo "provision-vm.sh: $*" >&2; exit 2; }
 
-target="" env_in="" user="" name="" ref="" new_pat=""
+target="" env_in="" user="" name="" ref="" new_pat="" gpu_host="" provider="" instance_id="" provider_config=""
 take() { [ -z "${!1}" ] || die "one $2 per call"; printf -v "$1" %s "$3"; }
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) peacock_usage "${BASH_SOURCE[0]}" ;;
-    --env|--user|--name|--ref)
+    --env|--user|--name|--ref|--gpu-host|--provider|--instance-id|--provider-config)
       [ -n "${2:-}" ] || die "$1 needs a value"
-      case "$1" in --env) var=env_in ;; --user) var=user ;; --name) var=name ;; --ref) var=ref ;; esac
+      case "$1" in
+        --env) var=env_in ;; --user) var=user ;; --name) var=name ;; --ref) var=ref ;;
+        --gpu-host) var=gpu_host ;; --provider) var=provider ;; --instance-id) var=instance_id ;;
+        --provider-config) var=provider_config ;;
+      esac
       take "$var" "$1" "$2"
       shift 2 ;;
     --new-pat) take new_pat "$1" 1; shift ;;
@@ -34,7 +39,33 @@ while [ $# -gt 0 ]; do
     *) take target "<login>@<address>" "$1"; shift ;;
   esac
 done
-if [ -z "$target" ]; then
+if [ -n "$gpu_host" ]; then
+  [ -n "$target" ] || die "name the GPU host's login: provision-vm.sh --gpu-host <name> <user>@<address>"
+  [ -z "$env_in$user$name$ref$new_pat" ] || die "--env, --user, --name, --ref and --new-pat ready a VM, not a GPU host"
+  host_name_is_valid "$gpu_host" || die "a GPU host's name is letters, digits, ., _ and -: $gpu_host"
+  [[ "$target" =~ ^([a-z_][a-z0-9_-]*)@([^@[:space:]]+)$ ]] || die "not <user>@<address>: $target"
+  gpu_target=$target target=""
+  provider=${provider:-ssh}
+  [[ "$provider" =~ ^[a-z0-9-]+$ ]] && [ -x "$HOST_ADAPTERS/$provider.sh" ] \
+    || die "no provider $provider: scripts/env/host has no $provider.sh"
+  needs=$("$HOST_ADAPTERS/$provider.sh" --needs)
+  for key in $needs; do
+    [ "$key" = INSTANCE_ID ] || die "a $provider host needs $key, which provision-vm.sh does not take"
+  done
+  if [[ " $needs " == *" INSTANCE_ID "* ]]; then
+    [[ "$instance_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "a $provider host needs --instance-id <its id>"
+  else
+    [ -z "$instance_id" ] || die "--instance-id is for a provider whose hosts need INSTANCE_ID; $provider's do not"
+  fi
+  config_name=$("$HOST_ADAPTERS/$provider.sh" --config-name)
+  if [ -n "$provider_config" ]; then
+    [ -n "$config_name" ] || die "--provider-config is for a provider whose CLI reads a config; $provider's does not"
+    [ -f "$provider_config" ] || die "no --provider-config $provider_config"
+  fi
+  command -v ssh-keygen > /dev/null || [ -f "$PEACOCK_GPU_KEY" ] || die "no ssh-keygen to make the GPU key"
+elif [ -n "$provider$instance_id$provider_config" ]; then
+  die "--provider, --instance-id and --provider-config record a GPU host: provision-vm.sh --gpu-host <name> <user>@<address>"
+elif [ -z "$target" ]; then
   [ -n "$new_pat" ] || die "name the VM: provision-vm.sh <login>@<address>, see --help"
   [ -z "$env_in$user$name$ref" ] || die "--env, --user, --name and --ref ready a VM: name it, <login>@<address>"
 else
@@ -67,7 +98,7 @@ if [ -n "$target" ]; then
 fi
 
 # The token is read and checked before anything is kept, so a wrong one leaves nothing behind.
-if [ -n "$new_pat" ] || [ ! -s "$PEACOCK_PAT" ]; then
+if [ -z "$gpu_host" ] && { [ -n "$new_pat" ] || [ ! -s "$PEACOCK_PAT" ]; }; then
   command -v gh > /dev/null || die "no gh on this machine to check the token with"
   origin=$(git -C "$here" remote get-url origin)
   [[ "$origin" =~ github\.com[:/]([^/]+)/([^/]+)$ ]] || die "the clone's origin is not a GitHub repository: $origin"
@@ -107,6 +138,60 @@ remote_test() {
   [ "$rc" != 255 ] || die "cannot reach $dev over ssh"
   return "$rc"
 }
+
+# copy_hosts <user>@<address> — this machine's hosts/ into the VM's ~/.config/peacock, where an
+# instance mounts it; a VM that cannot be reached keeps its own and is named.
+copy_hosts() {
+  local rc=0
+  tar -C "$PEACOCK_CONFIG" -cf - hosts \
+    | on "$1" 'umask 077 && mkdir -p .config/peacock && tar -C .config/peacock -xf -' || rc=$?
+  case "$rc" in
+    0) echo "hosts/ is on $1" ;;
+    255) echo "cannot reach $1: it keeps its hosts/ until provision-vm.sh --gpu-host reaches it" >&2 ;;
+    *) echo "provision-vm.sh: copying hosts/ to $1 failed" >&2; failed=1 ;;
+  esac
+}
+
+# The GPU key on the host, then the host file, then the file on every VM. ssh asks for the password
+# itself, on the terminal; the key goes on its stdin.
+if [ -n "$gpu_host" ]; then
+  if [ ! -f "$PEACOCK_GPU_KEY" ]; then
+    ssh-keygen -q -t ed25519 -N '' -C "peacock-gpu $(id -un)" -f "$PEACOCK_GPU_KEY"
+  fi
+  chmod 600 "$PEACOCK_GPU_KEY" "$PEACOCK_GPU_KEY.pub"
+  key_login() {
+    ssh "${ssh_opts[@]}" -i "$PEACOCK_GPU_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -- "$gpu_target" true \
+      < /dev/null > /dev/null 2>&1
+  }
+  if key_login; then
+    echo "$gpu_target takes the GPU key already"
+  else
+    echo "$gpu_target does not take the GPU key yet: type ${gpu_target%@*}'s password there once, and its .pub goes into authorized_keys"
+    on "$gpu_target" 'umask 077 && mkdir -p .ssh && touch .ssh/authorized_keys && IFS= read -r key &&
+                      { grep -qxF "$key" .ssh/authorized_keys || printf "%s\n" "$key" >> .ssh/authorized_keys; }' \
+      < "$PEACOCK_GPU_KEY.pub" || die "could not put the GPU key on $gpu_target"
+    key_login || die "the GPU key does not log in to $gpu_target even now: does its sshd take public keys?"
+  fi
+  install -d -m 700 "$PEACOCK_HOSTS"
+  chmod 700 "$PEACOCK_HOSTS"
+  hostfile=$(mktemp "$PEACOCK_HOSTS/.$gpu_host.XXXXXX")
+  printf 'PROVIDER=%s\nHOST=%s\nUSER=%s\n' "$provider" "${gpu_target#*@}" "${gpu_target%@*}" > "$hostfile"
+  if [ -n "$instance_id" ]; then echo "INSTANCE_ID=$instance_id" >> "$hostfile"; fi
+  mv "$hostfile" "$PEACOCK_HOSTS/$gpu_host.env"
+  # Copied as bytes, never printed: the profile holds a service account's private key.
+  if [ -n "$provider_config" ]; then
+    install -d -m 700 "$PEACOCK_HOSTS/$gpu_host"
+    install -m 600 "$provider_config" "$PEACOCK_HOSTS/$gpu_host/$config_name"
+    echo "$PEACOCK_HOSTS/$gpu_host/$config_name: the $provider CLI's config, which starts and stops $gpu_host"
+  fi
+  echo "$PEACOCK_HOSTS/$gpu_host.env names $gpu_target: gpu.sh $gpu_host prepare readies it"
+  failed=""
+  if [ -s "$PEACOCK_VMS" ]; then
+    while read -r -u 3 _ vm_target; do copy_hosts "$vm_target"; done 3< "$PEACOCK_VMS"
+  fi
+  [ -z "$failed" ] || exit 1
+  exit 0
+fi
 
 if [ -n "$target" ]; then
   if [ -n "$env_in" ]; then peacock_env_normalised "$env_in" "$PEACOCK_ENV"; fi
@@ -155,7 +240,9 @@ ROOT
 
   # Secrets on ssh's stdin only. The VM's peacock.env names its own copy of the GPU key, on a line
   # of its own whether or not the file ended in a newline.
-  tar -C "$PEACOCK_CONFIG" -cf - peacock.env gpu_ed25519 gpu_ed25519.pub \
+  copied=(peacock.env gpu_ed25519 gpu_ed25519.pub)
+  if [ -d "$PEACOCK_HOSTS" ]; then copied+=(hosts); fi
+  tar -C "$PEACOCK_CONFIG" -cf - "${copied[@]}" \
     | on "$dev" 'umask 077 && mkdir -p .config/peacock && chmod 700 .config/peacock &&
                  tar -C .config/peacock -xf - && cd .config/peacock &&
                  { [ -z "$(tail -c 1 peacock.env)" ] || echo; echo "GPU_SSH_KEY_FILE=$HOME/.config/peacock/gpu_ed25519"; } >> peacock.env'

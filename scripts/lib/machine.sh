@@ -9,6 +9,7 @@
 # is what stops it at a failed step, and both turn it off inside. The others print a value for `$(…)`.
 
 MACHINE_IMAGE=ghcr.io/asymptote-tech/peacockdb-build
+MACHINE_RUN_IMAGE=ghcr.io/asymptote-tech/peacockdb-run
 MACHINE_USER=$(id -u):$(id -g)
 # The machine's developers share it: group peacock, setgid, made by bootstrap-vm.sh. What is
 # written there is written under umask 002, so another developer can take a lock or clear a

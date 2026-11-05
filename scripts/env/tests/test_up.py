@@ -160,6 +160,26 @@ def test_up_names_the_container_after_user_and_chain():
         assert mount_at(run, str(m.home))[0] == str(m.home / "peacock-instances" / ".home" / "A")
 
 
+def test_up_names_the_instance_and_its_image_for_the_device_run():
+    with Machine() as m:
+        up_ok(m, "A", "--env", m.keys_file)
+        run = the_instance_run(m, "A")
+        assert f"PEACOCK_INSTANCE={USER_NAME}-A" in flag_values(run, "-e"), flag_values(run, "-e")
+        assert "PEACOCK_IMAGE_TAG=cudf-25.02" in flag_values(run, "-e"), flag_values(run, "-e")
+        tag = "cudf-25.02-0123456789ab"
+        up_ok(m, "B", "--env", m.keys_file, "--image", tag)
+        assert f"PEACOCK_IMAGE_TAG={tag}" in flag_values(the_instance_run(m, "B"), "-e")
+
+
+def test_up_mounts_the_host_files_even_before_there_are_any():
+    with Machine() as m:
+        hosts = m.home / ".config" / "peacock" / "hosts"
+        hosts.rmdir()
+        up_ok(m, "A", "--env", m.keys_file)
+        assert hosts.is_dir()
+        assert (str(hosts), str(hosts), True) in mounts(the_instance_run(m, "A"))
+
+
 def test_up_mounts_per_instance():
     with Machine() as m:
         ssh_key = m.home / ".ssh" / "gpu_key"
@@ -636,7 +656,8 @@ def test_help_needs_no_sed():
         system = path_without(m.home.parent, {"sed"})
         env = {"PATH": f"{m.bin}:{system}"}
         for script, first in (("up.sh", "up.sh <chain>"), ("down.sh", "down.sh <chain>"),
-                              ("provision-vm.sh", "provision-vm.sh <login>@<address>")):
+                              ("provision-vm.sh", "provision-vm.sh <login>@<address>"), ("gpu.sh", "gpu.sh <host>"),
+                              ("host/ssh.sh", "ssh.sh <name>"), ("host/nebius.sh", "nebius.sh <name>")):
             r = m.run(script, "--help", env=env)
             assert r.returncode == 0 and first in r.stdout, (script, r.returncode, r.stderr)
             assert "set -euo" not in r.stdout and not any(ln.startswith("#") for ln in r.stdout.splitlines()), r.stdout
@@ -644,7 +665,8 @@ def test_help_needs_no_sed():
 
 def test_laptop_scripts_need_bash_4_4():
     with Machine() as m:
-        texts = {s: (m.clone / "scripts" / "env" / s).read_text() for s in ("up.sh", "down.sh", "provision-vm.sh")}
+        texts = {s: (m.clone / "scripts" / "env" / s).read_text()
+                 for s in ("up.sh", "down.sh", "provision-vm.sh", "gpu.sh", "host/ssh.sh", "host/nebius.sh")}
         checks = set()
         for script, text in texts.items():
             lines = text.splitlines()

@@ -34,7 +34,7 @@ image_inputs() {
                 suffix = v[i]; gsub(/\./, "_", suffix)
                 if (v[i] != own && ends(name, "_" suffix) && ends(stage, "-" v[i])) next
               }
-              print name }' "$tree/docker/$kind.Dockerfile" | sort -u | paste -sd'|')
+              print name }' "$tree/docker/$kind.Dockerfile" | sort -u | paste -sd'|' -)
   sum=$(grep -E "^($names)=" "$tree/docker/pins.env" | LC_ALL=C sort | sha256sum) || return 2
   echo "docker/pins.env=${sum%% *}"
   [ "$kind" = build ] || return 0

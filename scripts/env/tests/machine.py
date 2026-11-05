@@ -27,6 +27,8 @@ CLONE_FILES = [
     "scripts/env/provision-vm.sh", "scripts/lib/peacock-config.sh", "scripts/lib/board.sh",
     "scripts/lib/image-inputs.sh", "scripts/lib/data-inputs.sh", "scripts/lib/machine.sh",
     "scripts/ensemble-watchdog.sh", "testdata/generate_testdata.sh", "cpp/CMakeLists.txt",
+    "scripts/env/gpu.sh", "scripts/env/host/ssh.sh", "scripts/env/host/nebius.sh", "scripts/lib/host.sh",
+    "scripts/lib/portable.sh",
 ]
 IMAGE_PASSWD = "root:x:0:0:root:/root:/bin/bash\npeacock:x:1000:1000::/home/peacock:/bin/bash\n"
 IMAGE_GROUP = "root:x:0:\npeacock:x:1000:\n"
@@ -420,5 +422,5 @@ def command(argv):
     """The image and the command after it, of a docker run."""
     i = 1
     while argv[i].startswith("-"):
-        i += 1 if argv[i] in ("-d", "--rm", "--init") else 2
+        i += 1 if argv[i] in ("-d", "--rm", "--init", "-i") else 2
     return argv[i], argv[i + 1:]

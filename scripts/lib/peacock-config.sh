@@ -2,7 +2,7 @@
 #
 # ~/.config/peacock/, on a person's own machine (the laptop) and on a VM (llm-wiki/build-test.md,
 # "Containers"): the storage keys, the person's PAT and GPU key, the VMs this laptop provisioned,
-# and the marker bootstrap-vm.sh leaves on a machine that runs instances. A function that refuses
+# the GPU hosts, and the marker bootstrap-vm.sh leaves on a machine that runs instances. A function that refuses
 # prints one line to stderr and returns 2; it is called as a statement, so set -e stops the caller.
 
 PEACOCK_CONFIG=$HOME/.config/peacock
@@ -11,6 +11,8 @@ PEACOCK_PAT=$PEACOCK_CONFIG/github-pat
 PEACOCK_GPU_KEY=$PEACOCK_CONFIG/gpu_ed25519
 PEACOCK_VMS=$PEACOCK_CONFIG/vm
 PEACOCK_MARKER=$PEACOCK_CONFIG/machine
+# One file a GPU host, <name>.env, written by provision-vm.sh --gpu-host (scripts/lib/host.sh).
+PEACOCK_HOSTS=$PEACOCK_CONFIG/hosts
 # bootstrap-vm.sh's clone, relative to the home of the user who ran it.
 PEACOCK_CLONE_IN_HOME=peacockdb
 # What peacock.env holds on a laptop, and must hold on a VM.

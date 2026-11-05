@@ -205,7 +205,91 @@ def test_provision_has_help():
     with Laptop() as lap:
         r = lap.provision("--help")
         assert r.returncode == 0 and "provision-vm.sh <login>@<address>" in r.stdout and "--new-pat" in r.stdout, r
+        assert "--gpu-host <name> <user>@<address>" in r.stdout, r.stdout
         assert lap.ssh_calls() == []
+
+
+GPU = "ubuntu@gpu1.test"
+
+
+def test_provision_gpu_host_installs_the_key_once():
+    with Laptop() as lap:
+        host = lap.add_gpu_host("gpu1.test")
+        r = ok(lap.provision("--gpu-host", "l40s", GPU))
+        pub = (lap.config / "gpu_ed25519.pub").read_text().strip()
+        keys = host / "home" / "ubuntu" / ".ssh" / "authorized_keys"
+        assert keys.read_text().splitlines() == [pub], keys.read_text()
+        assert [c["password"] for c in lap.ssh_calls()].count(True) == 1, lap.ssh_calls()
+        assert "password" in r.stdout, r.stdout
+        hosts = lap.config / "hosts"
+        assert (hosts / "l40s.env").read_text() == "PROVIDER=ssh\nHOST=gpu1.test\nUSER=ubuntu\n"
+        assert mode(hosts) == 0o700 and mode(hosts / "l40s.env") == 0o600, (oct(mode(hosts)), oct(mode(hosts / "l40s.env")))
+        checks = [c for c in lap.ssh_calls() if not c["password"]]
+        assert checks and all(str(lap.config / "gpu_ed25519") in c["argv"] and "BatchMode=yes" in c["argv"]
+                              for c in checks), [c["argv"] for c in checks]
+
+        n = len(lap.ssh_calls())
+        ok(lap.provision("--gpu-host", "l40s", GPU))
+        assert not any(c["password"] for c in lap.ssh_calls()[n:]), lap.ssh_calls()[n:]
+        assert keys.read_text().splitlines() == [pub], keys.read_text()
+
+
+def test_provision_gpu_host_writes_what_its_provider_needs():
+    with Laptop() as lap:
+        readied(lap)
+        lap.add_gpu_host("gpu1.test")
+        profile = lap.home / "sa-profile.yaml"
+        profile.write_text("profiles: a service account's key\n")
+        r = ok(lap.provision("--gpu-host", "h100", GPU, "--provider", "nebius", "--instance-id", "computeinstance-x1",
+                             "--provider-config", profile))
+        assert (lap.config / "hosts" / "h100.env").read_text() == \
+            "PROVIDER=nebius\nHOST=gpu1.test\nUSER=ubuntu\nINSTANCE_ID=computeinstance-x1\n"
+        kept = lap.config / "hosts" / "h100" / "config.yaml"
+        assert kept.read_bytes() == profile.read_bytes() and mode(kept) == 0o600 and mode(kept.parent) == 0o700
+        on_vm = lap.vm_home("vm1.test", "dev1") / ".config" / "peacock" / "hosts" / "h100" / "config.yaml"
+        assert on_vm.read_bytes() == profile.read_bytes() and mode(on_vm) == 0o600, oct(mode(on_vm))
+        assert "a service account's key" not in r.stdout + r.stderr
+        assert all("a service account" not in " ".join(c["argv"]) for c in lap.ssh_calls())
+        ok(lap.provision("--gpu-host", "h100", GPU, "--provider", "nebius", "--instance-id", "computeinstance-x1"))
+        assert kept.is_file(), "a rerun without --provider-config keeps the config"
+
+
+def test_provision_gpu_host_copies_hosts_to_every_vm():
+    with Laptop() as lap:
+        readied(lap)
+        lap.add_vm("vm2.test")
+        with (lap.config / "vm").open("a") as f:
+            f.write("second dev1@vm2.test\n")
+        lap.add_gpu_host("gpu1.test")
+        r = ok(lap.provision("--gpu-host", "l40s", GPU, env={"FAKE_SSH_DOWN": "vm2.test"}))
+        copied = lap.vm_home("vm1.test", "dev1") / ".config" / "peacock" / "hosts" / "l40s.env"
+        assert copied.read_bytes() == (lap.config / "hosts" / "l40s.env").read_bytes()
+        assert mode(copied) == 0o600, oct(mode(copied))
+        assert "dev1@vm2.test" in r.stderr, r.stderr
+
+        lap.add_vm("vm3.test")
+        ok(lap.provision("ubuntu@vm3.test", "--user", "dev1", "--name", "third"))
+        assert (lap.vm_home("vm3.test", "dev1") / ".config" / "peacock" / "hosts" / "l40s.env").is_file()
+
+
+def test_provision_gpu_host_refuses_bad_arguments_before_any_call():
+    cases = [(("--gpu-host", "l40s"), "<user>@<address>"),
+             (("--gpu-host", "../x", GPU), "../x"),
+             (("--gpu-host", "l40s", GPU, "--provider", "nowhere"), "nowhere"),
+             (("--gpu-host", "h100", GPU, "--provider", "nebius"), "--instance-id"),
+             (("--gpu-host", "l40s", GPU, "--instance-id", "computeinstance-x1"), "--instance-id"),
+             (("--gpu-host", "l40s", GPU, "--env", "x.env"), "--env"),
+             (("--gpu-host", "l40s", GPU, "--new-pat"), "--new-pat"),
+             (("--gpu-host", "l40s", GPU, "--provider-config", "/etc/hostname"), "--provider-config"),
+             (("--gpu-host", "h100", GPU, "--provider", "nebius", "--instance-id", "i1", "--provider-config",
+               "/nonexistent/c.yaml"), "/nonexistent/c.yaml"),
+             ((TARGET, "--provider-config", "/etc/hostname"), "--provider-config"),
+             ((TARGET, "--provider", "ssh"), "--provider"),
+             ((TARGET, "--instance-id", "computeinstance-x1"), "--instance-id")]
+    for args, words in cases:
+        with Laptop() as lap:
+            lap.add_gpu_host("gpu1.test")
+            refused(lap.provision(*args, stdin=PAT + "\n"), lap, words)
 
 
 

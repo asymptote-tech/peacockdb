@@ -482,42 +482,185 @@ developers share the storage keys and keep their own token, GPU key and Linux us
 ### Task 7: host adapters and the device run
 
 **Files:**
-- Create: `scripts/env/host/ssh.sh`, `scripts/env/host/nebius.sh` — each implements
-  `start|stop|status|ip|ssh <cmd>` for `HOST_NAME` read from `~/.config/peacock/hosts/<name>.env`
-- Create: `scripts/env/gpu.sh` — `gpu.sh <host> prepare|ship|run <list|bench|filter> [--cudf v]|pull`
+- Create: `scripts/env/host/ssh.sh`, `scripts/env/host/nebius.sh` — each
+  `<name> start|stop|status|ip|powers|ssh <cmd>` for the host `~/.config/peacock/hosts/<name>.env`
+  names; `--needs`, the host-file keys its provider needs; `--config-name`, the file in
+  `hosts/<name>/` its CLI reads; the only place a provider is named
+- Create: `scripts/lib/host.sh` — the host file read, ssh with the person's key, the adapters'
+  command line
+- Create: `scripts/lib/portable.sh` — `sha256sum`, `timeout` and a version comparison where a macOS
+  laptop has none
+- Create: `scripts/env/gpu.sh` —
+  `gpu.sh <host> prepare|ship|run <list|filter|bench>|pull [--cudf <v> | --image <tag>] [--instance <name>]`,
+  `gpu.sh <host> start | stop [--force]`
+- Create: `scripts/env/on-gpu-host.sh` — gpu.sh's side on the host, shipped by `prepare`
 - Modify: `scripts/env/provision-vm.sh` — `provision-vm.sh --gpu-host <name> <user>@<address>
-  [--provider <p>]`: writes the host file on the laptop and copies `hosts/` to every VM in the
-  `vm` file it can reach
-- Create: `scripts/env/tests/test_host.py`, `test_gpu.py`
+  [--provider <p>] [--instance-id <id>] [--provider-config <file>]`
+- Modify: `scripts/env/up.sh` — `PEACOCK_INSTANCE=<user>-<chain>` and `PEACOCK_IMAGE_TAG` in the
+  container; `hosts/` made when missing and always mounted
+- Modify: `scripts/lib/peacock-config.sh` (`PEACOCK_HOSTS`), `scripts/lib/machine.sh` (the run
+  image's name)
+- Create: `scripts/env/tests/test_host.py`, `test_gpu.py`, `test_gpu_power.py`, `gpuhost.py` (a GPU
+  host reached through laptop.py's fake ssh, its fakes answering only the exact query); modify
+  `laptop.py` (a key named with `-i`, BatchMode, a password login, a dropped command, stdin
+  streamed, a host's own `bin/` and `environment`), `machine.py`, `test_provision.py`, `test_up.py`,
+  `test_pins.py`, `test_image.py`
+- Modify: `docker/pins.env` (`DRIVER_MINIMUM_PTX`), `llm-wiki/prompts.md` (a GPU host's provider
+  config is never opened)
+- Modify: `llm-wiki/build-test.md` — "GPU hosts" in "Containers", "Trust"
 
 **Interfaces:**
-- Consumes: Tasks 2–3 images.
-- Produces: host file keys `PROVIDER=ssh|nebius HOST USER [PASSWORD_FIRST_LOGIN=1]
-  [INSTANCE_ID]`, in `~/.config/peacock/hosts/<name>.env` on the laptop, written by
-  `provision-vm.sh --gpu-host` and copied to each VM, where an instance mounts `hosts/` read-only.
-  A host file names no key: the key to every GPU host is the person's `gpu_ed25519`, which the VM's
-  `peacock.env` names as `GPU_SSH_KEY_FILE` (Task 6a). `prepare` installs that key's `.pub` on a
-  password-only host, then Docker + NVIDIA
-  Container Toolkit if missing, puts the data on the machine once (sf1 generated in the build
-  image there under the `data-inputs.sh` hash with the default vectors, as Task 6 keeps it; sf40 from S3 — skipped when
-  present and its checksum holds), then
-  `docker pull` the run image; `ship` rsyncs `cpp/install` and the query files to
-  `~/peacock/<instance>/` (instance-named, never the old path's dirs), never the data;
-  `run` executes the run image with `--gpus all` and `--hostname` set to the machine's name, which
-  the benchmark writes as `host=` (Task 8); `pull` brings `benchmark-results/`, the record
-  and logs home.
+- Consumes: Tasks 2–3 images, Task 6's `data-inputs.sh`, `image-inputs.sh`, `machine_data_set` and
+  `s3.sh`.
+- **The host file** `~/.config/peacock/hosts/<name>.env`: `PROVIDER=ssh|nebius HOST USER
+  [INSTANCE_ID]`, any other key refused by name. It names no key: the key to every GPU host is the
+  person's `gpu_ed25519`, which the VM's `peacock.env` names as `GPU_SSH_KEY_FILE` (Task 6a). Beside
+  it, `hosts/<name>/config.yaml` is the provider CLI's config for that host, where there is one.
+- **`provision-vm.sh --gpu-host`**, on the laptop: writes the host file; copies `--provider-config`
+  to `hosts/<name>/config.yaml` (mode 600), never printing it; where the key does not log in, one
+  interactive ssh, the person typing the password, puts `gpu_ed25519.pub` in the host's
+  `authorized_keys`; copies `hosts/` to every VM in `vm` it reaches, naming each it cannot. A VM
+  provisioned later gets `hosts/` with its keys. An instance mounts `hosts/` read-only, made by
+  `up.sh` when missing.
+- **Power is optional, per adapter.** `ssh.sh`: powered by hand, start and stop do nothing, status
+  is whether the key logs in. `nebius.sh`: needs `INSTANCE_ID`; with `hosts/<name>/config.yaml` it
+  powers the host through the CLI pinned in the build image, `--config` naming that file, never
+  reading it: start skips RUNNING and STARTING, waits out STOPPING, starts `--async`, polls to a
+  deadline, waits for the key to log in, and stops again what it started when it never reaches
+  RUNNING or ssh; stop waits for STOPPED and stops a host still STARTING. Without the config the
+  host is powered by hand and ip is its `HOST`.
+- **`gpu.sh` runs where the built tree is**: in an instance, which `up.sh` gives `PEACOCK_INSTANCE`
+  and `PEACOCK_IMAGE_TAG`, or on any machine holding a built tree, the host file and
+  `GPU_SSH_KEY_FILE`, with `--instance <name>`, refused without it. The tree's dir on the host is
+  `~/peacock/<instance>/`. The images are taken at the instance's tag, so a commit-pinned instance
+  runs that commit's run image. Every command logs in with the key first: a host without key login
+  is exit 2, with ssh's reason, naming `provision-vm.sh --gpu-host`. Exit 3 is the driver's alone; a
+  tool's failure, ssh's lost connection and an unreachable host included, is 1; on the host, every
+  failure that is not a refusal is 1. An adapter that cannot answer `powers` is said, never read as
+  "powered by hand". gpu.sh runs on a macOS laptop too.
+- A gpu.sh host is a VM of its own, never nebius-gpu: the old path knows none of these locks.
+- A host its adapter powers is started by each of `prepare`, `ship`, `run` and `pull`, and an EXIT
+  trap soft-stops it on every exit of the command; a soft stop that fails is said and changes no
+  status. The soft stop declines while a process is on the card, the device lock is held, or the
+  host's activity lock is: every step on the host holds it shared, and each command holds it shared
+  from its login on through one ssh session fed the script and a heartbeat, which lets go when the
+  heartbeat stops, gpu.sh killed alone included. The lock files are group-writable under any umask.
+  `start` and `stop [--force]` do the same by hand; a stop without the checks, ssh not answering
+  included, is taken only on a host reported STOPPED or STOPPING. A host powered by hand is left as
+  it is.
+- `prepare`: the driver checked first, every card's
+  `nvidia-smi --query-gpu=driver_version,compute_cap` a version and a capability, a capability below
+  8.0 refused, the driver at least `DRIVER_MINIMUM_<v>` of `docker/pins.env` and, for a capability
+  other than 8.x or 9.x, `DRIVER_MINIMUM_PTX`; below it exit 3 naming both; then its scripts
+  shipped, Docker, rsync and the NVIDIA Container Toolkit where missing, the data directory made;
+  the run and the build image pulled and each label compared with `image-inputs.sh` over the tree, a
+  difference or none exit 2 naming each file; sf1 generated in the build image on the host under the
+  `data-inputs.sh` hash (`machine_data_set`); sf40 from the buckets through `s3.sh`, in the build
+  image, checked against the bucket's `manifest.json` and kept with its `SHA256SUMS`, a set whose
+  sums hold skipped.
+- **The data directory** is `/var/lib/peacock`, made by `prepare` with sudo, group docker, setgid,
+  mode 2775, or the absolute `PEACOCK_DATA_DIR` of the host's `/etc/environment`, never made; one
+  missing or not writable is refused.
+- **Secrets on the host.** The S3 read keys reach it only for the sf40 download, on ssh's stdin into
+  that container's stdin and environment; never written there, never in argv or a remote command
+  line.
+- `ship` rsyncs `cpp/install` and `scripts/nebius/ci-ship.sh`'s fixtures to
+  `~/peacock/<instance>/`, never the data, holding the instance's run lock through its rsync, so it
+  is refused while the instance's run is going and no run starts under it. sf1 and sf40 are made by
+  the build image's ID. `run` follows a run of the instance still going; otherwise it checks the
+  driver and the run image, reading the ID from the tag once and the label from that ID, and runs
+  that ID with `--gpus all`, `--hostname` the host's name (Task 8's `host=`), `PCK_TEST_FILTER` and
+  `PEACOCK_BENCH_RESUME` passed through; a `bench` without sf40 is refused. **The run is detached
+  from the session** and followed: it holds its instance's lock (the host user's) and, for the whole
+  `docker run`, the host's device lock `<data dir>/.device.lock`; a second chain's run waits, saying
+  so in one line. After a dropped session, `run` of the same mode and the same `PCK_TEST_FILTER` and
+  `PEACOCK_BENCH_RESUME` (kept in `run/state`) follows the run still going while `cpp/install` is
+  the tree it started with; another mode or environment, or changed binaries, are refused; a lock
+  held by no live run is "busy"; a run that ended before it is followed gives its status; and no
+  second container starts, the container named `peacock-run-<user>-<instance>` and refused while it
+  exists. `PEACOCK_BENCH_RESUME` is refused outside `run bench`. Each run's status is kept beside
+  its log. Each bench's record becomes `records-<start time>.tsv`; one a killed run left is kept as
+  `records-<its start time>-interrupted.tsv` by the next `pull` or `run`.
+- `pull` brings `testdata/benchmark-results/` (per device slug), every `records-*.tsv` and the logs
+  home, with an rsync that needs no `--ignore-missing-args`: a record is never replaced, a newer
+  local file that differs is kept, both named, exit 1. `pull` takes `--instance` outside an
+  instance, as `ship` does.
 
-- [ ] **Step 1: failing tests** (fake `ssh`/`rsync`/`nebius`): `test_ssh_adapter_start_is_noop`;
-  `test_nebius_adapter_needs_instance_id`; `test_prepare_installs_key_on_password_host`;
-  `test_run_refuses_old_driver` (fake `nvidia-smi` reporting a driver below the run image's CUDA
-  minimum → exit 3 before `ship`, message names both); `test_ship_dir_is_instance_named`;
-  `test_run_passes_the_machines_hostname` (`docker run` gets `--hostname` with the name the fake
-  host's `hostname` answers); `test_prepare_refuses_stale_run_image` (the run image's
-  `peacockdb.inputs` differs from the tree → exit 2 before `ship`, naming the file).
-- [ ] **Step 2:** implement.
-- [ ] **Step 3: verify on nebius-gpu** (the L40S, by hand-given ssh): `gpu.sh nebius-l40s prepare`,
-  `ship`, `run list` with binaries from the build image: the device tiers pass with the same
-  counts as the latest `GPU Tests (nebius-gpu)` run. Record counts and wall times.
+- [x] **Step 1: failing tests** (fake `ssh`/`rsync`/`nebius`/`docker`/`nvidia-smi`/`aws`, the GPU
+  host a directory): `test_ssh_adapter_start_is_noop`;
+  `test_ssh_adapter_status_is_reachable_over_ssh`; `test_nebius_adapter_needs_instance_id`;
+  `test_nebius_adapter_powers_a_host_only_with_its_config`;
+  `test_nebius_adapter_goes_through_its_cli`;
+  `test_nebius_start_waits_out_a_stop_and_skips_a_running_host`;
+  `test_nebius_start_without_ssh_stops_only_what_it_started`; `test_the_config_stays_unread`;
+  `test_a_host_file_holds_only_its_keys` (`PASSWORD_FIRST_LOGIN` refused by name);
+  `test_no_script_but_an_adapter_names_a_provider_an_address_or_a_home`;
+  `test_provision_gpu_host_installs_the_key_once` (one password login over two runs);
+  `test_provision_gpu_host_writes_what_its_provider_needs`;
+  `test_provision_gpu_host_copies_hosts_to_every_vm`;
+  `test_prepare_refuses_a_host_without_key_login`; `test_run_refuses_old_driver` (prepare and run,
+  exit 3, nothing shipped or pulled, both versions named);
+  `test_a_driver_answer_that_is_no_version_is_refused`;
+  `test_the_host_fakes_answer_only_their_exact_query`; `test_prepare_refuses_stale_run_image`;
+  `test_prepare_names_a_pull_that_fails`; `test_run_refuses_an_image_another_tree_pulled_since`;
+  `test_ship_dir_is_instance_named`; `test_the_fixtures_are_ci_ship_s`;
+  `test_run_passes_the_machines_hostname`; `test_run_bench_needs_sf40`;
+  `test_one_device_run_at_a_time_per_host`;
+  `test_a_dropped_session_leaves_one_run_that_a_rerun_follows`;
+  `test_the_s3_keys_never_rest_on_the_host`; `test_prepare_installs_what_is_missing`;
+  `test_a_data_directory_it_cannot_write_is_refused`; `test_a_broken_sf40_set_is_fetched_again`;
+  `test_each_bench_run_keeps_its_own_record`; `test_a_killed_bench_s_record_comes_home`;
+  `test_pull_brings_the_results_home_and_keeps_a_newer_local_file`;
+  `test_a_tool_s_failure_is_exit_1_never_3`; `test_a_host_tool_s_own_status_is_exit_1`;
+  `test_the_image_run_is_the_one_whose_label_was_read`;
+  `test_a_rerun_with_another_environment_is_not_followed`;
+  `test_the_shared_files_stay_group_writable`;
+  `test_a_run_whose_instance_is_busy_is_neither_started_nor_followed`;
+  `test_a_container_of_the_instance_still_on_the_host_refuses_a_new_run`;
+  `test_a_hold_whose_caller_falls_silent_lets_go`;
+  `test_a_command_longer_than_the_hold_s_timeout_keeps_it_by_its_heartbeat`;
+  `test_a_run_that_ends_before_it_is_followed_gives_its_status`;
+  `test_gpu_sh_runs_on_a_laptop_with_macos_s_tools`;
+  `test_prepare_makes_the_default_data_directory_only_when_it_is_missing`;
+  `test_prepare_never_makes_an_explicit_data_directory`;
+  `test_a_relative_data_directory_is_refused_where_it_exists`;
+  `test_a_gpu_sh_killed_alone_lets_go_of_its_hold`;
+  `test_a_second_user_s_first_prepare_joins_the_group_before_it_holds`;
+  `test_a_run_during_a_ship_is_busy`; `test_a_lock_held_without_a_live_unfinished_run_is_busy`;
+  `test_the_portable_timeout_says_124_and_passes_the_command_s_own_status`;
+  `test_a_hold_lost_mid_command_is_named`;
+  `test_a_ship_killed_alone_keeps_its_locks_while_the_host_s_rsync_server_writes`;
+  `test_a_half_open_ship_server_has_the_hold_s_timeout_and_holds_the_instance_until_it_ends`;
+  `test_a_pull_s_server_of_the_instance_holds_no_ship`;
+  `test_an_instance_s_hold_waits_on_no_server_of_another_instance`;
+  `test_each_of_ship_s_two_servers_holds_the_instance_s_hold`;
+  `test_a_hold_that_lapses_while_the_command_works_is_named`;
+  `test_a_command_neither_waits_for_nor_leaves_its_heartbeat_s_sleep`;
+  `test_a_second_install_waits_and_says_so`; `test_gpu_power.py`'s
+  `test_a_soft_stop_without_ssh_on_a_running_host_declines`,
+  `test_a_soft_stop_without_ssh_or_a_state_declines` and
+  `test_an_explicit_stop_without_an_address_or_a_state_declines`;
+  `test_ship_refuses_while_a_run_goes_on_and_changed_binaries_are_not_followed`;
+  `test_a_card_past_compute_capability_9_needs_the_driver_that_compiles_its_ptx`;
+  `test_an_instance_on_a_pinned_image_runs_that_image`;
+  `test_nebius_stops_a_host_that_never_comes_up_and_one_still_starting`; `test_gpu_power.py`:
+  `test_a_powered_host_is_started_and_soft_stopped_by_every_command`,
+  `test_a_powered_host_is_stopped_on_every_exit`,
+  `test_a_green_run_whose_soft_stop_fails_keeps_its_status`,
+  `test_a_host_without_power_is_left_as_it_is`, `test_soft_stop_declines_while_the_card_is_busy`,
+  `test_soft_stop_waits_for_another_instance_s_work`,
+  `test_stop_checks_the_card_unless_the_host_is_stopped`,
+  `test_a_stop_during_another_instance_s_prepare_is_refused`,
+  `test_a_provider_cli_s_exit_3_is_exit_1`,
+  `test_an_adapter_that_cannot_answer_powers_is_not_read_as_by_hand`;
+  `test_up_names_the_instance_and_its_image_for_the_device_run`;
+  `test_up_mounts_the_host_files_even_before_there_are_any`.
+- [x] **Step 2:** implement.
+- [ ] **Step 3: verify on a GPU VM of its own** (an L40S, never nebius-gpu itself, whose old path
+  knows none of gpu.sh's locks): `provision-vm.sh --gpu-host <name> …`, then from an instance
+  `gpu.sh <name> prepare`, `ship`, `run list` with binaries from the build image: the device tiers
+  pass with the same counts as the latest `GPU Tests (nebius-gpu)` run. Record counts and wall
+  times, and the detail file's Task 7 checklist.
 - [ ] **Step 4:** commit.
 
 ### Task 8: benchmark provenance and the per-device tree (#226)

@@ -59,10 +59,11 @@ Starting a chain, and everything else the human does: `llm-wiki/README.md`.
   fact, and a long sentence hides the fact in the middle of itself.
 - **Every commit keeps code, code comments, and llm-wiki content in agreement.**
 - **Never open a Nebius credential file.** `~/.nebius/config.yaml`, `~/.nebius/credentials.yaml`
-  and any `*.pem` under `~/.nebius/`, on any host, the VM's copy included: no `cat`, `grep`,
-  `sed`, Read, or redaction attempt. A redaction leaked a service account's private key into a
-  transcript on 2026-10-14. Reach the cloud through `scripts/nebius.sh`; learn the CLI from
-  `nebius … --help`.
+  and any `*.pem` under `~/.nebius/`, and any file under `~/.config/peacock/hosts/<name>/` (a GPU
+  host's provider config), on any host, the VM's copy and an instance's mount included: no `cat`,
+  `grep`, `sed`, Read, or redaction attempt. A redaction leaked a service account's private key into
+  a transcript on 2026-10-14. Reach the cloud through `scripts/nebius.sh`, or through
+  `scripts/env/host/<provider>.sh` and `gpu.sh` for a GPU host; learn the CLI from `nebius … --help`.
 
 ## Board protocol
 

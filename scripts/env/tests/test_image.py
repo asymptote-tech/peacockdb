@@ -256,6 +256,8 @@ def test_help():
 # Pins of what is installed on the machine, not in the image (Task 6's bootstrap-vm.sh): Claude
 # Code is proprietary and the images are public.
 MACHINE_PINS = {"CLAUDE_CODE_VERSION", "SUPERPOWERS_VERSION", "SUPERPOWERS_SHA"}
+# Pins gpu.sh's driver check reads from the tree on a GPU host, no image (scripts/env/gpu.sh).
+DEVICE_RUN_PINS = {"DRIVER_MINIMUM_PTX"}
 
 
 def test_the_dockerfiles_declare_every_pin_but_the_machine_s():
@@ -264,7 +266,9 @@ def test_the_dockerfiles_declare_every_pin_but_the_machine_s():
     declared = {kind: set(re.findall(r"^ARG (\w+)", (REPO / "docker" / f"{kind}.Dockerfile").read_text(), re.M))
                 for kind in ["build", "run"]}
     assert MACHINE_PINS <= set(read_pins()), "pins.env lost a machine pin"
-    missing = sorted((set(read_pins()) - MACHINE_PINS | {"CUDF", "CUDF_SUBMODULE"}) - (declared["build"] | declared["run"]))
+    assert DEVICE_RUN_PINS <= set(read_pins()), "pins.env lost a device-run pin"
+    missing = sorted((set(read_pins()) - MACHINE_PINS - DEVICE_RUN_PINS | {"CUDF", "CUDF_SUBMODULE"})
+                     - (declared["build"] | declared["run"]))
     assert not missing, f"no Dockerfile declares: {missing}"
     assert "CUDF" in declared["run"], "run.Dockerfile never declares CUDF"
     for kind, names in declared.items():

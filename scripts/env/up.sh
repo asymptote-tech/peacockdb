@@ -245,7 +245,9 @@ bind "$MACHINE_REGISTRY" "$IMAGE_REGISTRY" ro
 for entry in "${DATA_SETS[@]}"; do
   bind "$DATA_SET/${entry%% *}" "$worktree/testdata/${entry%% *}" ro
 done
-if [ -d "$HOME/.config/peacock/hosts" ]; then bind "$HOME/.config/peacock/hosts" "$HOME/.config/peacock/hosts" ro; fi
+# Made when missing, so a GPU host recorded later reaches an instance already running.
+(umask 077 && mkdir -p "$PEACOCK_HOSTS")
+bind "$PEACOCK_HOSTS" "$PEACOCK_HOSTS" ro
 if [ -n "$ssh_key" ]; then bind "$ssh_key" "$ssh_key" ro; fi
 if [ -n "$provider" ]; then bind "$provider" "$provider" ro; fi
 
@@ -273,7 +275,8 @@ done
 run=(docker run -d --init --name "$container" --label "peacockdb.chain=$chain" --label "peacockdb.user=$user"
      --user "$MACHINE_USER" -e "HOME=$HOME" -e "PATH=$HOME/.local/bin:$image_path" -e DISABLE_AUTOUPDATER=1
      -e "CLAUDE_CONFIG_DIR=$claude_dir" -e "CCACHE_DIR=$MACHINE_CCACHE"
-     -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e "GIT_CONFIG_VALUE_0=$worktree/third_party/cudf")
+     -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e "GIT_CONFIG_VALUE_0=$worktree/third_party/cudf"
+     -e "PEACOCK_INSTANCE=$user-$chain" -e "PEACOCK_IMAGE_TAG=${image_tag:-cudf-$cudf}")
 run+=(--env-file "$env_file")
 for i in "${!dsts[@]}"; do
   spec="type=bind,src=${srcs[$i]},dst=${dsts[$i]}"
