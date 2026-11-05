@@ -13,8 +13,9 @@
 - The benchmark today times 26 hand-listed cases (`corpus_benchmark_cases.inc`); the registry
   enables about 534 tpch and tpcds device cells. The H200 run of the 26 took 3,602 s, 96 % of it the
   six rowgroup cases. The benchmark pool is a fixed 69 GiB.
-- Decided at Task 11's run: the rowgroup modes for every query, and the source of tpcds
-  sf40 (15 GB, in no bucket).
+- Decided for Task 11's run: the rowgroup modes check correctness and are not benchmarked, so a
+  run times the other three; tpcds sf40 comes from the bucket `tpcds-sf40` ("tpcds sf40 in its
+  bucket").
 
 
 ## Task 1: the conda specs

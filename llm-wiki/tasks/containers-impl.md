@@ -297,7 +297,7 @@ GitHub Actions (one dispatch-only workflow), ghcr.io, Nebius S3.
   (`provision-vm.sh … --user <other>`) reuses sf1 and the cuDF checkout, generating and fetching
   nothing, and `up.sh A` as them is refused naming the first. A rerun of `provision-vm.sh` skips
   every step. Record wall times.
-- [ ] **Step 4:** commit.
+- [x] **Step 4:** commit.
 
 ### Task 6a: one command per machine, one per chain
 
@@ -408,7 +408,7 @@ developers share the storage keys and keep their own token, GPU key and Linux us
   - An existing worktree is reused as it is, its branch left alone; a `--branch` naming another
     branch, or a `--board`, is refused.
 
-- [ ] **Step 1: failing tests** (fakes on `PATH`: `ssh` recording argv and stdin and running the
+- [x] **Step 1: failing tests** (fakes on `PATH`: `ssh` recording argv and stdin and running the
   remote command in a fake VM's home, `sudo`, `getent`, `groupadd`, `useradd`, `usermod`,
   `install`, `gh`, `claude`, `docker`; a stub `bootstrap-vm.sh` recording its arguments):
   - `test_provision.py::test_provision_readies_a_vm` — the laptop's directory 700 and its files
@@ -473,11 +473,11 @@ developers share the storage keys and keep their own token, GPU key and Linux us
     `GPU_SSH_KEY_FILE` on a line of its own; `--env` naming the laptop's own `peacock.env` keeps
     it whole; `test_provision_takes_comments_in_the_env_file`;
     `test_provision_refuses_a_ref_the_vm_clone_is_not_on` (its git call with hooks and fsmonitor off).
-- [ ] **Step 2:** implement; `llm-wiki/build-test.md`'s "Trust", "A fresh VM" and "Instances" say
+- [x] **Step 2:** implement; `llm-wiki/build-test.md`'s "Trust", "A fresh VM" and "Instances" say
   what a developer does once and per chain, that every developer on a VM is in the docker group
   and so can read the others' PAT and keys, and that `peacock.env` alone may be passed on.
 - [ ] **Step 3:** verified with Task 6's Step 3, on one fresh VM.
-- [ ] **Step 4:** commit.
+- [x] **Step 4:** commit.
 
 ### Task 7: host adapters and the device run
 
@@ -661,7 +661,7 @@ developers share the storage keys and keep their own token, GPU key and Linux us
   `gpu.sh <name> prepare`, `ship`, `run list` with binaries from the build image: the device tiers
   pass with the same counts as the latest `GPU Tests (nebius-gpu)` run. Record counts and wall
   times, and the detail file's Task 7 checklist.
-- [ ] **Step 4:** commit.
+- [x] **Step 4:** commit.
 
 ### Task 8: benchmark provenance and the per-device tree (#226)
 
@@ -722,12 +722,12 @@ developers share the storage keys and keep their own token, GPU key and Linux us
 
 ### Task 11: the benchmark run on an 80 GB A100 or H100
 
-- [ ] **Step 1:** the human creates the machine on nebius and settles the rowgroup modes; record
-  it in the detail file. tpcds sf40 comes from the bucket `tpcds-sf40`, so every device reads the
-  same parquet files (row-group layout is part of what the rowgroup modes measure). It is
-  published (detail file, "tpcds sf40 in its bucket"); its sums are compared with the copy the
-  H200 results were measured on once shad-gpu is back, and `prepare` checks the files against
-  the bucket.
+- [ ] **Step 1:** the human creates the machine on nebius. The rowgroup modes (`tp1_rowgroup`,
+  `tp4_rowgroup`) check correctness and are not benchmarked: a run times the other three.
+  tpcds sf40 comes from the bucket `tpcds-sf40`, so every device reads the same parquet files
+  (their row-group layout is part of what is measured). It is published (detail file, "tpcds
+  sf40 in its bucket"); its sums are compared with the copy the H200 results were measured on
+  once shad-gpu is back, and `prepare` checks the files against the bucket.
 - [ ] **Step 2:** binaries built in the build image (`--features gpu`, the benchmark target);
   `gpu.sh <host> prepare && ship && run bench && pull`, the idle watcher's four-hour limit handled
   (the run in segments, or the watcher configured for it on that host).
