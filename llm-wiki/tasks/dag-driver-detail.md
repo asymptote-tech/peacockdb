@@ -132,3 +132,16 @@ Coordinator decision (2026-11-04): `GpuHoldBuffer` joins `cuda_forward_bytes` in
 15 `-mini.cost.txt` goldens change in their category comment line only (numbers identical). This
 departs from the spec's "every existing golden byte-identical"; the alternative, exempting the buffer
 from the taxonomy test, would hide a node kind from the cost model. Name it in the signoff.
+
+## Rebase 2 (2026-11-05)
+
+Rebased onto `ENS-sf40-baseline` `606335f4`, the finished chain (containers-rebase, new-hosts,
+pinned-loads, bench-rows, sf40-baseline). Re-proof at `d3076c44`, local, CPU and compile only.
+
+- **New baseline, parent `606335f4`** (its tree exported and run on its own): `--lib` 994 (992 passed + 2 ignored); `test_corpus_goldens` **61**; `plan_goldens` 25. Later golden checks compare with 61 plus each task's additions.
+- pinned-loads' `RowGroupMeta.compressed_bytes` and its scan-path change needed nothing more: the replay had already given every dag-driver fixture `compressed_bytes: 0` (`tests/rebuild.rs`, `plan/validate/tests.rs`, `wire/tests.rs`). Every target compiles with no warning.
+- **Green:** `cargo test --features rust-only -p peacockdb-core`, every target: `--lib` 1056 + 2 ignored (994 + dag-driver's 64), `test_corpus_goldens` 61, `test_cost_model` 3, `test_cpu_corpus` 2451, `test_crate_privacy` 1, `test_golden_format` 41. `plan_goldens` 25. `cargo test -p cost-report`: 49, and `test_source_formatting` 32. `ctest -L cpu` 1/1: `peacock_cpu_tests`, 64 cases, `Lifecycle.DuplicateWithNoPlanIsRefused` among them. `peacock_plan_tests` lists 136, the four `HandleDuplicate` cases among them. The `--features gpu --no-run` build against rapids-cuda-12.2 compiles with no warning; its `--list` has 743 `gpu_tests::` (the duplicate's `abi.rs` case among them) and 5 `ffi_tests::`.
+- `git status --short testdata/` is empty. Against the parent, `testdata/` differs only in `cost_model.conf` and the 15 `-mini.cost.txt` category comment lines (`, GpuHoldBuffer`): the coordinator's decision of 2026-11-04.
+- **build-test.md:** HEAD's page plus the three hunks the replay lost (`/tmp/Lsurg/d2/build-test.md.merged`). C++ CPU/FFI row: the duplicate refusal, 63 → 64. Plan-executor row: the four duplicate cases, HEAD's 132 → 136. cpu header 3573 (`--lib` 1058 + 2451 + 61 + 3).
+- **Drift repaired, from Task 2:** Task 2 read the "Plan types" row's 43 as drift against `plan::validate::tests`' 35. It was not: the row also counts `plan::layout::tests` (4) and `plan::aggregate::tests` (4), as its text says ("layout canonical forms and equality; whether a hash survives a regrouping"), and 35 + 8 = 43. The row now links the three modules and says 54 (46 + 4 + 4). With that, the cpu rows sum to the header, 3573, and every `--lib` test maps to a row.
+- **Grand total** was never moved by dag-driver. Recounted by the page's rule (the N columns of both tables): 7953 — Rust 6123 (parent's 6058 + `--lib` 64 + `gpu_tests::` 1), C++ 283 (278 + 1 + 4), Python 1547.
