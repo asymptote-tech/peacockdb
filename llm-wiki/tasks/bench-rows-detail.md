@@ -323,3 +323,5 @@ inventory-based case listing). HEAD `1bdc89f3`.
 Still `blocked(building)` at Task 5: the H100 run waits on new-hosts' new block, the two VMs'
 disks (`new-hosts-detail.md`, "Blocked (2026-11-04, second)"); the PAT block is cleared.
 - 2026-11-05: green at 7782b714; PR #197 (base ENS-pinned-loads); reviewer round 1.
+- completeness approved 2026-11-05; dispatch 42000418045 (09:12:02Z), PR run 42000417344.
+- done 2026-11-05: PR run 42000417344 green; dispatch 42000418045 green (GPU Tests (nebius-gpu) included; build job rerun after GitHub 504s).
