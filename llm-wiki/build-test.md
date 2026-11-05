@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 7778 test cases — Rust 6009, C++ 278, Python 1491.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 234 image and VM tests under `scripts/env/tests/`, run by hand too. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 7779 test cases — Rust 6010, C++ 278, Python 1491.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 234 image and VM tests under `scripts/env/tests/`, run by hand too. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3460 cases: `--lib` 954, `test_cpu_corpus` 2447, `test_corpus_goldens` 56, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3461 cases: `--lib` 955, `test_cpu_corpus` 2447, `test_corpus_goldens` 56, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -546,7 +546,7 @@ peak, provenance last; an `h200/` section reads with no batches and no `load_us`
 its load the loaders' totals; a tree with no loader loads `0`; a marker and a failed case's
 record are not timed; an unknown key beneath a node and a trailer key held twice are refused
 
-| Benchmark report page | [test_support::benchmark_report::tests](../peacockdb-core/src/test_support/benchmark_report/tests.rs) | 13 |
+| Benchmark report page | [test_support::benchmark_report::tests](../peacockdb-core/src/test_support/benchmark_report/tests.rs) | 14 |
 |---|---|--:|
 
 the page over temp trees: a timed section's load, execute, total and peak, the total linked to its
@@ -555,7 +555,8 @@ reason, and the device list's `skipped` note over both; a `wrong` row's `wrong a
 devices side by side, a case one lacks `—`; a directory with no mode file is no column; rows in
 the main list's order, then by name, modes in `MODES` order; text escaped; the same page twice,
 with no temp path in it; a later task's extra table under its heading; a file holding one query
-twice refused, naming both lines; `section_href`'s line
+twice refused, naming both lines; a temp tree's name taken once per process, so parallel tests
+never share one; `section_href`'s line
 
 | Benchmark prefill | [test_support::benchmark_prefill::tests](../peacockdb-core/src/test_support/benchmark_prefill/tests.rs) | 5 |
 |---|---|--:|

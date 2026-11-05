@@ -1,7 +1,9 @@
 //! The benchmark report page over temp trees built from literal sections: what a cell reads
 //! for each kind of section, where the device's list overrides it, and the page's layout.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use crate::test_support::{
     DEVICE_CASES_HEADER, FAILED, ReportCell, ReportTable, SKIPPED, render_benchmark_report,
@@ -54,8 +56,14 @@ build=release
 allocator=rmm-pool
 ";
 
-/// A temp `benchmark-results/` of its own per test.
+/// A temp `benchmark-results/` of its own per test. A name is taken once per process: two tests
+/// sharing one would delete each other's tree when the tier runs in parallel.
 fn tree(name: &str) -> PathBuf {
+    static TAKEN: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+    assert!(
+        TAKEN.lock().unwrap().insert(name.to_string()),
+        "tree({name:?}) is already another test's"
+    );
     let root = std::env::temp_dir().join(format!(
         "peacock-benchmark-report-{name}-{}",
         std::process::id()
@@ -420,7 +428,7 @@ fn section_href_names_the_line() {
 /// One query twice in one file is refused naming both lines, never shown as whichever is last.
 #[test]
 fn a_query_with_two_sections_in_one_file_is_refused() {
-    let root = tree("twice");
+    let root = tree("two-sections");
     let rel = "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt";
     put(&root, rel, &[("q3", TIMED), ("q3", TIMED)]);
     let render = std::panic::catch_unwind(|| render_benchmark_report(&root, &[], &[]));
@@ -434,4 +442,13 @@ fn a_query_with_two_sections_in_one_file_is_refused() {
         message.contains(&format!("q3 has two sections, at lines 1 and {second}")),
         "{message}"
     );
+}
+
+/// Two tests on one temp tree race when the tier runs in parallel, so a name is taken once.
+#[test]
+fn a_tree_name_taken_twice_panics() {
+    let root = tree("taken-twice");
+    let again = std::panic::catch_unwind(|| tree("taken-twice"));
+    let _ = std::fs::remove_dir_all(&root);
+    assert!(again.is_err(), "tree(\"taken-twice\") was handed out twice");
 }

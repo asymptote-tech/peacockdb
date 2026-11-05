@@ -246,6 +246,14 @@ host=computeinstance-e00e6yena4nzjgaym0
   cost-report 49 + 32; `--features gpu` compiles with no warnings. Recount: cpu 3460, grand
   total 7778 (Rust 6009).
 
+## Review round 2 (PR #197)
+
+- `a_query_with_two_sections_in_one_file_is_refused` took `tree("twice")`, which
+  `the_page_is_the_same_twice` also uses. `tree()` deletes and recreates by name and pid, so the
+  two raced under a parallel run. It is now `tree("two-sections")`, and `tree()` panics on a name
+  already taken in the process (a static set; `a_tree_name_taken_twice_panics`, red first).
+  `--lib` 953 passed, 2 ignored (955). Recount: cpu 3461, grand total 7779 (Rust 6010).
+
 ## VM time
 
 | VM | start (UTC) | stop (UTC) | hours | why |
