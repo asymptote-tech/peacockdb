@@ -285,6 +285,14 @@
 
 | VM | start (UTC) | stop (UTC) | hours | why |
 |---|---|---|---|---|
+| nebius-cpu128 | 2026-11-05 10:56 | 11:10 | 0.23 | Task 8: the staged install, the tpcds sf40 database |
+| nebius-h100 | 2026-11-05 11:11 | 12:30 | 1.32 | Task 9: prepare, ship, the 130-case run |
+| nebius-h100 | 2026-11-05 12:35 | 14:14 | 1.65 | Task 10: both Nsight passes, both datasets |
+| nebius-cpu128 | 2026-11-05 14:15 | 14:40 | 0.42 | Task 11: DuckDB's corpus runs, both datasets |
+
+Totals on 2026-11-05: nebius-h100 2.97 h, nebius-cpu128 0.65 h. Both VMs were stopped softly at
+the end of each step, and both read `STOPPED` at 14:40.
+
 - Known red on `ENS-pinned-loads` and `ENS-bench-rows`: `scripts/env/tests/test_run_gpu.py::test_nsys_profile_uses_the_given_ssh` — pinned-loads' `1c85b136` made `create_nsys_profile.sh` call `nsys_loads.py`, which that test's fake tree lacked. Fixed here (Task 3, a stub in the fake tree); pinned-loads must carry the same fix when it resumes (or get it by the rebase order).
 
 ## Blocked (2026-11-04)
@@ -382,3 +390,221 @@ Work items handed to this task:
   `scripts/calibration/tests` 72 passed, with each file exiting 0 when run alone (matplotlib from
   `~/.cache/j13-pydeps` on `PYTHONPATH`); `test_duckdb_minimal.py` and `test_duckdb_result.py` 36
   passed (DuckDB 1.5.4, local sf1).
+
+## Before Task 8: the two work items in code (2026-11-05)
+
+- **`nsys_calls.py` checks a join** (`scripts/calibration/nsys_calls.py`, `nvtx_names.py`). The recipes
+  declare a join once, `join_build(#N CudfJoin)`, and `recipe_seqs` now reads that form too.
+  `NodeSession` names its three calls `N.<i> join_build`, `join_probe` and `join_finish`, and
+  `nvtx_names.plan_kind` reads each as `CudfJoin` for the check. `calls.tsv` keeps them apart.
+  Test: `test_a_join_s_three_calls_are_its_cudfjoin`, which failed first with "driven but not
+  declared: [2]". Mutation: without `plan_kind` it fails with "#2 is CudfJoin in the plan and
+  join_finish in the capture". On the real goldens, q3 declares `{5, 10}` CudfJoin and q8 seven
+  seqs. `nsys_hbm.py` keys calls by seq and call index only, so it needed nothing.
+- **The page marks unpinned loads** (`test_support/benchmark_report.rs`). A timed cell's load reads
+  `<ms> unpinned` when the section's `pinned_cache` does not start with `on`, or the section has
+  no such line. The intro says what the mark means. Every `h200/` row is marked (26 rows), and the
+  page is regenerated. Test: `a_load_without_the_pinned_cache_is_marked_unpinned`. `TIMED` is now
+  a pinned section, as one is written today. The two h200 expectations now carry the mark.
+  Mutation: inverting the check fails 4.
+- `cargo fmt --check` shows drift in 17 files this task never touched (HEAD's, a rustfmt
+  difference); the two files changed here are clean.
+
+## Task 8 (2026-11-05)
+
+- **Plan drift:** `/build` does not exist on dev, and `mkdir /build` is refused. The install is
+  at `/home/dmitry/build/peacock/sf40-baseline/install`, beside new-hosts' and pinned-loads'.
+- `nebius-sync.sh … --no-data` → `peacockdb-peacockdb-beta`; `check-build-image.sh` → the build
+  image is this tree's; `stage-install.sh` in the 25.02 build image: exit 0 in 3.5 min, no
+  warnings. It staged four rust-tests and the release benchmark. The library exports
+  `peacock_join_build` and `peacock_pinned_cache_prefill`. 651 MB. The worktree carries
+  pinned-loads: `git log --oneline | grep -c pinned-loads` gives 21.
+- **The tpcds database:** 61 GB free after it, out of 213 GB.
+  `benchmarks/duckdb_minimal.sh --dataset tpcds --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb --build-only`:
+  24 tables from the parquet, imported in 269 s, then `row counts verified against the parquet`.
+  `/var/lib/peacock/tpcds.sf40.duckdb` is 12.48 GiB. The run timed nothing.
+- **Candidates** (Task 9 Step 1): TPC-H 48 lines carry `tp1_single`, not 44. They are q1-q22 and
+  26 micro queries, `rollup_stddev` and `global_stddev` among them. TPC-DS has 82. The list is the
+  candidate set: 130 cases.
+
+## Task 9 (2026-11-05)
+
+- **Before the run.** Dev's `testdata/calibration/records.tsv`, an ignored leftover of 07:52, was
+  moved to `/tmp/Lsurg/s3/stale/dev-records.tsv`, so no segment took it. On the H100,
+  `~/peacock/peacockdb-beta/testdata/benchmark-results/h100-80gb-hbm3/` held
+  `tpch.sf40/tp1_single.benchmark.txt` with q1, q3, q6 and q8 from older binaries. It was removed
+  before the first run, so nothing stale was pulled home. The VM had no `calibration/records.tsv`.
+- **Commands as run.** `$G prepare` exit 0 (`tpch.sf40: fetched 0, kept 8`, `tpcds.sf40: fetched 0,
+  kept 24`); `$G ship --install /home/dmitry/build/peacock/sf40-baseline/install` exit 0; then
+  `scripts/env/bench-each.sh $VM --cases peacockdb-core/tests/common/corpus_benchmark_cases.inc --mode tp1_single --timeout 1800 --records /tmp/Lsurg/sf40run/records`,
+  detached on dev, 11:25–12:30. Exit 0: `130 cases at tp1_single, every one with its section`. No
+  interruption, no rerun. `records/device` reads `h100-80gb-hbm3`.
+- **Wall time per query** (`run-gpu.sh exited … after <s> s`): 130 cases, 2389 s in all; the
+  longest is tpch filter_project at 133 s. Each figure includes the container start, the prefill
+  and the ten rounds. tpch q1 19; tpch q2 28; tpch q3 17; tpch q4 17; tpch q5 16; tpch q6 13; tpch q7 20; tpch q8 22; tpch q9 39; tpch q10 19; tpch q11 29; tpch q12 13; tpch q13 11; tpch q14 14; tpch q15 17; tpch q16 27; tpch q17 20; tpch q18 20; tpch q19 16; tpch q20 33; tpch q21 23; tpch q22 12; tpch aggregate_groupby 12; tpch anti_join 29 (exit 1); tpch anti_join_reorder 8; tpch cross_join 7; tpch distinct_functions 19; tpch filter_project 133; tpch hash_join 21; tpch join_int 8; tpch left_join 18; tpch left_join_fixed 18; tpch left_join_reorder 16; tpch mixed_join 17; tpch nested_limits 9; tpch nested_loop_join 7; tpch nested_loop_left_join 7; tpch rollup_distinct 30; tpch rollup_grouping 11; tpch rollup_over_join 8; tpch scan_limit 13; tpch semi_join 79; tpch semi_join_reorder 9; tpch shuffle_additive 13; tpch shuffle_additive_avg 13; tpch shuffle_stddev 13; tpch rollup_stddev 16; tpch global_stddev 11; tpcds q1 9; tpcds q2 14; tpcds q3 10; tpcds q4 46; tpcds q5 22; tpcds q6 20; tpcds q7 11; tpcds q8 12; tpcds q9 18; tpcds q10 18; tpcds q11 38; tpcds q13 13; tpcds q14 41; tpcds q15 13; tpcds q16 16; tpcds q17 7 (exit 1); tpcds q18 14; tpcds q19 13; tpcds q21 7; tpcds q22 6; tpcds q23 40; tpcds q24 19; tpcds q25 6 (exit 1); tpcds q26 12; tpcds q28 15; tpcds q29 9 (exit 1); tpcds q30 12; tpcds q31 21; tpcds q32 18; tpcds q33 19; tpcds q34 16; tpcds q35 19; tpcds q37 15; tpcds q38 20; tpcds q39 11; tpcds q40 23; tpcds q41 12; tpcds q42 10; tpcds q43 10; tpcds q45 9; tpcds q46 27; tpcds q48 15; tpcds q50 20; tpcds q52 17; tpcds q54 22; tpcds q55 12; tpcds q56 21; tpcds q58 20; tpcds q59 14; tpcds q60 24; tpcds q61 16; tpcds q62 7; tpcds q64 67; tpcds q65 22; tpcds q66 18; tpcds q68 13; tpcds q69 17; tpcds q71 17; tpcds q73 19; tpcds q74 23; tpcds q75 27; tpcds q76 18; tpcds q77 18; tpcds q78 29; tpcds q79 12; tpcds q80 24; tpcds q81 14; tpcds q82 16; tpcds q83 9; tpcds q84 9; tpcds q85 10; tpcds q87 18; tpcds q88 20; tpcds q90 9; tpcds q91 7; tpcds q92 9; tpcds q93 16; tpcds q94 9; tpcds q95 13; tpcds q96 10; tpcds q97 16; tpcds q99 11.
+- **Skips** (`status=failed`; each a `skipped` row in `cases.csv`; no ticket, per the spec):
+
+| dataset | query | reason |
+|---|---|---|
+| tpch | anti_join | `call failed: GpuUnload lane 0: the exported stream is not the sink's rows: … expected Utf8 but found LargeUtf8 at column index 8 (declared vs exported: 8 o_comment: Utf8 vs LargeUtf8)`. At sf40 the export's `o_comment` passes 2 GiB of string bytes and comes back as LargeUtf8. |
+| tpcds | q17 | `this mode refuses it: invalid plan: what the accumulators hold and cannot be holding less of (2593119555 bytes) is already the whole budget (2147483648)` |
+| tpcds | q25 | the same refusal, 3146023251 bytes |
+| tpcds | q29 | the same refusal, 2593120563 bytes |
+
+  No section reads `reason=pinned cache: …`. The three tpcds refusals come from the planner, before
+  any device work, at tp1_single's 2 GiB budget.
+- **Cache** (Step 4). Every timed section reads `pinned_cache=on … source=default` (tpch 47, tpcds
+  79). None has `prefill_files=0`. The largest `resident` is 39.1 GiB in tpch (q9) and 14.6 GiB in
+  tpcds (q75). The largest `prefill_bytes` is 41947566081 (39.07 GiB) in tpch q9, `prefill_us`
+  20823061, and 15625613567 (14.55 GiB) in tpcds q80, `prefill_us` 7644016. The sum of
+  `prefill_us` is 249.5 s for tpch and 295.2 s for tpcds.
+- **The protocol note.** peacockdb's warm numbers read files resident in pinned host memory,
+  prefilled once per query process before any round. DuckDB's read through its buffer manager
+  over a warm page cache. Neither counts the first read from disk. The prefill's bytes and time
+  (`prefill_bytes`, `prefill_us`) are reported apart.
+- **`cases.csv`** (Step 5). `the_h100_list_is_the_lists_measured` is in `benchmark_lists.rs`, with
+  `H100` and `H100_MODES` beside `OTHER_ENGINES`. The rows come from the main list's `tp1_single`
+  lines, ordered as the registry orders them (`registry_cases`, now `pub(crate)`). The page uses
+  that order, and the list is written from it and held to it. `macro_invocations_in` no longer
+  exists since the inventory port. The file is written through a new delegate,
+  `test_support::write_device_cases`, staged and renamed.
+  - Red: "… cases.csv does not exist beside its tree — write it with UPDATE_CANONICAL=1 …".
+  - Written: 130 rows (126 `ok`, 4 `skipped`), in the list file's own order (diffed).
+  - Mutation: a tampered row fails naming its line.
+- **The page.** Regenerated: an h100-80gb-hbm3 column group beside h200, and 142 rows. Only the
+  H200's 26 loads carry `unpinned`.
+- **The record** (Step 6). `join_records.py --record <dir>/*.tsv`, as build-test.md and the plan
+  give it, failed: `--record` was `append`, one path per flag. It is now `extend` with
+  `nargs="+"`, so both forms work. Test: `test_one_record_flag_takes_every_segment`, which failed
+  first with "unrecognized arguments". Then the run gave `126 cases from 126 segments`, with
+  allocator `of 78.7GiB free`. `split_record.py --cases …/cases.csv` printed
+  `h100-80gb-hbm3/tpch.sf40` and `…/tpcds.sf40` (7850 and 48220 rows). `publish_record.sh` ran
+  with dev's `peacock.env` sourced, uploading `3b17277d…` (tpch) and `52d700b1…` (tpcds) and
+  pinning both. `fetch_record.sh` then reported each `as pinned`.
+- **Gates** (Step 7): `test_corpus_goldens` 61 passed. `test_cpu_corpus -- sf40` waits for Task 11.
+
+## Task 10 (2026-11-05)
+
+- **Commands as run.** Each was run from a cases file per dataset (`/tmp/Lsurg/sf40run/<ds>.csv`:
+  the header and that dataset's rows):
+  `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12 PCK_BENCH_HBM_FREQ=10000 scripts/create_nsys_profile.sh [--trace|--metrics] --cases <ds>.csv --device h100-80gb-hbm3 --host nebius-h100 --ssh "$H rsh" --remote-dir /home/dmitry/peacock/peacockdb-beta --remote-cudf-root /home/dmitry/peacock/cudf-25.02`.
+  The install shipped in Task 9 was still on the H100's disk. The records came from Task 9's
+  publish (`calibration/h100-80gb-hbm3/<ds>.sf40/records.tsv`). Each trace pass took under
+  20 min, so none was split.
+- **Three fixes, each test-first** (`scripts/calibration/`):
+  - **`nsys_calls.recipe_seqs` missed a golden's first section.** It looked for `"\n== <q>\n"`,
+    and a plans golden opens on `== aggregate-groupby` with nothing above it. The tpch trace
+    pass stopped there. The fixtures all opened with a header line, so no test saw it. The fix
+    puts a newline before the text. Test: `test_the_golden_s_first_section_is_found`. The tpch
+    capture was home, so `calls.tsv` was re-derived from it on dev, with no second trace.
+  - **The metrics pass's sampling.** At the default 20 kHz (the H200's), tpch q1 read "a sample
+    reports 101% of peak". At 10 kHz q1 passed, then q2 reported one gap. At 5 kHz the same gap
+    remained, so frequency was not its cause. In q2's capture on the host the gap ran 21.94–23.50 s,
+    after the last NVTX range had ended at 20.19 s. That is the process's teardown, likely freeing
+    its 147 GiB pinned cache, which no H200 run had. `nsys_hbm.py` now counts only gaps that
+    overlap our ranges' span; a capture with no range is refused by `cases_in`, as before. Tests:
+    `test_a_gap_after_the_last_range_is_no_stall`, which failed first, and
+    `test_a_gap_inside_the_case_is_refused`. Mutation: without the span condition the first
+    fails. Both passes ran at `PCK_BENCH_HBM_FREQ=10000`. The 101% at 20 kHz was not looked
+    into further.
+  - **`nsys_calls.py` and joins**, before this task (above).
+- **tpcds' sf40 plans are not sf1's for 14 queries.** The tpcds trace pass over all 79 cases
+  stopped at q18: "capture does not match q18's recipes". Its sf40 tree has 33 nodes with the
+  joins reordered; the sf1 golden has 32. The call breakdown checks a capture against
+  `goldens/<ds>.sf1/`, on the premise that "a plan's recipes are its shape and do not depend on
+  how much data it reads". That does not hold at sf40, where statistics change the join order.
+  Checked case by case over the 79-case capture (`/tmp/Lsurg/sf40run/diag_recipes.py`), 14
+  differ: q18, q30, q31, q32, q33, q56, q60, q61, q71, q81, q83, q85, q91 and q92. The other 65
+  match, and so do all 47 tpch cases.
+  - **What was done.** The trace pass ran again over those 65 (`tpcds65.csv`), so tpcds'
+    `calls.tsv` covers 65 cases. Its `loads.tsv` (all 79 cases) and `hbm.tsv` (all 79) come from
+    the full passes; neither reads a plan golden.
+  - **The 14 have no call breakdown.** They are the "case whose capture failed" of the spec, with
+    this reason. Checking an sf40 capture against sf40 plans needs a plan rendered at sf40, which
+    the goldens do not hold. That is the coordinator's call, not a ticket: it is calibration,
+    not production behaviour.
+- **Files** (Step 3): `testdata/calibration/h100-80gb-hbm3/{tpch,tpcds}.sf40/{calls,loads,hbm}.tsv`:
+  - tpch: calls 5718 rows, loads 131, hbm 786 (785 calls from 47 parts; 5 calls under 10 samples).
+  - tpcds: calls 26215, loads 756, hbm 4823 (4822 calls from 79 parts; 20 calls under 10 samples,
+    0.73% of bytes).
+  - `testdata/.gitignore` re-includes a device directory's three derived files and keeps its
+    fetched `records.tsv` ignored.
+  - The H200's `testdata/calibration/{calls,hbm}.tsv` were restored by `git show HEAD:…`.
+  - Captures stay in scratch: `/tmp/Lsurg/sf40run/capture-tpcds.sqlite` (79 cases) and
+    `testdata/calibration/capture.sqlite` (ignored; tpcds, 65 cases).
+- **The load split** (Step 4, from `loads.tsv`; `host_read_us` is 0 throughout, since every load
+  read pinned memory). Reading and copying against decoding:
+
+| dataset | loads | Σ load_us | read + h2d | decompress + decode | other | unattributed |
+|---|--:|--:|--:|--:|--:|--:|
+| tpch | 130 | 9046567 | 1581547 (17.5%) | 5486728 (60.6%: 4105586 + 1381142) | 152256 (1.7%) | 1994566 (22.0%) |
+| tpcds | 755 | 27330684 | 3158590 (11.6%) | 18437202 (67.5%: 14248162 + 4189040) | 334129 (1.2%) | 6217213 (22.7%) |
+
+## Task 11 (2026-11-05)
+
+- **The run** (Step 1). `nebius-sync.sh … --no-data` → `peacockdb-peacockdb-beta`. `sha256sum` of
+  `cases.csv` agreed on dev and the VM (`c1b2d405…`), and so did `duckdb_minimal.sh`'s
+  (`7da85a9d…`). Then, detached on the VM, per dataset:
+  `benchmarks/duckdb_minimal.sh --dataset <ds> --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb --cases testdata/benchmark-results/h100-80gb-hbm3/cases.csv --answers /var/lib/peacock/answers-<ds>.duckdb --results /tmp/duckdb-<ds>.tsv`.
+  tpch ran 14:18–14:29 and tpcds 14:29–14:38, both exit 0. Each database was 100.0 % resident
+  (tpch 32.73 GiB, tpcds 12.48 GiB; "bounded dd read + absolute-Cached", vmtouch not installed).
+  Every row is `warm` `yes` and `ok` (tpch 47, tpcds 79). The preamble reads
+  `duckdb=1.5.4 threads=128 … cpu=AMD_EPYC-Genoa_Processor cores=128 memory_gib=503.7`. The TSVs,
+  logs and answers databases were copied to `/tmp/Lsurg/sf40run/duck/`.
+- **Rendering** (Step 2). `duckdb_result.py --answers` was killed (137) on tpch after
+  `distinct-functions`. `filter-project`'s answer is 96008105 rows, and the renderer built the
+  whole table before measuring it against the cap, beyond dev's 31 GiB. This task's script is
+  fixed:
+  - An answer over the cap by its row count alone is never rendered. Each line is as wide as the
+    header at least, and there are rows + 4 of them, so the count settles it.
+  - Such an answer is fingerprinted in batches by `fingerprint_stream`. Its exact cells go
+    through `sort -z` in the C locale, and its fingerprint lines are `fingerprint_text`, which
+    both writers share.
+  - Tests, both failing first: `test_a_streamed_fingerprint_is_the_in_memory_one` and
+    `test_an_answer_over_the_cap_by_its_row_count_is_fingerprinted_unrendered`. Mutation: with
+    the count check off, the second fails.
+  - tpch then rendered in 8 min 43 s, with a peak RSS of 13.5 GB: 47 sections, 9 fingerprints.
+    `filter-project`'s hash `fc52384f…` is the H100's.
+  - tpcds was rendered again with the fix: byte for byte the first render (79 sections, 3
+    fingerprints, 2 of them now streamed).
+  - The page was regenerated with the `duckdb-cpu128` column, and its intro names DuckDB 1.5.4,
+    128 threads and the host.
+- **Compare** (Step 3), `every_sf40_device_answer_meets_duckdb`. Nine `ok` rows failed at first:
+  - **Seven were fingerprints the oracle would not compare**: tpch q20, anti_join_reorder,
+    left_join_fixed and semi_join_reorder; tpcds q34, q64 and q71. At sf40 their answers pass the
+    cap, but their sf1 lines do not declare `gpu: fingerprint`, and `compare_device_section`
+    refuses an undeclared fingerprint. Read by hand, each device fingerprint is identical to
+    DuckDB's: rows, columns and hash. The defect was this task's own `sf40_verdict`, so no
+    ticket: no registry line is written for sf40, and the cap is passed there by scale. It now
+    compares through `Side::Scaled` and `compare_scaled_section`: by fingerprint when the
+    section holds one, as rows otherwise. The sf1 path keeps its two-way declaration guard.
+    Tests: `an_sf40_section_over_the_cap_is_compared_by_its_fingerprint` and
+    `an_sf40_section_of_rows_is_compared_as_rows_under_either_line`, which failed first
+    (unresolved import). Mutation: always comparing rows fails the first.
+  - **Two were ties under `no_sort`**: tpcds q18 (`… LIMIT 100`) and q73. Both sides hold the same
+    rows: q18's 100 agree as a set at 4 dp, and q73's sorted rows have the same md5. Only rows
+    tying on every `ORDER BY` key swap: q18 at 23/24 and 60/61, the two `AAAAAAAAAACJAAAA`
+    rollup rows; q73 at 15/16, the two `Hamilton` rows with `cnt` 5. None is at q18's LIMIT edge.
+    The tie rule is the oracle's: `no_sort` is `same_sequence`, row by row with no tie rule, and
+    its own comment says no sf1 answer tied. Per the plan, that is a ticket against the oracle,
+    never an operator one: **#306** in `tickets/testinfra.md`. Both rows are `wrong`, note
+    `#306`, set by hand. `the_h100_list_is_the_lists_measured` passes, carrying the mark. The
+    page now says `wrong answer #306` twice. `tickets.md` was recounted: 90 open, testinfra 4,
+    next free 307.
+  - The compare then passed. `cases.csv` holds 124 `ok`, 4 `skipped` and 2 `wrong`.
+  - The registry did not change, so `ticket_widget.py` was not run.
+- **Gates** (Step 4), every VM stopped:
+  - `cargo test --features rust-only -p peacockdb-core` exit 0, no warnings: `--lib` 988 passed
+    and 2 ignored, `test_corpus_goldens` 61, `test_cost_model` 3, `test_cpu_corpus` 2451,
+    `test_crate_privacy` 1, `test_golden_format` 41. `cargo test -p cost-report`: 49, plus 32 in
+    `test_source_formatting`.
+  - Python: `scripts/calibration/tests` 77 passed, each file exiting 0 when run alone;
+    `test_bench_each.py` and `test_run_gpu.py` 51.
+  - `testdata/test_duckdb_result.py`, `benchmarks/tests/test_duckdb_minimal.py` and
+    `scripts/test_ticket_widget.py` (run together) failed **one test once**, while the
+    background cargo suite was building. Its name was not captured. Six later runs passed 49/49,
+    one of them beside a running `test_cpu_corpus`. It is unidentified, not proven flaky, and not
+    disabled.
+  - `build-test.md` was recounted for this commit: cpu 3505 (`--lib` 990, `test_corpus_goldens`
+    61). The rows are DuckDB oracle 49, DuckDB result rendering 29 and calibration 77. The grand
+    total is 7879: Rust 6054, C++ 278, Python 1547.

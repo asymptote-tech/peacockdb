@@ -6,10 +6,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use peacockdb_core::test_support::{
-    DEVICE_CASES_HEADER, ordered_sections, parse_device_cases, testdata_root,
+    CaseStatus, DEVICE_CASES_HEADER, FAILED, Measured, SKIPPED, device_cases_path, device_lines,
+    line_difference, ordered_sections, parse_device_cases, render_device_cases, testdata_root,
+    write_device_cases,
 };
 
-use super::benchmark::{Case, PREDATES_PROVENANCE, listed_cases, modes, synthesized_tree};
+use super::benchmark::{
+    Case, PREDATES_PROVENANCE, listed_cases, modes, registry_cases, synthesized_tree,
+};
 
 /// The `(dataset, sf, mode)` files a case list declares, each with the sections it is to hold.
 type Files = BTreeMap<(String, String, String), BTreeSet<String>>;
@@ -325,6 +329,92 @@ fn device_list_problem(device: &str, own: &Files, list: &Files) -> Result<(), St
 
 /// Other engines' result trees under `benchmark-results/`, read by their own tests: no device.
 const OTHER_ENGINES: &[&str] = &["duckdb-cpu128"];
+
+/// The H100's tree, and the modes its `cases.csv` is written at, in row order: sf40-baseline
+/// (tp1_single). tp4-sized adds `"tp4_sized"`.
+const H100: &str = "h100-80gb-hbm3";
+const H100_MODES: &[&str] = &["tp1_single"];
+
+/// The H100's `cases.csv` is what its tree measured of the main list's `tp1_single` lines, in the
+/// list's order: `ok` where a section is timed, `skipped` with the reason where every one failed,
+/// and `wrong` kept from the file as it stands, since the tree knows no tickets. Under
+/// `UPDATE_CANONICAL=1` the file is written from the tree. No tree and no file passes; a tree
+/// without its file, or a section the tree owes and lacks, fails naming it.
+#[test]
+fn the_h100_list_is_the_lists_measured() {
+    let rewrite = "UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test \
+                   test_corpus_goldens -- the_h100_list_is_the_lists_measured";
+    let tree = testdata_root().join("benchmark-results").join(H100);
+    let path = device_cases_path(H100);
+    let have = std::fs::read_to_string(&path).ok();
+    if !tree.is_dir() {
+        assert!(have.is_none(), "{} has no tree beside it", path.display());
+        return;
+    }
+    let wrong: BTreeMap<(String, String), String> = have
+        .as_deref()
+        .map(parse_device_cases)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|case| case.status == CaseStatus::Wrong)
+        .map(|case| ((case.dataset, case.query), case.note))
+        .collect();
+    let rank: BTreeMap<(String, String), usize> = registry_cases()
+        .into_iter()
+        .enumerate()
+        .map(|(at, (dataset, query, _))| ((dataset, query), at))
+        .collect();
+    let mut lines: Vec<Case> = listed_cases()
+        .into_iter()
+        .filter(|args| args[1] == "40" && modes(&args[3]).contains(H100_MODES[0]))
+        .collect();
+    lines.sort_by_key(|args| rank.get(&(args[0].clone(), args[2].clone())).copied());
+    let candidates: Vec<(String, String, Vec<String>)> = lines
+        .into_iter()
+        .map(|[dataset, _, query, line_modes]| {
+            (dataset, query, modes(&line_modes).into_iter().collect())
+        })
+        .collect();
+    let files = |dataset: &str, mode: &str| {
+        let file = tree.join(format!("{dataset}.sf40/{mode}.benchmark.txt"));
+        let text = std::fs::read_to_string(file).ok()?;
+        Some(
+            ordered_sections(&text)
+                .into_iter()
+                .filter(|(_, body)| !body.starts_with(SKIPPED))
+                .map(|(query, body)| {
+                    let measured = match body.strip_prefix(FAILED) {
+                        Some(rest) => {
+                            Measured::Failed(rest.lines().next().unwrap_or("").to_string())
+                        }
+                        None => Measured::Timed,
+                    };
+                    (query, measured)
+                })
+                .collect(),
+        )
+    };
+    let rows = device_lines(&candidates, H100_MODES, &files, &wrong)
+        .unwrap_or_else(|e| panic!("{}: {e}", tree.display()));
+    let want = render_device_cases(&rows);
+    if std::env::var("UPDATE_CANONICAL").is_ok() {
+        write_device_cases(H100, &want);
+        return;
+    }
+    let Some(have) = have else {
+        panic!(
+            "{} does not exist beside its tree — write it with {rewrite}",
+            path.display()
+        );
+    };
+    if have != want {
+        panic!(
+            "{} is not what its tree measured: {}. Rewrite it with {rewrite}",
+            path.display(),
+            line_difference(&have, &want)
+        );
+    }
+}
 
 /// Every directory directly under `root` but `OTHER_ENGINES`, each one device's tree.
 fn device_directories(root: &Path) -> Vec<PathBuf> {

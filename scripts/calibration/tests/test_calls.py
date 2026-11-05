@@ -175,6 +175,72 @@ def test_a_region_driven_several_times_an_execution_is_not_a_disagreement():
     assert {r["executions"] for r in filters} == {"2"}, filters
 
 
+Q3 = "tpch.sf40 q3 tp1-single"
+
+JOIN_PLANS = """peacockdb plan goldens
+
+== q3
+--- plan ---
+  (not read by this check)
+--- recipes ---
+GpuUnload: calling_lanes=1, per handle: result_from_handle(batch, row range)
+  GpuHashJoin: calling_lanes=1, join_build(#2 CudfJoin); per probe batch: join_probe; at done: join_finish
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#0 CudfScan, row groups)
+    GpuLoadParquet: calling_lanes=1, per batch: execute_scan_rowgroups(#1 CudfScan, row groups)
+--- memory ---
+"""
+
+
+def test_a_join_s_three_calls_are_its_cudfjoin():
+    """A join's recipe is `join_build(#N CudfJoin)`, and its calls are named for the ABI.
+
+    The capture names them `N.0 join_build`, `N.1 join_probe` and `N.2 join_finish`, all at
+    the join's seq. Read without that, the plan declares nothing at N and the capture drives
+    N, so every query with a join is refused as "driven but not declared". The calls stay
+    apart in the breakdown: the build and the probe cost differently. And a join call at a
+    seq the plan gives another kind is still refused.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        goldens = tmp / "goldens"
+        (goldens / "tpch.sf1").mkdir(parents=True)
+        (goldens / "tpch.sf1" / "tp1-single.plans.txt").write_text(JOIN_PLANS)
+        path = tmp / "capture.sqlite"
+        cap = Capture(path)
+        cap.case(Q3, [(0, 0, "CudfScan", ["read_parquet"]),
+                      (1, 0, "CudfScan", ["read_parquet"]),
+                      (2, 0, "join_build", ["hash_join"]),
+                      (2, 1, "join_probe", ["inner_join", "gather"]),
+                      (2, 2, "join_finish", ["gather"])])
+        cap.close()
+        rows = calls_of(path, tmp / "calls.tsv", "--plans-dir", str(goldens))
+        kinds = {r["recipe_kind"] for r in rows if r["recipe_seq"] == "2"}
+        assert kinds == {"join_build", "join_probe", "join_finish"}, kinds
+
+        (goldens / "tpch.sf1" / "tp1-single.plans.txt").write_text(
+            JOIN_PLANS.replace("join_build(#2 CudfJoin)", "join_build(#2 CudfFilter)"))
+        with raises(SystemExit, match="#2 is CudfFilter in the plan and CudfJoin in the capture"):
+            calls_of(path, tmp / "calls2.tsv", "--plans-dir", str(goldens))
+
+
+def test_the_golden_s_first_section_is_found():
+    """A plans golden opens on its first `== ` line, with nothing above it, as the committed
+    ones do: tpch's first section is `aggregate-groupby`."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        goldens = tmp / "goldens"
+        (goldens / "tpch.sf1").mkdir(parents=True)
+        (goldens / "tpch.sf1" / "tp1-single.plans.txt").write_text(
+            PLANS.split("\n\n", 1)[1])
+        path = tmp / "capture.sqlite"
+        cap = Capture(path)
+        cap.case(Q6, [(0, 0, "CudfScan", ["read_parquet"]),
+                      (1, 0, "CudfProject", ["compute_column"])])
+        cap.close()
+        rows = calls_of(path, tmp / "calls.tsv", "--plans-dir", str(goldens))
+    assert {r["query"] for r in rows} == {"q6"}, rows
+
+
 def test_regions_that_ran_different_numbers_of_times_are_refused():
     """Every region of one case runs once per execution, so a disagreement is a broken run.
 

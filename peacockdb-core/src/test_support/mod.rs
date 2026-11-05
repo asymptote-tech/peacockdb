@@ -1260,6 +1260,12 @@ pub fn render_device_cases(cases: &[DeviceCase]) -> String {
     device_cases::render(cases)
 }
 
+/// Replaces `device`'s `cases.csv` with `text`, staged and renamed, for an `UPDATE_CANONICAL`
+/// rewrite.
+pub fn write_device_cases(device: &str, text: &str) {
+    testdata::rewrite(&device_cases::path(device), text)
+}
+
 /// What a device's tree holds for a case in one mode's file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Measured {

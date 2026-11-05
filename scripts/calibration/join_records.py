@@ -81,7 +81,8 @@ def joined_allocator(lines):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--record", action="append", required=True, help="a segment; repeat")
+    parser.add_argument("--record", action="extend", nargs="+", required=True,
+                        help="segments, after one flag or several")
     parser.add_argument("--out", required=True, help="the joined record")
     args = parser.parse_args(argv)
 

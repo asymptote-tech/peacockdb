@@ -287,6 +287,21 @@ pub(crate) fn compare_device_section(
     }
 }
 
+/// The device's section at a scale no registry line is written for (sf40) against DuckDB's:
+/// fingerprinted exactly when it holds a fingerprint, since there the cap is passed by scale and
+/// the sf1 line's `gpu: fingerprint` says nothing about it.
+pub(crate) fn compare_scaled_section(
+    oracle: &DuckdbOracle,
+    ours: &str,
+    duckdb: &str,
+    kinds: &[CellKind],
+) -> Result<(), String> {
+    match fingerprint::is_fingerprint(ours) && matches!(oracle, DuckdbOracle::Compare { .. }) {
+        true => fingerprint::compare_over_cap(ours, duckdb, DUCKDB_FLOAT_TOLERANCE),
+        false => compare_sections(oracle, ours, duckdb, kinds),
+    }
+}
+
 /// The two row lists paired by position, each column compared under its [`Rule`].
 ///
 /// Row for row with no tie rule: on 2026-10-20 no corpus answer compared this way had rows
@@ -478,7 +493,7 @@ pub(crate) async fn duckdb_gpu_case(
     mode: &str,
     oracle: &str,
 ) {
-    let verdict = device_verdict(dataset, sf, sf, query, mode, oracle).await;
+    let verdict = device_verdict(dataset, sf, sf, query, mode, oracle, false).await;
     held(
         dataset,
         query,
@@ -490,7 +505,8 @@ pub(crate) async fn duckdb_gpu_case(
 /// The device's recorded answer at `mode` (its ident) against DuckDB's, both read at `sf`; the
 /// cells' kinds are planned at `kinds_sf`, since an output's schema does not move with the scale
 /// and CI holds no sf40 data. A missing file or section, or a file another cuDF recorded, is no
-/// answer, and the verdict names the variable that records one.
+/// answer, and the verdict names the variable that records one. `scaled`: `sf` is one no registry
+/// line is written for, so the section is compared by [`compare_scaled_section`].
 pub(crate) async fn device_verdict(
     dataset: &str,
     sf: &str,
@@ -498,6 +514,7 @@ pub(crate) async fn device_verdict(
     query: &str,
     mode: &str,
     oracle: &str,
+    scaled: bool,
 ) -> AnswerVerdict {
     let version = std::env::var("PCK_GPU_RESULT_VERSION").ok();
     let path = corpus_golden::gpu_result_golden(dataset, sf, version.as_deref());
@@ -523,7 +540,10 @@ pub(crate) async fn device_verdict(
             path.display()
         ));
     };
-    let side = Side::Device(mode);
+    let side = match scaled {
+        true => Side::Scaled(mode),
+        false => Side::Device(mode),
+    };
     verdict(dataset, sf, kinds_sf, query, oracle, Some(ours), side).await
 }
 
@@ -546,15 +566,19 @@ pub(crate) async fn sf40_verdict(dataset: &str, query: &str) -> AnswerVerdict {
         &query,
         "tp1_single",
         &row.duckdb_oracle,
+        true,
     )
     .await
 }
 
 /// Whose answer [`verdict`] holds to DuckDB's: the cpu's, which has no mode because the cpu
-/// authors the section, or the device's at one mode, which a `gpu:` part may compare apart.
+/// authors the section, or the device's at one mode, which a `gpu:` part may compare apart, or
+/// the device's at a scale no line is written for.
 enum Side<'a> {
     Cpu,
     Device(&'a str),
+    /// The device at a scale no registry line is written for.
+    Scaled(&'a str),
 }
 
 /// The verdict every case reaches, with DuckDB's section read here so none has to. The cells'
@@ -581,6 +605,7 @@ async fn verdict(
             let compared = match side {
                 Side::Cpu => compare_sections(&oracle, ours, duckdb, &kinds),
                 Side::Device(_) => compare_device_section(&oracle, ours, duckdb, &kinds),
+                Side::Scaled(_) => compare_scaled_section(&oracle, ours, duckdb, &kinds),
             };
             match compared {
                 Ok(()) => AnswerVerdict::Meets,
@@ -610,7 +635,7 @@ fn held(dataset: &str, query: &str, side: Side<'_>, verdict: AnswerVerdict) {
     };
     let at = match side {
         Side::Cpu => "the cpu".to_string(),
-        Side::Device(mode) => format!("the device at {mode}"),
+        Side::Device(mode) | Side::Scaled(mode) => format!("the device at {mode}"),
     };
     panic!("{dataset}/{query} ({at}): {said}");
 }

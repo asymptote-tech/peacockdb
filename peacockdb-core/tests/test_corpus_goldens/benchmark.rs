@@ -276,7 +276,7 @@ pub(crate) fn listed_cases() -> Vec<Case> {
 
 /// `(dataset, query, modes)` for every tpch and tpcds row with an enabled device cell, in the
 /// registry's row order, the modes in `MODES` order.
-fn registry_cases() -> Vec<(String, String, Vec<String>)> {
+pub(crate) fn registry_cases() -> Vec<(String, String, Vec<String>)> {
     let mut cases = Vec::new();
     for dataset in BENCHMARK_DATASETS {
         for row in load_csv().into_iter().filter(|row| row.dataset == dataset) {

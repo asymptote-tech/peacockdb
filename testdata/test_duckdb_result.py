@@ -300,6 +300,40 @@ class Answers(unittest.TestCase):
             text = (root / "goldens/tpch.sf40/duckdb-result.txt").read_text()
         self.assertTrue(text.startswith("== q6\n+"), text)
 
+    def test_a_streamed_fingerprint_is_the_in_memory_one(self):
+        """An answer too large to hold, fingerprinted batch by batch through an outside sort,
+        writes the same text: nulls, a float column, a non-ASCII cell and the separator's
+        neighbours included."""
+        names = ["id", "s", "x"]
+        types = ["BIGINT", "VARCHAR", "DOUBLE"]
+        rows = [(3, "z", 0.5), (1, "é", None), (2, None, 2.5), (10, "a\x02", -1.0), (1, "é", 7.0)]
+        batches = [rows[:2], rows[2:3], rows[3:]]
+        self.assertEqual(dr.fingerprint_stream(names, types, iter(batches)),
+                         dr.fingerprint(names, types, rows))
+        self.assertEqual(dr.fingerprint_stream(names, types, iter([])),
+                         dr.fingerprint(names, types, []))
+
+    @NEEDS_DUCKDB
+    def test_an_answer_over_the_cap_by_its_row_count_is_fingerprinted_unrendered(self):
+        """At sf40 an answer can be 96M rows (tpch filter-project): rendered first and measured
+        after, it outgrows the host. Its row count already puts it over the cap."""
+        import duckdb
+
+        with tempfile.TemporaryDirectory() as scratch:
+            db = pathlib.Path(scratch) / "answers.duckdb"
+            con = duckdb.connect(str(db))
+            con.execute('CREATE TABLE "big" AS SELECT range AS k, (range % 7)::DECIMAL(15,2) AS q '
+                        "FROM range(30000)")
+            want = dr.fingerprint(*dr.described(con.execute('SELECT * FROM "big" ORDER BY rowid')))
+            con.close()
+            render = dr.render
+            dr.render = lambda *a, **k: self.fail("an answer over the cap was rendered")
+            try:
+                text = dr.answer_sections("tpch", db, None)
+            finally:
+                dr.render = render
+        self.assertEqual(text, "== big\n" + want)
+
     def test_answers_need_a_scale(self):
         """`--answers` is sf40's source and parquet is sf1's: each without the other's scale, and
         an answers file for more than one dataset, is refused before DuckDB is asked anything."""

@@ -366,7 +366,13 @@ def join(args, run, rows):
     stamps = [t for t, _ in read]
     deltas = [b - a for a, b in zip(stamps, stamps[1:])]
     period_ns = statistics.median(deltas)
-    gaps = sum(1 for d in deltas if d > 2 * period_ns)
+    # Only a gap over our ranges can leave a region reading zero; one before the first or after
+    # the last is the process starting or ending (on the H100, freeing its pinned cache).
+    # A capture with no range counts none; `cases_in` refuses it below, naming why.
+    first = min((r[0] for r in ranges), default=0)
+    last = max((r[1] for r in ranges), default=0)
+    gaps = sum(1 for a, b in zip(stamps, stamps[1:])
+               if b - a > 2 * period_ns and a < last and b > first)
     if gaps:
         sys.exit(
             f"{gaps} gaps in GPU metric sampling at a median period of {period_ns / 1e3:.1f}us: "

@@ -4,7 +4,8 @@
 //! - A device is a directory holding a `<ds>.sf<sf>/<mode>.benchmark.txt` for one of `MODES`;
 //!   one row per (dataset, sf, query, mode) some device has a section for.
 //! - A timed cell is load, execute, total and peak; without `load_us`, the load is derived and the
-//!   peak `—`. Any other cell spans the four: the list's `skipped` note, the reason, or `—`.
+//!   peak `—`. A load read without the pinned host cache (`pinned_cache` off, or no such line) is
+//!   marked `unpinned`. Any other cell spans the four: the list's `skipped` note, the reason, or `—`.
 //! - A DuckDB tree holds `<ds>.sf<sf>/duckdb.tsv`: one column after the devices, its warm time on
 //!   every mode's row of a query its file holds.
 //! - No time, no absolute path, and no host but a DuckDB file's own: the same trees, same bytes.
@@ -24,6 +25,11 @@ use super::{
 
 /// What the peak column claims, and no more.
 const PEAK_MEANS: &str = "the accountant's peak, a lower bound on device memory";
+
+/// What an `unpinned` load is: its rounds read the files from disk or the page cache, so it is
+/// not comparable with a load from pinned memory.
+const UNPINNED_MEANS: &str = "read without the pinned host cache: its section's pinned_cache is \
+                              off, or the section predates the cache";
 
 /// `testdata/report.html`'s rules for the elements this page uses; its `td.g` colours are the
 /// classes `off`, `skip` and `na` here.
@@ -250,7 +256,7 @@ fn page(
          test_corpus_goldens from testdata/benchmark-results/ · section links @ master</p>\n\
          <p><b>PeacockDB benchmark results</b> — every device tree side by side, one row per \
          query and mode. Times are device-side, in ms: the total is load plus execute. The peak \
-         is {PEAK_MEANS}, in GiB.</p>\n"
+         is {PEAK_MEANS}, in GiB. A load marked unpinned was {UNPINNED_MEANS}.</p>\n"
     );
     html.push_str(&duckdb_intro(duckdbs));
     html.push_str("<ul>\n");
@@ -389,6 +395,16 @@ fn cells(place: &Place, mode: &str, device: &Device, found: Option<&Found>) -> S
             .count("load_us")
             .unwrap_or_else(|| section.tree_load_us());
         let execute = section.count("execute_us").unwrap_or(total - load);
+        let pinned = section
+            .field("pinned_cache")
+            .is_some_and(|cache| cache.split(' ').next() == Some("on"));
+        let unpinned = match pinned {
+            true => String::new(),
+            false => format!(
+                " <span class=\"source\" title=\"{}\">unpinned</span>",
+                escape(UNPINNED_MEANS)
+            ),
+        };
         let peak = section
             .count("peak_bytes")
             .map_or("—".to_string(), |bytes| {
@@ -403,8 +419,8 @@ fn cells(place: &Place, mode: &str, device: &Device, found: Option<&Found>) -> S
                 )
             });
         return format!(
-            "<td class=\"n\">{}</td><td class=\"n\">{}</td><td class=\"n\">{}{wrong}</td><td \
-             class=\"n\">{}</td>",
+            "<td class=\"n\">{}{unpinned}</td><td class=\"n\">{}</td><td \
+             class=\"n\">{}{wrong}</td><td class=\"n\">{}</td>",
             ms(load),
             ms(execute),
             linked(&ms(total), found),

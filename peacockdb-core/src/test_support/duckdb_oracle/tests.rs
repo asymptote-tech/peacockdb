@@ -9,7 +9,7 @@ use datafusion::arrow::compute::cast;
 use datafusion::arrow::datatypes::{DataType, TimeUnit};
 use datafusion::arrow::util::display::array_value_to_string;
 
-use super::{compare_device_section, tight};
+use super::{compare_device_section, compare_scaled_section, tight};
 use crate::test_support::{
     CellKind, DUCKDB_FLOAT_TOLERANCE, DuckdbOracle, RowOrder, Values, compare_sections,
 };
@@ -642,4 +642,30 @@ fn an_enabled_device_cell_without_its_section_names_the_cycle_to_run() {
         said.contains("does not exist") && said.contains("PCK_WRITE_GPU_RESULT=1"),
         "{said}"
     );
+}
+
+// --- the device side at a scale no line is written for -------------------------------------
+
+/// At sf40 an answer under sf1's cap can pass it, and no registry line is written for sf40: the
+/// section is compared by fingerprint because it holds one, under a line that does not say so.
+#[test]
+fn an_sf40_section_over_the_cap_is_compared_by_its_fingerprint() {
+    assert_eq!(
+        compare_scaled_section(&exact(), &fp(), OURS, &KINDS),
+        Ok(())
+    );
+    let off = OURS.replace("| 2 | 1.5 |", "| 3 | 1.5 |");
+    compare_scaled_section(&exact(), &fp(), &off, &KINDS)
+        .expect_err("a different answer behind the fingerprint");
+}
+
+#[test]
+fn an_sf40_section_of_rows_is_compared_as_rows_under_either_line() {
+    assert_eq!(compare_scaled_section(&exact(), OURS, DUCK, &KINDS), Ok(()));
+    assert_eq!(
+        compare_scaled_section(&gpu_fp(), OURS, DUCK, &KINDS),
+        Ok(())
+    );
+    let off = DUCK.replace("| 2 | 1.5 |", "| 3 | 1.5 |");
+    compare_scaled_section(&exact(), OURS, &off, &KINDS).expect_err("a different row");
 }

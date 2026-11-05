@@ -8,6 +8,7 @@ Tests, CI, hosts, testdata etc
 - [#178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault](#t178)
 - [#176 (CI coverage one-way) the CI coverage guard checks one direction only](#t176)
 - [#129 (26.02 CI leg image) The "26.02" CI leg builds against a 25.10a image](#t129)
+- [#306 (no_sort ties by position) a `no_sort` comparison pairs rows by position, so tied rows in another order fail](#t306)
 
 <a id="t178"></a>
 ### #178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault
@@ -60,3 +61,22 @@ while the repo has no forks, which is exactly why it will bite later.
 (b) is closed. `gpu-tests` now never runs on a pull_request, so a fork PR gets no GPU job, and
 the `s3-datasets` comment says so. Only (a) is open.
 
+<a id="t306"></a>
+### #306 (no_sort ties by position) a `no_sort` comparison pairs rows by position, so tied rows in another order fail
+The DuckDB oracle compares a `no_sort` line row by row (`same_sequence` in
+`test_support/duckdb_oracle.rs`), with no tie rule. Rows that tie on every `ORDER BY` key may come
+in either order, and each engine is right. So two correct answers fail as different.
+
+Found at sf40, H100, tp1_single (sf40-baseline). Both sides hold the same rows; only tied rows
+swap:
+
+- tpcds q18 (`ORDER BY ca_country NULLS FIRST, ca_state, ca_county, i_item_id LIMIT 100`): the two
+  `AAAAAAAAAACJAAAA` rows of one rollup group tie on all four keys. The device has `agg1` 22 then
+  16, and DuckDB 16 then 22, at rows 23/24 (and 60/61 likewise). The 100 rows agree as a set.
+- tpcds q73 (`ORDER BY cnt DESC, c_last_name`): the two `Hamilton` rows with `cnt` 5 swap at rows
+  15/16 (Nicholas, Harry). The rows agree as a set.
+
+At sf1 no such answer had a tie, which `same_sequence`'s comment records (2026-10-20). Both rows
+are `wrong` with this ticket in `testdata/benchmark-results/h100-80gb-hbm3/cases.csv` until the
+oracle accepts a permutation of tied rows. Then they go back to `ok`. The fix needs the sort
+keys, which the oracle does not know today.

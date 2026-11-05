@@ -10,7 +10,8 @@ use crate::test_support::{
     section_href,
 };
 
-/// A section written now: two loaders (1000 µs) and an unload (500 µs).
+/// A section written now: two loaders (1000 µs) and an unload (500 µs), read from the pinned
+/// host cache.
 const TIMED: &str = "\
 GpuUnload
   time_us=[[500]] total_us=500 batch_rows=[[10]] batch_bytes=[[80]]
@@ -27,10 +28,10 @@ peak_bytes=2147483648
 runs=[1700,1700,1700,1700,1700,1700,1700,1700,1700,1700]
 build=release
 allocator=rmm-pool
-pinned_cache=off source=env
-prefill_files=0
-prefill_bytes=0
-prefill_us=0
+pinned_cache=on cap=147.4GiB resident=1.0GiB files=2 fills=2 fill_us=900 fallbacks=0 evictions=0 reloads=0 source=default
+prefill_files=2
+prefill_bytes=1073741824
+prefill_us=900
 device=NVIDIA H100 80GB HBM3
 driver=580.95.05
 cuda=12.9
@@ -178,10 +179,36 @@ fn an_h200_section_derives_load_and_shows_no_peak() {
         &[("q1", UNBATCHED)],
     );
     let html = page(root, &[("tpch", "q1")]);
-    // load (766 + 849) µs, execute 2321 − 1615.
+    // load (766 + 849) µs, execute 2321 − 1615; the section predates the pinned cache.
     assert_eq!(
         row(&html, "q1", "tp1_single"),
-        ["q1", "tp1_single", "1.6", "0.7", "2.3", "—"]
+        ["q1", "tp1_single", "1.6 unpinned", "0.7", "2.3", "—"]
+    );
+}
+
+#[test]
+fn a_load_without_the_pinned_cache_is_marked_unpinned() {
+    let root = tree("unpinned");
+    let off = TIMED
+        .lines()
+        .map(|line| match line.starts_with("pinned_cache=") {
+            true => "pinned_cache=off source=env\n".to_string(),
+            false => format!("{line}\n"),
+        })
+        .collect::<String>();
+    put(
+        &root,
+        "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
+        &[("q1", UNBATCHED), ("q3", &off), ("q6", TIMED)],
+    );
+    let html = page(root, &[("tpch", "q1"), ("tpch", "q3"), ("tpch", "q6")]);
+    // No `pinned_cache` line: a section from before the cache.
+    assert_eq!(row(&html, "q1", "tp1_single")[2], "1.6 unpinned");
+    assert_eq!(row(&html, "q3", "tp1_single")[2], "1.0 unpinned");
+    assert_eq!(row(&html, "q6", "tp1_single")[2], "1.0");
+    assert!(
+        html.contains("A load marked unpinned was read without the pinned host cache"),
+        "{html}"
     );
 }
 
@@ -270,7 +297,7 @@ fn devices_sit_side_by_side_and_a_case_one_lacks_is_absent() {
             "0.5",
             "1.5",
             "2.00",
-            "1.6",
+            "1.6 unpinned",
             "0.7",
             "2.3",
             "—"

@@ -110,7 +110,8 @@ def recipe_seqs(plans_path, query):
     regions in it are the ones this plan was supposed to produce. A capture of a different
     query, or of a plan that has since moved, looks perfectly self-consistent.
     """
-    text = pathlib.Path(plans_path).read_text()
+    # A newline before the text, so the first section, which opens the file, has one too.
+    text = "\n" + pathlib.Path(plans_path).read_text()
     marker = f"\n== {query}\n"
     if marker not in text:
         sys.exit(f"{plans_path} has no `== {query}` section")
@@ -120,8 +121,9 @@ def recipe_seqs(plans_path, query):
     recipes = section.split("--- recipes ---", 1)[1].split("--- memory ---", 1)[0]
     # `execute_node(#4 CudfAggregate{Merge}, prior output)` -> 4, CudfAggregate. The brace
     # payload is the recipe's own annotation and is not what a capture's range carries.
+    # A join is declared once, `join_build(#10 CudfJoin)`; its probe and finish name no seq.
     found = {}
-    for seq, kind in re.findall(r"execute_\w+\(#(\d+) (\w+)", recipes):
+    for seq, kind in re.findall(r"(?:execute_\w+|join_build)\(#(\d+) (\w+)", recipes):
         found[int(seq)] = kind
     return found
 
@@ -145,7 +147,7 @@ def check_against_recipes(regs, plans_path):
         # of the two written wins and every case reports the plan and the capture as
         # disagreeing about a node they agree on.
         if not nvtx_names.is_bare_call(kind):
-            by_case[case][seq] = kind
+            by_case[case][seq] = nvtx_names.plan_kind(kind)
     checked = sorted(c for c in by_case if (c[0], c[3]) == (dataset, mode))
     if not checked:
         sys.exit(

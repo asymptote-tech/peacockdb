@@ -28,12 +28,16 @@ Usage (DuckDB 1.5.4, the version CI pins for generate_testdata.sh):
 """
 
 import argparse
+import collections
 import csv
 import datetime
 import decimal
 import hashlib
+import os
 import pathlib
+import subprocess
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent
 CAP = 262144
@@ -146,8 +150,15 @@ def fingerprint(names, types, rows):
                 exact += text + CELL_SEPARATOR
         hashed.append(exact)
 
-    out = [f"fingerprint: rows={len(cells)}"]
-    for at in range(width):
+    hashed.sort()
+    return fingerprint_text(len(cells), approximate, nonnull, values,
+                            hashlib.sha256("\n".join(hashed).encode()).hexdigest())
+
+
+def fingerprint_text(rows, approximate, nonnull, values, digest):
+    """The fingerprint's lines from its parts, for both writers of it."""
+    out = [f"fingerprint: rows={rows}"]
+    for at in range(len(approximate)):
         line = f"col {at}: nonnull={nonnull[at]}"
         if approximate[at]:
             # Summed IN VALUE ORDER, so the two sides add in one sequence and float
@@ -169,9 +180,52 @@ def fingerprint(names, types, rows):
                 f" max={approx_number(high)}"
             )
         out.append(line)
-    hashed.sort()
-    out.append("hash: " + hashlib.sha256("\n".join(hashed).encode()).hexdigest())
+    out.append("hash: " + digest)
     return "\n".join(out) + "\n"
+
+
+def fingerprint_stream(names, types, batches):
+    """`fingerprint` over rows that come in batches and need not fit in memory: sf40's largest
+    answer is 96M rows. The hashed rows go through `sort -z` in the C locale, whose byte order
+    over UTF-8 is the order `fingerprint` sorts the text in."""
+    width = len(names)
+    approximate = [is_approximate(t) for t in types]
+    nonnull = [0] * width
+    values = [[] for _ in range(width)]
+    rows = 0
+    digest = hashlib.sha256()
+    with tempfile.TemporaryDirectory() as scratch:
+        unsorted = pathlib.Path(scratch) / "rows"
+        with open(unsorted, "wb") as out:
+            for batch in batches:
+                for row in batch:
+                    rows += 1
+                    exact = ""
+                    for at, value in enumerate(row):
+                        text = cell(value)
+                        if text:
+                            nonnull[at] += 1
+                        if approximate[at]:
+                            if text:
+                                values[at].append(float(text))
+                        else:
+                            exact += text + CELL_SEPARATOR
+                    if "\0" in exact:
+                        sys.exit("duckdb_result.py: a NUL in a cell, which the outside sort splits on")
+                    out.write(exact.encode() + b"\0")
+        sort = subprocess.Popen(["sort", "-z", "-T", scratch, str(unsorted)],
+                                stdout=subprocess.PIPE, env={**os.environ, "LC_ALL": "C"})
+        pending, first = b"", True
+        for chunk in iter(lambda: sort.stdout.read(1 << 20), b""):
+            *records, pending = (pending + chunk).split(b"\0")
+            for record in records:
+                if not first:
+                    digest.update(b"\n")
+                digest.update(record)
+                first = False
+        if sort.wait() != 0:
+            sys.exit(f"duckdb_result.py: sort exited {sort.returncode} over the hashed rows")
+    return fingerprint_text(rows, approximate, nonnull, values, digest.hexdigest())
 
 
 def render(names, rows, keep_order=False):
@@ -270,6 +324,10 @@ def session():
     return con
 
 
+# An answer over the cap by its row count alone, read in batches when fingerprinted.
+Streamed = collections.namedtuple("Streamed", "names types rows batches")
+
+
 def sections(dataset, stems, answer):
     """One `== <stem>` section per stem, in the order given. `answer(stem)` is the query's
     `(names, types, rows)`, or the text after `failed: ` where there is none."""
@@ -281,6 +339,10 @@ def sections(dataset, stems, answer):
         if isinstance(got, str):
             out.append(f"failed: {got}\n")
             print(f"{dataset}/{stem}: failed", file=sys.stderr)
+            continue
+        if isinstance(got, Streamed):
+            out.append(fingerprint_stream(got.names, got.types, got.batches))
+            print(f"{dataset}/{stem}: {got.rows} rows, over the cap by count", file=sys.stderr)
             continue
         names, types, rows = got
         table = render(names, rows, keep_order=stem in ordered)
@@ -337,7 +399,15 @@ def answer_sections(dataset, answers, only, root=ROOT):
     def answer(stem):
         if stem not in tables:
             return "no answer recorded"
-        return described(con.execute(f'SELECT * FROM answers."{stem}" ORDER BY rowid'))
+        rows = con.execute(f'SELECT count(*) FROM answers."{stem}"').fetchone()[0]
+        cursor = con.execute(f'SELECT * FROM answers."{stem}" ORDER BY rowid')
+        names = [d[0] for d in cursor.description]
+        # Every line of the table is as wide as its header at least, and there are rows + 4 of
+        # them, each with its newline: at or over the cap by count, the rows are never held.
+        if (rows + 4) * (len("| " + " | ".join(names) + " |") + 1) >= CAP:
+            batches = iter(lambda: cursor.fetchmany(100000), [])
+            return Streamed(names, [d[1] for d in cursor.description], rows, batches)
+        return names, [d[1] for d in cursor.description], cursor.fetchall()
 
     return sections(dataset, stems, answer)
 

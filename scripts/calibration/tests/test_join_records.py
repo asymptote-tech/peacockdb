@@ -92,6 +92,18 @@ def test_join_orders_segments_by_attempt_not_argv():
         assert body(join(tmp, nine, ten)) == [row("q6", 100)]
 
 
+def test_one_record_flag_takes_every_segment():
+    """`--record <dir>/*.tsv`, as build-test.md runs it: a shell glob after one flag."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        q1 = segment(tmp, "tpch-q1-tp1_single.1.tsv", [row("q1", 10)])
+        q6 = segment(tmp, "tpch-q6-tp1_single.1.tsv", [row("q6", 5)])
+        out = tmp / "joined.out.tsv"
+        with contextlib.redirect_stdout(io.StringIO()):
+            join_records.main(["--record", str(q1), str(q6), "--out", str(out)])
+        assert body(out.read_text()) == [row("q1", 10), row("q6", 5)]
+
+
 def test_join_spans_the_free_memory():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
