@@ -159,7 +159,7 @@ hourly GH watch over all three VMs, sf40 data on both, `run-gpu.sh` on the H100 
 (no host adapters), `provision-vm.sh`/`bootstrap-vm.sh` verified on the CPU VM, and the three
 hosts' roles in the standing rules.
 
-### 3. [`pinned-loads.md`](pinned-loads.md) — closes [#149](../archive/archived-tickets.md#t149), [#232](../archive/archived-tickets.md#t232) — state: reviewing — PR #196
+### 3. [`pinned-loads.md`](pinned-loads.md) — closes [#149](../archive/archived-tickets.md#t149), [#232](../archive/archived-tickets.md#t232) — state: completing — PR #196
 
 The parquet load reads table files kept resident in a pinned host file cache (on by default on
 a discrete GPU, off with no CUDA device; session option `pinned_host_cache_bytes`, default three

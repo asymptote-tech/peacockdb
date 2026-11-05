@@ -2159,7 +2159,7 @@ hand. A new region repeats these steps.
   Two more variables win over the engine the same way: `PEACOCK_PINNED_HOST_CACHE_BYTES=<bytes>`
   sizes the pinned host file cache (`0` is off), and `PEACOCK_SCAN_READER=read_parquet` swaps the
   scan's one-chunk reader for `read_parquet`. A device tier with the cache off is still green, but
-  `peacock_plan_tests`' two cache-on cases skip. A benchmark prefills its cases' files first
+  `peacock_plan_tests`' three cache-on cases skip. A benchmark prefills its cases' files first
   ("The prefill" under Benchmarks).
 - **`verda` and `verda-gpu` are names for a host, not addresses of one.** They are ephemeral
   Verda Cloud instances, reprovisioned with a new IP, so `--host` takes `<user@ip>` and

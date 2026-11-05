@@ -947,3 +947,4 @@ Resume at Task 2 Step 3 once new-hosts' Task 10 has proven the H100 path.
   `ffi_tests::` 5, `test_ffi` 4, `--features gpu --no-run` builds; 25.02 image `ninja` clean,
   `ctest -L cpu` 1/1, `peacock_cpu_tests` 63, `peacock_plan_tests` lists 132; `git clang-format
   --diff HEAD -- cpp/` changes nothing. build-test.md recounted: 7745 (Rust 5977, C++ 278).
+- review round 2: findings closed; build-test.md's skip count nit fixed by the coordinator; nsys_calls.py join gap routed to sf40-baseline. completing.
