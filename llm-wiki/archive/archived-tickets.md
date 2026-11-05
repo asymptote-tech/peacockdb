@@ -61,11 +61,12 @@ benchmark), through `source_info` over the pinned bytes:
 | q8 | 447118 | 268975 | 425933 | 271455 |
 
 H2D, bytes-weighted per query, all pinned: 25.7–31.8 GB/s before, 41.0–48.6 GB/s from the cache;
-copies stay one per column-chunk run (median 0.1–0.8 MiB), so 55.5 GB/s is not reached. Compressed
-load rate before → default: q1 5.8 → 15.5 GB/s, q3 6.2 → 13.4, q6 3.7 → 6.4, q8 13.5 → 19.8. The
-prefill reads 9.0–15.5 GB per query process at 2.0–2.1 GB/s from the page cache (91.7 MB/s cold).
-The L40S list is green with the cache on and off, goldens unchanged. Integrated: deferred, no GB10.
-Record: `tasks/pinned-loads-detail.md` (archived with the task).
+copies stay one per column-chunk run (median 0.1–0.8 MiB), so 55.5 GB/s is not reached. The load
+rate over the compressed bytes copied, before → default: q1 4.2 → 11.2 GB/s, q3 4.0 → 8.6,
+q6 2.6 → 4.5, q8 8.5 → 12.5. The default capacity on the H100 VM (196.6 GiB, no container limit)
+is 147.4 GiB. The prefill reads 9.0–15.5 GB per query process at 2.0–2.1 GB/s from the page
+cache (91.7 MB/s cold). The L40S list is green with the cache on and off, goldens unchanged.
+Integrated: deferred, no GB10.
 
 <a id="t232"></a>
 ### #232 — the scan reads through `read_parquet`, which is several times slower than the chunked reader

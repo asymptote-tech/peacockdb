@@ -3,8 +3,9 @@ mod ffi_tests {
     use peacockdb_ffi::raw::{
         PEACOCK_PINNED_CACHE_DEFAULT_BYTES, PEACOCK_PINNED_CACHE_NO_DEVICE,
         PEACOCK_PREFILL_BAD_ARGUMENT, PEACOCK_PREFILL_OFF, PEACOCK_RMM_POOL_UNAVAILABLE,
-        PeacockExecutor, PeacockPinnedCacheStats, PeacockPrefillStats, PeacockRmmPoolInfo,
-        peacock_executor_create, peacock_executor_destroy, peacock_install_rmm_pool,
+        PeacockDeviceInfo, PeacockExecutor, PeacockPinnedCacheStats, PeacockPrefillStats,
+        PeacockRmmPoolInfo, peacock_device_info, peacock_executor_create, peacock_executor_destroy,
+        peacock_install_rmm_pool,
         peacock_pinned_cache_prefill, peacock_pinned_host_cache_stats,
         peacock_set_pinned_host_cache_bytes,
     };
@@ -44,12 +45,22 @@ mod ffi_tests {
     }
 
     /// The ffi rung has no device, which is CI's dataset-matrix and a container without
-    /// `--gpus`: the cache is off, a prefill says so, and nothing throws across the ABI.
+    /// `--gpus`: the cache is off, a prefill says so, and nothing throws across the ABI. On a
+    /// host with a device only the cache's state and the argument refusals are checked here.
     /// One case, so libtest's other threads share no cache state with it.
     #[test]
     fn pinned_host_cache_is_off_without_a_device() {
         let mut stats = PeacockPinnedCacheStats::default();
         assert_eq!(unsafe { peacock_pinned_host_cache_stats(&mut stats) }, 0);
+        let mut info = PeacockDeviceInfo {
+            name: [0; 256],
+            runtime: 0,
+        };
+        if unsafe { peacock_device_info(&mut info) } == 0 {
+            assert_ne!(stats.state, PEACOCK_PINNED_CACHE_NO_DEVICE, "a device answered");
+            assert_ne!(unsafe { peacock_pinned_host_cache_stats(ptr::null_mut()) }, 0);
+            return;
+        }
         assert_eq!(stats.state, PEACOCK_PINNED_CACHE_NO_DEVICE);
         assert_eq!(stats.capacity_bytes, 0);
 

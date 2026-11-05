@@ -188,4 +188,5 @@ did not cause it; it only stopped hiding it behind the host read.
 One launch decompresses every page of the load as a batch, so its time follows its slowest page,
 not its bytes. Next: the page sizes per column chunk from the footers, and the launch's per-chunk
 time. If one large page sets it, it is a writer setting in `testdata/generate_testdata.sh`, as
-#150 is. Evidence: `tasks/pinned-loads-detail.md`, "Before/after".
+#150 is. The numbers are a `create_nsys_profile.sh --trace` capture's kernels inside each load's
+window, as `nsys_loads.py` draws it; the loads' times are in [#149](../archive/archived-tickets.md#t149).

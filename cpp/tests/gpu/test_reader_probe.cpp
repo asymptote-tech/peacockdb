@@ -1,4 +1,4 @@
-// #232's re-measure (llm-wiki/tasks/pinned-loads-impl.md, Task 2): read_parquet against a
+// #232's re-measure (llm-wiki/archive/archived-tickets.md#t232): read_parquet against a
 // one-chunk chunked_parquet_reader, each from the path and from the same file held whole in
 // pinned host memory. A measurement, not a check, so the case is disabled and runs by name:
 // GTEST_ALSO_RUN_DISABLED_TESTS=1 GTEST_FILTER='DISABLED_ReaderProbe.*' with PEACOCK_PROBE_FILE

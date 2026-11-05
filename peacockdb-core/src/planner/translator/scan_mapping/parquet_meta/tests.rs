@@ -57,6 +57,28 @@ fn chunk_bytes(table: &str, columns: &[usize]) -> u64 {
         .sum::<i64>() as u64
 }
 
+/// The same, compressed: what the file holds rather than what decoding produces.
+fn chunk_compressed_bytes(table: &str, columns: &[usize]) -> u64 {
+    let file = std::fs::File::open(minimal().join(format!("{table}.parquet"))).unwrap();
+    let reader = SerializedFileReader::new(file).unwrap();
+    reader
+        .metadata()
+        .row_groups()
+        .iter()
+        .flat_map(|group| columns.iter().map(|c| group.column(*c).compressed_size()))
+        .sum::<i64>() as u64
+}
+
+#[tokio::test]
+async fn compressed_bytes_are_the_footers_compressed_sizes_of_the_projected_columns() {
+    // The benchmark's `[load-bytes] compressed=` reads these; `bytes` is the uncompressed size,
+    // which sizes batches, and reporting it as compressed overstated what a load copies.
+    let groups = survivors("SELECT c_name, c_comment FROM customer").await;
+    let compressed: u64 = groups.iter().map(|g| g.compressed_bytes).sum();
+    assert_eq!(compressed, chunk_compressed_bytes("customer", &[1, 7]));
+    assert_ne!(compressed, groups.iter().map(|g| g.bytes).sum::<u64>());
+}
+
 #[tokio::test]
 async fn bytes_are_the_column_chunk_totals_of_the_projected_columns() {
     // n_name is field 1 of the file schema, and its chunks are what a scan projecting

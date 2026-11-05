@@ -1,18 +1,23 @@
-//! The wrappers over the cache's three symbols where the FFI is linked and no device is,
-//! which is this rung by definition: the C++ answer arrives as `NoDevice` and `Off`.
+//! The wrappers over the cache's three symbols where the FFI is linked. CI's ffi rung has no
+//! device, and there the C++ answer arrives as `NoDevice` and `Off`; on a host with one, only
+//! that the cache is not `NoDevice` (the device rung, `gpu_tests`, covers the rest).
 
 use std::ptr;
 
 use peacockdb_ffi::raw::{PeacockExecutor, peacock_executor_create, peacock_executor_destroy};
 
 use crate::executor::{
-    PinnedCacheSource, PinnedCacheState, PrefillError, apply_pinned_host_cache, pinned_host_cache,
-    prefill_on,
+    PinnedCacheSource, PinnedCacheState, PrefillError, apply_pinned_host_cache, device_info,
+    pinned_host_cache, prefill_on,
 };
 
 #[tokio::test]
 async fn the_cache_is_off_without_a_device() {
     let cache = pinned_host_cache();
+    if device_info().is_some() {
+        assert_ne!(cache.state, PinnedCacheState::NoDevice, "a device answered");
+        return;
+    }
     assert_eq!(cache.state, PinnedCacheState::NoDevice);
     assert_eq!(cache.capacity_bytes, 0);
     assert_eq!(cache.to_string(), "off no-device");

@@ -549,7 +549,7 @@ Unprofiled, 2026-11-05 03:00–03:07Z on nebius-h100, the install of this branch
 | q8 | `chunked` | 636764 | 909, 802, 731, 37390, 44594, 32186, 44030, 425933 | skipped: off | `off source=env` |
 | q8 | `all` | 465418 | 807, 769, 685, 32955, 40116, 31300, 37563, 271455 | 7, 15542365278, 7625426 | `on resident=14.5GiB files=7 fills=7 fill_us=7625375 fallbacks=0 evictions=0 reloads=0 source=default` |
 
-`[load-bytes]` is the same in all three configurations of a query (the plan does not move): q1 `compressed=2342506873 decoded=18667100168`, q3 `2654465356 / 6603217369`, q6 `339204934 / 1922457600`, q8 `8222326409 / 14304945284`. Under `cache` and `all` the first line is `[pinned-cache] 147.4 GiB of 196.6 GiB host RAM (default) on a discrete device`; under `chunked`, `off (pinned_host_cache_bytes = 0, env)` and `prefill skipped: the pinned host cache is off`.
+`[load-bytes]` is the same in all three configurations of a query (the plan does not move); its `compressed=` was then the uncompressed size ("Signoff: load rate"): q1 `compressed=2342506873 decoded=18667100168`, q3 `2654465356 / 6603217369`, q6 `339204934 / 1922457600`, q8 `8222326409 / 14304945284`. Under `cache` and `all` the first line is `[pinned-cache] 147.4 GiB of 196.6 GiB host RAM (default) on a discrete device`; under `chunked`, `off (pinned_host_cache_bytes = 0, env)` and `prefill skipped: the pinned host cache is off`.
 
 ## After profile
 
@@ -649,43 +649,46 @@ their cold small tables. From a warm page cache it is 2.0–2.1 GB/s, one `pread
 
 `load_us` is Σ `GpuLoadParquet` `total_us` of the reported run; each GB/s is `bytes / (load_us ·
 1000)`; the H2D rate is bytes-weighted over the query's loads from `loads-<q>-<config>.tsv`
-(`before`: Task 2's), pinned beside it. The `before` row's bytes are the `all` run's `[load-bytes]`.
+(`before`: Task 2's), pinned beside it. **Compressed bytes are the profiles' `h2d_bytes`**, summed
+over the query's loads: the compressed column chunks each load copied, the same in all four
+configurations. The runs' `[load-bytes] compressed=` was not that (review round 1): it summed
+the footer's uncompressed sizes. Decoded bytes are the `all` run's `[load-bytes] decoded=`.
 
 **q1**
 
-| reader, source | config | compressed bytes | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s (profile; pinned) |
+| reader, source | config | compressed bytes (copied) | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s (profile; pinned) |
 |---|---|--:|--:|--:|--:|--:|--:|
-| `read_parquet`, path (before) | `before` | 2342506873 | 18667100168 | 403877 | 5.8 | 46.2 | 26.8; 26.8 |
-| `read_parquet`, cache | `cache` | 2342506873 | 18667100168 | 154641 | 15.1 | 120.7 | 46.4; 46.4 |
-| chunked, path | `chunked` | 2342506873 | 18667100168 | 386539 | 6.1 | 48.3 | 29.0; 29.0 |
-| chunked, cache (the default) | `all` | 2342506873 | 18667100168 | 151556 | 15.5 | 123.2 | 46.4; 46.4 |
+| `read_parquet`, path (before) | `before` | 1693633748 | 18667100168 | 403877 | 4.2 | 46.2 | 26.8; 26.8 |
+| `read_parquet`, cache | `cache` | 1693633748 | 18667100168 | 154641 | 11.0 | 120.7 | 46.4; 46.4 |
+| chunked, path | `chunked` | 1693633748 | 18667100168 | 386539 | 4.4 | 48.3 | 29.0; 29.0 |
+| chunked, cache (the default) | `all` | 1693633748 | 18667100168 | 151556 | 11.2 | 123.2 | 46.4; 46.4 |
 
 **q3**
 
-| reader, source | config | compressed bytes | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s (profile; pinned) |
+| reader, source | config | compressed bytes (copied) | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s (profile; pinned) |
 |---|---|--:|--:|--:|--:|--:|--:|
-| `read_parquet`, path (before) | `before` | 2654465356 | 6603217369 | 425582 | 6.2 | 15.5 | 25.7; 25.7 |
-| `read_parquet`, cache | `cache` | 2654465356 | 6603217369 | 198993 | 13.3 | 33.2 | 41.4; 41.4 |
-| chunked, path | `chunked` | 2654465356 | 6603217369 | 407713 | 6.5 | 16.2 | 27.0; 27.0 |
-| chunked, cache (the default) | `all` | 2654465356 | 6603217369 | 198697 | 13.4 | 33.2 | 41.4; 41.4 |
+| `read_parquet`, path (before) | `before` | 1702160452 | 6603217369 | 425582 | 4.0 | 15.5 | 25.7; 25.7 |
+| `read_parquet`, cache | `cache` | 1702160452 | 6603217369 | 198993 | 8.6 | 33.2 | 41.4; 41.4 |
+| chunked, path | `chunked` | 1702160452 | 6603217369 | 407713 | 4.2 | 16.2 | 27.0; 27.0 |
+| chunked, cache (the default) | `all` | 1702160452 | 6603217369 | 198697 | 8.6 | 33.2 | 41.4; 41.4 |
 
 **q6**
 
-| reader, source | config | compressed bytes | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s (profile; pinned) |
+| reader, source | config | compressed bytes (copied) | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s (profile; pinned) |
 |---|---|--:|--:|--:|--:|--:|--:|
-| `read_parquet`, path (before) | `before` | 339204934 | 1922457600 | 91920 | 3.7 | 20.9 | 26.0; 26.0 |
-| `read_parquet`, cache | `cache` | 339204934 | 1922457600 | 53299 | 6.4 | 36.1 | 41.0; 41.0 |
-| chunked, path | `chunked` | 339204934 | 1922457600 | 88248 | 3.8 | 21.8 | 27.0; 27.0 |
-| chunked, cache (the default) | `all` | 339204934 | 1922457600 | 53071 | 6.4 | 36.2 | 41.0; 41.0 |
+| `read_parquet`, path (before) | `before` | 237274556 | 1922457600 | 91920 | 2.6 | 20.9 | 26.0; 26.0 |
+| `read_parquet`, cache | `cache` | 237274556 | 1922457600 | 53299 | 4.5 | 36.1 | 41.0; 41.0 |
+| chunked, path | `chunked` | 237274556 | 1922457600 | 88248 | 2.7 | 21.8 | 27.0; 27.0 |
+| chunked, cache (the default) | `all` | 237274556 | 1922457600 | 53071 | 4.5 | 36.2 | 41.0; 41.0 |
 
 **q8**
 
-| reader, source | config | compressed bytes | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s (profile; pinned) |
+| reader, source | config | compressed bytes (copied) | decoded bytes | `load_us` | compressed GB/s | decoded GB/s | H2D GB/s (profile; pinned) |
 |---|---|--:|--:|--:|--:|--:|--:|
-| `read_parquet`, path (before) | `before` | 8222326409 | 14304945284 | 609525 | 13.5 | 23.5 | 31.8; 31.8 |
-| `read_parquet`, cache | `cache` | 8222326409 | 14304945284 | 413057 | 19.9 | 34.6 | 48.6; 48.6 |
-| chunked, path | `chunked` | 8222326409 | 14304945284 | 586575 | 14.0 | 24.4 | 32.8; 32.8 |
-| chunked, cache (the default) | `all` | 8222326409 | 14304945284 | 415650 | 19.8 | 34.4 | 48.6; 48.6 |
+| `read_parquet`, path (before) | `before` | 5205698980 | 14304945284 | 609525 | 8.5 | 23.5 | 31.8; 31.8 |
+| `read_parquet`, cache | `cache` | 5205698980 | 14304945284 | 413057 | 12.6 | 34.6 | 48.6; 48.6 |
+| chunked, path | `chunked` | 5205698980 | 14304945284 | 586575 | 8.9 | 24.4 | 32.8; 32.8 |
+| chunked, cache (the default) | `all` | 5205698980 | 14304945284 | 415650 | 12.5 | 34.4 | 48.6; 48.6 |
 
 Prefill, tpch sf40: as in "Cache" (1–7 files, 9.0–15.5 GB, 4.3–7.6 s, 2.0–2.1 GB/s warm).
 
@@ -693,9 +696,11 @@ Prefill, tpch sf40: as in "Cache" (1–7 files, 9.0–15.5 GB, 4.3–7.6 s, 2.0�
   GB/s, and `chunked` → `all` the same within 5 % (2.5×, 2.1×, 1.7×, 1.4×).
 - The reader's share: `before` → `chunked` 1.03–1.05× (session noise, above), and `cache` → `all`
   0.99–1.02×.
-- `compressed` is more than the loads copy (q1 2342506873 against 1693633748 H2D bytes). Both are
-  the same in every configuration; which bytes `[load-bytes]` counts that never cross is
-  bench-rows' to settle when it reads the line.
+- **`[load-bytes] compressed=` was the uncompressed size** (review round 1): `load_bytes` summed
+  `GpuLoadParquet::bytes()`, the footer's `uncompressed_size()`, which sizes batches. It now sums
+  `compressed_bytes()`, the footer's `compressed_size()` over the same chunks
+  (`RowGroupMeta.compressed_bytes`; `compressed_bytes_are_the_footers_compressed_sizes_of_the_projected_columns`).
+  The numbers these runs printed (q1 2342506873) are uncompressed; no rate above uses them.
 
 **#305 (snappy batch floor) opened.** Under `all` a load's decompression is one
 `nvcomp::unsnap_kernel` launch of about 29 ms whatever its size (q8 `supplier`, 1.9 MB copied,
@@ -821,6 +826,8 @@ test files fall under existing globs and targets, so nothing needs a CI step.
 | nebius-cpu128 | 2026-11-05 02:45:29 (RUNNING 02:46:40) | 2026-11-05 02:54:04 (`stop`: stopped) | 0.14 | Task 7 Step 1, the CPU-VM build of this tree |
 | nebius-h100 | 2026-11-05 02:54:29 (RUNNING 02:55:32) | 2026-11-05 03:10:41 (`stop`: stopped) | 0.27 | Task 7 Steps 2–4: `ship`, the filter run, 12 bench runs, 12 traces |
 | nebius-gpu (L40S) | 2026-11-05 03:12:09 (RUNNING 03:13:03) | 2026-11-05 03:48:15 (`stop`: stopped) | 0.60 | Task 7 Step 6: sync, build, the list on and off |
+| nebius-gpu (L40S) | 2026-11-05 04:43:09 (RUNNING 04:44:15) | 2026-11-05 04:53:38 (`stop`: stopped) | 0.17 | review round 1: the mutation red; the ffi cases with a device |
+| nebius-gpu (L40S) | 2026-11-05 04:54:01 (RUNNING 04:55:03) | 2026-11-05 05:00:19 (`stop`: stopped) | 0.11 | review round 1: the restored build (`touch`ed), green |
 - L40S start for Task 2 Step 3's devprops: no capacity from 2026-11-04T06:57:37Z (developer; treated as 75). The coordinator retries every 15 min up to 10 h (until 16:57Z). Decision: the H100's devprops is read in its own short bracket before the CPU-VM build exists, so Tasks 3–5 (offline) can start once both cards are read; one extra H100 start of a few minutes, against the plan's order (Step 3 reads it after the build).
 - Order change (coordinator, 2026-11-04): Tasks 3, 4, 4b and 5 (offline, tested on no VM) run now, before Task 2's before profile, because the H100 path waits on new-hosts' block. The before profile and the before load times (Task 2 Steps 4–8) are then taken on an install staged from `ENS-new-hosts`'s tip (today's engine, no pinned-loads change), never from this branch. Task 6 waits on Task 2's Decision.
 
@@ -907,3 +914,36 @@ Resume at Task 2 Step 3 once new-hosts' Task 10 has proven the H100 path.
   `join_build` and a rule mapping `join_build`/`join_probe` onto `CudfJoin`. It is calibration's
   (bp-benchmarks'), and it blocks any Nsight trace of a join query, sf40-baseline's included.
 - 2026-11-05: green at ec5c068e; PR #196 (base ENS-new-hosts); reviewer round 1.
+
+## Review round 1 (2026-11-05)
+
+- **1, `[load-bytes] compressed=` was uncompressed.** `load_bytes` summed `GpuLoadParquet::bytes()`,
+  the footer's `uncompressed_size()`. `RowGroupMeta` now carries `compressed_bytes`, the footer's
+  `compressed_size()` over the same chunks (`parquet_meta.rs`), `GpuLoadParquet::compressed_bytes()`
+  sums it, and the line reads that. `bytes` still sizes batches and lanes, so no plan, golden or
+  batch moves. Red: `compressed_bytes_are_the_footers_compressed_sizes_of_the_projected_columns`
+  failed to compile (`no field compressed_bytes`); green after. The recorded runs printed the
+  uncompressed size, and the sf40 footers are on the VMs only (no VM for this finding), so the
+  signoff's compressed column is the profiles' `h2d_bytes`, the same in every configuration;
+  the rates, the #149 archive entry and build-test.md's definition are recomputed or corrected.
+- **2, no test told a pinned read from a path read.** `PinnedHostCache.ACachedScanReadsTheCachedBytesNotTheFile`
+  (`test_pinned_scan.cpp`): a temp copy of `customer.parquet`, prefilled, overwritten in place
+  with same-size garbage and its mtime put back (`utimensat`); the cached scan equals the
+  original, and with the cache off the path read throws. On the L40S (correctness is its role),
+  with `scan.cpp`'s ternary replaced by `source_info{paths}`: red, `Corrupted header or footer`,
+  while the two older cases pass. Restored: `PinnedHostCache.*` and `ScanReader.*` 6/6.
+  **Trap:** `nebius-sync.sh` keeps dev's mtimes, so restoring a mutated file on a VM leaves it
+  older than its object and ninja rebuilds nothing; the first "green" run was the mutant. `touch`
+  the restored file before rebuilding.
+- **3, nits.** The ffi rung's two pinned-cache tests branch on whether a device answers
+  (`device_info()`, `peacock_device_info`); with one they check only that the cache is not
+  `NO_DEVICE`. Run both ways: no device on dev (5, 4), a device on the L40S (5, 4). The prefill's
+  `EXPECT_GT(out.us, 0u)` is gone. Code comments citing this task's files point at
+  architecture.md or the ticket's archive entry; the #149 entry no longer points at this file,
+  #305's evidence names no section; architecture.md's parquet-source row keeps the rules and
+  sends the numbers to #149.
+- Gates: `cargo test --features rust-only -p peacockdb-core` exit 0 (`--lib` 929 + 2 ignored,
+  2447, 47, 3, 1, 41), `cargo test -p cost-report` 49 + 32, testdata clean; host cuDF 25.02
+  `ffi_tests::` 5, `test_ffi` 4, `--features gpu --no-run` builds; 25.02 image `ninja` clean,
+  `ctest -L cpu` 1/1, `peacock_cpu_tests` 63, `peacock_plan_tests` lists 132; `git clang-format
+  --diff HEAD -- cpp/` changes nothing. build-test.md recounted: 7745 (Rust 5977, C++ 278).

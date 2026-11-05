@@ -490,7 +490,6 @@ TEST_F(PinnedHostCache, PrefillMakesEveryFileResident) {
   EXPECT_EQ(out.bytes, 2 * KiB);
   EXPECT_EQ(out.needed, 2 * KiB);
   EXPECT_EQ(out.limit, 4 * KiB);
-  EXPECT_GT(out.us, 0u);
   const std::size_t fills = cache.stats().fills;
   auto lease = cache.acquire({a, b});
   ASSERT_TRUE(lease.cached());

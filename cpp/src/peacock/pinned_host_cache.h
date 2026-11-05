@@ -2,7 +2,7 @@
 // PRIVATE header -- must stay under src/, NOT include/ (see plan_types.h).
 //
 // Whole parquet files kept in pinned host memory, so a scan's H2D copy is a DMA from pinned
-// pages with no host copy before it (llm-wiki/tasks/pinned-loads.md, item 0a). An entry is
+// pages with no host copy before it (llm-wiki/architecture.md, "cuDF options"). An entry is
 // freed only when no lease holds it: eviction runs between reads, never under one.
 
 #include <sys/types.h>

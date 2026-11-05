@@ -362,8 +362,8 @@ pub(crate) async fn process_prefill() -> &'static Result<ProcessPrefill, Prefill
     PREFILL.get_or_init(|| prefilled.map(|stats| ProcessPrefill { stats, files }))
 }
 
-/// What the tree's loads read and produced in one run: the parquet bytes of their row groups
-/// over the projected columns, and the bytes of the batches they emitted.
+/// What the tree's loads read and produced in one run: the compressed parquet bytes of their row
+/// groups over the projected columns, and the bytes of the batches they emitted.
 fn load_bytes(tree: &dyn GpuNode, report: &RunReport, what: &str) -> (u64, u64) {
     let index = PlanIndex::build(tree).unwrap_or_else(|e| panic!("{what}: {e}"));
     let loads = index.nodes.iter().enumerate().filter_map(|(at, indexed)| {
@@ -373,7 +373,7 @@ fn load_bytes(tree: &dyn GpuNode, report: &RunReport, what: &str) -> (u64, u64) 
             .flatten()
             .map(|batch| batch.bytes)
             .sum();
-        Some((load.bytes(), emitted as u64))
+        Some((load.compressed_bytes(), emitted as u64))
     });
     loads.fold((0, 0), |(compressed, decoded), (read, out)| {
         (compressed + read, decoded + out)

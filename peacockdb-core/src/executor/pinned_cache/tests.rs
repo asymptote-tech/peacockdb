@@ -194,6 +194,7 @@ fn plan_files_skips_a_rows_only_load() {
             index: 0,
             rows: 10,
             bytes: 100,
+            compressed_bytes: 0,
         }],
         can_be_null: vec![],
     };

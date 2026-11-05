@@ -1,6 +1,7 @@
 /// The scan through the process's pinned host cache: a read from the pinned bytes equals the
-/// read from the path, and a prefilled file is read with no fill. Both skip when
-/// PEACOCK_PINNED_HOST_CACHE_BYTES is set, since that fixes the capacity these cases move.
+/// read from the path, a prefilled file is read with no fill, and a cached scan reads the cached
+/// bytes, not the file. All skip when PEACOCK_PINNED_HOST_CACHE_BYTES is set, since that fixes
+/// the capacity these cases move.
 
 #include "peacock_gpu.h"
 #include "plan_executor.h"
@@ -15,9 +16,15 @@
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -30,11 +37,12 @@ std::string customer_path() {
   return std::string(env ? env : PEACOCK_TESTDATA_DIR) + "/tpch.minimal/customer.parquet";
 }
 
-/// One CudfScan over customer.parquet: every row group, four columns of four kinds.
-std::vector<uint8_t> customer_scan() {
+/// One CudfScan over customer.parquet (or a copy at `path`): every row group, four columns of
+/// four kinds.
+std::vector<uint8_t> customer_scan(std::string const& path) {
   flatbuffers::FlatBufferBuilder fbb;
   auto paths = fbb.CreateVector(
-      std::vector<flatbuffers::Offset<flatbuffers::String>>{fbb.CreateString(customer_path())});
+      std::vector<flatbuffers::Offset<flatbuffers::String>>{fbb.CreateString(path)});
   std::vector<flatbuffers::Offset<fb::Field>> fields;
   for (auto [name, type] :
        {std::pair{"c_custkey", fb::DataType_Int64}, std::pair{"c_name", fb::DataType_Utf8},
@@ -50,11 +58,12 @@ std::vector<uint8_t> customer_scan() {
 
 /// The scan executed in a session of its own, which keeps the table alive.
 struct Scanned {
-  std::vector<uint8_t> plan = customer_scan();
-  peacock::NodeSession session{plan.data(), plan.size()};
+  std::vector<uint8_t> plan;
+  peacock::NodeSession session;
   uint64_t handle = 0;
 
-  Scanned() {
+  explicit Scanned(std::string const& path = customer_path())
+      : plan(customer_scan(path)), session(plan.data(), plan.size()) {
     std::size_t count = 0;
     peacock::NodeStats stats{};
     session.execute_node(0, nullptr, nullptr, 0, &handle, /*out_cap=*/1, &count, &stats);
@@ -133,4 +142,47 @@ TEST(PinnedHostCache, PrefilledScanFillsNothing) {
   Scanned path;
   expect_equal(runs.front()->table(), path.table());
   set_capacity(PEACOCK_PINNED_CACHE_DEFAULT_BYTES);
+}
+
+TEST(PinnedHostCache, ACachedScanReadsTheCachedBytesNotTheFile) {
+  if (capacity_fixed_by_env()) GTEST_SKIP() << "PEACOCK_PINNED_HOST_CACHE_BYTES is set";
+  ASSERT_EQ(set_capacity(PEACOCK_PINNED_CACHE_DEFAULT_BYTES).state, PEACOCK_PINNED_CACHE_ON);
+  char dir_template[] = "/tmp/pinned-scan-XXXXXX";
+  ASSERT_NE(mkdtemp(dir_template), nullptr);
+  const std::filesystem::path dir = dir_template;
+  const std::string copy = (dir / "customer.parquet").string();
+  std::filesystem::copy_file(customer_path(), copy);
+
+  peacock_executor_t* executor = nullptr;
+  ASSERT_EQ(peacock_executor_create(0, &executor), 0);
+  std::unique_ptr<peacock_executor_t, void (*)(peacock_executor_t*)> owner(
+      executor, peacock_executor_destroy);
+  const char* paths[] = {copy.c_str()};
+  peacock_prefill_stats_t prefill{};
+  ASSERT_EQ(peacock_pinned_cache_prefill(executor, paths, 1, &prefill), PEACOCK_PREFILL_OK)
+      << peacock_last_error(executor);
+
+  // Garbage of the same size, the mtime put back: the cache sees the file it pinned, and only a
+  // read of the file itself sees the garbage.
+  struct stat st {};
+  ASSERT_EQ(stat(copy.c_str(), &st), 0);
+  const int fd = open(copy.c_str(), O_WRONLY);
+  ASSERT_GE(fd, 0);
+  const std::vector<char> garbage(static_cast<std::size_t>(st.st_size), '\x5a');
+  ASSERT_EQ(pwrite(fd, garbage.data(), garbage.size(), 0), st.st_size);
+  close(fd);
+  const timespec times[2] = {st.st_atim, st.st_mtim};
+  ASSERT_EQ(utimensat(AT_FDCWD, copy.c_str(), times, 0), 0);
+
+  const auto before = stats_now();
+  Scanned pinned(copy);
+  EXPECT_EQ(stats_now().reloads, before.reloads) << "the overwrite was seen as a change";
+  EXPECT_EQ(stats_now().fallbacks, before.fallbacks) << "the scan read its path";
+  Scanned original;
+  expect_equal(pinned.table(), original.table());
+
+  ASSERT_EQ(set_capacity(0).state, PEACOCK_PINNED_CACHE_OFF);
+  EXPECT_ANY_THROW(Scanned{copy}) << "a path read of the garbage did not fail";
+  set_capacity(PEACOCK_PINNED_CACHE_DEFAULT_BYTES);
+  std::filesystem::remove_all(dir);
 }

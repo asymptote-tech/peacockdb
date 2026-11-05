@@ -341,7 +341,7 @@ def test_run_passes_the_filter_and_resume():
 
 
 def test_run_passes_the_pinned_cache_and_scan_reader_switches():
-    """pinned-loads measures each fix alone by these two; a run that drops them measures the
+    """A load's fixes are measured one at a time by these two; a run that drops them measures the
     engine's default under every name."""
     with Host() as h:
         prepared(h)

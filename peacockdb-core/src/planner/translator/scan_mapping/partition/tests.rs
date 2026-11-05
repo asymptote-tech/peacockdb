@@ -7,7 +7,7 @@ fn pruned(sizes: &[(u64, u64)]) -> Vec<RowGroupMeta> {
     (0..)
         .filter(|i| !skipped.contains(i))
         .zip(sizes)
-        .map(|(index, &(rows, bytes))| RowGroupMeta { index, rows, bytes })
+        .map(|(index, &(rows, bytes))| RowGroupMeta { index, rows, bytes, compressed_bytes: 0 })
         .collect()
 }
 
@@ -17,6 +17,7 @@ fn uniform(count: usize, rows: u64) -> Vec<RowGroupMeta> {
             index,
             rows,
             bytes: rows * 4,
+            compressed_bytes: 0,
         })
         .collect()
 }
