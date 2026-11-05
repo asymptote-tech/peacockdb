@@ -151,7 +151,7 @@ commit they build on (`02f6a4d8`) and nothing of the join optimizer; case list r
 master's registry; green on the CPU gates; images published. Chain L absorbs the containers task;
 the agent-container launcher, the embeddings' S3 path and the scratch-chain run are dropped.
 
-### 2. [`new-hosts.md`](new-hosts.md) — closes no ticket — state: completing — PR #195
+### 2. [`new-hosts.md`](new-hosts.md) — closes no ticket — state: completeness approved — PR #195
 
 The `gpu-host` scripts renamed `nebius`; `nebius.sh --instance-id/--profile` for the H100
 (eu-north1) and the 128-core CPU VM (eu-west1), 1-hour idle watchers with per-VM credentials, the
