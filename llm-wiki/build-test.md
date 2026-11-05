@@ -1455,7 +1455,7 @@ tpch.sf40, tpcds.sf40 (on the GPU host, outside the repo; each symlinked in as t
         │           ├── nsys_calls.py × goldens/<dataset>.sf1
         │           │     └──► calibration/calls.tsv   what one ABI call splits into, per case
         │           └── nsys_loads.py
-        │                 └──► calibration/loads.tsv   where each parquet load's time goes (not committed)
+        │                 └──► calibration/loads.tsv   where each parquet load's time goes (committed per device only)
         │
         └── --metrics   the same cases under the memory counters, one capture per case;
               │         PEACOCK_BENCHMARK_CAPTURE=metrics
@@ -1548,8 +1548,8 @@ What the arrows are there to make checkable:
   `plot.py` is the only thing that draws, for the same reason.
 - **The derived text is committed; the record and the captures are not.** The
   `.benchmark.txt` tree, `calls.tsv`, `hbm.tsv` and every panel are in git, rewritten in place
-  by each collection, so `git diff` shows how the numbers moved. `loads.tsv` is not: it is one
-  host's profile, read into a task's detail file. The record is 26 MB at sf40 and grows with
+  by each collection, so `git diff` shows how the numbers moved. The top-level `loads.tsv` is
+  not: it is one host's scratch profile; a device's own `loads.tsv` is (below). The record is 26 MB at sf40 and grows with
   every case, so it lives in S3 and git holds its sha256: `--pull-benchmarks` writes both, and
   the commit that moves the tree moves the pin. The two `.sqlite` exports are
   undiffable binary that only the scripts above read. The counters one grows ~27 MB a second
@@ -3023,8 +3023,14 @@ A timed section with `pinned_cache` other than `on`, or with `prefill_files=0`, 
    `split_record.py --record <joined> --cases testdata/benchmark-results/h100-80gb-hbm3/cases.csv --out-dir <split>`;
    `publish_record.sh --from <split> h100-80gb-hbm3/tpch.sf40 h100-80gb-hbm3/tpcds.sf40`, with dev's
    `peacock.env` exported.
-7. The profiles, per dataset, from a cases file of the header and that dataset's rows:
-   `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12 PCK_BENCH_HBM_FREQ=10000 scripts/create_nsys_profile.sh --cases <ds>.csv --device h100-80gb-hbm3 --host nebius-h100 --ssh "$H rsh" --remote-dir /home/dmitry/peacock/<i> --remote-cudf-root /home/dmitry/peacock/cudf-25.02`.
+7. The profiles, per dataset, from a cases file of the header and that dataset's rows, with
+   `P="PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12 PCK_BENCH_HBM_FREQ=10000"` and
+   `C="scripts/create_nsys_profile.sh --device h100-80gb-hbm3 --host nebius-h100 --ssh "$H rsh" --remote-dir /home/dmitry/peacock/<i> --remote-cudf-root /home/dmitry/peacock/cudf-25.02"`.
+   tpch: `$P $C --cases <ds>.csv` (both passes). tpcds takes three runs, because `nsys_calls.py`
+   refuses the 14 cases whose sf40 join order differs from the sf1 goldens and `set -e` then
+   skips the metrics pass: `$C --trace --cases <ds>.csv` keeps `loads.tsv`; `$C --trace --cases
+   <ds>-65.csv` (those 14 left out) writes `calls.tsv` and overwrites `loads.tsv`, so set the first
+   aside; `$P $C --metrics --cases <ds>.csv` writes `hbm.tsv`.
    Move `testdata/calibration/{calls,loads,hbm}.tsv` to `testdata/calibration/h100-80gb-hbm3/<ds>.sf40/`,
    and restore the H200's `calls.tsv` and `hbm.tsv` from git. Then `$H stop`.
 

@@ -399,8 +399,8 @@ def main():
     runs_seen = set(executions.values())
     if args.plans_dir:
         # One golden per (dataset, mode), found from the capture rather than listed by the
-        # caller. sf1 whatever the capture's sf: plan goldens live there, and recipes are
-        # the plan's shape. A missing golden is a refusal — this is the only thing that
+        # caller. sf1 whatever the capture's sf: plan goldens live there. A plan whose joins
+        # the planner orders differently at that sf is refused here. A missing golden is a refusal — this is the only thing that
         # says the regions are the plan's.
         for dataset, mode in sorted({(case[0], case[3]) for case, *_ in regs}):
             path = pathlib.Path(args.plans_dir) / f"{dataset}.sf1" / f"{mode}.plans.txt"

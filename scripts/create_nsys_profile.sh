@@ -43,7 +43,7 @@
 # WRITES (under testdata/calibration/)
 #   capture.sqlite           the trace capture's export
 #   calls.tsv                what one ABI call splits into, derived from it
-#   loads.tsv                where each parquet load's time goes, derived from it (not committed)
+#   loads.tsv                where each parquet load's time goes, derived from it (committed per device only)
 #   hbm.tsv                  the counters pass's traffic, a row per call of the pinned records
 # The counters pass is one capture per case, each joined on the host and deleted before the
 # next: sampling the whole set at the default frequency writes ~27 MB of export a second of
@@ -69,8 +69,8 @@ HBM_REL=calibration/hbm.tsv
 # and this script's passes cannot supply them.
 RECORDS_REL=calibration
 # Goldens nsys_calls.py checks the capture against, each case in `<dataset>.sf1/` under this.
-# sf1 because that is where plan goldens live — a plan's recipes are its shape and do not
-# depend on how much data it reads.
+# sf1 because that is where plan goldens live. A plan's recipes are its shape, but the planner
+# can order joins differently at sf40, and then the check refuses the case (sf40 baseline).
 PLANS_DIR=testdata/goldens
 
 # Part of the measurement, not display. Too high a sampling frequency and the device cannot
