@@ -4,25 +4,20 @@ use std::fmt::Write as _;
 
 use datafusion::arrow::datatypes::DataType;
 
+use super::dag_walk;
 use super::expr_text::{expr_text, join_filter_text};
 use crate::plan::Schema;
 use crate::plan::{AggCall, PlanAgg};
 use crate::plan::{AggregateBody, NodeRef, as_node_ref};
 use crate::plan::{BatchLayout, ColumnOrder, KeyDistribution, PartitionLayout, SortOrder};
 use crate::plan::{Expr, NamedExpr};
-use crate::plan::{GpuNode, RowInterval};
+use crate::plan::{GpuNode, PlanDag, RowInterval};
 
-pub(crate) fn render_plan(root: &dyn GpuNode) -> String {
-    let mut text = String::new();
-    render_node(root, 0, &mut text);
-    text
-}
-
-fn render_node(node: &dyn GpuNode, depth: usize, text: &mut String) {
-    let _ = writeln!(text, "{}{}", "  ".repeat(depth), node_line(node));
-    for child in node.children() {
-        render_node(child, depth + 1, text);
-    }
+pub(crate) fn render_plans(roots: &[&dyn GpuNode]) -> String {
+    let dag = PlanDag::of(roots);
+    dag_walk::render(&dag, &mut |at, indent, prefix, text| {
+        let _ = writeln!(text, "{indent}{prefix}{}", node_line(dag.nodes[at].node));
+    })
 }
 
 fn node_line(node: &dyn GpuNode) -> String {

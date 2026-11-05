@@ -134,6 +134,15 @@ Plan: `dag-driver-impl.md`, Tasks 1–11; each *Commit* step is a checkpoint the
 - `plans::shared(table, lanes)` is now in `src/tests/plans.rs`, and `driver/tests/mod.rs`'s copy (Task 6) is gone. `plan/dag/tests.rs` and `plan/validate/tests/holds.rs` keep their own one-lane `shared`/`shared_source`, untouched.
 - Counts after Task 8: `--lib` 1083 (1081 passed + 2 ignored), +4: Memory estimation 19. build-test.md: cpu 3598, `--lib` 1083, grand total 7978 (Rust 6148).
 
+## Task 9 notes
+
+- Dispatched 2026-11-05 (continued after Task 8's commit), CPU only, local. Task 9 has no device step.
+- `plan_text/dag_walk.rs::render(dag, first)` is the one walk: depth first over the roots in order, headers and `@k` back-references written there, each first visit's lines by the renderer's closure, handed the node's `PlanDag` index, its indent and its `@k ` prefix. A continuation line (`in_rows=`, `time_us=`) is indented from the indent, not from the prefix.
+- All four renderers go through it, and each one-root form delegates with `&[root]`: `render_plan`/`render_plans`, `render_plan_memory`/`render_plans_memory`, `render_run`/`render_runs`, `render_timings`/`render_timings_of_roots`. The old recursive walks are gone. `run_text` and `bench_text` walk `PlanDag` rather than `PlanIndex`: the driver's index is numbered by the same `PlanDag::of`, so the report's indices are the walk's. `timed_load_us` still builds a `PlanIndex` over one root, unchanged. The memory renderer reads `post_order` off the walk's nodes, which is what the model is indexed by since Task 8.
+- One test the plan does not list: `the_memory_section_prints_a_shared_node_once`. `a_run_renders_a_shared_node_once` lives in `driver/tests/render.rs`, beside the run renderer's other tests, since it needs the mock.
+- I wrote these tests before reporting Task 8's checkpoint, set them aside as a patch, and reapplied them after Task 8's commit. They failed to compile (no `render_plans`, `render_plans_memory` or `render_runs`) before the implementation. Mutation check: never labelling a shared node turns all four red.
+- Counts after Task 9: `--lib` 1088 (1086 passed + 2 ignored), +5: Plan text 20, `executor::driver::tests` 163. build-test.md: cpu 3603, `--lib` 1088, grand total 7983 (Rust 6153).
+
 ## Golden baseline (Task 1 Step 1, parent state `f52c11b6`, local)
 
 - `--lib`: 984 passed, 2 ignored (986 cases).

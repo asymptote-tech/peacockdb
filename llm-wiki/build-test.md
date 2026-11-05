@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 7978 test cases — Rust 6148, C++ 283, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 7983 test cases — Rust 6153, C++ 283, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3598 cases: `--lib` 1083, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3603 cases: `--lib` 1088, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -392,14 +392,16 @@ CASE operand or as `date_bin`'s argument is refused naming #249. A hold buffer c
 nothing: the same bytes and wire nodes as without it, and no recipe of its own. The trivial kinds are not here — the plan goldens run them over every
 corpus query
 
-| Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 16 |
+| Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 20 |
 |---|---|--:|
 
 the renderer against what the planner emits from real SQL: every column reference prints name
 at ordinal, every node carrying a fetch prints it, a join prints its keys and projection by
 name — a mark join's mark among them — a null decimal prints as `NULL`, a source prints its
 mapping verbatim, a name that is not a token is backquoted, no node name carries an exec
-suffix, and a hold buffer prints a line of its own
+suffix, and a hold buffer prints a line of its own. Over several roots: one root printing no
+header, a shared node printed once and referenced as `@1` after, a buffered reader's buffer above
+the reference, and the memory section drawn the same way
 
 | One driver, two backends | [one_generic_driver_serves_two_backends_with_different_batch_types](../peacockdb-core/src/executor/tests.rs) | 2 |
 |---|---|--:|
@@ -410,7 +412,7 @@ a `CpuBatch`'s share holding the same Arrow buffers as the batch, column by colu
 
 *subcomponent*
 
-| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 162 |
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 163 |
 |---|---|--:|
 
 flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
@@ -421,7 +423,7 @@ the calls not made and a mid-plan limit judged by the rows it emitted, never its
 each node emitted and consumed (the two records the corpus goldens
 read), the accountant through the drivers, a backend failure stopping the query with the
 accounting still reconciling, the execution golden's text with every number chosen by the
-script, every empty scatter lane dropped while a lane that owes its probe reaches `SetBuild` with no
+script — over several roots a shared node rendered once — every empty scatter lane dropped while a lane that owes its probe reaches `SetBuild` with no
 batch, a zero-row build draining like none, and the mock against its own
 script; then the measurement side: the ABI-call record indexed by the lanes a node is driven on,
 holding the backend's calls and not the driver's own, a backend that names no seq leaving every

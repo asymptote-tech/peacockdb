@@ -11,7 +11,9 @@ use super::mock::{EmitRule, Script, spec};
 use super::*;
 use crate::executor::{AbiCall, AbiCalls, AbiTarget};
 use crate::executor::{Region, join_regions, nodes_as_recorded};
-use crate::plan_text::{render_plan, render_run, render_timings, timed_device_us, timed_load_us};
+use crate::plan_text::{
+    render_plan, render_run, render_runs, render_timings, timed_device_us, timed_load_us,
+};
 use crate::tests::plans::*;
 use crate::wire::FbKind;
 
@@ -398,4 +400,31 @@ fn region(seq: u32, call_index: u64, device_us: u64) -> Region {
         host_us: device_us,
         device_us,
     }
+}
+
+#[test]
+fn a_run_renders_a_shared_node_once() {
+    let script = Script::default().source("s", vec![vec![spec(10, 80), spec(7, 56)]]);
+    let s = shared("s", 1);
+    let roots = vec![unload(filter(read(&s))), unload(filter(read(&s)))];
+    let fused = run_roots(&refs(&roots), &script);
+    let root = "  GpuUnload: output_rows=17, output_bytes=139
+    in_rows=[[17]] batch_rows=[[10,7]] batch_bytes=[[82,57]]
+    GpuFilter: predicate=k@0, lanes=1, batches=multiple, output_rows=17, output_bytes=136
+      in_rows=[[17]] batch_rows=[[10,7]] batch_bytes=[[80,56]]
+";
+    assert_eq!(
+        render_runs(&refs(&roots), &fused.report),
+        format!(
+            "\
+early_exit=none
+root 0:
+{root}      @1 GpuLoadParquet: table=s, projections=[k@0], partition_groups=[[[0]]], lanes=1, \
+batches=multiple, output_rows=17, output_bytes=136
+        in_rows=[] batch_rows=[[10,7]] batch_bytes=[[80,56]]
+root 1:
+{root}      @1
+"
+        )
+    );
 }

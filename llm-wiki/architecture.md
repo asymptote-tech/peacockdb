@@ -1547,6 +1547,15 @@ against nothing at plan time — what the device produces for it is held to the 
 batch by the test harness and the corpus's validator — and the C++ reader checks each reference's
 name (`column_at`).
 
+**Several roots print as one text, and a shared node prints once.** With several roots each
+tree is preceded by `root <i>:`, counted from 0, and indented one level; one root prints no
+header, so a single query's text is unchanged. A node two or more parents read prints its line
+prefixed `@<k> ` where the walk first reaches it, `k` counting such nodes from 1 in walk order.
+Every later visit prints `@<k>` alone and does not descend. The walk is `PlanDag`'s,
+`plan_text/dag_walk.rs`, and all four renderers draw through it: the plan, the memory section,
+the execution text and the benchmark tree. A `GpuHoldBuffer` prints its own line in each, so a
+buffered reader of a shared source reads as the buffer with `@<k>` beneath it.
+
 **Estimates go in a `--- memory ---` section per query, not on the node line.** They churn where
 plan shapes do not — an estimator change, then #19's statistics, then #147's refinement — so on
 the node line every such change would rewrite every line and a reader could not tell a shape
