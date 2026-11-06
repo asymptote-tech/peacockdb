@@ -1426,6 +1426,17 @@ pub fn section_href(rel: &str, line: usize) -> String {
     benchmark_report::section_href(rel, line)
 }
 
+/// A time cell of the page: microseconds as milliseconds, one decimal. For the fused tables,
+/// which `prototypes` builds.
+pub(crate) fn report_ms(us: u64) -> String {
+    benchmark_report::ms(us)
+}
+
+/// A peak cell of the page: bytes as GiB, two decimals.
+pub(crate) fn report_gib(bytes: u64) -> String {
+    benchmark_report::gib(bytes)
+}
+
 /// What became of one benchmark case in its mode's file.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CaseOutcome {

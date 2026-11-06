@@ -12,9 +12,9 @@
 #[cfg_attr(not(test), allow(dead_code))]
 mod fuser;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::test_support::BenchNode;
+use crate::test_support::{BenchNode, ReportTable};
 
 /// The `all` batch's measured runs after its warm-up: it is the longest, and 3 still give a
 /// second minimum. The other batches measure `MEASURED_RUNS`.
@@ -84,6 +84,13 @@ impl<'a> FusedSection<'a> {
             .map(|node| node.total_us)
             .sum()
     }
+}
+
+/// The report page's fused-batches tables: one per `<device>/fused/<ds>.sf<sf>/tp1_single.fused.txt`
+/// under `root`, by device, dataset and sf, a row per batch linked to its section. No fused file,
+/// no table.
+pub fn fused_report_tables(root: &Path) -> Vec<ReportTable> {
+    fuser::fused_report_tables(root)
 }
 
 /// One fused section, or `None` for a marker or a failed batch's record.

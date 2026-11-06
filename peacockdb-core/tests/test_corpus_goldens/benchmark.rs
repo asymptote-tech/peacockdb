@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use super::benchmark_checks::{fused_problem, rows_problem, section_problem};
-use peacockdb_core::prototypes::parse_fused_section;
+use peacockdb_core::prototypes::{fused_report_tables, parse_fused_section};
 use peacockdb_core::test_support::{
     BUILD, FAILED, MODES, Mode, SKIPPED, benchmark_report_path, device_slug, line_difference,
     load_csv, ordered_sections, parse_benchmark_section, render_benchmark_report,
@@ -403,7 +403,8 @@ fn the_benchmark_cases_follow_the_registry() {
 
 /// The committed page is, byte for byte, what the trees under `testdata/benchmark-results/`
 /// render through `parse_benchmark_section`, the main list's order giving the row order: the
-/// registry's, which writes the list (`the_benchmark_cases_follow_the_registry`). Under
+/// registry's, which writes the list (`the_benchmark_cases_follow_the_registry`). The fused
+/// files under it add a table each, through `fused_report_tables`. Under
 /// `UPDATE_CANONICAL=1` the page is rewritten and the test passes. A commit that changes a tree
 /// and not the page fails here, naming the first line that moved.
 #[test]
@@ -412,7 +413,8 @@ fn the_benchmark_report_matches_the_trees() {
         .into_iter()
         .map(|(dataset, query, _)| (dataset, query))
         .collect();
-    let want = render_benchmark_report(&testdata_root().join("benchmark-results"), &order, &[]);
+    let root = testdata_root().join("benchmark-results");
+    let want = render_benchmark_report(&root, &order, &fused_report_tables(&root));
     if std::env::var("UPDATE_CANONICAL").is_ok() {
         write_benchmark_report(&want);
         return;

@@ -405,11 +405,7 @@ fn cells(place: &Place, mode: &str, device: &Device, found: Option<&Found>) -> S
                 escape(UNPINNED_MEANS)
             ),
         };
-        let peak = section
-            .count("peak_bytes")
-            .map_or("—".to_string(), |bytes| {
-                format!("{:.2}", bytes as f64 / 1073741824.0)
-            });
+        let peak = section.count("peak_bytes").map_or("—".to_string(), gib);
         let wrong = case
             .filter(|case| case.status == CaseStatus::Wrong && case.modes.iter().any(|m| m == mode))
             .map_or(String::new(), |case| {
@@ -534,8 +530,13 @@ fn first_line(text: &str) -> &str {
 }
 
 /// Microseconds as milliseconds with one decimal.
-fn ms(us: u64) -> String {
+pub(crate) fn ms(us: u64) -> String {
     format!("{:.1}", us as f64 / 1000.0)
+}
+
+/// Bytes as GiB with two decimals: the peak column's unit.
+pub(crate) fn gib(bytes: u64) -> String {
+    format!("{:.2}", bytes as f64 / 1073741824.0)
 }
 
 /// As Python's `html.escape`, which `ticket_widget.py` writes `report.html` with.

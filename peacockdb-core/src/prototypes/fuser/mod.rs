@@ -17,6 +17,7 @@ mod lists;
 mod loads;
 mod merge;
 mod pipeline;
+mod report;
 mod section;
 #[cfg(test)]
 mod tests;
@@ -518,6 +519,11 @@ pub(crate) fn parse_fused_section(body: &str) -> Option<FusedSection<'_>> {
 #[cfg(not(feature = "rust-only"))]
 pub(crate) async fn benchmark_fused(dataset: &str, sf: &str, batch: &str) {
     benchmark::benchmark_fused(dataset, sf, batch).await
+}
+
+/// One table per fused file under `root` (`benchmark-results/`), for bench-rows' report page.
+pub(crate) fn fused_report_tables(root: &std::path::Path) -> Vec<crate::test_support::ReportTable> {
+    report::fused_report_tables(root)
 }
 
 /// Whether a run failed for want of device memory: rmm's `bad_alloc`/`out_of_memory`, or a

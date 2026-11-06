@@ -242,6 +242,19 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     installed; `bash -n` on both scripts.
   - Next: Task 7 (the page's table). Task 9's build is the first real run of `benchmark_fused`.
 
+- 2026-11-06, Task 7 (developer). Checkpoint `fuser: the report page's fused-batches table`
+  reported, not committed. `--lib` 1191 → 1197 passed (+6 `prototypes::fuser::report::tests`),
+  goldens 64 with the page test unchanged (no fused file committed), formatting 39.
+  - **The page's units are bench-rows' own**: `benchmark_report.rs`'s `ms` and a new `gib` (the
+    peak cell's former inline format) are `pub(crate)`, reached as `test_support::report_ms` and
+    `report_gib`, so the fused tables cannot drift from the main ones.
+  - **A failed batch** (`status=failed reason=…`) is a row too, outcome `failed: <reason>`
+    (class `off`), which the plan did not list; test `a_failed_batch_says_why`.
+  - Order: device directory name, then dataset, then sf as a number (`sf40` before `sf100`);
+    test `tables_go_by_device_then_dataset_then_scale`. A row's link is its `== <batch>` line,
+    as the main tables link a section.
+  - The link-line mutation (`at` for `at + 1`) failed two tests.
+
 ## The hold rule (spec 1a)
 
 All numbers are the sf40-baseline tree's, per origin node: Σ `batch_bytes` and Σ `batch_rows`
