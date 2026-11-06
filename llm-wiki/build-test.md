@@ -9,7 +9,8 @@ Code and tests are authoritative; this page maps them.
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
 CI GPU job, `--test-threads=1`, on nebius-gpu while shad-gpu is down (*Nebius host*); the sf40
-benchmark cases run by hand on nebius-h100, through `run-gpu.sh … run bench`, and the sf40 C++ pair
+benchmark cases run by hand on nebius-h100, through `run-gpu.sh … run bench` (the fused ones
+through `run prototype_fused_benchmarks`), and the sf40 C++ pair
 has no host while shad-gpu is down (its rows say so) · `manual` = no CI step runs it · `2gpu` =
 manual, host with ≥2 GPUs (verda-gpu) · `validate-large` = validate-large.yml manual dispatch.
 The first table says it once per block: cpu and ffi are dataset-matrix, gpu is shad-gpu. Everything
@@ -1936,13 +1937,13 @@ execution suite — not just the golden/meta tier. Naming a tier takes `--test`.
 been mis-transcribed at least once; see the "refactor is verified with a subset" rule
 below.
 
-**A third feature, `test-support`, is never passed by hand.** It gates `src/test_support/`,
-the shared harness — the testdata root, the modes, the golden-text reader, the link-time
+**A third feature, `test-support`, is passed by one script only.** It gates `src/prototypes/` and
+`src/test_support/`, the shared harness — the testdata root, the modes, the golden-text reader, the link-time
 registry, the result comparators, the corpus goldens and the corpus case itself — which the
 crate's unit tests reach as `crate::test_support::…` and the `tests/*.rs` binaries as
 `peacockdb_core::test_support::…`. The crate's dev-dependency on itself turns it on, so `cargo
-test` in every shape sees the module and `cargo build` cannot name it; no CI step and no script
-passes the flag. The corpus binaries and `test_corpus_goldens` reach it directly through
+test` in every shape sees the module and `cargo build` cannot name it. No CI step passes the
+flag; `stage-install.sh` does, to build `prototype_fused_benchmarks` ("Fused batches"). The corpus binaries and `test_corpus_goldens` reach it directly through
 `cpu_case`, `gpu_case`, `duckdb_case`, `duckdb_gpu_case` and `authoritative_mode`, whose
 signatures name no engine type; the other suites name `test_support` directly. `tests/common/` holds only the two case
 lists, `corpus_cases.inc` and `corpus_benchmark_cases.inc`: each corpus binary `include!`s its
@@ -1969,7 +1970,7 @@ no arguments beyond what is shown and need no dataset or device.
 
 | Script | Question | Invocation |
 |---|---|---|
-| `scripts/case-inventory.sh` | every test case a shape compiles, one per line — `--lib` and every `--test` binary for `rust-only` and `cudf`, `--lib` alone for `gpu`, since no `--test` target reads the `gpu` feature and their `cudf` listing stands | `scripts/case-inventory.sh rust-only`, or `CUDF_ROOT=<rapids env> scripts/case-inventory.sh cudf\|gpu` |
+| `scripts/case-inventory.sh` | every test case a shape compiles, one per line — `--lib` and every `--test` binary for `rust-only` and `cudf`, `--lib` alone for `gpu`, since the only `--test` target that reads the `gpu` feature, `prototype_fused_benchmarks`, is not a `test_*.rs` file it lists, and the others' `cudf` listing stands | `scripts/case-inventory.sh rust-only`, or `CUDF_ROOT=<rapids env> scripts/case-inventory.sh cudf\|gpu` |
 | `scripts/compare-inventory.sh` | did any case stop compiling into its target | `scripts/compare-inventory.sh <shape> <baseline> <current>` — the baseline is an argument, so it outlives whichever task took it |
 | `scripts/visibility-dump.py` | every `pub`/`pub(...)` item with its declaring file; `--items` drops the file and visibility, giving the set a move cannot change | `scripts/visibility-dump.py peacockdb-core/src` |
 | `scripts/residue-gate.sh` | does a retired name survive anywhere, tracked or not | `scripts/residue-gate.sh` |
@@ -2232,8 +2233,8 @@ by default. `<v>` is the cuDF version, 25.02 by default.
 `scripts/env/stage-install.sh [--cudf <v>]` makes the install `ship` sends. It runs at the tree
 root inside the build image of `<v>`, and refuses another image (exit 2). It builds and installs
 the C++ into `cpp/install`. Then it stages, from empty, the gpu test binaries into
-`cpp/install/rust-tests/` and the release `peacock_gpu_benchmarks` into
-`cpp/install/rust-benchmarks/`, each stripped of debug info. cargo builds into `target-img-<v>`
+`cpp/install/rust-tests/` and the release `peacock_gpu_benchmarks` and
+`prototype_fused_benchmarks` into `cpp/install/rust-benchmarks/`, each stripped of debug info. cargo builds into `target-img-<v>`
 unless `CARGO_TARGET_DIR` is set. Exit 1 is a failed build. It runs on nebius-cpu128 ("The CPU-VM
 build").
 
@@ -2639,8 +2640,8 @@ The binaries and data are mounted, never in the image:
   `host=` is its own. Resuming needs `-e PEACOCK_BENCH_RESUME=1` on the `docker run`, which
   passes none of the caller's environment through.
 - `/peacock/install` is a staged `cpp/install`, built in the build image of the same version:
-  `lib/libpeacock_gpu.so`, `bin/peacock_*_tests`, `rust-tests/` and, for `bench`,
-  `rust-benchmarks/`. Read-only.
+  `lib/libpeacock_gpu.so`, `bin/peacock_*_tests`, `rust-tests/` and, for `bench` and
+  `run prototype_fused_benchmarks`, `rust-benchmarks/`. Read-only.
 - `/peacock/testdata` is the repository's `testdata/` with its datasets. Read-write: a run writes
   `benchmark-results/` and the calibration record.
 - The entrypoint is `/opt/run/run-tests.sh <list|filter|bench>`. `list` is the L40S list, by
@@ -3288,8 +3289,8 @@ whatever the sf1 line declares. Near the cap DuckDB's longer floats can pass it 
 
 query-fuser's prototype (`src/prototypes/fuser/`, spec `llm-wiki/tasks/query-fuser.md`). Eight
 cases, `bench_fused_<tpch|tpcds>_sf40_<first3|first10|first20|all>_tp1_single`. Each fuses that
-prefix of the H100 `cases.csv` list, read when the case runs, into one plan with one load per
-file. It runs at sf40 only: the hold rule and the cap read sf40-baseline's
+prefix of the H100 `cases.csv` list, read when the case runs, into one plan with one shared load per
+file, plus a load per re-read the hold rule chooses. It runs at sf40 only: the hold rule and the cap read sf40-baseline's
 `tp1_single.benchmark.txt` and `calibration/h100-80gb-hbm3/<ds>.sf40/loads.tsv`. Any other scale
 panics.
 

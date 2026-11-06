@@ -1104,8 +1104,8 @@ aside: not as a path, an alias or a brace-list item. The engine never depends on
   `SharedSource` over the union of their columns and row groups. Each reader selects its own
   columns through a column-ref `GpuProject`, or reads the source itself. Three shapes stay
   unshared, with the reason recorded: a scan a limit cut to a prefix (`limit-cut`), a scan whose
-  columns would gain NULLs (`nulls:<col>`), and a rows-only scan beside column scans
-  (`rows-only`). Every reader of a shared scan inside a hold is buffered or re-reads the table,
+  columns would gain NULLs (`nulls:<col>`), and a rows-only scan beside column scans, or a lone
+  column scan beside rows-only ones (`rows-only`). Every reader of a shared scan inside a hold is buffered or re-reads the table,
   as a chooser decides. The benchmark's chooser and its concurrency cap are plain functions of
   the sf40 baseline's numbers and the rmm pool, written down in the detail file. It reports, without executing, the identical subtrees above the shared
   sources and what merging them would save (the merge hint), and what overlapping loads with
@@ -1321,8 +1321,8 @@ Three conventions the signatures do not carry:
   `result_from_handle`, which are otherwise the two halves of the limit rule — one produces
   a handle, the other a result.
 - **Instrumentation is process-global and off by default; the benchmark harness and the
-  timing tests are what turn it on** — `peacock_gpu_benchmarks`, `test_node_timing`, two
-  `gpu_tests` cases in the GPU backend, and the gtest fixtures on both C++ tiers. Without
+  timing tests are what turn it on** — `peacock_gpu_benchmarks`, `prototype_fused_benchmarks`,
+  `test_node_timing`, two `gpu_tests` cases in the GPU backend, and the gtest fixtures on both C++ tiers. Without
   the pool every cuDF intermediate is a `cudaMalloc`/`cudaFree` round trip
   ([#148](tickets/performance.md#t148)); the gtest binaries install it from their own `main()`, and this
   symbol exists for a Rust caller that cannot include the C++ header. Under `set_node_timing` every per-call entry point opens one region per output

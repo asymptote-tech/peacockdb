@@ -854,6 +854,12 @@ Keys:
 - **Nit 2:** `build-test.md:7` header should match the tables (8141 / Rust 6296 at cf5ec195); the developer updates it with this round's new tests.
 - Not a finding: buffers left when a group dissolves (at most 0.44 GB); dropping them in `regrouped` is optional.
 
+## Completeness pass (2026-11-06)
+
+- Reviewer (what is wrong): 0 blocking, 0 important; every Done-when item met, recomputed from the committed files. Note: the fused format, hold and cap rules live only in this detail file, which the post-merge archive step deletes; architecture.md, build-test.md and `fuser/mod.rs` point here.
+- Analyst (what is missing): 1 important. The merge hint groups identical subtrees without requiring members from two or more queries (`merge.rs:88-101`). The fuser also shares two scans of one file inside one query, so within-query repeats dominate `saved_us` (tpcds all: 1,182 ms within, at most 94 ms across; tpcds first3: 77.5 ms, all within). Spec item 2 asks for "across queries". **Decided:** restrict merge groups to members spanning two or more queries; regression test; rerun the eight batches on the H100 (the executed plans do not change, so the profiles from 51b27ddf stand and are not rerun). For batching-report: part of the measured load saving is deduplication inside one query (`shared=` shows `q14+q14+q14`), which a batch of one would also show.
+- Falsified sentences (analyst) fixed by the coordinator: architecture.md "Prototypes" (`rows-only` covers a lone column scan) and "Interfaces" (instrumentation: `prototype_fused_benchmarks`); build-test.md: the `test-support` feature paragraph, `case-inventory.sh`'s gpu note, "Fused batches" (one shared load per file plus re-reads), stage-install's staged binaries, the run image's `rust-benchmarks/`, the Runs legend.
+
 ## Checkpoints
 
 | step | commit | note |
