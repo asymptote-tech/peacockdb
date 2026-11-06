@@ -706,6 +706,20 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     untracked sf40-baseline leftover.
 - 2026-11-06: H100 rerun after round 2 committed. **Decided:** tpcds first10's 2.3 % slowdown (a group's shared load is rebuilt only at the end of a resolve, so mid-resolve re-reads overstate the ledger) is accepted as a stated limit of the prototype, not fixed: seven of eight batches got faster or held, and another rebuild-per-decision change would need a fourth H100 session for a ~0.1 s effect. Reviewer round 3 dispatched.
 - 2026-11-06: review round 3: 0 blocking, 0 important, 1 nit (wording, fixed by the coordinator). Board `completing`; completeness pass (fresh reviewer, fresh analyst) dispatched.
+- 2026-11-06, completeness pass (developer): the merge hint across queries only, local, test
+  first. Checkpoint reported, not committed; the H100 rerun of the eight batches waits for it.
+  - `groups_of` (`merge.rs`) keeps a group only where its members come from two or more
+    queries. A group that does keeps every member, a query's own repeat among them, as spec
+    item 2's "across queries" reads. RED: `a_query_repeating_a_subtree_with_itself_is_no_entry`
+    (`merge::tests`): one query joining a coalesced filter over lineitem with the same filter,
+    the probe's through a buffer, gave one entry with both members in q0 (30 µs). Green with
+    the filter, red again with it reverted alone.
+  - `merge_hint`'s comment, "The fused format"'s `--- merge ---` and build-test.md (the merge
+    row 6, `--lib` 1211, the cpu block 3729, the header 8144 / Rust 6299; the tables sum to
+    8144) say so.
+  - **Checks:** `--lib` 1209 passed, 2 ignored; `test_corpus_goldens` 64; cost-report
+    formatting 39; `scripts/cargo-cudf.sh check -p peacockdb-core --features gpu,test-support
+    --tests` clean; no warnings; rustfmt on `merge.rs`, `merge/tests.rs`, `mod.rs`.
 
 ## The hold rule (spec 1a)
 
@@ -819,7 +833,8 @@ Keys:
 - `answers=match`: every root's answer equalled its query run alone on the same device; a
   mismatch fails the batch, so no other value is written.
 - `--- merge ---`: the merge hint. `saved_us` the batch's total, then one `entry` per group,
-  largest saving first; `members` are `<query>:<pre-order index in its own tree>`; `node` is last
+  largest saving first. A group's members come from two or more queries (the completeness
+  pass): a query repeating a subtree with itself over a shared load is no entry; `members` are `<query>:<pre-order index in its own tree>`; `node` is last
   and keeps its spaces.
 - `--- pipeline ---`: the pipelining hint, the model stated on one line. `load_order` the tables
   in the order the model loads them; `serial_us`, `makespan_us`, `saved_us = serial − makespan`.

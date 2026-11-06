@@ -83,8 +83,9 @@ fn keys_of(dag: &PlanDag<'_>) -> Vec<(usize, bool)> {
     keys
 }
 
-/// The groups: two or more nodes of one key above a shared source, each standing for a node
-/// of a query's own tree, its root aside. Ordered by first member, members in index order.
+/// The groups: two or more nodes of one key above a shared source, from two or more queries,
+/// each standing for a node of a query's own tree, its root aside. Ordered by first member,
+/// members in index order.
 fn groups_of(dag: &PlanDag<'_>, fused: &Fused, keys: &[(usize, bool)]) -> Vec<Vec<usize>> {
     let mut by_key: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     for (at, (key, reaches)) in keys.iter().enumerate() {
@@ -98,7 +99,11 @@ fn groups_of(dag: &PlanDag<'_>, fused: &Fused, keys: &[(usize, bool)]) -> Vec<Ve
             by_key.entry(*key).or_default().push(at);
         }
     }
-    let mut groups: Vec<Vec<usize>> = by_key.into_values().filter(|m| m.len() > 1).collect();
+    let across = |members: &Vec<usize>| {
+        let query = |at: &usize| fused.origins[*at][0].query;
+        members.iter().any(|m| query(m) != query(&members[0]))
+    };
+    let mut groups: Vec<Vec<usize>> = by_key.into_values().filter(across).collect();
     groups.sort_by_key(|members| members[0]);
     groups
 }

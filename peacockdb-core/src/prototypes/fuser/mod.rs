@@ -255,12 +255,13 @@ pub(crate) struct MergeHint {
 
 /// What merging the identical subtrees above the shared sources would save: a report, not an
 /// execution. A node's key is its plan line and its children's keys (a shared source's is its
-/// sharing key, a buffer's its child's). A group is two or more nodes of one key whose subtree
-/// reaches a shared source; no root is in one. An entry is a group no same-size group contains
-/// member for member (each member's parent, through any buffer, in it). It saves Σ − max of its
-/// copies' Σ baseline `total_us` over their subtrees, loads, inserted projects and buffers
-/// excluded; one copy stays. Entries come largest saving first. The batch saves Σ over every
-/// group of (Σ own `total_us` − max own `total_us`), each node being in one group.
+/// sharing key, a buffer's its child's). A group is two or more nodes of one key, from two or
+/// more queries, whose subtree reaches a shared source; no root is in one. An entry is a group
+/// no same-size group contains member for member (each member's parent, through any buffer, in
+/// it). It saves Σ − max of its copies' Σ baseline `total_us` over their subtrees, loads,
+/// inserted projects and buffers excluded; one copy stays. Entries come largest saving first.
+/// The batch saves Σ over every group of (Σ own `total_us` − max own `total_us`), each node
+/// being in one group.
 pub(crate) fn merge_hint(fused: &Fused, baseline: &Baseline) -> MergeHint {
     merge::merge_hint(fused, baseline)
 }

@@ -3,8 +3,8 @@
 
 use crate::plan::GpuNode;
 use crate::prototypes::fuser::tests::{baseline, buffer_every_hold_lowest, re_read_every_hold};
+use crate::prototypes::fuser::tests::{coalesce, join, lineitem, unload};
 use crate::prototypes::fuser::tests::{count, filter, filter_above, fused_with, held_pair};
-use crate::prototypes::fuser::tests::{lineitem, unload};
 use crate::prototypes::fuser::{Baseline, MergeHint, Origin, merge_hint};
 
 /// Filters take `filters[q]`, aggregates `counts[q]`, loads 100 and unloads 7.
@@ -104,4 +104,25 @@ fn a_buffer_does_not_split_a_group() {
     assert_eq!(hint.entries.len(), 1);
     assert!(hint.entries[0].node.starts_with("GpuFilter"));
     assert_eq!(hint.entries[0].saved_us, 30);
+}
+
+/// One query joining a filter over lineitem, coalesced, with the same filter: both scans read one shared
+/// load, the probe's through a buffer, and the two filters are alike, but merging them is not
+/// what the hint reports: only subtrees across queries are.
+#[test]
+fn a_query_repeating_a_subtree_with_itself_is_no_entry() {
+    let trees = vec![unload(join(
+        coalesce(filter(lineitem(&[0, 4], &[0]))),
+        filter(lineitem(&[0, 4], &[0])),
+    ))];
+    let fused = fused_with(&trees, &mut buffer_every_hold_lowest);
+    assert_eq!(fused.shared.len(), 1, "the two scans read one load");
+    assert_eq!(
+        fused.holds.len(),
+        1,
+        "the probe's filter reads it through a buffer"
+    );
+    let hint = merge_hint(&fused, &baseline(&trees, times(&[30], &[])));
+    assert!(hint.entries.is_empty(), "{:?}", hint.entries);
+    assert_eq!(hint.saved_us, 0);
 }
