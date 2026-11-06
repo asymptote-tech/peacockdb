@@ -25,6 +25,14 @@
 !/calibration/*-*/*/calls.tsv
 !/calibration/*-*/*/loads.tsv
 !/calibration/*-*/*/hbm.tsv
+# query-fuser's profiles, a dataset's directory under the device's fused/: per batch its calls
+# and loads, then the merged hbm.tsv and the batches whose capture failed.
+!/calibration/*-*/fused/*/
+/calibration/*-*/fused/*/*
+!/calibration/*-*/fused/*/*.calls.tsv
+!/calibration/*-*/fused/*/*.loads.tsv
+!/calibration/*-*/fused/*/hbm.tsv
+!/calibration/*-*/fused/*/failed.tsv
 
 # The device's recorded answers from a cuDF other than shad-gpu's 25.02. `gpu-result.txt`
 # IS committed — one version per file, so the comparison with DuckDB reads one engine's

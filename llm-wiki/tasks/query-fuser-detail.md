@@ -381,6 +381,144 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     - dev's `/` has 12 GB free. The trace pass brings each batch's `capture-<batch>.sqlite`
       home, and the corpus's capture was 1.2 GB, so watch `df -h /` during Step 5.
 
+- 2026-11-06, Task 9 (developer), **rerun after the fix (`03b7af97`): every batch measured,
+  both profiles complete.** Nothing committed or staged.
+  - The first run's pulled files were set aside to `/tmp/qf-run1/`, and the VM's old
+    `fused/` results and records removed after `ship`, so the new files are one binary's
+    (resume keys a section by provenance, which does not name the binary).
+  - **Build.** nebius-cpu128 (60 GB free): sync, `check-build-image.sh` exit 0,
+    `stage-install.sh` exit 0 in 4 min, the install rsynced to
+    `/home/dmitry/build/peacock/query-fuser/install`, VM stopped.
+  - **H100.** 79 GB free, card idle. `install-watch` (no key file) exit 0. `prepare` skipped:
+    run at 05:39 this day, and the fix touched no image input (`run` checks the label and
+    would have refused, exit 2). `ship` exit 0, the five inputs present.
+  - **Batches**, one process each; tpch first3 without `PEACOCK_BENCH_RESUME`, the rest with
+    `=1`. All eight exit 0, `outcome=measured`, `answers=match`; none out of memory, no
+    marker. µs are the 2nd-min run, then load and execute; peak is the accountant's.
+
+    | batch | run_us | load_us | execute_us | cap | over_budget | buffers | re-reads | peak GB | wall |
+    |---|--:|--:|--:|--:|---|--:|--:|--:|--:|
+    | tpch first3 | 931199 | 590808 | 336098 | 3 | false | 8 | 1 | 42.4 | 475 s |
+    | tpch first10 | 4062112 | 3259796 | 785957 | 1 | true | 0 | 38 | 26.8 | 73 s |
+    | tpch first20 | 6259660 | 4791518 | 1440222 | 1 | true | 37 | 40 | 54.2 | 102 s |
+    | tpch all | 7222597 | 5408423 | 1781233 | 1 | true | 40 | 46 | 54.2 | 63 s |
+    | tpcds first3 | 595427 | 286540 | 305166 | 3 | false | 12 | 1 | 3.7 | 169 s |
+    | tpcds first10 | 4360983 | 1588374 | 2744943 | 1 | true | 67 | 19 | 45.1 | 72 s |
+    | tpcds first20 | 12060453 | 6261687 | 5735083 | 1 | true | 92 | 118 | 34.7 | 163 s |
+    | tpcds all | 36987469 | 22305327 | 14443467 | 1 | true | 102 | 642 | 37.3 | 234 s |
+
+    tpch first3's 475 s and tpcds first3's 169 s are mostly the prefill on a page cache the
+    restart emptied; the run before took 35 s for tpch first3.
+  - **Profiles**, `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12
+    PCK_BENCH_HBM_FREQ=10000` (the frequency is build-test.md's; the plan's Step 5 omits it).
+    tpch and tpcds each exit 0: both passes over all four batches, a `<batch>.calls.tsv` and
+    `<batch>.loads.tsv` per batch, `hbm.tsv` merged from 4 parts (tpch 1467 calls, tpcds
+    7112). No `failed.tsv`: no batch failed a capture or a join. Trace captures 21-565 MB
+    each; dev's `/` went from 12 GB to 8.9 GB free.
+  - `every_fused_section_adds_up` passes over both files, locally, with the VMs stopped.
+  - **Pulled, not committed:** `testdata/benchmark-results/h100-80gb-hbm3/fused/{tpch,tpcds}.sf40/tp1_single.fused.txt`;
+    `testdata/calibration/fused/{tpch,tpcds}.sf40/` (gitignored): the per-batch `calls.tsv`,
+    `loads.tsv`, `records.tsv`, `hbm.tsv`, `hbm-parts/`, `records-metrics.tsv` and the
+    `capture-*` files; logs in `~/.cache/peacock/run-gpu/peacockdb-beta/` and
+    `/tmp/qf2-*.log`. `testdata/calibration/hbm-parts/` came back with the pull
+    (sf40-baseline's leftover on the VM): untracked, not to be committed.
+  - **For Task 10:** copy to `calibration/h100-80gb-hbm3/fused/<ds>.sf40/` only
+    `<batch>.calls.tsv`, `<batch>.loads.tsv` and `hbm.tsv` (no `failed.tsv` exists this time);
+    not `*.records.tsv`, `records-metrics.tsv`, `hbm-parts/` or `capture-*`. The page test
+    fails until regenerated, because the new fused tables are missing from it.
+
+- 2026-11-06, Task 10 (developer), Steps 1-4 **to the two commits** (not made). All local,
+  every VM stopped.
+  - **Step 1, read back.** `every_fused_section_adds_up` passes over both files. All eight
+    sections are `outcome=measured` with `answers=match`; no section failed, so no ticket.
+  - **Protocol.** One process per batch. The batch's files are prefilled once into the pinned
+    host cache before any run (`prefill_*` below; no batch failed `prefill:` or `pinned
+    cache:`), then 1 warm-up and the 2nd-smallest of 10 measured runs, of 3 for `all`, every
+    run reading pinned buffers. The rmm pool is the benchmark's 69 GiB. Each root's answer is
+    checked against its query run alone on the device.
+  - **Per batch.** Shared and unshared are counts of loads; buffers are count and Σ bytes;
+    re-reads count and Σ `reread_us`; load and execute in ms; peak is the accountant's (a
+    lower bound), GB; cache is `pinned_cache=`'s `resident`, then this batch's prefill; wall
+    is the process's.
+
+    | batch | queries | shared | unshared | buffers | re-reads | cap | over budget | outcome | load | execute | peak | cache; prefill | wall |
+    |---|---|--:|--:|---|---|--:|---|---|--:|--:|--:|---|--:|
+    | tpch.sf40 first3 | 3 (q1..q3) | 5 | 0 | 8, 5.42 GB | 1, Σ 43 ms | 3 | false | measured | 591 | 336 | 42.4 | 39.5GiB; 8 files, 42.4 GB, 462.0 s | 475 s |
+    | tpch.sf40 first10 | 10 (q1..q10) | 8 | 0 | 0, 0.00 GB | 38, Σ 2565 ms | 1 | true | measured | 3260 | 786 | 26.8 | 39.5GiB; 8 files, 42.4 GB, 22.3 s | 73 s |
+    | tpch.sf40 first20 | 20 (q1..q20) | 8 | 0 | 37, 8.47 GB | 40, Σ 4052 ms | 1 | true | measured | 4792 | 1440 | 54.2 | 39.5GiB; 8 files, 42.4 GB, 21.6 s | 102 s |
+    | tpch.sf40 all | 22 (q1..q22) | 8 | 0 | 40, 8.46 GB | 46, Σ 4757 ms | 1 | true | measured | 5408 | 1781 | 54.2 | 39.5GiB; 8 files, 42.4 GB, 21.6 s | 63 s |
+    | tpcds.sf40 first3 | 3 (q1..q3) | 4 | 0 | 12, 4.27 GB | 1, Σ 34 ms | 3 | false | measured | 287 | 305 | 3.7 | 13.9GiB; 8 files, 14.9 GB, 161.1 s | 169 s |
+    | tpcds.sf40 first10 | 10 (q1..q10) | 10 | 0 | 67, 27.93 GB | 19, Σ 1075 ms | 1 | true | measured | 1588 | 2745 | 45.1 | 14.6GiB; 16 files, 15.7 GB, 13.6 s | 72 s |
+    | tpcds.sf40 first20 | 20 (q1..q23) | 12 | 0 | 92, 14.81 GB | 118, Σ 5889 ms | 1 | true | measured | 6262 | 5735 | 34.7 | 14.7GiB; 20 files, 15.8 GB, 8.3 s | 163 s |
+    | tpcds.sf40 all | 79 (q1..q99) | 24 | 0 | 102, 6.62 GB | 642, Σ 23804 ms | 1 | true | measured | 22305 | 14443 | 37.3 | 14.7GiB; 24 files, 15.8 GB, 8.1 s | 234 s |
+
+    Reads per table, from each section (one per shared load, plus each re-read and unshared
+    scan):
+    - tpch.sf40 first3: `reads=[lineitem:1,region:1,nation:1,supplier:1,part:1,partsupp:2,customer:1,orders:1]`
+    - tpch.sf40 first10: `reads=[lineitem:9,region:4,nation:9,supplier:6,part:3,partsupp:3,customer:5,orders:7]`
+    - tpch.sf40 first20: `reads=[lineitem:16,region:1,nation:3,supplier:4,part:5,partsupp:6,customer:5,orders:8]`
+    - tpch.sf40 all: `reads=[lineitem:19,region:1,nation:3,supplier:6,part:3,partsupp:6,customer:6,orders:10]`
+    - tpcds.sf40 first3: `reads=[store:1,date_dim:1,store_returns:2,customer:1,web_sales:1,catalog_sales:1,item:1,store_sales:1]`
+    - tpcds.sf40 first10: `reads=[store:1,date_dim:1,store_returns:2,customer:3,web_sales:6,catalog_sales:5,item:1,store_sales:6,catalog_page:1,catalog_returns:1,web_site:1,web_returns:1,customer_address:2,promotion:1,customer_demographics:2,reason:1]`
+    - tpcds.sf40 first20: `reads=[store:3,date_dim:18,store_returns:1,customer:15,web_sales:16,catalog_sales:16,item:21,store_sales:25,catalog_page:1,catalog_returns:2,web_site:1,web_returns:1,customer_address:6,promotion:1,customer_demographics:5,reason:1,household_demographics:1,call_center:1,warehouse:1,inventory:2]`
+    - tpcds.sf40 all: `reads=[store:31,date_dim:145,store_returns:14,customer:43,web_sales:52,catalog_sales:43,item:81,store_sales:81,catalog_page:2,catalog_returns:14,web_site:5,web_returns:12,customer_address:51,promotion:6,customer_demographics:17,reason:3,household_demographics:23,call_center:3,warehouse:7,inventory:6,ship_mode:3,income_band:5,time_dim:14,web_page:5]`
+  - **The first3 walls** are the prefill reading from a page cache the VM's restart had
+    emptied (tpch `prefill_us` 462 s, tpcds 161 s); the later batches found the files cached.
+  - **Against the queries run alone.** The summed sf40-baseline `run_us` of a batch's queries
+    (`tp1_single.benchmark.txt`, same device and protocol), against the fused run's, ms:
+
+    | batch | queries | Σ alone (load + execute) | fused (load + execute) | fused / Σ alone |
+    |---|--:|---|---|--:|
+    | tpch first3 | 3 | 1004 (667 + 334) | 931 (591 + 336) | 0.93 |
+    | tpch first10 | 10 | 3501 (2709 + 782) | 4062 (3260 + 786) | 1.16 |
+    | tpch first20 | 20 | 6355 (4917 + 1419) | 6260 (4792 + 1440) | 0.99 |
+    | tpch all | 22 | 7488 (5707 + 1760) | 7223 (5408 + 1781) | 0.96 |
+    | tpcds first3 | 3 | 718 (407 + 308) | 595 (287 + 305) | 0.83 |
+    | tpcds first10 | 10 | 6238 (3458 + 2758) | 4361 (1588 + 2745) | 0.70 |
+    | tpcds first20 | 20 | 13962 (8168 + 5748) | 12060 (6262 + 5735) | 0.86 |
+    | tpcds all | 79 | 38671 (24066 + 14455) | 36987 (22305 + 14443) | 0.96 |
+
+  - **An honest reading.** Six of the eight batches run at cap 1 with `over_budget=true`: the
+    shared loads, buffers and largest root already exceed the 90 % budget, so the roots run one
+    at a time and many held readers re-read (tpch first10: 0 buffers and 38 re-reads, lineitem
+    loaded 9 times; tpcds all: 642 re-reads, `date_dim` loaded 145 times). Only the two first3
+    batches run at cap 3 within budget. The fused time grows faster than the batch size (tpch
+    3 → 22 queries: 0.93 → 7.2 s; tpcds 3 → 79: 0.60 → 37 s), largely because later queries
+    cost more alone. Against the summed alone times the fused run saves 1-30 %, and tpch
+    first10 is 16 % slower than its queries alone. Execute is within 2 % of the summed alone
+    execute in every batch, so whatever is saved is load time, and re-reads under cap 1 give
+    most of it back. Each section's merge and pipelining hints estimate what more is
+    available.
+  - **Step 2, the profiles.** All 1005 rows of the eight `loads.tsv` have `load_us > 0`,
+    `host_read_us ≤ load_us`, `unattributed_us ≤ load_us` and `off_thread_device_us ≤ h2d_us +
+    decompress_us + decode_us + other_device_us` (a script over the files; no violation).
+    `host_read_source=none` throughout: the reads come from the pinned cache, so no OS read
+    falls in a load's window. tpch first3's loads, µs per execution (median), by recipe seq:
+
+    | seq | load_us | host_read_us | h2d_us | h2d_bytes | decompress_us | decode_us | other_device_us |
+    |--:|--:|--:|--:|--:|--:|--:|--:|
+    | 0 | 245369 | 0 | 63873 | 2898624785 | 75231 | 42705 | 12647 |
+    | 12 | 1233 | 0 | 18 | 2351 | 12 | 76 | 84 |
+    | 15 | 1305 | 0 | 19 | 4470 | 29 | 89 | 85 |
+    | 17 | 163444 | 0 | 600 | 31676072 | 107702 | 56258 | 100 |
+    | 19 | 39175 | 0 | 1526 | 49631672 | 29330 | 8494 | 154 |
+    | 22 | 40748 | 0 | 7600 | 328784853 | 27177 | 1093 | 603 |
+    | 40 | 41039 | 0 | 7597 | 328784853 | 27183 | 1093 | 602 |
+    | 60 | 36257 | 0 | 798 | 26432232 | 29260 | 4821 | 119 |
+    | 63 | 48330 | 0 | 7225 | 299761060 | 31465 | 2190 | 331 |
+
+    The shared lineitem load (seq 0): 64 ms copying 2.9 GB (45 GB/s, pinned) against 118 ms
+    decompressing and decoding, 13 ms of other device work and 55 ms unattributed, of 245 ms.
+    Copied with `cp -p` to `testdata/calibration/h100-80gb-hbm3/fused/<ds>.sf40/`:
+    `<batch>.calls.tsv`, `<batch>.loads.tsv`, `hbm.tsv` (no `failed.tsv` exists).
+  - **A gap the plan left, fixed here:** `testdata/.gitignore`'s `/calibration/*-*/*/*`
+    ignored the device's `fused/<ds>.sf40/` directories, so the profiles' files could not be
+    committed. Added: the dataset directory under `fused/` re-included, everything in it
+    ignored, then `*.calls.tsv`, `*.loads.tsv`, `hbm.tsv` and `failed.tsv` re-included.
+    `git check-ignore` shows a `*.records.tsv` there, the device's fetched records and the
+    `calibration/fused/` scratch area all still ignored. The file is not an image or data
+    input (`scripts/lib/image-inputs.sh`, `data-inputs.sh`).
+
 ## The hold rule (spec 1a)
 
 All numbers are the sf40-baseline tree's, per origin node: Σ `batch_bytes` and Σ `batch_rows`
@@ -516,3 +654,5 @@ Keys:
 |---|---|---|---|
 | nebius-cpu128 | 2026-11-06 05:17:59 | 2026-11-06 05:26:58 | 0.15 |
 | nebius-h100 | 2026-11-06 05:27:02 | 2026-11-06 05:44:50 | 0.30 |
+| nebius-cpu128 | 2026-11-06 06:06:11 | 2026-11-06 06:12:23 | 0.10 |
+| nebius-h100 | 2026-11-06 06:12:26 | 2026-11-06 07:25:00 | 1.21 |
