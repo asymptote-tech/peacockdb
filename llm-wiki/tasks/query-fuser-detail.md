@@ -86,6 +86,16 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
   - A node is a group candidate only where it stands for a node of its query's own tree, so
     inserted projects (time 0) never form an entry.
   - `MergeEntry.members` are in fused pre-order; entries with equal savings keep group order.
+- 2026-11-06, Task 4 (developer). Checkpoint `fuser: the pipelining hint` reported, not
+  committed. `--lib` +6 (`prototypes::fuser::pipeline::tests`).
+  - The test `baseline` builder moved from `merge/tests.rs` into `fuser/tests.rs`, shared.
+  - **Sources are ordinals in fused pre-order**, so "missing sources appended in fused
+    pre-order" is ascending ordinal order inside `pipeline_hint`.
+  - **The makespan is the later of the executor's last finish and the loader's last load**;
+    every load feeds some root, so the executor's finish always wins in practice.
+  - A shared source's load time is the largest over the origins its fused node holds *now*:
+    after a re-read the re-reading member is no longer one of them.
+  - Extra test beyond the plan's: `a_root_needing_two_sources_waits_for_both`.
 
 ## Checkpoints
 

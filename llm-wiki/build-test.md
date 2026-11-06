@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 8052 test cases — Rust 6219, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 8058 test cases — Rust 6225, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3658 cases: `--lib` 1143, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3664 cases: `--lib` 1149, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -918,6 +918,13 @@ naming it, and a baseline of another plan is refused naming the query and the no
 identical subtrees above a shared source across queries: two equal filters are one entry saving
 the cheaper copy, a different predicate is none, only the largest identical subtree is an entry,
 a nested group of fewer members counts once in the batch's total, and a buffer splits no group
+
+| Pipeline hint | [prototypes::fuser::pipeline::tests](../peacockdb-core/src/prototypes/fuser/pipeline/tests.rs) | 6 |
+|---|---|--:|
+
+the schedule of one loader beside one executor: the cheapest root loads first, a shared source
+loads once, a root waits for every source and for the executor; its inputs off a fused plan
+take a shared source's largest member load, and count a re-read as a source of its own
 
 | The fuser | [prototypes::fuser::fuse::tests](../peacockdb-core/src/prototypes/fuser/fuse/tests.rs) | 14 |
 |---|---|--:|

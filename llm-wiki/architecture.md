@@ -1106,7 +1106,8 @@ on a prototype. `cost-report`'s `test_source_formatting/prototypes.rs` enforces 
   columns would gain NULLs (`nulls:<col>`), and a rows-only scan beside column scans
   (`rows-only`). Every reader of a shared scan inside a hold is buffered or re-reads the table,
   as a chooser decides. It reports, without executing, the identical subtrees above the shared
-  sources and what merging them would save (the merge hint). It runs at sf40 only. Decisions
+  sources and what merging them would save (the merge hint), and what overlapping loads with
+  execution would save (the pipelining hint). It runs at sf40 only. Decisions
   and formats:
   `tasks/query-fuser-detail.md`.
 

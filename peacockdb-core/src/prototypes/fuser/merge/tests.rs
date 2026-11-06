@@ -2,49 +2,10 @@
 //! per node: which identical subtrees are entries, what each saves, and the batch's total.
 
 use crate::plan::GpuNode;
-use crate::prototypes::fuser::tests::{buffer_every_hold_lowest, re_read_every_hold};
+use crate::prototypes::fuser::tests::{baseline, buffer_every_hold_lowest, re_read_every_hold};
 use crate::prototypes::fuser::tests::{count, filter, filter_above, fused_with, held_pair};
 use crate::prototypes::fuser::tests::{lineitem, unload};
-use crate::prototypes::fuser::{Baseline, MergeHint, Origin, QueryTimes, merge_hint};
-
-/// Each tree's nodes in pre-order: names, and children as indices.
-fn pre_order(tree: &dyn GpuNode) -> (Vec<String>, Vec<Vec<usize>>) {
-    fn walk(node: &dyn GpuNode, names: &mut Vec<String>, children: &mut Vec<Vec<usize>>) {
-        let at = names.len();
-        names.push(node.name().to_string());
-        children.push(Vec::new());
-        for child in node.children() {
-            children[at].push(names.len());
-            walk(child, names, children);
-        }
-    }
-    let (mut names, mut children) = (Vec::new(), Vec::new());
-    walk(tree, &mut names, &mut children);
-    (names, children)
-}
-
-/// A baseline for `trees` in which query `q`'s node of name `n` took `us(q, n)`.
-fn baseline(trees: &[Box<dyn GpuNode>], us: impl Fn(usize, &str) -> u64) -> Baseline {
-    let per_query = trees
-        .iter()
-        .enumerate()
-        .map(|(query, tree)| {
-            let (names, children) = pre_order(tree.as_ref());
-            let zeros = vec![0; names.len()];
-            QueryTimes {
-                total_us: names.iter().map(|name| us(query, name)).collect(),
-                names,
-                children,
-                batch_rows: zeros.clone(),
-                batch_bytes: zeros,
-                load_us: 0,
-                execute_us: 0,
-                peak_bytes: 0,
-            }
-        })
-        .collect();
-    Baseline { per_query }
-}
+use crate::prototypes::fuser::{Baseline, MergeHint, Origin, merge_hint};
 
 /// Filters take `filters[q]`, aggregates `counts[q]`, loads 100 and unloads 7.
 fn times(filters: &[u64], counts: &[u64]) -> impl Fn(usize, &str) -> u64 {

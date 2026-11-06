@@ -12,6 +12,7 @@ mod baseline;
 mod fuse;
 mod lists;
 mod merge;
+mod pipeline;
 #[cfg(test)]
 mod tests;
 
@@ -238,4 +239,43 @@ pub(crate) struct MergeHint {
 ///   in one group, so nothing is counted twice.
 pub(crate) fn merge_hint(fused: &Fused, baseline: &Baseline) -> MergeHint {
     merge::merge_hint(fused, baseline)
+}
+
+/// What one root needs before it can run: its baseline execute time, and the sources it
+/// reads, as ordinals into the load times beside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RootNeeds {
+    pub(crate) execute_us: u64,
+    pub(crate) sources: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PipelineHint {
+    /// Source ordinals, in the order the model loads them.
+    pub(crate) load_order: Vec<usize>,
+    /// Σ loads + Σ executes: the run with nothing overlapped.
+    pub(crate) serial_us: u64,
+    pub(crate) makespan_us: u64,
+    /// `serial_us − makespan_us`.
+    pub(crate) saved_us: u64,
+}
+
+/// What overlapping loads with execution would save. A report, not an execution. The model:
+/// - One loader and one executor, each sequential, running at the same time.
+/// - A root starts once its last source is loaded and the executor is free; roots execute in
+///   the order they become ready, ties by root order.
+/// - Loads go greedily: next is the root whose missing sources take the least load time
+///   (ties by root order), and its missing sources are appended in ordinal order.
+/// - Against a measured fused run, the estimate is `(load_us + execute_us) − saved_us`.
+pub(crate) fn pipeline_hint(load_us: &[u64], roots: &[RootNeeds]) -> PipelineHint {
+    pipeline::pipeline_hint(load_us, roots)
+}
+
+/// [`pipeline_hint`]'s inputs off a fused plan. A source is every distinct `GpuLoadParquet` in
+/// the fused DAG, ordinals in its pre-order, so a re-read is a source of its own. A shared
+/// source loads in the **largest** baseline `total_us` among the loads it stands for: the union
+/// reads at least as much as any of them, so this is a lower bound. A root executes in its
+/// baseline trailer's `execute_us`.
+pub(crate) fn pipeline_inputs(fused: &Fused, baseline: &Baseline) -> (Vec<u64>, Vec<RootNeeds>) {
+    pipeline::pipeline_inputs(fused, baseline)
 }
