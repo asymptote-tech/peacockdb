@@ -632,6 +632,7 @@ Keys:
 - An out-of-memory batch keeps `--- batch ---` (its holds, cap and estimate), `--- merge ---`
   and the pipeline's model lines; no tree, and its `--- run ---` is the five provenance keys,
   which is what a resumed run keeps it by.
+- 2026-11-06: plan complete (Task 10 committed 5551e9b8, 57be22b8). PR #200 against `ENS-dag-driver`; board `reviewing`; reviewer round 1 dispatched.
 
 ## Checkpoints
 
