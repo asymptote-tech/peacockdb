@@ -376,6 +376,7 @@ Keys:
 | Task 5 Step 5 | `54596367` | fuser: buffer or re-read, and the concurrency cap rule; lib 1171, goldens 61, formatting 38 |
 | Task 6 (part A) | `5af21f1e` | fuser: the fused format and the benchmark's host-side rules (Task 6, part); interim, developer context; lib 1181, goldens 64, formatting 38, gpu check clean |
 | Task 6 Step 5 | `7e194089` | fuser: the fused benchmark case and its file; lib 1191, goldens 64, formatting 39, gpu check clean; target links, first device run is Task 9 |
+| Task 7 Step 5 | `7eae3641` | fuser: the report page's fused-batches table; lib 1197, goldens 64, formatting 39, gpu check clean |
 
 ## VM time
 
