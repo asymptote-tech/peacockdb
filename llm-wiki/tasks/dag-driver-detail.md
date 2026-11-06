@@ -277,3 +277,5 @@ pinned-loads, bench-rows, sf40-baseline). Re-proof at `d3076c44`, local, CPU and
 - **Grand total** was never moved by dag-driver. Recounted by the page's rule (the N columns of both tables): 7953 — Rust 6123 (parent's 6058 + `--lib` 64 + `gpu_tests::` 1), C++ 283 (278 + 1 + 4), Python 1547.
 - 2026-11-05: green (Task 11); PR #199 (base ENS-sf40-baseline); reviewer round 1.
 - review round 2: important closed; doc-comment nit fixed by the coordinator (comment-only); the two unused arrow includes in test_plan_executor.cpp left (nit). completing.
+- completeness approved 2026-11-06; dispatch 42137166270 (00:29:13Z; first device run since review round 1), PR run 42137167965.
+- done 2026-11-06: dispatch 42137166270 and PR run 42137167965 green (GPU Tests (nebius-gpu) included).
