@@ -630,6 +630,7 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
   - **Logs:** `/tmp/qf3-*.log` (stage, ship, each batch, each profile, pull, the golden check);
     `~/.cache/peacock/run-gpu/peacockdb-beta/`. `testdata/calibration/hbm-parts/` is still the
     untracked sf40-baseline leftover; not to be committed.
+- 2026-11-06: H100 rerun after round 1 committed (6e66896b, cf5ec195). Review round 2 returned; developer dispatched on its I1 and nit 7, then a full H100 rerun.
 
 ## The hold rule (spec 1a)
 
@@ -765,6 +766,15 @@ Keys:
 - **I2.** Over budget, the hold rule re-reads every hold, even 5-byte buffers, though a re-read adds the reader's whole load to its root (`holds.rs:139`, `decide` `holds.rs:20-51`, `cap.rs:59-62`). The plan specified the rule, so this is a coordinator decision. **Decided:** when over budget, buffer when the buffer's bytes are below what the re-read adds to its root; record the change in "The hold rule". Spec 1a's "plain function of those numbers and the memory budget" still holds.
 - Nits for the developer: 2 (doc comments over 10 lines, `mod.rs:255-266`, `358-370`), 3 (prototypes gate misses `use crate::prototypes as p;`), 4 (`Unshared::RowsOnly` doc vs label), 5 (`fused_problem` does not require `answers=match`), 6 (`baseline_for` first match without a comment), 7 (`recorded()` should look through `GpuHoldBuffer`), 8 (`create_nsys_profile.sh:47` example lacks `PCK_BENCH_HBM_FREQ=10000`).
 - Reviewer confirmed: 03b7af97 sound; `testdata/.gitignore` admits only the four profile kinds; Review Focus 1-7 hold. Outside the diff: `!/calibration/*-*/` re-includes `calibration/hbm-parts/`, so never `git add testdata` wholesale.
+
+## Review round 2 (2026-11-06)
+
+0 blocking, 1 important, 2 nits. B1, I1, I2 and the round-1 nits confirmed fixed; the rerun is consistent.
+
+- **I1 (round 2).** The hold ledger takes `S` and the largest root from `cap_inputs` once, at the first decision inside `fuse`, before `regrouped` shrinks the unions (`holds.rs:138`). Later cap-hold decisions are priced against a stale `S`. tpcds all: about 11 GB of headroom never offered, 90 cap holds re-read that together needed 0.60 GB and carry 1.72 s of load; tpcds first20: 18 such re-reads; tpch first20/all err the other way. **Decided:** compute `S` and the largest root from `cap_inputs` at every `choose`; update "The hold rule"; regression test (a re-read dissolves a large group, and a cap hold that fits only in the freed headroom is buffered); rerun all eight batches and the profiles from one binary.
+- **Nit 7 (round 1), reopened and taken:** `recorded()` (`holds.rs:77`) prices a join's build child that is an inserted buffer as the reader's own load. Seen in tpch first3 q2 (`tp1_single.fused.txt` lines 14-15: supplier charged 66 MB where nation's build is 493 bytes). Look through a buffer to its child; nested-join test.
+- **Nit 2:** `build-test.md:7` header should match the tables (8141 / Rust 6296 at cf5ec195); the developer updates it with this round's new tests.
+- Not a finding: buffers left when a group dissolves (at most 0.44 GB); dropping them in `regrouped` is optional.
 
 ## Checkpoints
 
