@@ -36,6 +36,7 @@ Branch `ENS-tp4-sized`, forked from `ENS-batching-report` at `325b1825` on 2026-
 | step | commit | note |
 |---|---|---|
 | Task 1 Step 5 | tp4-sized: the h100 list is written at tp1_single and tp4_sized | reported; coordinator commits |
+| Task 1 Step 5 | `49a0d619` | tp4-sized: the h100 list is written at tp1_single and tp4_sized; test_corpus_goldens 66, cpu suite green |
 
 ## VM time
 
