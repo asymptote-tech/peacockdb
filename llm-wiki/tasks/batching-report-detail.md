@@ -161,6 +161,8 @@ Branch `ENS-batching-report`, forked from `ENS-query-fuser` at `413366c4` on 202
     that `ci_coverage.rs` guards the line. build-test.md: "Fused batches" (the stale rule), the
     calibration row (114 → 118), the CI wiring guard row (12 → 14, two scripted guards), the
     header 8181 → 8187 (Rust 6301, Python 1600); the tables sum to 8187.
+- 2026-11-06: completeness approved (signoff in the spec). VMs hard-stopped 15:42Z. CI device run dispatched 2026-11-06T15:42:33Z on 0e250733: run 42245551840.
+- 2026-11-06: CI run 42245551840 green, GPU Tests (nebius-gpu) included; the PR's CI green. VMs hard-stopped. Board `done`.
 
 ## Review round 1 (2026-11-06)
 
