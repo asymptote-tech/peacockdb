@@ -11,8 +11,9 @@ use std::path::{Path, PathBuf};
 
 use crate::executor::{RunError, nodes_as_recorded};
 use crate::plan::GpuNode;
+use crate::test_support::append_records_to;
 use crate::test_support::testdata_root;
-use crate::test_support::{COLUMNS, FAILED, Provenance, RunMeta, SKIPPED, append_records_to};
+use crate::test_support::{Capture, FAILED, MODES, Provenance, RunMeta, SKIPPED};
 use crate::test_support::{ordered_sections, parse_benchmark_section, provenance_fields};
 use crate::wire::{FbKind, attach_recipes};
 
@@ -40,36 +41,66 @@ pub(crate) fn fused_results_file(device: &str, dataset: &str, sf: &str) -> PathB
         .join("tp1_single.fused.txt")
 }
 
-/// The fused record, gitignored: the metrics pass reads it.
-pub(crate) fn fused_record_path(dataset: &str, sf: &str) -> PathBuf {
+/// A batch's clean record, gitignored: `calibration/fused/<ds>.sf<sf>/<batch>.records.tsv`. One
+/// file per batch, since one process runs one batch and a record's heading is its process's
+/// (the allocator line carries the free memory its pool saw).
+pub(crate) fn fused_record_path(dataset: &str, sf: &str, batch: &str) -> PathBuf {
     testdata_root()
         .join("calibration")
         .join("fused")
         .join(format!("{dataset}.sf{sf}"))
-        .join("records.tsv")
+        .join(format!("{batch}.records.tsv"))
 }
 
-/// The test that runs `batch` of `dataset`, which is also the record's `query` for its rows.
-pub(crate) fn case_name(dataset: &str, batch: &str) -> String {
-    format!("bench_fused_{dataset}_sf40_{batch}_tp1_single")
+/// The NVTX case range a batch's measured runs sit in, `<ds>.sf<sf> <batch> tp1-single`: what a
+/// capture's calls are attributed by.
+pub(crate) fn case_range(dataset: &str, sf: &str, batch: &str) -> String {
+    format!("{dataset}.sf{sf} {batch} {}", MODES[0].name)
 }
 
-pub(crate) fn replace_case_rows(path: &Path, rows: &[String], meta: &RunMeta<'_>) {
-    if let Ok(text) = std::fs::read_to_string(path) {
-        let query = COLUMNS
-            .iter()
-            .position(|column| *column == "query")
-            .expect("a record row names its query");
-        let mine =
-            |line: &&str| !line.starts_with('#') && line.split('\t').nth(query) == Some(meta.query);
-        if text.lines().any(|line| mine(&line)) {
-            let kept: Vec<&str> = text.lines().filter(|line| !mine(line)).collect();
-            let staged = path.with_extension("tsv.new");
-            std::fs::write(&staged, format!("{}\n", kept.join("\n")))
-                .unwrap_or_else(|e| panic!("staging {}: {e}", path.display()));
-            std::fs::rename(&staged, path)
-                .unwrap_or_else(|e| panic!("publishing {}: {e}", path.display()));
-        }
+/// A batch's record coordinates: the case range's, so `nsys_hbm.py` joins a capture's calls to
+/// the record's rows; the batch is the `query`.
+pub(crate) fn batch_meta<'a>(
+    dataset: &'a str,
+    sf: &'a str,
+    batch: &'a str,
+    allocator: &'a str,
+    capture: Capture,
+    provenance: &'a Provenance,
+) -> RunMeta<'a> {
+    RunMeta {
+        dataset,
+        sf,
+        query: batch,
+        mode: MODES[0].name,
+        allocator,
+        capture,
+        provenance,
+    }
+}
+
+/// Where a batch's rows go. A clean run writes the batch's record; a captured run writes only
+/// `env` (`PEACOCK_RECORD_PATH`), or nothing, never the clean record the metrics pass joins
+/// against, as a captured corpus case does.
+pub(crate) fn record_path_for(
+    capture: Capture,
+    env: Option<&Path>,
+    dataset: &str,
+    sf: &str,
+    batch: &str,
+) -> Option<PathBuf> {
+    match capture {
+        Capture::None => Some(fused_record_path(dataset, sf, batch)),
+        Capture::Trace | Capture::Metrics => env.map(Path::to_path_buf),
+    }
+}
+
+/// `rows` as the whole record at `path`: one run's, any earlier run's file replaced.
+pub(crate) fn write_batch_record(path: &Path, rows: &[String], meta: &RunMeta<'_>) {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => panic!("{}: an earlier record is not removed: {e}", path.display()),
     }
     append_records_to(path, rows, meta);
 }

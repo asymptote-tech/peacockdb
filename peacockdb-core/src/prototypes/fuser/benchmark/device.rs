@@ -17,22 +17,22 @@ use crate::plan::{Batching, GpuNode};
 use crate::plan_text::{render_timings_of_roots, timed_device_us, timed_load_us_of_roots};
 use crate::prototypes::FUSED_ALL_RUNS;
 use crate::test_support::{
-    Capture, CaseOutcome, MEASURED_RUNS, MODES, Regeneration, Resume, RunMeta, RunTotals,
-    answer_on_the_device, assert_dataset_present, assert_fit_to_measure, assert_results_match,
-    declared_steps, device_slug, install_bench_pool, measure_into, merge_section, plan_at,
-    prefill_for_roots, provenance_of_this_run, record_rows, results_file, rounds_were_pinned,
-    rows_match_the_recipes, run_roots_timed, run_section,
+    Capture, CaseOutcome, MEASURED_RUNS, MODES, RECORD_PATH_ENV, Regeneration, Resume, RunMeta,
+    RunTotals, answer_on_the_device, assert_dataset_present, assert_fit_to_measure,
+    assert_results_match, declared_steps, device_slug, install_bench_pool, measure_into,
+    merge_section, plan_at, prefill_for_roots, provenance_of_this_run, record_rows, results_file,
+    rounds_were_pinned, rows_match_the_recipes, run_roots_timed, run_section,
 };
 use crate::wire::{attach_recipes_for_roots, join_scratch_bytes};
 
 use super::super::{
-    CapDecision, DEVICE, Fused, HoldLedger, MergeHint, Outcome, PipelineHint, Query, batches,
-    case_name, fuse, fused_record_path, fused_results_file, is_out_of_memory, merge_hint,
-    ordered_queries, pipeline_hint, pipeline_inputs, read_load_times, render_fused_section,
-    replace_case_rows, settle,
+    CapDecision, DEVICE, Fused, HoldLedger, MergeHint, Outcome, PipelineHint, Query, batches, fuse,
+    fused_results_file, is_out_of_memory, merge_hint, ordered_queries, pipeline_hint,
+    pipeline_inputs, read_load_times, render_fused_section, settle,
 };
-use super::{baseline_for, declared_batches, holds_this_run, load_times_path, scan_seqs};
-use super::{out_of_memory_run, second_smallest_at};
+use super::{baseline_for, batch_meta, case_range, declared_batches, holds_this_run};
+use super::{load_times_path, out_of_memory_run, record_path_for, scan_seqs};
+use super::{second_smallest_at, write_batch_record};
 
 /// One timed run: its wall time, what it answered and reported, and the device's regions.
 struct Run {
@@ -89,24 +89,22 @@ pub(crate) async fn benchmark_fused(dataset: &str, sf: &str, batch: &str) {
         return;
     }
 
-    let case = case_name(dataset, batch);
-    let meta = RunMeta {
-        dataset,
-        sf,
-        query: &case,
-        mode: MODES[0].name,
-        allocator: &allocator,
-        capture,
-        provenance: &provenance,
+    let meta = batch_meta(dataset, sf, batch, &allocator, capture, &provenance);
+    let env = std::env::var_os(RECORD_PATH_ENV).map(PathBuf::from);
+    let record = record_path_for(capture, env.as_deref(), dataset, sf, batch);
+    let write = |rows: &[String]| {
+        if let Some(path) = &record {
+            write_batch_record(path, rows, &meta)
+        }
     };
-    let record = fused_record_path(dataset, sf);
     let measured = measure(dataset, sf, batch, &names, maximum_bytes, &meta, &what);
+    // A captured run writes no section: its times were taken under the profiler.
     if capture != Capture::None {
         let (_, rows) = measured.await;
-        replace_case_rows(&record, &rows, &meta);
+        write(&rows);
         return;
     }
-    let rows = |rows: Vec<String>| replace_case_rows(&record, &rows, &meta);
+    let rows = |rows: Vec<String>| write(&rows);
     match measure_into(
         &file,
         &declared,
@@ -192,7 +190,7 @@ async fn measure(
         Err(error) => panic!("{what}, warm-up: {error}"),
     }
     set_nvtx_ranges(meta.capture != Capture::None);
-    let case_range = nvtx_range(&format!("{dataset}.sf{sf} {batch} tp1-single"));
+    let in_case = nvtx_range(&case_range(dataset, sf, batch));
     let wanted = if batch == "all" {
         FUSED_ALL_RUNS
     } else {
@@ -211,7 +209,7 @@ async fn measure(
             Err(error) => panic!("{what}: {error}"),
         }
     }
-    drop(case_range);
+    drop(in_case);
     // The answer checks below run each query alone, and their calls belong to no case.
     set_nvtx_ranges(false);
     let after = pinned_host_cache();

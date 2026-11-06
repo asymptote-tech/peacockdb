@@ -715,5 +715,113 @@ def test_cases_with_a_filter_narrow_the_trace_pass():
         refused(nsys_profile(tmp, tree, vm, env, "--device", "H100 80GB"), 1, "--device")
 
 
+# --- create_nsys_profile.sh --fused ------------------------------------------------------------
+
+BATCHES = ["first3", "first10", "first20", "all"]
+# The fused binary: logs its arguments and the record it was given, fails a batch named in
+# FAKE_FAIL_BATCH.
+FUSED_BENCH = ('#!/bin/sh\nprintf "%s record=%s\\n" "$*" "${PEACOCK_RECORD_PATH-unset}" >> "$FAKE_BENCH_LOG"\n'
+               'case "$*" in *"_${FAKE_FAIL_BATCH:-none}_tp1_single"*) echo "boom"; exit 101 ;; esac\n'
+               'echo "running 1 test"\necho "test result: ok. 1 passed; 0 failed; 0 ignored"\n')
+
+
+# As the real reader, which cannot open a record that is not there.
+STRICT_HBM = STUB_HBM.replace(
+    "with open(os.environ",
+    "missing = [a[i + 1] for i, w in enumerate(a) if w == \"--record\" and not os.path.exists(a[i + 1])]\n"
+    "if missing:\n    sys.exit(f\"no record {missing}\")\nwith open(os.environ", 1)
+
+
+def fused_tree(tmp, records=BATCHES):
+    """nsys_tree with the fused binary staged beside the corpus one, and on the host a clean record
+    per batch in `records`, as the fused runs leave them."""
+    tree, vm, env = nsys_tree(tmp)
+    (tree / "scripts/calibration/nsys_hbm.py").write_text(STRICT_HBM)
+    bench = vm / "cpp/install/rust-benchmarks/prototype_fused_benchmarks"
+    bench.write_text(FUSED_BENCH)
+    bench.chmod(0o755)
+    for batch in records:
+        record = vm / f"testdata/calibration/fused/tpch.sf40/{batch}.records.tsv"
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(f"# run: capture=none\ndataset\ttpch\n{batch}\n")
+    return tree, vm, env
+
+
+def fused_dir(tree):
+    return tree / "testdata/calibration/fused/tpch.sf40"
+
+
+def test_fused_profile_runs_one_capture_per_batch():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = fused_tree(tmp)
+        r = ok(nsys_profile(tmp, tree, vm, env, "--fused", "tpch.sf40", "--trace"))
+        runs = (tmp / "bench.log").read_text().splitlines()
+        assert runs == [f"--nocapture --test-threads=1 bench_fused_tpch_sf40_{b}_tp1_single --exact record=unset"
+                        for b in BATCHES], runs
+        for b in BATCHES:
+            assert (fused_dir(tree) / f"{b}.calls.tsv").is_file(), (b, r.stdout)
+            assert (fused_dir(tree) / f"{b}.loads.tsv").is_file(), (b, r.stdout)
+        assert not (fused_dir(tree) / "failed.tsv").exists()
+        assert not (tree / "testdata/calibration/calls.tsv").exists(), "the corpus's files are not touched"
+
+
+def test_fused_profile_joins_each_batch_against_its_own_record():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = fused_tree(tmp, records=["first3", "first10", "all"])
+        r = nsys_profile(tmp, tree, vm, env, "--fused", "tpch.sf40", "--metrics")
+        assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+        runs = (tmp / "bench.log").read_text().splitlines()
+        assert len(runs) == 4 and all(run.endswith("record=" + str(vm / "testdata/calibration/fused/tpch.sf40"
+                                                                       "/records-metrics.tsv")) for run in runs), runs
+        readers = log_lines(tmp / "hbm.log")
+        joins = [a for a in readers if "--capture" in a]
+        joined = ["first3", "first10", "all"]  # first20 has no record, so its join is refused
+        assert [a[a.index("--case") + 1] for a in joins] == [f"tpch.sf40 {b} tp1-single" for b in joined], joins
+        assert [a[a.index("--record") + 1] for a in joins] == [
+            f"testdata/calibration/fused/tpch.sf40/{b}.records.tsv" for b in joined], joins
+        (merge,) = [a for a in readers if "--parts" in a]
+        records = [merge[i + 1] for i, w in enumerate(merge) if w == "--record"]
+        assert records == [f"testdata/calibration/fused/tpch.sf40/{b}.records.tsv"
+                           for b in ("first3", "first10", "all")], merge
+        assert len([w for w in merge if w == "--parts"]) == 3, merge
+        assert (fused_dir(tree) / "hbm.tsv").is_file(), r.stdout
+        failed = (fused_dir(tree) / "failed.tsv").read_text().splitlines()
+        assert len(failed) == 1 and failed[0].startswith("first20\tmetrics\t"), failed
+        for b in BATCHES:
+            assert (vm / f"testdata/calibration/fused/tpch.sf40/{b}.records.tsv").exists() == (b != "first20"), \
+                "a clean record is never removed or replaced"
+
+
+def test_fused_profile_refuses_a_filter():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = fused_tree(tmp)
+        for extra_env, args, word in (({"PCK_TEST_FILTER": "first3"}, (), "PCK_TEST_FILTER"),
+                                      ({}, ("--cases", tmp / "x.csv"), "--cases"),
+                                      ({}, ("--device", "h100-80gb-hbm3"), "--device")):
+            r = nsys_profile(tmp, tree, vm, {**env, **extra_env}, "--fused", "tpch.sf40", *args)
+            assert r.returncode != 0, (word, r.stdout, r.stderr)
+            assert "--fused" in r.stderr and word in r.stderr, (word, r.stderr)
+        r = nsys_profile(tmp, tree, vm, env, "--fused", "tpch")
+        assert r.returncode != 0 and "tpch" in r.stderr, r.stderr
+        assert not (tmp / "rsh.log").exists(), (tmp / "rsh.log").read_text()
+
+
+def test_fused_profile_lists_a_failed_capture_and_goes_on():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = fused_tree(tmp)
+        r = nsys_profile(tmp, tree, vm, {**env, "FAKE_FAIL_BATCH": "first10"}, "--fused", "tpch.sf40", "--trace")
+        assert r.returncode != 0, (r.stdout, r.stderr)
+        failed = (fused_dir(tree) / "failed.tsv").read_text().splitlines()
+        assert [line.split("\t")[:2] for line in failed] == [["first10", "trace"]], failed
+        for b in ("first3", "first20", "all"):
+            assert (fused_dir(tree) / f"{b}.calls.tsv").is_file(), b
+        assert not (fused_dir(tree) / "first10.calls.tsv").exists()
+        assert "failed.tsv" in r.stderr, r.stderr
+
+
 if __name__ == "__main__":
     raise SystemExit(main(globals()))

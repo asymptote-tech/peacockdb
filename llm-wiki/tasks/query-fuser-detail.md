@@ -255,6 +255,71 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     as the main tables link a section.
   - The link-line mutation (`at` for `at + 1`) failed two tests.
 
+- 2026-11-06, Task 8 (developer). Checkpoint `fuser: an Nsight profile per fused batch`
+  reported, not committed. `--lib` 1197 → 1199 passed (`benchmark::tests` 12 → 14: one replaced,
+  three added), `test_run_gpu.py` 45 → 49. Two Task 6 defects found while wiring the metrics
+  pass, fixed here with tests that were red against Task 6's behaviour:
+  - **A captured fused run wrote into the clean record.** Its heading says `capture=metrics`, so
+    the append panicked on the heading mismatch (and had it not, the profiler's times would
+    have replaced the clean run's). Now `record_path_for`: a clean run writes the batch's record,
+    a captured one only `PEACOCK_RECORD_PATH` (or nothing), as a captured corpus case does. Test
+    `a_captured_run_never_writes_the_clean_record`.
+  - **The record's `query` was the test name** (`bench_fused_…`), the case range's word is the
+    batch, and `nsys_hbm.py` joins rows to calls by `(dataset, sf, query, mode)`, so no fused join
+    could find its rows. The rows' `query` is now the batch (`batch_meta`, `case_range`). Test
+    `the_record_names_a_batch_as_its_case_range_does`. `case_name` and `replace_case_rows` are gone.
+  - **A record per batch**, `calibration/fused/<ds>.sf40/<batch>.records.tsv`, written whole by
+    each run (`write_batch_record`), replacing the plan's one `records.tsv` per dataset. The
+    heading's `allocator=` line carries the free memory the pool saw, which is per process, and
+    Task 9 runs one process per batch: a shared file would have refused the second batch's
+    append whenever free memory moved by 0.1 GiB, failing that batch. Test
+    `a_rerun_batch_writes_its_record_afresh` (two headings, the second kept whole).
+  - **`create_nsys_profile.sh --fused <ds>.sf<sf>`**: the host-pass helpers (`switches`,
+    `remote_pass`) moved above the corpus's checks, unchanged, so the fused branch runs before
+    them and exits; the corpus path is untouched. `PCK_TEST_FILTER`, `--cases` and `--device`
+    beside `--fused` are refused before any call. The metrics pass needs no record filtering:
+    each batch joins against its own record on the host, and the merge is given only the
+    batches that joined, record and part each. A batch with no record (a marker, or a run that
+    never wrote one) fails its join and is a `failed.tsv` line. Trace captures come home as
+    `capture-<batch>.sqlite` beside the derived files.
+  - The plan's failed-capture test fails `all`; it fails `first10` here, so it shows the batches
+    after a failure still run (a `return` in place of `continue` turned it red). Its metrics test
+    gives the reader a stub that refuses a missing `--record`, as the real one does.
+  - `shellcheck` is not installed here: Step 3's check is `bash -n` only, and the reviewer or
+    the CPU VM should run `shellcheck scripts/create_nsys_profile.sh`.
+
+**For Task 9 (a fresh developer): what this chain left you.**
+- Binary: `cpp/install/rust-benchmarks/prototype_fused_benchmarks`, staged by
+  `scripts/env/stage-install.sh` (release, `--features gpu,test-support`) beside
+  `peacock_gpu_benchmarks`. `<dir>/rust-benchmarks/prototype_fused_benchmarks*` is Step 1's check.
+  It has never run: this host's `libpeacock` predates `peacock_join_build`, so Task 9's run is
+  the first execution of `benchmark_fused` (it type-checks and links).
+- Tests: `bench_fused_{tpch,tpcds}_sf40_{first3,first10,first20,all}_tp1_single`; run one per
+  process, `run-gpu.sh … run prototype_fused_benchmarks --exact <test>`. `--exact` beside
+  `PCK_TEST_FILTER` is refused. The log is `~/peacock/<i>/logs/prototype_fused_benchmarks.log`
+  (each run overwrites it).
+- What a batch reads at run time, all in the shipped committed testdata: the H100 `cases.csv`,
+  `benchmark-results/h100-80gb-hbm3/<ds>.sf40/tp1_single.benchmark.txt` and
+  `calibration/h100-80gb-hbm3/<ds>.sf40/loads.tsv`. `every_batched_query_has_its_baseline_and_its_loads`
+  checks every batched query has both, locally.
+- What it writes on the host: `benchmark-results/h100-80gb-hbm3/fused/<ds>.sf40/tp1_single.fused.txt`
+  and `calibration/fused/<ds>.sf40/<batch>.records.tsv`. `run-gpu.sh pull` brings both (all of
+  `benchmark-results/` and `calibration/`). Do not set `PEACOCK_RECORD_PATH` or
+  `PEACOCK_PINNED_HOST_CACHE_BYTES` for the clean runs.
+- Resume: `PEACOCK_BENCH_RESUME=1` keeps a batch whose section (measured or out of memory) ends
+  with this run's five provenance keys; a failed section runs again.
+- Profiles (Step 5): `create_nsys_profile.sh --fused <ds>.sf40` with the H100 arguments and
+  `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12`, after both datasets' clean runs, so
+  each batch's record is on the host for the metrics pass. It writes locally into
+  `testdata/calibration/fused/<ds>.sf40/`; the trace captures (`capture-*.sqlite`) are large and
+  are not to be committed.
+- Task 10 Step 2's copy to `calibration/h100-80gb-hbm3/fused/<ds>.sf40/` is `<batch>.calls.tsv`,
+  `<batch>.loads.tsv`, `hbm.tsv` and `failed.tsv` only: not `*.records.tsv`, not `capture-*`.
+- Watch: `idle_watch.py` names the binary in full; Step 2's `install-watch` puts that list on the
+  VM before any fused run. A batch over 4 hours is stopped by the cap.
+- Not exercised anywhere yet: the out-of-memory path end to end, the first20 marker path (neither
+  list is short enough), and the answer check against each query alone on the device.
+
 ## The hold rule (spec 1a)
 
 All numbers are the sf40-baseline tree's, per origin node: Σ `batch_bytes` and Σ `batch_rows`

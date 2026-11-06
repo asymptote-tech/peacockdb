@@ -36,6 +36,16 @@
 # where `fetch_record.sh <slug>/<dataset>.sf<sf>` puts a device's:
 #   ./scripts/create_nsys_profile.sh --cases <the H100's cases.csv, one dataset's rows> \
 #       --device h100-80gb-hbm3 <the H100 arguments above>
+# --fused <dataset>.sf<sf> profiles query-fuser's four batches of that dataset instead
+# (first3, first10, first20, all): the staged rust-benchmarks/prototype_fused_benchmarks, one
+# capture per batch by --exact, each case range `<dataset>.sf<sf> <batch> tp1-single`. The trace
+# pass writes testdata/calibration/fused/<dataset>.sf<sf>/<batch>.{calls,loads}.tsv. The metrics
+# pass joins each batch against its clean record on the host, <batch>.records.tsv beside them
+# (the fused runs wrote it), and merges the batches that joined into hbm.tsv there. A batch whose
+# capture or join fails is a line of failed.tsv there (batch, pass, reason) and the next batch
+# runs; the exit is 1 if any did. PCK_TEST_FILTER, --cases and --device are refused with it:
+#   PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12 ./scripts/create_nsys_profile.sh \
+#       --fused tpch.sf40 <the H100 arguments above>
 # The HBM defaults below are an H200's; another card overrides PCK_BENCH_HBM_SET and
 # PCK_BENCH_HBM_PEAK_BW (the H100 80GB HBM3: gh100 and 3.35e12), and nsys and python3 must be
 # on that host's PATH.
@@ -90,6 +100,7 @@ REMOTE_CUDF_ROOT=""
 HOST_OVERRIDDEN=0
 DEVICE_CASES=""
 DEVICE=""
+FUSED=""
 need_value() { [ -n "${2:-}" ] || die "$1 requires a value"; }
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -101,6 +112,7 @@ while [ $# -gt 0 ]; do
     --ssh)              need_value "$1" "${2:-}"; REMOTE_SSH="$2"; shift ;;
     --cases)            need_value "$1" "${2:-}"; DEVICE_CASES="$2"; shift ;;
     --device)           need_value "$1" "${2:-}"; DEVICE="$2"; shift ;;
+    --fused)            need_value "$1" "${2:-}"; FUSED="$2"; shift ;;
     -h|--help) usage 0 ;;
     *) echo "unknown argument: $1" >&2; usage 1 ;;
   esac
@@ -128,64 +140,6 @@ if [ "$TRACE" -eq 0 ] && [ "$METRICS" -eq 0 ]; then TRACE=1; METRICS=1; fi
 # than assumed to contain no apostrophe.
 : "${PCK_TEST_FILTER:=}"
 filter_q=$(printf '%q' "$PCK_TEST_FILTER")
-
-# Before the first side effect: a missing input should say so in a second, not after a
-# capture and an export. The local checks first, then the one question for the host.
-[ -z "$DEVICE" ] || [[ "$DEVICE" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
-  || die "--device $DEVICE is not a device slug, e.g. h100-80gb-hbm3"
-if [ -n "$DEVICE_CASES" ]; then
-  [ -f "$DEVICE_CASES" ] || die "--cases $DEVICE_CASES: no such file"
-  BENCH_CASES=$DEVICE_CASES
-  # A device list's `ok` and `wrong` rows, a line per mode, as bench_cases prints the main list.
-  bench_cases() {
-    python3 scripts/calibration/device_cases.py "$DEVICE_CASES" \
-      | awk -F'\t' '{ n = split($4, modes, "|"); for (i = 1; i <= n; i++) print $1, $2, $3, modes[i] }'
-  }
-  bench_datasets() {
-    local cases
-    cases=$(bench_cases) || return 1
-    awk '{ print $1 ".sf" $2 }' <<< "$cases" | LC_ALL=C sort -u
-  }
-fi
-datasets=$(bench_datasets) \
-  || die "cannot read the datasets from $BENCH_CASES (the reason is above)"
-for name in $datasets; do
-  [ -d "$PLANS_DIR/${name%%.sf*}.sf1" ] \
-    || die "$PLANS_DIR/${name%%.sf*}.sf1 is missing; nsys_calls.py checks the $name cases against it."
-done
-# The counters pass's cases, a test name and its case range each, narrowed by the filter.
-cases=$(bench_cases) || die "cannot read the cases from $BENCH_CASES (the reason is above)"
-# A list of `none` lines alone parses and times nothing: one empty line, no case.
-[ -n "$cases" ] || die "$BENCH_CASES declares no timed case"
-metric_tests=() metric_cases=()
-while read -r dataset sf query mode; do
-  bench=bench_${dataset}_sf${sf}_${query}_${mode}
-  case "$bench" in *"$PCK_TEST_FILTER"*) ;; *) continue ;; esac
-  metric_tests+=("$bench")
-  metric_cases+=("$dataset.sf$sf ${query//_/-} ${mode//_/-}")
-done <<< "$cases"
-all_cases=$(grep -c . <<< "$cases")
-# A device list's trace pass runs its cases by name: the main list's runs the filter over all.
-if [ -n "$DEVICE_CASES" ]; then
-  [ ${#metric_tests[@]} -gt 0 ] || die "PCK_TEST_FILTER=$PCK_TEST_FILTER selects none of $DEVICE_CASES's cases"
-  filter_q="$(printf '%q ' "${metric_tests[@]}")--exact"
-fi
-if [ "$METRICS" -eq 1 ] && [ ${#metric_tests[@]} -ne "$all_cases" ]; then
-  die "--metrics with PCK_TEST_FILTER=$PCK_TEST_FILTER selects ${#metric_tests[@]} of the
-     $all_cases cases, and the counters pass's merge is checked against every one of them.
-     Narrow the trace pass only: --trace."
-fi
-[ -z "$DEVICE" ] || RECORDS_REL=$RECORDS_REL/$DEVICE
-record_args=()
-for name in $datasets; do
-  record=testdata/$RECORDS_REL/$name/records.tsv
-  record_args+=(--record "$record")
-  [ "$METRICS" -eq 0 ] || [ -f "$record" ] \
-    || die "$record is missing, and the counters pass has no times of its own to
-     join onto. Fetch it: scripts/calibration/fetch_record.sh ${DEVICE:+$DEVICE/}$name"
-done
-remote_ssh test -x "$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET" \
-  || die "$BENCH_TARGET is not on $REMOTE — build it and --push-binaries --patch first."
 
 # One pass on the host: capture, export, and say what came of it.
 #
@@ -248,6 +202,162 @@ ran=\$(passed_count "\$log")
 echo "==> the $label pass ran \$ran tests"
 EOF
 }
+
+# --fused: query-fuser's batches, by name, in BATCH_SIZES' order (src/prototypes/fuser/mod.rs).
+FUSED_TARGET=prototype_fused_benchmarks
+FUSED_BATCHES=(first3 first10 first20 all)
+
+# fused_failed <failed.tsv> <batch> <pass> <reason>: one line, said on stderr too.
+fused_failed() {
+  printf '%s\t%s\t%s\n' "$2" "$3" "$4" >> "$1"
+  echo "!!! $2, the $3 pass: $4" >&2
+}
+
+# The four batches of $FUSED, each pass a capture per batch. Every batch gets its own attempt:
+# a batch that fails is listed in failed.tsv and the loop goes on, and the exit says so after.
+fused_profile() {
+  local dataset=${FUSED%%.sf*} sf=${FUSED#*.sf} dir=calibration/fused/$FUSED batch test
+  local failed=testdata/calibration/fused/$FUSED/failed.tsv parts joined=() merge_args=()
+  mkdir -p "testdata/$dir"
+  rm -f "$failed"
+  if [ "$TRACE" -eq 1 ]; then
+    for batch in "${FUSED_BATCHES[@]}"; do
+      test=bench_fused_${dataset}_sf${sf}_${batch}_tp1_single
+      echo "==> trace, $batch"
+      if ! remote_pass trace "$dir/capture-$batch" "" "$test --exact" \
+          --trace=nvtx,cuda --sample=none --cpuctxsw=none; then
+        fused_failed "$failed" "$batch" trace "the capture failed: /tmp/$BENCH_TARGET.trace.log on $REMOTE"
+        continue
+      fi
+      if ! pull_one "$dir/capture-$batch.sqlite" "the $batch capture"; then
+        fused_failed "$failed" "$batch" trace "its capture did not come home"
+        continue
+      fi
+      # Loads first, as the corpus's pass: they read no golden. No --plans-dir: a fused plan is
+      # in no golden.
+      if ! python3 scripts/calibration/nsys_loads.py --capture "testdata/$dir/capture-$batch.sqlite" \
+          --out "testdata/$dir/$batch.loads.tsv"; then
+        fused_failed "$failed" "$batch" trace "nsys_loads.py refused the capture (above)"
+        continue
+      fi
+      python3 scripts/calibration/nsys_calls.py --capture "testdata/$dir/capture-$batch.sqlite" \
+        --out "testdata/$dir/$batch.calls.tsv" \
+        || fused_failed "$failed" "$batch" trace "nsys_calls.py refused the capture (above)"
+    done
+  fi
+  if [ "$METRICS" -eq 1 ]; then
+    parts=$dir/hbm-parts
+    remote_ssh "rm -rf $REMOTE_REPO/testdata/$parts && mkdir -p $REMOTE_REPO/scripts/calibration $REMOTE_REPO/testdata/$parts"
+    resilient_rsync -a scripts/calibration/{nsys_hbm,nvtx_names,record}.py \
+      "$REMOTE:$REMOTE_REPO/scripts/calibration/"
+    for batch in "${FUSED_BATCHES[@]}"; do
+      test=bench_fused_${dataset}_sf${sf}_${batch}_tp1_single
+      echo "==> counters, $batch"
+      # The captured run's rows go to the pass's own record, never the batch's clean one, which
+      # the join reads.
+      if ! remote_pass metrics "$dir/capture-metrics" "$dir/records-metrics.tsv" "$test --exact" \
+          --trace=nvtx,cuda --sample=none --cpuctxsw=none \
+          --gpu-metrics-device="$HBM_DEVICE" --gpu-metrics-set="$HBM_SET" \
+          --gpu-metrics-frequency="$HBM_FREQ"; then
+        fused_failed "$failed" "$batch" metrics "the capture failed: /tmp/$BENCH_TARGET.metrics.log on $REMOTE"
+        continue
+      fi
+      if ! remote_ssh "cd $REMOTE_REPO && python3 scripts/calibration/nsys_hbm.py \
+          --record testdata/$dir/$batch.records.tsv --capture testdata/$dir/capture-metrics.sqlite \
+          --case $(printf '%q' "$dataset.sf$sf $batch tp1-single") --peak-bw $HBM_PEAK_BW \
+          --out testdata/$parts/$batch.tsv"; then
+        fused_failed "$failed" "$batch" metrics "the join refused it (above); its capture is still on $REMOTE"
+        continue
+      fi
+      remote_ssh "rm -f $REMOTE_REPO/testdata/$dir/capture-metrics.sqlite $REMOTE_REPO/testdata/$dir/capture-metrics.nsys-rep"
+      joined+=("$batch")
+    done
+    # The merge is held to every record it is given, so only the batches that joined.
+    if [ ${#joined[@]} -gt 0 ]; then
+      for batch in "${joined[@]}"; do
+        merge_args+=(--record "testdata/$dir/$batch.records.tsv" --parts "testdata/$parts/$batch.tsv")
+      done
+      remote_ssh "cd $REMOTE_REPO && python3 scripts/calibration/nsys_hbm.py $(printf '%q ' "${merge_args[@]}")--out testdata/$dir/hbm.tsv" \
+        || die "merging the counters parts of ${joined[*]} on $REMOTE failed (above)."
+      pull_one "$dir/hbm.tsv" "HBM traffic" || die "bringing testdata/$dir/hbm.tsv home from $REMOTE failed."
+    fi
+  fi
+  if [ -s "$failed" ]; then
+    echo "!!! $(grep -c . "$failed") of the batches' passes failed: $failed" >&2
+    return 1
+  fi
+}
+
+if [ -n "$FUSED" ]; then
+  [[ "$FUSED" =~ ^[a-z]+\.sf[0-9]+$ ]] || die "--fused $FUSED is not <dataset>.sf<sf>, e.g. tpch.sf40"
+  [ -z "$PCK_TEST_FILTER" ] \
+    || die "--fused runs its dataset's four batches, and PCK_TEST_FILTER=$PCK_TEST_FILTER narrows the tests: give one"
+  [ -z "$DEVICE_CASES" ] || die "--fused takes its batches from the fused binary, not --cases: give one"
+  [ -z "$DEVICE" ] || die "--fused reads each batch's record on the host, not --device's: give one"
+  BENCH_TARGET=$FUSED_TARGET
+  remote_ssh test -x "$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET" \
+    || die "$BENCH_TARGET is not on $REMOTE: stage it (scripts/env/stage-install.sh) and ship it first."
+  fused_profile
+  exit
+fi
+
+# Before the first side effect: a missing input should say so in a second, not after a
+# capture and an export. The local checks first, then the one question for the host.
+[ -z "$DEVICE" ] || [[ "$DEVICE" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
+  || die "--device $DEVICE is not a device slug, e.g. h100-80gb-hbm3"
+if [ -n "$DEVICE_CASES" ]; then
+  [ -f "$DEVICE_CASES" ] || die "--cases $DEVICE_CASES: no such file"
+  BENCH_CASES=$DEVICE_CASES
+  # A device list's `ok` and `wrong` rows, a line per mode, as bench_cases prints the main list.
+  bench_cases() {
+    python3 scripts/calibration/device_cases.py "$DEVICE_CASES" \
+      | awk -F'\t' '{ n = split($4, modes, "|"); for (i = 1; i <= n; i++) print $1, $2, $3, modes[i] }'
+  }
+  bench_datasets() {
+    local cases
+    cases=$(bench_cases) || return 1
+    awk '{ print $1 ".sf" $2 }' <<< "$cases" | LC_ALL=C sort -u
+  }
+fi
+datasets=$(bench_datasets) \
+  || die "cannot read the datasets from $BENCH_CASES (the reason is above)"
+for name in $datasets; do
+  [ -d "$PLANS_DIR/${name%%.sf*}.sf1" ] \
+    || die "$PLANS_DIR/${name%%.sf*}.sf1 is missing; nsys_calls.py checks the $name cases against it."
+done
+# The counters pass's cases, a test name and its case range each, narrowed by the filter.
+cases=$(bench_cases) || die "cannot read the cases from $BENCH_CASES (the reason is above)"
+# A list of `none` lines alone parses and times nothing: one empty line, no case.
+[ -n "$cases" ] || die "$BENCH_CASES declares no timed case"
+metric_tests=() metric_cases=()
+while read -r dataset sf query mode; do
+  bench=bench_${dataset}_sf${sf}_${query}_${mode}
+  case "$bench" in *"$PCK_TEST_FILTER"*) ;; *) continue ;; esac
+  metric_tests+=("$bench")
+  metric_cases+=("$dataset.sf$sf ${query//_/-} ${mode//_/-}")
+done <<< "$cases"
+all_cases=$(grep -c . <<< "$cases")
+# A device list's trace pass runs its cases by name: the main list's runs the filter over all.
+if [ -n "$DEVICE_CASES" ]; then
+  [ ${#metric_tests[@]} -gt 0 ] || die "PCK_TEST_FILTER=$PCK_TEST_FILTER selects none of $DEVICE_CASES's cases"
+  filter_q="$(printf '%q ' "${metric_tests[@]}")--exact"
+fi
+if [ "$METRICS" -eq 1 ] && [ ${#metric_tests[@]} -ne "$all_cases" ]; then
+  die "--metrics with PCK_TEST_FILTER=$PCK_TEST_FILTER selects ${#metric_tests[@]} of the
+     $all_cases cases, and the counters pass's merge is checked against every one of them.
+     Narrow the trace pass only: --trace."
+fi
+[ -z "$DEVICE" ] || RECORDS_REL=$RECORDS_REL/$DEVICE
+record_args=()
+for name in $datasets; do
+  record=testdata/$RECORDS_REL/$name/records.tsv
+  record_args+=(--record "$record")
+  [ "$METRICS" -eq 0 ] || [ -f "$record" ] \
+    || die "$record is missing, and the counters pass has no times of its own to
+     join onto. Fetch it: scripts/calibration/fetch_record.sh ${DEVICE:+$DEVICE/}$name"
+done
+remote_ssh test -x "$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET" \
+  || die "$BENCH_TARGET is not on $REMOTE — build it and --push-binaries --patch first."
 
 # --sample=none: the CPU profiler's SIGPROF interrupts the very host spans the ranges
 # measure. --cpuctxsw=none for the same reason.

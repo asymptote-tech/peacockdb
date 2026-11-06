@@ -31,7 +31,7 @@ use std::path::PathBuf;
 use crate::executor::RunError;
 use crate::plan::{Batching, GpuNode, PlanError};
 use crate::prototypes::FusedSection;
-use crate::test_support::{BenchSection, DeviceCase, RunMeta};
+use crate::test_support::{BenchSection, DeviceCase};
 
 /// One query of a batch: its name, and its own planned tree.
 pub(crate) struct Query<'a> {
@@ -537,18 +537,8 @@ pub(crate) fn fused_results_file(device: &str, dataset: &str, sf: &str) -> PathB
     benchmark::fused_results_file(device, dataset, sf)
 }
 
-/// `calibration/fused/<dataset>.sf<sf>/records.tsv`, which the metrics pass reads.
-pub(crate) fn fused_record_path(dataset: &str, sf: &str) -> PathBuf {
-    benchmark::fused_record_path(dataset, sf)
-}
-
-/// `bench_fused_<dataset>_sf40_<batch>_tp1_single`: the test, and its rows' `query`.
-pub(crate) fn case_name(dataset: &str, batch: &str) -> String {
-    benchmark::case_name(dataset, batch)
-}
-
-/// `rows` appended to the record at `path` after dropping every row of `meta.query`'s case, so
-/// a rerun batch replaces its rows rather than doubling them.
-pub(crate) fn replace_case_rows(path: &std::path::Path, rows: &[String], meta: &RunMeta<'_>) {
-    benchmark::replace_case_rows(path, rows, meta)
+/// `calibration/fused/<dataset>.sf<sf>/<batch>.records.tsv`: a batch's clean record, one file
+/// per batch since one process runs one batch, and the metrics pass joins against it.
+pub(crate) fn fused_record_path(dataset: &str, sf: &str, batch: &str) -> PathBuf {
+    benchmark::fused_record_path(dataset, sf, batch)
 }

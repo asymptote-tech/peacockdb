@@ -7,17 +7,18 @@ use std::path::PathBuf;
 use crate::executor::{RunError, nodes_as_recorded, plan_files};
 use crate::plan::{Batching, GpuNode};
 use crate::prototypes::fuser::tests::re_read_every_hold;
-use crate::prototypes::fuser::{Baseline, ordered_queries, read_load_times, replace_case_rows};
-use crate::prototypes::fuser::{Query, case_name, fuse, fused_record_path, is_out_of_memory};
+use crate::prototypes::fuser::{Baseline, ordered_queries, read_load_times};
+use crate::prototypes::fuser::{Query, fuse, fused_record_path, is_out_of_memory};
 use crate::prototypes::{fused_results_file, parse_fused_section};
-use crate::test_support::{COLUMNS, Capture, FAILED, MODES, Provenance, RunMeta, SKIPPED};
+use crate::test_support::{COLUMNS, Capture, FAILED, MODES, Provenance, SKIPPED};
 use crate::test_support::{ordered_sections, parse_benchmark_section, provenance_fields};
 use crate::test_support::{queries_dir_for, testdata_root};
 use crate::tests::share::planned;
 use crate::wire::join_scratch_bytes;
 
-use super::{baseline_for, declared_batches, holds_this_run, load_times_path};
-use super::{out_of_memory_run, scan_seqs, second_smallest_at};
+use super::{baseline_for, batch_meta, case_range, declared_batches, holds_this_run};
+use super::{load_times_path, out_of_memory_run, record_path_for, scan_seqs};
+use super::{second_smallest_at, write_batch_record};
 
 fn failed(text: &str) -> RunError {
     RunError::CallFailed(text.to_string())
@@ -42,9 +43,9 @@ fn the_fused_file_lies_beside_the_device_tree() {
         "{}",
         path.display()
     );
-    let record = fused_record_path("tpch", "40");
+    let record = fused_record_path("tpch", "40", "first3");
     assert!(
-        record.ends_with("calibration/fused/tpch.sf40/records.tsv"),
+        record.ends_with("calibration/fused/tpch.sf40/first3.records.tsv"),
         "{}",
         record.display()
     );
@@ -66,21 +67,9 @@ fn provenance() -> Provenance {
     }
 }
 
-fn meta<'a>(case: &'a str, provenance: &'a Provenance) -> RunMeta<'a> {
-    RunMeta {
-        dataset: "tpch",
-        sf: "40",
-        query: case,
-        mode: "tp1-single",
-        allocator: "rmm-pool",
-        capture: Capture::None,
-        provenance,
-    }
-}
-
-/// A record row of `case`, its `node_seq` `n`, every other column 0 but the four in front.
-fn row(case: &str, n: usize) -> String {
-    let mut fields = vec!["tpch", "40", case, "tp1-single"]
+/// A record row of `batch`, its `node_seq` `n`, every other column 0 but the four in front.
+fn row(batch: &str, n: usize) -> String {
+    let mut fields = vec!["tpch", "40", batch, "tp1-single"]
         .into_iter()
         .map(String::from)
         .collect::<Vec<_>>();
@@ -88,31 +77,88 @@ fn row(case: &str, n: usize) -> String {
     fields.join("\t")
 }
 
+/// One process per batch: the next run's heading differs (its pool saw other free memory), and
+/// its record replaces the last one whole rather than being refused or merged with it.
 #[test]
-fn a_rerun_batch_replaces_its_record_rows() {
+fn a_rerun_batch_writes_its_record_afresh() {
     let path = std::env::temp_dir().join(format!("fuser_record_{}.tsv", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let provenance = provenance();
-    let (first3, first10) = (case_name("tpch", "first3"), case_name("tpch", "first10"));
-    assert_eq!(first3, "bench_fused_tpch_sf40_first3_tp1_single");
-    let (first3, first10) = (first3.as_str(), first10.as_str());
-    replace_case_rows(
-        &path,
-        &[row(first3, 1), row(first3, 2)],
-        &meta(first3, &provenance),
+    let first = batch_meta(
+        "tpch",
+        "40",
+        "first3",
+        "rmm-pool of 79.1GiB free",
+        Capture::None,
+        &provenance,
     );
-    replace_case_rows(&path, &[row(first10, 7)], &meta(first10, &provenance));
-    replace_case_rows(&path, &[row(first3, 3)], &meta(first3, &provenance));
+    write_batch_record(&path, &[row("first3", 1), row("first3", 2)], &first);
+    let rerun = batch_meta(
+        "tpch",
+        "40",
+        "first3",
+        "rmm-pool of 79.0GiB free",
+        Capture::None,
+        &provenance,
+    );
+    write_batch_record(&path, &[row("first3", 3)], &rerun);
     let text = std::fs::read_to_string(&path).expect("the record");
     std::fs::remove_file(&path).expect("the record is removed");
     let rows: Vec<&str> = text
         .lines()
         .filter(|line| line.starts_with("tpch\t"))
         .collect();
-    assert_eq!(rows, [row(first10, 7), row(first3, 3)]);
+    assert_eq!(rows, [row("first3", 3)]);
+    assert!(
+        text.contains("allocator=rmm-pool of 79.0GiB free"),
+        "{text}"
+    );
+    assert!(!text.contains("79.1GiB"), "{text}");
+}
+
+/// The record's `(dataset, sf, query, mode)` are the case range's words: `nsys_hbm.py` joins a
+/// capture's calls to the record's rows by exactly these.
+#[test]
+fn the_record_names_a_batch_as_its_case_range_does() {
+    let provenance = provenance();
+    let range = case_range("tpcds", "40", "first10");
+    assert_eq!(range, "tpcds.sf40 first10 tp1-single");
+    let meta = batch_meta(
+        "tpcds",
+        "40",
+        "first10",
+        "rmm-pool",
+        Capture::Metrics,
+        &provenance,
+    );
+    let (set, rest) = range.split_once(' ').expect("three words");
+    let (query, mode) = rest.split_once(' ').expect("three words");
+    assert_eq!(set, format!("{}.sf{}", meta.dataset, meta.sf));
+    assert_eq!((meta.query, meta.mode), (query, mode));
+    assert_eq!(meta.capture, Capture::Metrics);
+}
+
+/// A captured run's rows go where `PEACOCK_RECORD_PATH` says, or nowhere: never into the clean
+/// run's record, which the metrics pass joins against and whose heading says `capture=none`.
+#[test]
+fn a_captured_run_never_writes_the_clean_record() {
+    let side = PathBuf::from("/tmp/records-metrics.tsv");
+    let clean = fused_record_path("tpch", "40", "all");
     assert_eq!(
-        text.lines().filter(|l| l.starts_with("dataset\t")).count(),
-        1
+        record_path_for(Capture::Metrics, Some(&side), "tpch", "40", "all"),
+        Some(side.clone())
+    );
+    assert_eq!(
+        record_path_for(Capture::Trace, None, "tpch", "40", "all"),
+        None
+    );
+    assert_eq!(
+        record_path_for(Capture::None, Some(&side), "tpch", "40", "all"),
+        Some(clean.clone())
+    );
+    assert_eq!(
+        record_path_for(Capture::None, None, "tpch", "40", "all"),
+        Some(clean)
     );
 }
 
