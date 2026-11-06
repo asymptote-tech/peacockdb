@@ -704,6 +704,7 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
   - **Logs:** `/tmp/qf4-*.log` (stage, ship, each batch, each profile, pull);
     `~/.cache/peacock/run-gpu/peacockdb-beta/`. `testdata/calibration/hbm-parts/` is still the
     untracked sf40-baseline leftover.
+- 2026-11-06: H100 rerun after round 2 committed. **Decided:** tpcds first10's 2.3 % slowdown (a group's shared load is rebuilt only at the end of a resolve, so mid-resolve re-reads overstate the ledger) is accepted as a stated limit of the prototype, not fixed: seven of eight batches got faster or held, and another rebuild-per-decision change would need a fourth H100 session for a ~0.1 s effect. Reviewer round 3 dispatched.
 
 ## The hold rule (spec 1a)
 
