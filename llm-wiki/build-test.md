@@ -25,7 +25,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3729 cases: `--lib` 1211, `test_cpu_corpus` 2451, `test_corpus_goldens` 64, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3731 cases: `--lib` 1211, `test_cpu_corpus` 2451, `test_corpus_goldens` 66, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -98,7 +98,7 @@ tie
 the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions;
 one binary per engine, since `inventory` collects per linked binary
 
-| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_checks](../peacockdb-core/tests/test_corpus_goldens/benchmark_checks.rs), [benchmark_lists](../peacockdb-core/tests/test_corpus_goldens/benchmark_lists.rs), [benchmark_record](../peacockdb-core/tests/test_corpus_goldens/benchmark_record.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 64 |
+| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_checks](../peacockdb-core/tests/test_corpus_goldens/benchmark_checks.rs), [benchmark_lists](../peacockdb-core/tests/test_corpus_goldens/benchmark_lists.rs), [benchmark_record](../peacockdb-core/tests/test_corpus_goldens/benchmark_record.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 66 |
 |---|---|--:|
 
 the committed sections against their own arithmetic, with no dataset and no run: `consumed +
@@ -3201,8 +3201,9 @@ UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test
 ```
 
 - Its candidates are the main list's lines carrying `tp1_single`, in the list's order: tpch 48
-  (q1-q22 and 26 micro queries) and tpcds 82. `H100_MODES` names the modes it writes; tp4-sized
-  adds its own.
+  (q1-q22 and 26 micro queries) and tpcds 82. `H100_MODES` names the modes it writes:
+  tp1_single and tp4_sized. A row carries each mode its query is timed at, so a query whose
+  tp4_sized section failed keeps `tp1_single` alone. A mode with no file in the tree is not read.
 - A query with a timed section is an `ok` row. A query whose every section failed is a `skipped`
   row, its note the failure's reason.
 - A `wrong` row is kept from the file as it stands, since the tree knows no tickets. Mark one by
