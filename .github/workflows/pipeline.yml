@@ -186,6 +186,17 @@ jobs:
           # page would silently canonicalize (llm-wiki/tasks/pbench.md).
           testdata/generate_pbench.sh --check
 
+      # The query-batching page's numbers against the committed results they are read from:
+      # a commit that changes one of those inputs without rerunning batching_report.py fails
+      # here. Python over committed text, so one leg; it is beside pbench's --check because
+      # both prove committed output is what its committed inputs make.
+      - name: Query-batching page is current (Python)
+        if: matrix.cudf == '25.02'
+        run: |
+          set -euo pipefail
+          python3 scripts/calibration/batching_report.py --testdata testdata \
+            --report llm-wiki/reports/query-batching.md --check
+
       # The exec-model prototype's statistics sidecars counted again from the data by
       # gen_stats.py with the DuckDB the generator step unpacked (its `export` ends with that
       # step, hence `env` here), and its row estimates against the engine's CPU runs, which
