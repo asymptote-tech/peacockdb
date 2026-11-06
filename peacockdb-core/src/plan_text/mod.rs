@@ -32,6 +32,12 @@ use crate::planner::MemoryModel;
 /// renderer adds it and as the tree's reader adds it back.
 pub(crate) const LOAD_NODE: &str = "GpuLoadParquet";
 
+/// One node's line as the plan golden prints it: name, fields, layout and declared schema.
+/// Its caller is the query-fuser prototype, which keys identical subtrees by it.
+pub(crate) fn node_line_of(node: &dyn GpuNode) -> String {
+    node_text::node_line(node)
+}
+
 /// The plan under `root`, one line per node. The plan golden carries the declared schema
 /// per node; an execution golden does not, since what it records is what ran.
 pub(crate) fn render_plan(root: &dyn GpuNode) -> String {
@@ -94,4 +100,10 @@ pub(crate) fn timed_device_us(times: &Measurements) -> u64 {
 /// [`timed_device_us`] under the same rule, so `execute_us` never goes below zero.
 pub(crate) fn timed_load_us(root: &dyn GpuNode, times: &Measurements) -> u64 {
     bench_text::timed_load_us(root, times)
+}
+
+/// [`timed_load_us`] over several roots, a load they share counted once: a fused run's
+/// `load_us`.
+pub(crate) fn timed_load_us_of_roots(roots: &[&dyn GpuNode], times: &Measurements) -> u64 {
+    bench_text::timed_load_us_of_roots(roots, times)
 }

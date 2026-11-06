@@ -20,13 +20,12 @@ use crate::repo_root;
 use crate::runners::{
     NEBIUS_TEST, GPU_STAGING_STEP, gpu_job_lib_rung, gpu_job_staged_by_name, gpu_job_staged_lib,
     gpu_job_staged_targets, is_rust_gpu_runner_invocation, lib_rung_of,
-    rust_gpu_runner_invocations, staged_by_name_of,
+    rust_gpu_runner_invocations, shadgpu_staged_targets, staged_by_name_of,
 };
 
-/// Why a target is absent from the normal CI tiers. One kind today, and it is checkable:
-/// [`Exemption::GpuJob`] makes a claim about a committed workflow array, verified below. A
-/// target nothing runs at all gets a variant of its own carrying the reason, since that claim
-/// is one nothing can confirm.
+/// Why a target is absent from the normal CI tiers. Both kinds are checkable:
+/// [`Exemption::GpuJob`] claims a committed workflow array runs it, and
+/// [`Exemption::ManualPrototype`] that nothing in CI does, both verified below.
 #[derive(Debug)]
 pub(crate) enum Exemption {
     /// Run on the GPU host by pipeline.yml's gpu-tests job, from a prebuilt binary
@@ -36,6 +35,10 @@ pub(crate) enum Exemption {
     /// mode disappearing with nothing red, which is the failure the pipeline comment
     /// warns about in prose but nothing enforced.
     GpuJob,
+    /// Manual, prototype: run by hand through `run-gpu.sh <vm options> run <target>`, never by
+    /// CI. VERIFIED: no workflow line names it with `--test`, and neither the gpu-tests
+    /// job's staging array nor `build-test-shadgpu.sh`'s `RUST_TESTS` lists it.
+    ManualPrototype,
 }
 
 /// The measurement harness, which is a GPU-job target like the others and is additionally
@@ -47,7 +50,40 @@ pub(crate) const INTENTIONALLY_NOT_IN_CI: &[(&str, Exemption)] = &[
     ("test_node_timing", Exemption::GpuJob),
     (BENCHMARK_TARGET, Exemption::GpuJob),
     ("test_gpu_corpus", Exemption::GpuJob),
+    ("prototype_fused_benchmarks", Exemption::ManualPrototype),
 ];
+
+/// `Ok` where `target` is named by no `--test <target>` word pair in any folded workflow
+/// line, run or build alike, and by neither staging list; else which of them names it.
+fn wired_nowhere(
+    target: &str,
+    workflow_lines: &[String],
+    gpu_staged: &BTreeSet<String>,
+    shadgpu_staged: &BTreeSet<String>,
+) -> Result<(), String> {
+    let names = |line: &String| {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        words.windows(2).any(|pair| pair == ["--test", target])
+    };
+    let mut wired: Vec<String> = workflow_lines
+        .iter()
+        .filter(|line| names(line))
+        .map(|line| format!("workflow line `{}`", line.trim()))
+        .collect();
+    if gpu_staged.contains(target) {
+        wired.push("pipeline.yml's gpu-tests staging array".to_string());
+    }
+    if shadgpu_staged.contains(target) {
+        wired.push("build-test-shadgpu.sh's RUST_TESTS".to_string());
+    }
+    match wired.is_empty() {
+        true => Ok(()),
+        false => Err(format!(
+            "{target} is exempt as a manual prototype, yet CI names it: {}",
+            wired.join("; ")
+        )),
+    }
+}
 
 /// Join backslash-continued shell lines into one logical line.
 ///
@@ -577,6 +613,15 @@ fn every_rust_test_target_is_named_by_ci() {
         gpu_staging
     );
 
+    let shadgpu_staging = shadgpu_staged_targets();
+    for (target, _) in INTENTIONALLY_NOT_IN_CI
+        .iter()
+        .filter(|(_, e)| matches!(e, Exemption::ManualPrototype))
+    {
+        wired_nowhere(target, &workflow_lines, &gpu_staging, &shadgpu_staging)
+            .unwrap_or_else(|wired| panic!("{wired}"));
+    }
+
     // Keep the exemption list honest: an entry for a target that no longer exists is
     // stale and would silently excuse a future target that reuses the name. Report the
     // stated reason alongside, because that is what the reader has to judge — "is this
@@ -586,12 +631,46 @@ fn every_rust_test_target_is_named_by_ci() {
         .filter(|(n, _)| !targets.contains(*n))
         .map(|(n, e)| match e {
             Exemption::GpuJob => format!("{n} (exempt as: run by the gpu-tests job)"),
+            Exemption::ManualPrototype => format!("{n} (exempt as: manual, prototype)"),
         })
         .collect();
     assert!(
         stale.is_empty(),
         "INTENTIONALLY_NOT_IN_CI names targets that no longer exist — remove them:\n  {}",
         stale.join("\n  ")
+    );
+}
+
+/// A manual prototype is named by no workflow line, no gpu-job staging array and no
+/// `build-test-shadgpu.sh` list; each of the three, doctored to name it, is refused naming it.
+#[test]
+fn a_manual_prototype_is_wired_nowhere() {
+    let target = "prototype_fused_benchmarks";
+    let none = BTreeSet::new();
+    let built = vec![format!(
+        "cargo test --no-run --release -p peacockdb-core --test {target} --features gpu"
+    )];
+    let error = wired_nowhere(target, &built, &none, &none).expect_err("a build step wires it");
+    assert!(error.contains(target), "{error}");
+    let named: BTreeSet<String> = [target.to_string()].into();
+    assert!(
+        wired_nowhere(target, &[], &named, &none).is_err(),
+        "the gpu job stages it"
+    );
+    assert!(
+        wired_nowhere(target, &[], &none, &named).is_err(),
+        "shad-gpu stages it"
+    );
+    let longer = vec![format!("cargo test --test {target}_more")];
+    assert_eq!(wired_nowhere(target, &longer, &none, &none), Ok(()));
+    assert_eq!(
+        wired_nowhere(
+            target,
+            &workflow_lines(),
+            &gpu_job_staged_targets(),
+            &shadgpu_staged_targets()
+        ),
+        Ok(())
     );
 }
 

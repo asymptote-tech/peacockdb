@@ -19,6 +19,13 @@ const PUB_OUTSIDE_A_MOD_RS: &[&str] = &["lib.rs"];
 /// count passes when one is dropped and another added.
 const COMPONENTS: &[&str] = &["common", "executor", "plan", "plan_text", "planner", "wire"];
 
+/// The `pub mod`s behind a feature, in `lib.rs` order, each with its gate: the harness, and the
+/// prototypes built on it under its rules (`coding-style.md`, Visibility).
+const GATED: &[(&str, &str)] = &[
+    ("prototypes", "feature = \"test-support\""),
+    ("test_support", "feature = \"test-support\""),
+];
+
 /// One surface file: its bare `pub` items and its `pub` fields, by name.
 struct Surface {
     file: &'static str,
@@ -119,7 +126,8 @@ const SURFACE: &[Surface] = &[
 ///
 /// rustc cannot ask this: `pub mod` is legal everywhere, and the module it exposes is used, so
 /// no lint fires. The only reader is this test. `lib.rs` is pinned by name: the six
-/// components unconditionally, and `test_support` behind its feature and nothing else.
+/// components unconditionally, and `test_support` and `prototypes` behind its feature and
+/// nothing else.
 #[test]
 fn pub_mod_declares_a_component_and_nothing_else() {
     let mut found = Vec::new();
@@ -145,19 +153,38 @@ fn pub_mod_declares_a_component_and_nothing_else() {
          what a sibling needs in the parent's own mod.rs. There is no sanctioned form.",
         found.join("\n")
     );
-    let (unconditional, gated) = gated_pub_mods(&read(Path::new("lib.rs")));
+    let (unconditional, _) = gated_pub_mods(&read(Path::new("lib.rs")));
     assert_eq!(
         unconditional, COMPONENTS,
         "lib.rs declares these components `pub mod` unconditionally, and the rules name six"
     );
-    assert_eq!(
-        gated,
-        vec![(
-            "test_support".to_string(),
-            "feature = \"test-support\"".to_string()
-        )],
-        "the harness is the one `pub mod` behind a feature, and it is behind its own"
-    );
+    if let Some(why) = gated_mismatch(&read(Path::new("lib.rs"))) {
+        panic!("{why}");
+    }
+}
+
+/// Why `lib.rs`'s gated `pub mod`s are not [`GATED`], or `None` where they are.
+fn gated_mismatch(lib: &str) -> Option<String> {
+    let (_, gated) = gated_pub_mods(lib);
+    let expected: Vec<(String, String)> = GATED
+        .iter()
+        .map(|(name, gate)| (name.to_string(), gate.to_string()))
+        .collect();
+    (gated != expected).then(|| {
+        format!(
+            "the harness and the prototypes are the `pub mod`s behind a feature, both behind \
+             the harness's own, and lib.rs gates {gated:?}"
+        )
+    })
+}
+
+#[test]
+fn a_third_gated_component_is_refused() {
+    let lib = "pub mod plan;\n#[cfg(feature = \"test-support\")]\npub mod prototypes;\n\
+               #[cfg(feature = \"test-support\")]\npub mod test_support;\n";
+    assert_eq!(gated_mismatch(lib), None);
+    let third = format!("{lib}#[cfg(feature = \"test-support\")]\npub mod experiments;\n");
+    assert!(gated_mismatch(&third).is_some_and(|why| why.contains("experiments")));
 }
 
 /// `lib.rs`'s `pub mod` declarations, split by whether the line above gates them: the
@@ -255,26 +282,14 @@ fn a_components_api_is_declared_in_its_mod_rs() {
 /// `pub` item or field outside the table is a missed demotion or a claim without a receipt,
 /// and a table row that is not `pub` in its file is a deletion or a demotion the table did not
 /// follow. Names per file rather than a count, so a dropped-and-added pair cannot pass.
-/// `test_support/` is the feature-gated exception, checked by signature elsewhere.
+/// `test_support/` and `prototypes/mod.rs` are the feature-gated exceptions, checked by
+/// signature elsewhere.
 #[test]
 fn bare_pub_is_the_surface_and_nothing_else() {
     let mut found: Vec<(String, Vec<String>, Vec<String>)> = Vec::new();
     for rel in sources() {
         let path = rel.to_string_lossy().replace('\\', "/");
-        if path.starts_with("test_support/") {
-            continue;
-        }
-        let text = read(&rel);
-        let items: Vec<String> = text
-            .lines()
-            .filter(|l| is_bare_pub_item(l))
-            .filter_map(bare_pub_name)
-            .filter(|n| !n.starts_with("mod "))
-            .collect();
-        let fields: Vec<String> = pub_fields(&text)
-            .iter()
-            .filter_map(|(_, line)| bare_pub_name(line))
-            .collect();
+        let (items, fields) = bare_pubs(&path, &read(&rel));
         if !items.is_empty() || !fields.is_empty() {
             found.push((path, items, fields));
         }
@@ -324,6 +339,39 @@ fn bare_pub_is_the_surface_and_nothing_else() {
          calls it; the receipt is `cargo build -p peacockdb` failing without it, or \
          `private_interfaces` on a row already listed. Otherwise it is `pub(crate)`.",
         stale.join("\n")
+    );
+}
+
+/// The bare `pub` items and fields of the file at `path` that the surface must list: none in
+/// the harness, whose API is bare `pub` behind its feature, nor in the prototypes' facade,
+/// which is under the harness's rules. Below that facade a prototype is ordinary code.
+fn bare_pubs(path: &str, text: &str) -> (Vec<String>, Vec<String>) {
+    if path.starts_with("test_support/") || path == "prototypes/mod.rs" {
+        return (Vec::new(), Vec::new());
+    }
+    let items = text
+        .lines()
+        .filter(|l| is_bare_pub_item(l))
+        .filter_map(bare_pub_name)
+        .filter(|n| !n.starts_with("mod "))
+        .collect();
+    let fields = pub_fields(text)
+        .iter()
+        .filter_map(|(_, line)| bare_pub_name(line))
+        .collect();
+    (items, fields)
+}
+
+#[test]
+fn a_bare_pub_inside_a_prototype_is_refused() {
+    let doctored = "pub fn fuse() {}\n";
+    // Found in no surface file, so `bare_pub_is_the_surface_and_nothing_else` reports it.
+    for below in ["prototypes/fuser/fuse.rs", "prototypes/fuser/mod.rs"] {
+        assert_eq!(bare_pubs(below, doctored).0, ["fuse"], "{below}");
+    }
+    assert_eq!(
+        bare_pubs("prototypes/mod.rs", doctored),
+        (Vec::new(), Vec::new())
     );
 }
 

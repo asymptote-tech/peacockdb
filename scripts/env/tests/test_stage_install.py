@@ -37,7 +37,7 @@ if name in os.environ.get("FAKE_CARGO_FAILS", "").split():
     print(f"error: could not compile `{name}`", file=sys.stderr)
     sys.exit(101)
 profile = "release" if "--release" in a else "debug"
-features = "gpu" if "gpu" in a else "default"
+features = a[a.index("--features") + 1] if "--features" in a else "default"
 exe = pathlib.Path(os.environ["CARGO_TARGET_DIR"]) / profile / "deps" / f"{name}-0123abcd"
 exe.parent.mkdir(parents=True, exist_ok=True)
 exe.write_text(f"{name} {kind} {profile} {features}\n")
@@ -100,15 +100,28 @@ def test_stage_install_stages_four_tests_and_a_release_bench():
             "peacockdb_core_gpu_lib": "peacockdb_core lib debug gpu",
         }, staged
         bench = {p.name: p.read_text().strip() for p in (t.install / "rust-benchmarks").iterdir()}
-        assert bench == {"peacock_gpu_benchmarks": "peacock_gpu_benchmarks test release default"}, bench
+        assert bench["peacock_gpu_benchmarks"] == "peacock_gpu_benchmarks test release default", bench
         for call in t.cargo():
             a = call["argv"]
             assert a[:4] == ["test", "--no-run", "-p", "peacockdb-core"], a
             assert call["target"] == str(t.root / "target-img-25.02"), call
         stripped = sorted(t.lines("strip.log"))
         want = sorted([f"--strip-debug cpp/install/rust-tests/{n}" for n in GPU_TESTS + ["peacockdb_core_gpu_lib"]]
-                      + ["--strip-debug cpp/install/rust-benchmarks/peacock_gpu_benchmarks"])
+                      + [f"--strip-debug cpp/install/rust-benchmarks/{n}"
+                         for n in ("peacock_gpu_benchmarks", "prototype_fused_benchmarks")])
         assert stripped == want, stripped
+
+
+def test_stage_install_builds_the_prototype_target():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        ok(t.run())
+        bench = {p.name: p.read_text().strip() for p in (t.install / "rust-benchmarks").iterdir()}
+        assert bench == {
+            "peacock_gpu_benchmarks": "peacock_gpu_benchmarks test release default",
+            "prototype_fused_benchmarks": "prototype_fused_benchmarks test release gpu,test-support",
+        }, bench
+        assert "--strip-debug cpp/install/rust-benchmarks/prototype_fused_benchmarks" in t.lines("strip.log")
 
 
 def test_stage_install_stages_from_empty():

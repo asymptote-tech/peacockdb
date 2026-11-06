@@ -24,7 +24,8 @@ STATE = "/var/lib/peacock-gpu-idle/state.json"
 LOG = "/var/log/peacock-gpu-idle.log"
 #: An ssh login's terminals. Their atime is the last input; `nebius.sh ssh <cmd>` gets none.
 PTS = "/dev/pts"
-TEST_NAMES = ("peacock_", "test_gpu_corpus", "test_node_timing", "peacockdb_core_gpu_lib")
+TEST_NAMES = ("peacock_", "test_gpu_corpus", "test_node_timing", "peacockdb_core_gpu_lib",
+              "prototype_fused_benchmarks")
 BUILD_NAMES = ("rsync", "cargo", "cmake", "ninja", "nvcc", "cc1plus")
 CPU_TEST_NAMES = ("duckdb", "aws")
 #: The fresh-VM bootstrap's work. `docker` is the client: it is matched by its whole name,

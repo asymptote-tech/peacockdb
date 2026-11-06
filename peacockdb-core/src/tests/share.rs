@@ -7,11 +7,12 @@ use std::num::NonZeroUsize;
 
 use datafusion::execution::context::SessionContext;
 
+use crate::plan::rebuild;
 use crate::plan::{GpuLoadParquet, GpuNode, NodeRef, Schema, SharedSource, as_node_ref};
 use crate::plan::{PlanDag, PlanError, new_hold_buffer, validate_dag};
 use crate::planner;
 use crate::test_support::{Mode, data_dir_for};
-use crate::tests::rebuild::{rebuild, schema_of};
+use crate::tests::rebuild::schema_of;
 
 /// Four tpch queries to fuse. Wherever two read one table they read the same columns, so
 /// their loads match and share: lineitem as `{l_orderkey, l_quantity}`, orders as

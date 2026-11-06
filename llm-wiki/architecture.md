@@ -17,7 +17,7 @@ state stays resident, so the query fits a budget the table does not.
 ## Contents
 
 [Planning](#planning) · [The node set](#the-node-set) · [Joins](#joins) ·
-[Execution](#execution) · [The wire format](#the-wire-format) ·
+[Execution](#execution) · [Prototypes](#prototypes) · [The wire format](#the-wire-format) ·
 [Interfaces](#interfaces) · [Rehash and the comet hash](#rehash-and-the-comet-hash) ·
 [C++ executor layout](#c-executor-layout) · [Column indexing](#column-indexing) ·
 [cuDF options](#cudf-options) · [Node display](#node-display) ·
@@ -690,8 +690,8 @@ one DAG, with one root per query. A load two of them read alike is one `SharedSo
 each batch once, and every reader takes it. `run_roots` runs it. It calls `validate_dag` first,
 and answers each root separately with the rows that query answers alone; their order matches
 where the root reads one source per stream, since a shared source's place in the schedule comes
-from the whole plan. The planner builds no fused plan.
-query-fuser will; until then tests build them by hand (`src/tests/share.rs`). The rules follow:
+from the whole plan. The planner builds no fused plan. The query-fuser prototype does
+([Prototypes](#prototypes)), and tests build them by hand (`src/tests/share.rs`). The rules follow:
 what may be shared ([Traits](#traits)); holds, hold buffers and why nothing deadlocks
 ([The scheduling rule](#the-scheduling-rule)); limits per reader
 ([Early exit at a limit](#early-exit-at-a-limit)); one charge per batch
@@ -1088,6 +1088,32 @@ A query's answer is the same rule one level up: a root that received nothing ans
 batch under the sink's input schema, made by the driver (`Driver::answers`) and recorded as no
 node's emission, so an answer's schema never depends on how its rows ran out.
 
+## Prototypes
+
+Prototype code measures an idea; it does not ship. It lives in
+`peacockdb-core/src/prototypes/<name>/`. The component is compiled only under `test-support`, as
+`test_support/` is, so `cargo build` cannot name it. Its facade, `prototypes/mod.rs`, follows
+`test_support`'s rules. Each prototype's module doc says what it is and the scale it runs at.
+
+**No file outside `prototypes/` and the tests names `prototypes`**, `lib.rs`'s declaration
+aside: not as a path, an alias or a brace-list item. The engine never depends on a prototype.
+`cost-report`'s `test_source_formatting/prototypes.rs` enforces it.
+
+- **`fuser`** (query-fuser). It fuses N tp1_single plans into one DAG on the driver's fused
+  plans ([Execution](#execution)). Only sources are merged: the scans of one file become one
+  `SharedSource` over the union of their columns and row groups. Each reader selects its own
+  columns through a column-ref `GpuProject`, or reads the source itself. Three shapes stay
+  unshared, with the reason recorded: a scan a limit cut to a prefix (`limit-cut`), a scan whose
+  columns would gain NULLs (`nulls:<col>`), and a rows-only scan beside column scans, or a lone
+  column scan beside rows-only ones (`rows-only`). Every reader of a shared scan inside a hold is buffered or re-reads the table,
+  as a chooser decides. The benchmark's chooser and its concurrency cap are plain functions of
+  the sf40 baseline's numbers and the rmm pool, written down in the detail file. It reports, without executing, the identical subtrees above the shared
+  sources and what merging them would save (the merge hint), and what overlapping loads with
+  execution would save (the pipelining hint). It runs at sf40 only. A batch runs on the device
+  through the benchmark harness's parts in `test_support` (its pool, cache, protocol and trailer)
+  and the `prototype_fused_benchmarks` target, by hand on the H100 (build-test.md, "Fused
+  batches"). Decisions and formats: `tasks/query-fuser-detail.md`.
+
 ## The wire format
 
 **The flat buffers** are the serialized plan (`flatbuffers/gpu_plan.fbs`) — the only thing
@@ -1295,8 +1321,8 @@ Three conventions the signatures do not carry:
   `result_from_handle`, which are otherwise the two halves of the limit rule — one produces
   a handle, the other a result.
 - **Instrumentation is process-global and off by default; the benchmark harness and the
-  timing tests are what turn it on** — `peacock_gpu_benchmarks`, `test_node_timing`, two
-  `gpu_tests` cases in the GPU backend, and the gtest fixtures on both C++ tiers. Without
+  timing tests are what turn it on** — `peacock_gpu_benchmarks`, `prototype_fused_benchmarks`,
+  `test_node_timing`, two `gpu_tests` cases in the GPU backend, and the gtest fixtures on both C++ tiers. Without
   the pool every cuDF intermediate is a `cudaMalloc`/`cudaFree` round trip
   ([#148](tickets/performance.md#t148)); the gtest binaries install it from their own `main()`, and this
   symbol exists for a Rust caller that cannot include the C++ header. Under `set_node_timing` every per-call entry point opens one region per output

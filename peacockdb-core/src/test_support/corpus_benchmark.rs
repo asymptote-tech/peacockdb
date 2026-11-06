@@ -28,7 +28,7 @@ use super::benchmark_prefill::{
     unprefilled,
 };
 use super::benchmark_section::{assert_dataset_present, case_timeout, measure_case, watch_case};
-use super::benchmark_trailer::{RunTotals, run_section};
+use super::benchmark_trailer::run_section;
 use super::corpus::{line_row_order, plan_at};
 use super::corpus_golden::declared_sf;
 use super::corpus_gpu::record_gpu_result;
@@ -40,8 +40,8 @@ use super::record::{
 };
 use super::{
     BUILD, BenchmarkCase, Capture, CaseOutcome, GpuRecording, MEASURED_RUNS, Mode, NOT_TIMED,
-    RECORD_PATH_ENV, RESUME_ENV, Resume, RowOrder, RunMeta, SKIPPED, data_dir_for, load_csv,
-    mode_named, stem, testdata_root,
+    RECORD_PATH_ENV, RESUME_ENV, Resume, RowOrder, RunMeta, RunTotals, SKIPPED, data_dir_for,
+    load_csv, mode_named, stem, testdata_root,
 };
 
 /// The sections a `(dataset, sf, mode)` file is declared to hold: the queries timed at
@@ -476,9 +476,14 @@ fn second_smallest(mut runs: Vec<Run>) -> Run {
     runs.swap_remove(1)
 }
 
+/// The benchmark's pool installed, or what is installed already: the process has one.
+pub(crate) fn install_bench_pool() -> RmmPool {
+    install_rmm_pool(BENCH_POOL_BYTES)
+}
+
 /// The two conditions the harness refuses to measure without: rmm's pool, and a release
 /// build. `install_rmm_pool` is idempotent, so asking it is asking what the resource is.
-fn assert_fit_to_measure(what: &str) {
+pub(crate) fn assert_fit_to_measure(what: &str) {
     assert!(
         matches!(install_rmm_pool(BENCH_POOL_BYTES), RmmPool::Pool { .. }),
         "{what} would measure over rmm's default resource, where every cuDF intermediate is \

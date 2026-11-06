@@ -89,7 +89,12 @@ pub(crate) fn timed_device_us(times: &Measurements) -> u64 {
 /// Every load node's `total_us` added, under the same rule as `device_us`: the trailer's
 /// `load_us`. A plan with no loader (`GpuEmpty` answers from no file) loads for 0.
 pub(crate) fn timed_load_us(root: &dyn GpuNode, times: &Measurements) -> u64 {
-    let index = PlanIndex::build(root).expect("the tree the run was made over indexes");
+    timed_load_us_of_roots(&[root], times)
+}
+
+/// [`timed_load_us`] over several roots, a load they share once.
+pub(crate) fn timed_load_us_of_roots(roots: &[&dyn GpuNode], times: &Measurements) -> u64 {
+    let index = PlanIndex::build_roots(roots).expect("the roots the run was made over index");
     (0..index.nodes.len())
         .filter(|node| index.nodes[*node].node.name() == LOAD_NODE)
         .map(|node| total_of(times, node))
