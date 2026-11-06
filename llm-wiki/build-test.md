@@ -108,7 +108,7 @@ tree the indentation draws. The golden is written by the run it will later check
 contradicts itself is the only witness to a renderer that is wrong. Each `*.fused.txt` section
 passes `fused_problem`, its holds, cap, tree, runs and pipelining estimate against each other,
 and a measured one must say `answers=match` (both H100 files, and two doctored cases). The benchmark tree gets the
-same reading, through its one reader, `parse_benchmark_section`, and each timed section through
+same reading, through its one Rust reader, `parse_benchmark_section`, and each timed section through
 `section_problem`: every `total_us` is the sum of the `time_us` beside it and `device_us` the sum
 of the totals. Where a section carries them, `load_us` is the `GpuLoadParquet` totals,
 `load_us + execute_us` is `device_us`, each node's `batch_rows` and `batch_bytes` have one shape,
@@ -637,7 +637,8 @@ and its version, threads, host and `SELECT 1` floor named in the intro, with wha
 | DuckDB results reader | [test_support::duckdb_results::tests](../peacockdb-core/src/test_support/duckdb_results/tests.rs) | 9 |
 |---|---|--:|
 
-`parse_duckdb_results`, `duckdb.tsv`'s one reader: the shared fixture to a literal, the values
+`parse_duckdb_results`, `duckdb.tsv`'s Rust reader (the query-batching generator's is held to the
+same literal): the shared fixture to a literal, the values
 `benchmarks/tests/test_duckdb_minimal.py` holds the script's output to; a working set it could not
 size reads as none; a short row, an unknown status, a failed row with a time, an `ok` row without
 one, a missing preamble, a column line out of order and a query listed twice refused, naming the line
@@ -3102,8 +3103,9 @@ Then a `--- run ---` trailer, one `key=value` a line, seventeen keys in this ord
 
 The `h200/` sections predate `load_us`, `execute_us`, `peak_bytes`, `pinned_cache` and the three
 `prefill_*` keys. Only `h200/` may lack them (`PREDATES_ROWS` in `test_corpus_goldens`); a section
-in any other tree without them is refused. One reader, `parse_benchmark_section` in
-`test_support`, reads a section in either shape: a field a section lacks reads as `None`, never as
+in any other tree without them is refused. One Rust reader, `parse_benchmark_section` in
+`test_support`, reads a section in either shape (the query-batching generator reads the H100 tree
+in Python, held to it only by its `--check`): a field a section lacks reads as `None`, never as
 a derived value, and `tree_load_us()` gives an old section's load. A failed case's section is its
 record instead (above).
 
@@ -3159,8 +3161,9 @@ each query's threads=1 answer as table `"<q>"` (`<q>` the file's stem), which `d
 `key=value`s (`duckdb threads host cpu cores memory_gib db resident_pct floor_ms`; `floor_ms` is
 `SELECT 1` timed as a query is, its second-smallest), the column line `query
 ms_2nd_min runs_ms workset_bytes disk_read_bytes warm status`, then a row per query, `runs_ms`
-comma-joined, a failed row `-` for its times, its disk read and its warm verdict. Its one reader is
-`parse_duckdb_results` in `test_support`, tested over `testdata/fixtures/duckdb-results.tsv`, which
+comma-joined, a failed row `-` for its times, its disk read and its warm verdict. Its readers are
+`parse_duckdb_results` in `test_support` and the query-batching generator's, both tested over
+`testdata/fixtures/duckdb-results.tsv`, which
 `benchmarks/tests/test_duckdb_minimal.py` holds the script's output to. The results live in
 `testdata/benchmark-results/duckdb-cpu128/<ds>.sf40/duckdb.tsv`.
 
@@ -3322,8 +3325,9 @@ batch that runs out of device memory writes its section and passes.
   `<batch>.loads.tsv`, `hbm.tsv` and `failed.tsv`.
 - `PEACOCK_BENCH_RESUME=1` keeps a section this device, driver, CUDA, cuDF and host wrote.
 - The comparison page, `llm-wiki/reports/query-batching.md`: fused against unfused and DuckDB per
-  batch, with the hints, the load split and the provenance. Every number on it comes from
-  `scripts/calibration/batching_report.py --testdata testdata --report llm-wiki/reports/query-batching.md`.
+  batch, with the hints, the load split and the provenance. Every number between its markers comes
+  from `scripts/calibration/batching_report.py --testdata testdata --report llm-wiki/reports/query-batching.md`;
+  the Reading below them is written by hand from those tables, and `--check` does not cover it.
   Rerun it in the commit that changes any of its inputs; `--check` exits 1 while the page is
   stale, and dataset-matrix runs it on the 25.02 leg, beside `generate_pbench.sh --check`. The
   page is not documentation to the pipeline's path filters (*CI structure*), so a push that
