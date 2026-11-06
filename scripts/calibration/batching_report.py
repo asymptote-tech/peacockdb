@@ -283,6 +283,8 @@ def gather(testdata, dataset, cases):
             if measured and path.exists():
                 entry["split"]["fused"] = load_split(
                     record.read_tsv(path, "query", "mode", *LOAD_COLUMNS))
+                if name in failed_profiles:
+                    entry["profile_failed"] = failed_profiles[name]
             elif name in failed_profiles:
                 entry["split"]["fused"] = failed_profiles[name]
             elif measured:
@@ -559,7 +561,9 @@ def split_table(data):
         f"time. Unfused `host_read_source`: {sources}. With `kvikio` the host read holds "
         "kvikio's bounce copies, which H2D counts too, so the two are not added. The parts are "
         "separate medians and can overlap in time, so they may add up to more than Σ load.",
-    ]
+    ] + [f"- {e['name']}'s fused row is read from `{e['name']}.loads.tsv`, though `failed.tsv` "
+         f"lists the batch: {e['profile_failed']}." for e in data["batches"]
+         if "profile_failed" in e]
 
 
 def timed_sections(gathered):

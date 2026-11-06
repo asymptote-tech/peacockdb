@@ -114,6 +114,27 @@ Branch `ENS-batching-report`, forked from `ENS-query-fuser` at `413366c4` on 202
     renamed `test_provenance_holds_the_protocol_and_the_duckdb_run`.
   - build-test.md: the calibration row 105 → 114, the header 8172 → 8181 (Python 1596), the
     tables sum to 8181; dataset-matrix's paragraph and "Fused batches" name the CI step.
+- 2026-11-06, review round 2 (developer): I1 and N1. Not committed. All local, no VM.
+  - **I1:** the page is off the docs-only list in all three places. Both triggers are now
+    `paths: ['**', '!**.md', '!llm-wiki/**', 'llm-wiki/reports/query-batching.md']`, not
+    `paths-ignore`: GitHub's workflow-syntax page documents `!` and a later re-include ("A
+    matching positive pattern after a negative match will include the path again") for
+    `paths:` only, says to use `paths:` to both include and exclude, and documents `'**'` as
+    "the default behavior when you don't use a path filter". The `changes` grep also answers
+    code for a diff holding the page (`grep -qxF`). Header comment, the job's comment and
+    build-test.md ("CI structure", "Fused batches") updated.
+  - No existing test covers the `changes` logic (only `ci_coverage.rs`/`runners.rs` read
+    `pipeline.yml`, for Rust targets), so none was extended. Checked mechanically instead: the
+    YAML parses with both lists as above and no `paths-ignore`; the `changes` step's own
+    `run:` block, extracted from the YAML, passes `bash -n` and, run under a fake `gh` (a
+    clean append of given files), answers `code=true` for the page alone, for the page with a
+    task file, and for a script, and `code=false` for a task file alone, for `.md` files
+    elsewhere (another report included) and for `docs/llm-wiki/reports/query-batching.md`. An
+    emulation of the documented `paths:` rules over the list agrees on eight such sets. Neither
+    is GitHub itself.
+  - **N1** (test first, red then 37 passed): when `<batch>.loads.tsv` exists and `failed.tsv`
+    lists the batch, the row reads the file and a line under the split table says so, with the
+    reason; no failure, no line.
 
 ## Review round 1 (2026-11-06)
 
