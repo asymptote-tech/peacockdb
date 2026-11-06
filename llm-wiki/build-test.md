@@ -106,7 +106,7 @@ prefix of its own lane's `partition_groups`, the root's `out_rows` against `.res
 tree the indentation draws. The golden is written by the run it will later check, so a file that
 contradicts itself is the only witness to a renderer that is wrong. Each `*.fused.txt` section
 passes `fused_problem`, its holds, cap, tree, runs and pipelining estimate against each other
-(none is committed yet; two doctored cases hold the check). The benchmark tree gets the
+(both H100 files, and two doctored cases). The benchmark tree gets the
 same reading, through its one reader, `parse_benchmark_section`, and each timed section through
 `section_problem`: every `total_us` is the sum of the `time_us` beside it and `device_us` the sum
 of the totals. Where a section carries them, `load_us` is the `GpuLoadParquet` totals,

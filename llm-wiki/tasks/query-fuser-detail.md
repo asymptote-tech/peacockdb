@@ -518,6 +518,8 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     `git check-ignore` shows a `*.records.tsv` there, the device's fetched records and the
     `calibration/fused/` scratch area all still ignored. The file is not an image or data
     input (`scripts/lib/image-inputs.sh`, `data-inputs.sh`).
+- 2026-11-06: plan complete (Task 10 committed 5551e9b8, 57be22b8). PR #200 against `ENS-dag-driver`; board `reviewing`; reviewer round 1 dispatched.
+- 2026-11-06: review round 1 returned (see "Review round 1"); developer dispatched on B1, I1, I2 and the code nits, then an H100 rerun.
 
 ## The hold rule (spec 1a)
 
@@ -632,7 +634,16 @@ Keys:
 - An out-of-memory batch keeps `--- batch ---` (its holds, cap and estimate), `--- merge ---`
   and the pipeline's model lines; no tree, and its `--- run ---` is the five provenance keys,
   which is what a resumed run keeps it by.
-- 2026-11-06: plan complete (Task 10 committed 5551e9b8, 57be22b8). PR #200 against `ENS-dag-driver`; board `reviewing`; reviewer round 1 dispatched.
+
+## Review round 1 (2026-11-06)
+
+1 blocking, 2 important, 9 nits. All routed to the developer except nits 1 and 9 (markdown, fixed by the coordinator).
+
+- **B1.** A re-read leaves the shared load loading the union of every original member (`fuse.rs:371-382`). tpch first10: all 8 groups end with one reader; q1 loads a 12-column lineitem union alone (342 ms vs 155 ms alone). The 8 single-reader groups add 511 ms, nearly all of first10's "16 % slower". Multi-reader groups also keep stale unions (first20/all lineitem: 14 columns where 9 are read). The cap's `S` uses the same unions. Fix: after resolving (and after each `settle` round) rebuild each group's load over its remaining members, re-point the inserted projects; a group of one reads its member's own load; recompute the cap; regression test; rerun all eight batches and the profiles on the H100; correct "An honest reading".
+- **I1.** The resolve loop terminates only if the chooser honours `waits` (`fuse.rs:348-356`). Fix: after `choose` for a waiting reader, check the chosen edge has no state at or below it, else error naming the chooser; regression test with a chooser that always buffers at `path.last()` under a cap.
+- **I2.** Over budget, the hold rule re-reads every hold, even 5-byte buffers, though a re-read adds the reader's whole load to its root (`holds.rs:139`, `decide` `holds.rs:20-51`, `cap.rs:59-62`). The plan specified the rule, so this is a coordinator decision. **Decided:** when over budget, buffer when the buffer's bytes are below what the re-read adds to its root; record the change in "The hold rule". Spec 1a's "plain function of those numbers and the memory budget" still holds.
+- Nits for the developer: 2 (doc comments over 10 lines, `mod.rs:255-266`, `358-370`), 3 (prototypes gate misses `use crate::prototypes as p;`), 4 (`Unshared::RowsOnly` doc vs label), 5 (`fused_problem` does not require `answers=match`), 6 (`baseline_for` first match without a comment), 7 (`recorded()` should look through `GpuHoldBuffer`), 8 (`create_nsys_profile.sh:47` example lacks `PCK_BENCH_HBM_FREQ=10000`).
+- Reviewer confirmed: 03b7af97 sound; `testdata/.gitignore` admits only the four profile kinds; Review Focus 1-7 hold. Outside the diff: `!/calibration/*-*/` re-includes `calibration/hbm-parts/`, so never `git add testdata` wholesale.
 
 ## Checkpoints
 
