@@ -260,5 +260,29 @@ def test_regions_that_ran_different_numbers_of_times_are_refused():
         assert not (tmp / "calls.tsv").exists(), "the refused capture left a calls.tsv"
 
 
+class CountedCalls(list):
+    """A thread's calls that count every element read, one by index or each of a slice."""
+
+    read = 0
+
+    def __getitem__(self, at):
+        got = super().__getitem__(at)
+        type(self).read += len(got) if isinstance(at, slice) else 1
+        return got
+
+
+def test_a_region_reads_its_own_calls_and_not_the_rest_of_its_thread():
+    """A tp4_sized tpch capture holds 5.8 M calls and 350 k regions on one thread. A region
+    that copies the rest of its thread's calls to walk them makes the reader quadratic, and
+    then it never finishes."""
+    rows = CountedCalls((10 * i, 10 * i + 5, f"call{i}", 1) for i in range(100_000))
+    index = ([r[0] for r in rows], rows)
+    CountedCalls.read = 0
+    inside = list(nsys_calls.calls_in(index, 20, 40))
+    assert [c[2] for c in inside] == ["call2", "call3"], inside
+    # The two inside, and call4, whose start at 40 ends the walk.
+    assert CountedCalls.read <= 3, CountedCalls.read
+
+
 if __name__ == "__main__":
     raise SystemExit(main(globals()))
