@@ -891,6 +891,7 @@ Keys:
 | Task 9 fix | `03b7af97` | fuser: a join hold in a root that waits is never buffered above its state; found on the H100 (tpch first20/all); lib 1200, formatting 39; tpch first3/first10 measured, rerun pending |
 | Review round 1 fixes | `0d46064d` | fuser: review round 1: a group rebuilt over its remaining readers, a looping chooser refused, buffers over budget below the re-read; B1, I1, I2, nits 2-6, 8; nit 7 declined (a held path never passes a buffer); lib 1206, goldens 64, formatting 39 |
 | Review round 2 fixes | `51b27ddf` | fuser: review round 2: holds priced against the plan as it stands, a buffered build priced as what it buffers; I1 (round 2), nits 7 and 2; lib 1208 passed, goldens 64, formatting 39 |
+| Completeness fix | `7b1db00e` | fuser: the merge hint groups subtrees across queries only; completeness pass; lib 1209 passed, goldens 64, formatting 39 |
 
 ## VM time
 
