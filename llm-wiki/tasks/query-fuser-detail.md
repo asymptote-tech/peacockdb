@@ -724,6 +724,7 @@ Keys:
 | Task 7 Step 5 | `7eae3641` | fuser: the report page's fused-batches table; lib 1197, goldens 64, formatting 39, gpu check clean |
 | Task 8 Step 5 | `a203912b` | fuser: an Nsight profile per fused batch; lib 1199, goldens 64, formatting 39, test_run_gpu 49; shellcheck not run (not installed) |
 | Task 9 fix | `03b7af97` | fuser: a join hold in a root that waits is never buffered above its state; found on the H100 (tpch first20/all); lib 1200, formatting 39; tpch first3/first10 measured, rerun pending |
+| Review round 1 fixes | `0d46064d` | fuser: review round 1: a group rebuilt over its remaining readers, a looping chooser refused, buffers over budget below the re-read; B1, I1, I2, nits 2-6, 8; nit 7 declined (a held path never passes a buffer); lib 1206, goldens 64, formatting 39 |
 
 ## VM time
 
