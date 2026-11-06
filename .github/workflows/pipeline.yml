@@ -3,29 +3,37 @@ name: CI Pipeline
 # Documentation-only changes skip the whole pipeline. Nothing under llm-wiki/ or any
 # .md file is read by a build, a test or a golden — verified by grep, and the rule is
 # only safe while that stays true, so a doc file that ever becomes an input (a fixture,
-# a generated table someone asserts on) has to come off this list.
+# a generated table someone asserts on) has to come off this list. One has:
+# llm-wiki/reports/query-batching.md, which a step asserts is what batching_report.py
+# makes. Both triggers re-include it and the `changes` job counts it as code.
 #
-# paths-ignore skips only when EVERY changed file matches, so a commit touching the spec
-# and the code it describes still runs in full. No status check is required on master
-# (no ruleset enforcement, no required_status_checks), so a skipped run leaves a PR
-# mergeable rather than stuck waiting on a check that will never report.
+# The triggers are `paths:` lists, everything less the docs: GitHub documents `!` and a
+# later re-include for `paths:` only, never for paths-ignore. A run starts when any changed
+# file is left in, so a commit touching the spec and the code it describes still runs in
+# full. No status check is required on master (no ruleset enforcement, no
+# required_status_checks), so a skipped run leaves a PR mergeable rather than stuck waiting
+# on a check that will never report.
 on:
   push:
     branches: [master]
-    paths-ignore:
-      - '**.md'
-      - 'llm-wiki/**'
+    paths:
+      - '**'
+      - '!**.md'
+      - '!llm-wiki/**'
+      - 'llm-wiki/reports/query-batching.md'
   pull_request:
-    paths-ignore:
-      - '**.md'
-      - 'llm-wiki/**'
+    paths:
+      - '**'
+      - '!**.md'
+      - '!llm-wiki/**'
+      - 'llm-wiki/reports/query-batching.md'
   # The only way a branch reaches gpu-tests: `gh workflow run pipeline.yml --ref <branch>`, by
   # an actor with write access who is also listed in GPU_ALLOWED_ACTORS. It runs the whole
   # pipeline, as a push to master does (`changes` answers code=true for any non-PR event).
   workflow_dispatch:
 
 jobs:
-  # paths-ignore above is not enough on its own. For a pull_request event GitHub
+  # The path filter above is not enough on its own. For a pull_request event GitHub
   # evaluates it against the WHOLE PR diff, not the commits just pushed, so a PR that
   # touches any code runs the full pipeline on every later docs-only push — measured,
   # not assumed: a docs-only push to #118 started run 31644108948 with the filter live.
@@ -71,8 +79,9 @@ jobs:
 
           files=$(jq -r '(.files // [])[].filename' <<<"$cmp")
           echo "changed in this push:"; echo "${files:-(nothing)}" | sed 's/^/  /'
-          # Same two patterns as paths-ignore above; they must stay in step.
-          if grep -qvE '(\.md$|^llm-wiki/)' <<<"$files"; then
+          # The trigger lists' patterns above; they must stay in step, the page included.
+          if grep -qvE '(\.md$|^llm-wiki/)' <<<"$files" \
+              || grep -qxF 'llm-wiki/reports/query-batching.md' <<<"$files"; then
             everything "the push changes more than documentation"
           fi
           echo "code=false" >> "$GITHUB_OUTPUT"

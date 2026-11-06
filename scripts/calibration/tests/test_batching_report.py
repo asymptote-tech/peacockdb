@@ -419,8 +419,15 @@ def test_load_split_sums_columns_and_keeps_read_and_copy_apart():
 def test_a_failed_profile_with_its_loads_file_still_shows_the_split():
     s = spec()
     s["fused_failed"]["tpch"] = "first3\tmetrics\tthe capture failed\n"
-    split = {r[1]: r[2:] for r in table(rendered(s), TPCH_SPLIT) if r[0] == "first3"}
+    text = rendered(s)
+    split = {r[1]: r[2:] for r in table(text, TPCH_SPLIT) if r[0] == "first3"}
     assert split["fused"] == ["3.0", "0.0", "0.6", "1.9", "0.0", "0.0"], split
+    # The file may be an earlier run's, so the failure is said beside it, never dropped.
+    footnote = section_after(text, TPCH_SPLIT).splitlines()
+    assert ("- first3's fused row is read from `first3.loads.tsv`, though `failed.tsv` lists "
+            "the batch: metrics: the capture failed.") in footnote, footnote
+    assert not any("failed.tsv" in line for line in section_after(rendered(), TPCH_SPLIT)
+                   .splitlines()), "no failure, no line"
 
 
 def test_a_failed_profile_without_its_loads_file_shows_the_reason():
