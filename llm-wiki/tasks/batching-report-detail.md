@@ -194,6 +194,7 @@ Branch `ENS-batching-report`, forked from `ENS-query-fuser` at `413366c4` on 202
 | Task 2 Step 5 | `672fe067` | batching-report: fused vs unfused vs DuckDB per batch size, sf40; test_batching_report 28, formatting 39 |
 | Review round 1 fixes | `7f7b51aa` | batching-report: review round 1: DuckDB's floor named and taken off, the page checked in CI; I1-I5, N1-N7; test_batching_report 37, calibration 114, formatting 39, --check 0 |
 | Review round 2 fixes | `4d8cb7a0` | batching-report: review round 2: the page off the docs-only list, a failed profile beside its file; I1, N1; calibration 114, formatting 39, --check 0 |
+| Completeness fixes | `b0cbe4f9` | batching-report: completeness pass: a stale fused batch named, not refused; the page's --check guarded in CI; calibration 118, formatting 41, --check 0, page byte-identical |
 
 ## VM time
 
