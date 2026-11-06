@@ -1511,6 +1511,107 @@ pub async fn benchmark_case(dataset: &str, sf: &str, query: &str, mode: &str) {
     corpus_benchmark::benchmark_case(dataset, sf, query, mode).await
 }
 
+// --- the benchmark's parts, for the fused benchmark -----------------------------------
+// `prototypes`' fused benchmark measures several roots as one plan under the same pool, cache,
+// protocol and trailer as a corpus case. It reaches the harness through these; each names an
+// engine type or serves one that does, so they stay `pub(crate)`.
+
+/// What the chosen run cost, as the trailer reports it.
+pub(crate) struct RunTotals {
+    pub(crate) run_us: u64,
+    pub(crate) device_us: u64,
+    /// The tree's `GpuLoadParquet` totals, a part of `device_us`.
+    pub(crate) load_us: u64,
+    pub(crate) peak_bytes: u64,
+}
+
+/// The `--- run ---` trailer: the chosen run's totals, every run's time, the allocator, the
+/// pinned cache at the end, the prefill and the five.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) fn run_section(
+    totals: &RunTotals,
+    spread: &[u64],
+    allocator: &str,
+    end: &crate::executor::PinnedCache,
+    prefill: &crate::executor::PrefillStats,
+    provenance: &Provenance,
+) -> String {
+    benchmark_trailer::run_section(totals, spread, allocator, end, prefill, provenance)
+}
+
+/// The benchmark's rmm pool, installed once per process: what the run may hold.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) fn install_bench_pool() -> crate::executor::RmmPool {
+    corpus_benchmark::install_bench_pool()
+}
+
+/// Refuse to measure over rmm's default resource or in a debug build.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) fn assert_fit_to_measure(what: &str) {
+    corpus_benchmark::assert_fit_to_measure(what)
+}
+
+/// `query` planned at `mode` over `dataset` at `sf`: the session and the tree.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) async fn plan_at(
+    dataset: &str,
+    sf: &str,
+    query: &str,
+    mode: &Mode,
+) -> (SessionContext, Box<dyn GpuNode>) {
+    corpus::plan_at(dataset, sf, query, mode).await
+}
+
+/// `files` made resident in the pinned host cache through a session over `roots`.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) fn prefill_for_roots(
+    roots: &[&dyn GpuNode],
+    join_scratch: u64,
+    files: &[PathBuf],
+    what: &str,
+) -> Result<crate::executor::PrefillStats, crate::executor::PrefillError> {
+    gpu_session::prefill_for_roots(roots, join_scratch, files, what)
+}
+
+/// One timed run of `roots` under `cap` in a session of its own, and the device's regions.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) fn run_roots_timed(
+    roots: &[&dyn GpuNode],
+    join_scratch: u64,
+    cap: std::num::NonZeroUsize,
+    what: &str,
+) -> Result<(crate::executor::FusedRun, Vec<crate::executor::Region>), crate::executor::RunError> {
+    gpu_session::run_roots_timed(roots, join_scratch, cap, what)
+}
+
+/// Whether the rounds between two snapshots of the pinned cache read pinned buffers only.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) fn rounds_were_pinned(
+    before: &crate::executor::PinnedCache,
+    after: &crate::executor::PinnedCache,
+) -> Result<(), String> {
+    benchmark_prefill::rounds_were_pinned(before, after)
+}
+
+/// One run's record rows, `nodes` as `nodes_as_recorded` gives them.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) fn record_rows(
+    nodes: &[(&str, usize)],
+    report: &crate::executor::RunReport,
+    measured: &crate::executor::Measurements,
+    meta: &RunMeta<'_>,
+    run_index: usize,
+) -> Vec<String> {
+    record::record_rows(nodes, report, measured, meta, run_index)
+}
+
+/// The seqs each node's recipe publishes, by post-order: what [`rows_match_the_recipes`] holds
+/// a run's rows to.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) fn declared_steps(recipes: &crate::wire::RecipePlan) -> BTreeMap<usize, BTreeSet<u32>> {
+    record::declared_steps(recipes)
+}
+
 // --- the calibration record --------------------------------------------------------
 // One row per cuDF call, `record.rs`. The binaries reach the writer, the checker and the
 // heading; the row builder names the run report and stays behind them.
@@ -1632,6 +1733,11 @@ pub struct Provenance {
 /// path segment, `NVIDIA H100 80GB HBM3` as `h100-80gb-hbm3`. The full name is in each file.
 pub fn device_slug(name: &str) -> String {
     provenance::device_slug(name)
+}
+
+/// The five as `(key, value)`, in the one order a trailer and a record heading write them.
+pub(crate) fn provenance_fields(provenance: &Provenance) -> [(&'static str, &str); 5] {
+    provenance::fields(provenance)
 }
 
 /// This process's five, read as a benchmark case reads them; panics naming `what` when one

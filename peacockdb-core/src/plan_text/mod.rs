@@ -101,3 +101,9 @@ pub(crate) fn timed_device_us(times: &Measurements) -> u64 {
 pub(crate) fn timed_load_us(root: &dyn GpuNode, times: &Measurements) -> u64 {
     bench_text::timed_load_us(root, times)
 }
+
+/// [`timed_load_us`] over several roots, a load they share counted once: a fused run's
+/// `load_us`.
+pub(crate) fn timed_load_us_of_roots(roots: &[&dyn GpuNode], times: &Measurements) -> u64 {
+    bench_text::timed_load_us_of_roots(roots, times)
+}

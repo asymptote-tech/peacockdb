@@ -97,7 +97,7 @@ def test_run_gpu_refuses_an_unknown_verb_or_option():
     with Host() as h:
         refused(h.gpu("teleport"), 2, "teleport")
         refused(h.gpu("--color", "red", "run", "list"), 2, "--color")
-        refused(h.gpu("run", "everything"), 2, "everything")
+        refused(h.gpu("run", "every thing"), 2, "every thing")
         refused(h.gpu("--dir", "../up", "ship"), 2, "--dir")
         refused(h.gpu("--cudf", "24.12", "prepare"), 2, "24.12")
         assert h.nebius_calls() == []
@@ -397,6 +397,89 @@ def test_run_before_ship_says_so():
         prepared(h)
         refused(h.gpu("run", "list"), 2, "ship")
         assert h.docker_runs() == []
+
+
+# --- run, a staged binary by name -------------------------------------------------------------
+
+FUSED = "prototype_fused_benchmarks"
+FIRST3 = "bench_fused_tpch_sf40_first3_tp1_single"
+
+
+def staged_fused(h):
+    """Prepared and shipped, with the fused binary staged executable in the install."""
+    exe = h.tree / "cpp/install/rust-benchmarks" / FUSED
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_text("staged")
+    exe.chmod(0o755)
+    prepared(h)
+    ok(h.gpu("ship"))
+    h.world(run_output="running 1 test\ntest result: ok. 1 passed\n")
+    return h
+
+
+def test_run_names_a_staged_binary():
+    with Host() as h:
+        staged_fused(h)
+        r = ok(h.gpu("run", FUSED, "--exact", FIRST3, env={"PEACOCK_BENCH_RESUME": "1"}))
+        assert "1 passed" in r.stdout, r.stdout
+        runs = h.docker_runs()
+        assert len(runs) == 1, runs
+        a = runs[0]
+        assert a[a.index("--entrypoint") + 1] == f"/peacock/install/rust-benchmarks/{FUSED}", a
+        envs = [a[i + 1] for i, x in enumerate(a) if x == "-e"]
+        assert envs == ["LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib", "PEACOCK_TESTDATA_DIR=/peacock/testdata",
+                        "PEACOCK_BENCH_RESUME=1"], envs
+        assert a[a.index(RUN_REF):] == [RUN_REF, "--nocapture", "--test-threads=1", "--exact", FIRST3], a
+        assert not {"list", "filter", "bench"} & set(a), a
+        assert a[a.index("--hostname") + 1] == HOSTNAME and a[a.index("--name") + 1] == "peacock-chain-l"
+        mounts = [a[i + 1] for i, x in enumerate(a) if x == "-v"]
+        assert f"{h.vm_dir()}/cpp/install:/peacock/install:ro" in mounts, mounts
+        assert h.world()["containers"] == {}, "the run's container is left behind"
+
+
+def test_run_staged_narrows_by_the_filter():
+    with Host() as h:
+        staged_fused(h)
+        ok(h.gpu("run", FUSED, env={"PCK_TEST_FILTER": "tpcds"}))
+        a = h.docker_runs()[0]
+        assert a[a.index(RUN_REF):] == [RUN_REF, "--nocapture", "--test-threads=1", "tpcds"], a
+        assert "PCK_TEST_FILTER=tpcds" in [a[i + 1] for i, x in enumerate(a) if x == "-e"], a
+
+
+def test_run_staged_fails_on_a_segfault_in_the_log():
+    with Host() as h:
+        staged_fused(h)
+        h.world(run_output="running 1 test\nSegmentation fault\n", run_code=0)
+        r = h.gpu("run", FUSED, "--exact", FIRST3)
+        assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+
+
+def test_run_staged_fails_when_no_test_ran():
+    with Host() as h:
+        staged_fused(h)
+        h.world(run_output="running 0 tests\ntest result: ok. 0 passed\n", run_code=0)
+        r = h.gpu("run", FUSED, "--exact", "bench_fused_tpch_sf40_first4_tp1_single")
+        assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+        h.world(run_output="running 1 test\n", run_code=101)
+        assert h.gpu("run", FUSED, "--exact", FIRST3).returncode == 1
+
+
+def test_run_staged_refuses_an_unstaged_name():
+    with Host() as h:
+        staged_fused(h)
+        refused(h.gpu("run", "peacock_cpu_benchmarks"), 2, "peacock_cpu_benchmarks", "rust-benchmarks")
+        assert h.docker_runs() == []
+
+
+def test_run_staged_refuses_bad_arguments_before_the_vm():
+    with Host() as h:
+        refused(h.gpu("run", FUSED, "--exact", FIRST3, env={"PCK_TEST_FILTER": "q1"}), 2, "--exact",
+                "PCK_TEST_FILTER")
+        refused(h.gpu("run", FUSED, "--exact"), 2, "--exact")
+        refused(h.gpu("run", FUSED, "--skip", "x"), 2, "--skip")
+        refused(h.gpu("run", "../bin/sh"), 2, "../bin/sh")
+        refused(h.gpu("run", "list", "--exact", FIRST3), 2, "list")
+        assert h.nebius_calls() == []
 
 
 # --- pull --------------------------------------------------------------------------------------

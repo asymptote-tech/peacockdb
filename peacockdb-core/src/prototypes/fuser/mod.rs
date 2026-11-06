@@ -168,6 +168,10 @@ pub(crate) fn resolve_cap_holds(
     fuse::resolve_cap_holds(fused, cap, choose)
 }
 
+/// The card the fused runs are measured on: its case list orders the batches, and its sf40
+/// baseline and `loads.tsv` price them.
+pub(crate) const DEVICE: &str = "h100-80gb-hbm3";
+
 /// The batch sizes, each a prefix of the ordered list; `None` is the whole list.
 pub(crate) const BATCH_SIZES: [(&str, Option<usize>); 4] = [
     ("first3", Some(3)),
@@ -507,6 +511,13 @@ pub(crate) fn render_fused_section(
 /// a line the format does not allow, naming it.
 pub(crate) fn parse_fused_section(body: &str) -> Option<FusedSection<'_>> {
     section::parse_fused_section(body)
+}
+
+/// `batch` of `dataset`'s list fused, timed and checked on the device, into
+/// [`fused_results_file`] and [`fused_record_path`]. Panics unless `sf` is 40.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) async fn benchmark_fused(dataset: &str, sf: &str, batch: &str) {
+    benchmark::benchmark_fused(dataset, sf, batch).await
 }
 
 /// Whether a run failed for want of device memory: rmm's `bad_alloc`/`out_of_memory`, or a

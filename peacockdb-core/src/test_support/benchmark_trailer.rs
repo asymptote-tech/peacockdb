@@ -8,7 +8,7 @@
 mod tests;
 
 use super::provenance::fields;
-use super::{BUILD, Provenance};
+use super::{BUILD, Provenance, RunTotals};
 use crate::executor::{PinnedCache, PrefillStats};
 
 /// The keys `run_section` writes, in order, the five provenance keys last. A resumed run keeps a
@@ -32,15 +32,6 @@ pub(crate) const TRAILER_KEYS: [&str; 17] = [
     "cudf",
     "host",
 ];
-
-/// What the chosen run cost, as the trailer reports it.
-pub(crate) struct RunTotals {
-    pub(crate) run_us: u64,
-    pub(crate) device_us: u64,
-    /// The tree's `GpuLoadParquet` totals, a part of `device_us`.
-    pub(crate) load_us: u64,
-    pub(crate) peak_bytes: u64,
-}
 
 /// The trailer, ending with the run's provenance, which a resumed run keeps a section by.
 ///

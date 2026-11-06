@@ -8,10 +8,7 @@ use std::path::Path;
 
 use crate::test_support::{CaseStatus, DeviceCase, device_cases_path, parse_device_cases};
 
-use super::BATCH_SIZES;
-
-/// The device whose case list orders the batches: the card the fused runs are measured on.
-const DEVICE: &str = "h100-80gb-hbm3";
+use super::{BATCH_SIZES, DEVICE};
 
 const MODE: &str = "tp1_single";
 

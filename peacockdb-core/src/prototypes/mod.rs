@@ -7,7 +7,8 @@
 //! file outside `prototypes/` and the tests names `prototypes::`, which cost-report's
 //! `test_source_formatting/prototypes.rs` checks. `llm-wiki/architecture.md`, "Prototypes".
 
-// Reached by its own tests alone until the fused benchmark's entry points are declared here.
+// Part of its API is reached by its own tests alone: the fused benchmark's modules call one
+// another directly, and a rust-only build has no benchmark at all.
 #[cfg_attr(not(test), allow(dead_code))]
 mod fuser;
 
@@ -18,6 +19,15 @@ use crate::test_support::BenchNode;
 /// The `all` batch's measured runs after its warm-up: it is the longest, and 3 still give a
 /// second minimum. The other batches measure `MEASURED_RUNS`.
 pub const FUSED_ALL_RUNS: usize = 3;
+
+/// One fused batch on the device: `batch` (`first3`, `first10`, `first20` or `all`) of
+/// `dataset`'s list in the H100 `cases.csv`, read now, fused, timed and every answer checked,
+/// into [`fused_results_file`]'s section and the fused record. Panics unless `sf` is `40`.
+/// build-test.md, "Benchmarks".
+#[cfg(not(feature = "rust-only"))]
+pub async fn benchmark_fused(dataset: &str, sf: &str, batch: &str) {
+    fuser::benchmark_fused(dataset, sf, batch).await
+}
 
 /// `benchmark-results/<device>/fused/<dataset>.sf<sf>/tp1_single.fused.txt`: one section per
 /// batch, `== first3` to `== all`. The extension keeps it out of the `.benchmark.txt` checks.

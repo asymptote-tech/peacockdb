@@ -187,6 +187,61 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
       `test_corpus_goldens` +3 → 64, cost-report +1 when the wiring test lands), and "The fused
       format" section here.
 
+- 2026-11-06, Task 6 (developer, second), **to its checkpoint**: Parts B, C and the docs on top
+  of part A. Checkpoint `fuser: the fused benchmark case and its file` reported, not committed.
+  `--lib` 1181 → 1191 passed (+8 `prototypes::fuser::benchmark::tests`, +2
+  `executor::driver::tests::render`), goldens 64, cost-report formatting 38 → 39, gpu
+  `--tests` check clean, the target linked (it cannot run here: the local `libpeacock` predates
+  `peacock_join_build`). Decisions and deviations:
+  - **Reachability: harness parts, not `Session`.** `test_support/mod.rs` gains `pub(crate)`
+    delegates under one banner: `RunTotals` (moved from `benchmark_trailer.rs`, a type cannot be
+    delegated), `run_section`, `install_bench_pool` (the pool constant stays private),
+    `assert_fit_to_measure`, `plan_at`, `rounds_were_pinned`, `record_rows`, `declared_steps`,
+    `provenance_fields`, and two new `gpu_session.rs` functions, `prefill_for_roots` and
+    `run_roots_timed` (one session per run, `assert_closed`, regions drained). All but
+    `provenance_fields` are gated `not(rust-only)`. `measure_into`, `merge_section`,
+    `answer_on_the_device` and the rest were reachable already.
+  - **The 2nd-min is picked by index** (`second_smallest_at`), not through the harness's
+    `second_smallest`, which takes its private `Run`.
+  - **Resume is the fused file's own check.** `measure_into`'s `holds_measured` parses with
+    `parse_benchmark_section`, which panics on `--- batch ---`, outside the failure record. So
+    `benchmark_fused` keeps a section itself (`holds_this_run`: a section of the batch whose last
+    five trailer keys are this run's provenance, measured or out of memory) and hands
+    `measure_into` `Resume::No`.
+  - **A marker batch** (a size the list does not exceed) writes its `SKIPPED` section through
+    `merge_section` and returns. Today neither list is that short.
+  - **A captured run** (`PEACOCK_BENCHMARK_CAPTURE`) writes the record rows and no section, as
+    `benchmark_case` does. NVTX is off across the warm-up and the answer checks: the alone runs'
+    calls belong to no case, and the capture's containment check would refuse them.
+  - **The cap's pool is `RmmPool::Pool.maximum_bytes`**, what the run installed, not the
+    request.
+  - **`scan_seqs`**: per pre-order node of a query's own tree, the seq of its recipe's
+    `FbKind::Scan` call, through `nodes_as_recorded`'s post-order and `attach_recipes`.
+  - Engine delegates: `nodes_as_recorded_of_roots` (`driver/index.rs` → `driver/mod.rs` →
+    `executor/mod.rs`, `nodes_as_recorded` now calls it) and `timed_load_us_of_roots`
+    (`bench_text.rs` → `plan_text/mod.rs`, `timed_load_us` calls it). `PlanIndex::build` then
+    has no rust-only caller and carries the reason at its `allow`.
+  - `prototypes/mod.rs` keeps `fuser`'s `allow(dead_code)` outside test builds: some of its
+    `mod.rs` API is reached by its own tests alone, since the benchmark's modules call one
+    another directly. `DEVICE` moved from `lists.rs` to `fuser/mod.rs`, shared with the
+    baseline and `loads.tsv` paths.
+  - **`TEST_NAMES` gains `"prototype_fused_benchmarks"`, not `"prototype_fused"`**: the list
+    names binaries in full and `matches` compares the first 15 characters, as it does for
+    `peacockdb_core_gpu_lib`. The test feeds `ps` the 15-character comm.
+  - **`run-gpu.sh run <name>`**: a name is `[A-Za-z0-9_]+`; `--exact` beside `PCK_TEST_FILTER`
+    is refused before any call, naming both. The existing refusal case `run everything` reached
+    the VM after this (a well-formed name), so it became `run "every thing"`, still refused
+    locally; the unstaged-name refusal is its own test. `PCK_TEST_FILTER` goes both as `-e` and as
+    libtest's filter.
+  - **`wired_nowhere`** reads `--test <target>` as a word pair in every folded workflow line,
+    `--no-run` included (a build step is wiring too), plus both staging lists.
+  - `ci_coverage`'s RED: with the target present and no exemption,
+    `every_rust_test_target_is_named_by_ci` named `prototype_fused_benchmarks`.
+  - Not run here, environmental: `test_image_any_user.py` (no 26.02 build image) and
+    `test_run_image.py` (`PEACOCK_STAGED_INSTALLS` unset), 3 cases. `shellcheck` is not
+    installed; `bash -n` on both scripts.
+  - Next: Task 7 (the page's table). Task 9's build is the first real run of `benchmark_fused`.
+
 ## The hold rule (spec 1a)
 
 All numbers are the sf40-baseline tree's, per origin node: Σ `batch_bytes` and Σ `batch_rows`
@@ -218,6 +273,84 @@ Inputs: per shared load, its member with the largest recorded load bytes, scaled
 member's planned bytes to the union's; per buffer, its decision's bytes; per root, its
 `peak_bytes` less the recorded bytes of its loads now shared. `settle` loops: the cap, then
 `resolve_cap_holds` under it with the ledger, until the cap stops falling.
+
+## The fused format
+
+`testdata/benchmark-results/h100-80gb-hbm3/fused/<ds>.sf40/tp1_single.fused.txt`, one
+`== <batch>` section per batch in `BATCH_SIZES` order (`first3`, `first10`, `first20`, `all`).
+Written by `render_fused_section` and read back by `parse_fused_section`
+(`prototypes/fuser/section.rs`), the page's table and `every_fused_section_adds_up` alike. A
+batch the list does not exceed is `skipped: same set as all: …`; a batch that panicked is
+`status=failed reason=…` and the five provenance keys, as a tree section is.
+
+```
+--- batch ---
+queries=[q1,q2,q3]
+outcome=measured                  # or out-of-memory, then reason=<one line>
+shared=[lineitem:q1+q3,orders:q3]
+unshared=[q2/lineitem:limit-cut]
+reads=[lineitem:2,orders:1]
+buffers=1
+buffer_bytes=123456789
+rereads=1
+hold query=q3 table=lineitem hold=GpuHashJoin choice=buffer above=7 bytes=123456789 reread_us=48120 why=fits: 123456789 <= 900000000
+cap=2
+pool_bytes=74088185856
+budget_bytes=66679367270
+estimate_bytes=51234567890
+over_budget=false
+answers=match                     # measured only
+--- merge ---
+saved_us=812
+entry saved_us=640 members=q1:3,q3:5 node=GpuFilter: …
+--- pipeline ---
+model=<the model, one line>
+load_order=[lineitem,orders]
+serial_us=…
+makespan_us=…
+saved_us=…
+fused_measured_us=…               # measured only
+pipelined_estimate_us=…           # measured only
+--- tree ---                      # measured only
+<render_timings_of_roots of the chosen run>
+--- run ---
+<run_section of the chosen run; out of memory: the five provenance keys alone>
+```
+
+Keys:
+- `queries`: the roots in order, the batch's prefix of the H100 `cases.csv` list.
+- `shared`: per shared load, its table and the queries reading it, a query once per scan.
+  `unshared`: `<query>/<table>:<why>` per scan left alone beside others of its file, `why`
+  `limit-cut`, `nulls:<column>` or `rows-only`.
+- `reads`: per table, the distinct loads of it in the fused plan: one per shared load, plus each
+  re-read and unshared scan. `Σ reads` is the tree's distinct `GpuLoadParquet` nodes.
+- `buffers`, `buffer_bytes`, `rereads`: the count of `choice=buffer` lines, the Σ of their
+  `bytes`, and the count of `choice=re-read` lines.
+- `hold`: one per held reader, in the order they were resolved. `hold` is the node whose hold it
+  enters (`GpuHashJoin`, or `GpuUnload` for a root waiting on the cap). `above` is the pre-order
+  index, in that query's own tree, of the node the buffer sits on (`-` for a re-read). `bytes`
+  is what a buffer would keep, `reread_us` what a re-read costs (`loads.tsv`), recorded either
+  way. `why` is last and keeps its spaces: `fits: …`, `too large: …`, or `no edge: …`.
+- `cap`, `pool_bytes`, `budget_bytes`, `estimate_bytes`, `over_budget`: the cap rule below, the
+  pool being what the run installed. `estimate_bytes <= budget_bytes` unless `over_budget`.
+- `answers=match`: every root's answer equalled its query run alone on the same device; a
+  mismatch fails the batch, so no other value is written.
+- `--- merge ---`: the merge hint. `saved_us` the batch's total, then one `entry` per group,
+  largest saving first; `members` are `<query>:<pre-order index in its own tree>`; `node` is last
+  and keeps its spaces.
+- `--- pipeline ---`: the pipelining hint, the model stated on one line. `load_order` the tables
+  in the order the model loads them; `serial_us`, `makespan_us`, `saved_us = serial − makespan`.
+  `fused_measured_us` is the chosen run's `load_us + execute_us` (`device_us`), and
+  `pipelined_estimate_us = fused_measured_us − saved_us`, saturating.
+- `--- tree ---`: `root <i>:` before each root; a node several roots read is written once as
+  `@<k> <line>` and named after as `@<k>`; each node's time line beneath it, bench-rows' format.
+- `--- run ---`: bench-rows' trailer, its arithmetic over the tree with each shared node once.
+  `runs` holds `MEASURED_RUNS` times, `FUSED_ALL_RUNS` for `all`; `run_us` is its 2nd-smallest.
+  `pinned_cache` is the cache at the batch's end, `prefill_*` this batch's own prefill call: a
+  later batch whose files an earlier one loaded reports `prefill_files=0`.
+- An out-of-memory batch keeps `--- batch ---` (its holds, cap and estimate), `--- merge ---`
+  and the pipeline's model lines; no tree, and its `--- run ---` is the five provenance keys,
+  which is what a resumed run keeps it by.
 
 ## Checkpoints
 
