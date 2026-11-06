@@ -7,7 +7,7 @@ mod tests;
 
 use crate::plan::{GpuNode, NodeRef, PlanDag, as_node_ref, holds_state};
 
-use super::{Baseline, Choice, EdgeCost, Fused, HeldReader, HoldDecision, HoldInputs};
+use super::{Baseline, Choice, EdgeCost, Fused, Headroom, HeldReader, HoldDecision, HoldInputs};
 use super::{HoldLedger, LoadTimes, budget_of, cap_inputs};
 
 pub(crate) fn place_buffer(edges: &[EdgeCost]) -> Option<&EdgeCost> {
@@ -17,30 +17,41 @@ pub(crate) fn place_buffer(edges: &[EdgeCost]) -> Option<&EdgeCost> {
         .min_by_key(|edge| edge.bytes)
 }
 
-pub(crate) fn decide(inputs: &HoldInputs, headroom_bytes: u64) -> HoldDecision {
+pub(crate) fn decide(inputs: &HoldInputs, headroom: Headroom) -> HoldDecision {
     let decision = |choice, bytes, why: String| HoldDecision {
         choice,
         bytes,
         reread_us: inputs.reread_us,
         why,
     };
-    match place_buffer(&inputs.edges) {
-        Some(edge) if edge.bytes <= headroom_bytes => decision(
+    let reread = inputs.reread_bytes;
+    match (place_buffer(&inputs.edges), headroom) {
+        (Some(edge), Headroom::Left(left)) if edge.bytes <= left => decision(
             Choice::Buffer { edge: edge.edge },
             edge.bytes,
-            format!("fits: {} <= {headroom_bytes}", edge.bytes),
+            format!("fits: {} <= {left}", edge.bytes),
         ),
-        Some(edge) => decision(
+        (Some(edge), Headroom::Left(left)) => decision(
             Choice::ReRead,
             edge.bytes,
-            format!("too large: {} > {headroom_bytes}", edge.bytes),
+            format!("too large: {} > {left}", edge.bytes),
         ),
-        None if inputs.edges.is_empty() => decision(
+        (Some(edge), Headroom::Over) if edge.bytes < reread => decision(
+            Choice::Buffer { edge: edge.edge },
+            edge.bytes,
+            format!("over budget: {} < re-read {reread}", edge.bytes),
+        ),
+        (Some(edge), Headroom::Over) => decision(
+            Choice::ReRead,
+            edge.bytes,
+            format!("over budget: {} >= re-read {reread}", edge.bytes),
+        ),
+        (None, _) if inputs.edges.is_empty() => decision(
             Choice::ReRead,
             0,
             "no edge: the reader takes the shared load directly".to_string(),
         ),
-        None => decision(
+        (None, _) => decision(
             Choice::ReRead,
             0,
             "no edge: each lies above a join that grew the rows, or above state a waiting root \
@@ -90,12 +101,13 @@ pub(crate) fn hold_inputs(
         edges.push(EdgeCost {
             edge: (*parent, *slot),
             bytes: recorded(child).1 + builds,
-            allowed: !grown && !(held.waits && keeps_state(&dag, child)),
+            allowed: !grown && !(held.waits && state_under(&dag, child).is_some()),
         });
     }
     let seq = seqs[member.query][member.node].expect("the reader's own load has a scan seq");
     HoldInputs {
         reread_us: loads.load_us(&names[member.query], seq),
+        reread_bytes: baseline.per_query[member.query].batch_bytes[member.node],
         edges,
     }
 }
@@ -107,17 +119,15 @@ fn is_join(node: &dyn GpuNode) -> bool {
     )
 }
 
-/// Whether anything at or under `at` keeps state: what a waiting root may not have below its
-/// buffer (`validate_cap`).
-fn keeps_state(dag: &PlanDag<'_>, at: usize) -> bool {
+pub(crate) fn state_under(dag: &PlanDag<'_>, at: usize) -> Option<usize> {
     let mut stack = vec![at];
     while let Some(next) = stack.pop() {
         if holds_state(dag.nodes[next].node) {
-            return true;
+            return Some(next);
         }
         stack.extend(&dag.nodes[next].children);
     }
-    false
+    None
 }
 
 pub(crate) fn choose(
@@ -136,7 +146,11 @@ pub(crate) fn choose(
         .filter(|record| matches!(record.decision.choice, Choice::Buffer { .. }))
         .map(|record| record.decision.bytes)
         .sum();
-    let headroom = budget_of(ledger.pool_bytes).saturating_sub(charged + buffered);
+    let (budget, spent) = (budget_of(ledger.pool_bytes), charged + buffered);
+    let headroom = match spent > budget {
+        true => Headroom::Over,
+        false => Headroom::Left(budget - spent),
+    };
     let inputs = hold_inputs(
         fused,
         held,

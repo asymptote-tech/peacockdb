@@ -108,6 +108,8 @@ fn a_root_is_charged_its_peak_less_its_shared_loads() {
     assert_eq!(charged.shared_bytes, [expected]);
 }
 
+/// q0's lineitem reader re-reads, which leaves q1 alone in its group, so each root keeps its
+/// own load: neither is shared.
 #[test]
 fn a_re_read_load_is_charged_in_full() {
     let trees = held_pair(&[0, 4], &[0, 4]);
@@ -117,7 +119,9 @@ fn a_re_read_load_is_charged_in_full() {
     times.per_query[0].peak_bytes = 1000;
     times.per_query[1].batch_bytes[2] = 200;
     times.per_query[1].peak_bytes = 500;
-    assert_eq!(cap_inputs(&fused, &times, 1 << 30).root_bytes, [1000, 300]);
+    let charged = cap_inputs(&fused, &times, 1 << 30);
+    assert_eq!(charged.root_bytes, [1000, 500]);
+    assert!(charged.shared_bytes.is_empty());
 }
 
 /// A ledger over `times`, every load 70 µs to re-read, the trees' loads all at seq 0.

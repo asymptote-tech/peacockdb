@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use crate::executor::{RunError, nodes_as_recorded, plan_files};
 use crate::plan::{Batching, GpuNode};
-use crate::prototypes::fuser::tests::re_read_every_hold;
+use crate::prototypes::fuser::tests::buffer_every_hold_lowest;
 use crate::prototypes::fuser::{Baseline, ordered_queries, read_load_times};
 use crate::prototypes::fuser::{Query, fuse, fused_record_path, is_out_of_memory};
 use crate::prototypes::{fused_results_file, parse_fused_section};
@@ -180,7 +180,7 @@ async fn plan_files_of_a_fused_batch_is_its_queries_union() {
             tree: tree.as_ref(),
         })
         .collect();
-    let fused = fuse(&queries, Batching::Off, &mut re_read_every_hold).expect("they fuse");
+    let fused = fuse(&queries, Batching::Off, &mut buffer_every_hold_lowest).expect("they fuse");
     assert!(fused.shared.iter().any(|group| group.table == "lineitem"));
     let roots: Vec<&dyn GpuNode> = fused.roots.iter().map(|root| root.as_ref()).collect();
     let each: BTreeSet<PathBuf> = trees

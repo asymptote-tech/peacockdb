@@ -44,10 +44,11 @@
 # (the fused runs wrote it), and merges the batches that joined into hbm.tsv there. A batch whose
 # capture or join fails is a line of failed.tsv there (batch, pass, reason) and the next batch
 # runs; the exit is 1 if any did. PCK_TEST_FILTER, --cases and --device are refused with it:
-#   PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12 ./scripts/create_nsys_profile.sh \
-#       --fused tpch.sf40 <the H100 arguments above>
-# The HBM defaults below are an H200's; another card overrides PCK_BENCH_HBM_SET and
-# PCK_BENCH_HBM_PEAK_BW (the H100 80GB HBM3: gh100 and 3.35e12), and nsys and python3 must be
+#   PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12 PCK_BENCH_HBM_FREQ=10000 \
+#       ./scripts/create_nsys_profile.sh --fused tpch.sf40 <the H100 arguments above>
+# The HBM defaults below are an H200's; another card overrides PCK_BENCH_HBM_SET,
+# PCK_BENCH_HBM_PEAK_BW and PCK_BENCH_HBM_FREQ (the H100 80GB HBM3: gh100, 3.35e12 and 10000,
+# since at 20 kHz a sample read 101 % of its peak), and nsys and python3 must be
 # on that host's PATH.
 #
 # WRITES (under testdata/calibration/)

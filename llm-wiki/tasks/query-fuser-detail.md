@@ -521,6 +521,60 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
 - 2026-11-06: plan complete (Task 10 committed 5551e9b8, 57be22b8). PR #200 against `ENS-dag-driver`; board `reviewing`; reviewer round 1 dispatched.
 - 2026-11-06: review round 1 returned (see "Review round 1"); developer dispatched on B1, I1, I2 and the code nits, then an H100 rerun.
 
+- 2026-11-06, review round 1 (developer): B1, I1, I2 and nits 2-8, local, test first; nits 1
+  and 9 were the coordinator's. Checkpoint reported, not committed; the H100 rerun waits for it.
+  - **B1, a group rebuilt over the readers it has left.** `resolve` ends with `regrouped`, so
+    `fuse` and every `settle` round do: each group's load is rebuilt as the union of its
+    remaining members' own loads (`union_of`, the metadata read again), every reader re-pointed
+    through `consumer`, and a member left alone reads its own load, its group dropped from
+    `shared`. The cap reads the rebuilt loads, since `settle` computes it after each resolve.
+    RED: `a_group_left_with_one_reader_reads_its_own_load` (`shared` still held q1 alone) and
+    `a_group_that_lost_a_reader_loads_only_what_the_rest_read` (the union kept the re-read
+    q0's column: `[0, 1, 2, 4]`); the second also runs the fused roots on the cpu against each
+    alone. Four tests pinned the old behaviour and were changed: `a_held_reader_is_re_read`
+    and `section::a_rendered_section_reads_back` (no group of one in `shared`),
+    `a_re_read_load_is_charged_in_full` (q1's root keeps its load, `[1000, 500]`, nothing
+    shared), `plan_files_of_a_fused_batch_is_its_queries_union` (buffers, so lineitem stays
+    shared), and `tpch_q3_q5_q10_fused_answer_as_alone`, which now asks for the three shared
+    tables under buffering only, no group of one under either chooser, and still checks every
+    answer under both.
+  - **I1.** After the chooser decides a waiting reader, a buffer with state at or under its
+    edge is refused, `PlanError::Invalid` naming the chooser, the edge, the query, the table and
+    the stateful node (`refuse_state_below`). RED: `a_chooser_buffering_a_waiting_reader_above_state_is_refused`
+    hung until killed at 60 s; green it returns the error.
+  - **I2.** `decide` takes `Headroom::Left(bytes) | Over`; `HoldInputs.reread_bytes` is the
+    reader's own load's recorded `batch_bytes`. Over budget, a placed buffer is kept where its
+    bytes are below `reread_bytes` (`over budget: b < re-read r`), else a re-read
+    (`over budget: b >= re-read r`). "The hold rule" below says so. Three `decide` tests and a
+    `reread_bytes` assertion in `hold_inputs_read_the_baseline_and_loads_tsv`; RED was the
+    build (no `Headroom`, no `reread_bytes`).
+  - **Nits.** 2: `merge_hint`'s and `hold_inputs`'s docs cut to 8 lines, the latter pointing to
+    "The hold rule". 3: the gate reads `prototypes` as a whole identifier, `mod prototypes;`
+    aside, so `use crate::prototypes as p;` and `use crate::{plan, prototypes};` are caught
+    (RED on the first); architecture.md, build-test.md and `prototypes/mod.rs` say so. 4:
+    `RowsOnly`'s doc says the refusal covers a lone scan on either side of the split, as
+    `share_groups` does. 5: `fused_problem` refuses a measured section without
+    `answers=match` (two doctorings, RED on `answers=mismatch`). 6: `baseline_for` says why
+    the first section is the one (`merged_text` writes each query once). 8:
+    `create_nsys_profile.sh`'s usage gives `PCK_BENCH_HBM_FREQ=10000` and why.
+  - **Nit 7 not done, deliberately.** A held reader's path never climbs through a buffer: the
+    regions validation names stop at buffers (`region_of_edge` and `held_region_of_node` are
+    `Through::NoBuffer`), so a reader below a buffer is outside the region. Building one
+    (nested joins, the outer hold buffered under the inner join) showed the inner join is
+    never named. Looking through a buffer in `recorded()` would guard a case validation
+    cannot produce.
+  - **Not done here, for the reviewer's eye:** a buffer placed for a reader whose group a
+    later re-read dissolves stays, though its reader now reads its own load. It is still
+    correct, only kept bytes nobody shares. With I2 buffering more over budget, this may
+    matter in the rerun's figures.
+  - **Timing:** the fuser suite ran 13 s, then 157 s, then 13 s on the same code;
+    `a_capped_first10_answers_the_corpus_goldens_on_the_cpu` once took 167 s alone and three
+    times 11-12 s. Without the regroup the suite was 13 s once. Not explained.
+  - **Checks:** `--lib` 1206 passed, 2 ignored (+6: fuse 3, holds 3); `test_corpus_goldens`
+    64; cost-report formatting 39; `test_run_gpu.py` 49; `cargo-cudf.sh check --features
+    gpu,test-support --tests` clean; rustfmt on every touched file; `bash -n` on the script.
+    build-test.md: `--lib` 1208, the fuser row 17, the hold-rule row 28.
+
 ## The hold rule (spec 1a)
 
 All numbers are the sf40-baseline tree's, per origin node: Σ `batch_bytes` and Σ `batch_rows`
@@ -538,12 +592,23 @@ over lanes and batches. The rule is `decide`, `hold_inputs` and `HoldLedger::cho
   taken out with its record, and its reader decided again under that rule.
 - Placement: the allowed edge with the fewest bytes; a tie goes to the lower edge.
 - A re-read costs the reader's own load's `loads.tsv` `load_us`, keyed by the query and the seq
-  of its `CudfScan` recipe. It is recorded either way.
-- The choice: a buffer where one is placed and its bytes fit the headroom, else a re-read.
-- Headroom: `budget − (S + B + max root_bytes)`, saturating. `S` and the roots come from
-  `cap_inputs` at the first decision; `B` is the buffers the fused plan holds at each decision,
-  so a buffer taken out is no longer charged. Readers are decided in the order validation
-  names them.
+  of its `CudfScan` recipe. It is recorded either way. It also adds that load's recorded
+  `batch_bytes` back to its root (`reread_bytes`): the load is no longer shared.
+- Headroom: `budget − (S + B + max root_bytes)`; over budget when `S + B + max root_bytes >
+  budget`. `S` and the roots come from `cap_inputs` at the first decision; `B` is the buffers
+  the fused plan holds at each decision, so a buffer taken out is no longer charged. Readers
+  are decided in the order validation names them.
+- The choice, where a buffer is placed. Within the budget: the buffer where its bytes fit the
+  headroom, else a re-read. Over budget (review round 1, I2, the coordinator's decision): the
+  buffer where its bytes are below `reread_bytes`, else a re-read; a buffer then costs less
+  than the re-read it replaces. No allowed edge: a re-read.
+- A re-read takes its reader out of its group. After every resolve, in `fuse` and in each
+  `settle` round, each group's shared load is rebuilt over the members left: the union of
+  their own loads, every inserted project re-pointed at it. A member left alone reads its own
+  load, and its group is gone from `shared` (review round 1, B1). The cap then reads the
+  rebuilt loads.
+- A chooser that buffers a waiting reader above state is refused, `PlanError::Invalid` naming
+  the chooser, rather than looping between it and validation (review round 1, I1).
 
 ## The cap rule (spec 4)
 

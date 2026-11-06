@@ -6,7 +6,7 @@ use crate::plan::GpuNode;
 use crate::prototypes::fuser::tests::{baseline, coalesce, filter, fused_with, join, key_of};
 use crate::prototypes::fuser::tests::{lineitem, load_times, re_read_every_hold, unload};
 use crate::prototypes::fuser::{Baseline, Choice, EdgeCost, HoldDecision, HoldInputs, HoldLedger};
-use crate::prototypes::fuser::{LoadTimes, decide, hold_inputs, place_buffer};
+use crate::prototypes::fuser::{Headroom, LoadTimes, decide, hold_inputs, place_buffer};
 use crate::test_support::parse_benchmark_section;
 
 fn edge(at: usize, bytes: u64, allowed: bool) -> EdgeCost {
@@ -20,6 +20,7 @@ fn edge(at: usize, bytes: u64, allowed: bool) -> EdgeCost {
 fn inputs(edges: Vec<EdgeCost>) -> HoldInputs {
     HoldInputs {
         reread_us: 700,
+        reread_bytes: 100,
         edges,
     }
 }
@@ -45,7 +46,7 @@ fn a_disallowed_edge_is_never_placed() {
 
 #[test]
 fn a_buffer_that_fits_is_chosen() {
-    let decision = decide(&inputs(vec![edge(4, 70, true)]), 100);
+    let decision = decide(&inputs(vec![edge(4, 70, true)]), Headroom::Left(100));
     assert_eq!(
         decision,
         HoldDecision {
@@ -59,22 +60,46 @@ fn a_buffer_that_fits_is_chosen() {
 
 #[test]
 fn a_buffer_that_does_not_fit_means_a_re_read() {
-    let decision = decide(&inputs(vec![edge(4, 70, true)]), 60);
+    let decision = decide(&inputs(vec![edge(4, 70, true)]), Headroom::Left(60));
     assert_eq!(decision.choice, Choice::ReRead);
     assert_eq!((decision.bytes, decision.reread_us), (70, 700));
     assert_eq!(decision.why, "too large: 70 > 60");
 }
 
 #[test]
+fn over_budget_a_buffer_smaller_than_its_re_read_is_chosen() {
+    let decision = decide(&inputs(vec![edge(4, 70, true)]), Headroom::Over);
+    assert_eq!(decision.choice, Choice::Buffer { edge: (4, 0) });
+    assert_eq!((decision.bytes, decision.reread_us), (70, 700));
+    assert_eq!(decision.why, "over budget: 70 < re-read 100");
+}
+
+#[test]
+fn over_budget_a_buffer_no_smaller_than_its_re_read_means_a_re_read() {
+    let mut equal = inputs(vec![edge(4, 70, true)]);
+    equal.reread_bytes = 70;
+    let decision = decide(&equal, Headroom::Over);
+    assert_eq!(decision.choice, Choice::ReRead);
+    assert_eq!(decision.why, "over budget: 70 >= re-read 70");
+}
+
+#[test]
+fn over_budget_no_allowed_edge_means_a_re_read() {
+    let decision = decide(&inputs(vec![edge(4, 5, false)]), Headroom::Over);
+    assert_eq!(decision.choice, Choice::ReRead);
+    assert!(decision.why.starts_with("no edge: "), "{}", decision.why);
+}
+
+#[test]
 fn no_allowed_edge_means_a_re_read() {
-    let decision = decide(&inputs(vec![edge(4, 70, false)]), 1 << 40);
+    let decision = decide(&inputs(vec![edge(4, 70, false)]), Headroom::Left(1 << 40));
     assert_eq!(decision.choice, Choice::ReRead);
     assert_eq!(
         decision.why,
         "no edge: each lies above a join that grew the rows, or above state a waiting root \
          may not keep"
     );
-    let direct = decide(&inputs(Vec::new()), 1 << 40);
+    let direct = decide(&inputs(Vec::new()), Headroom::Left(1 << 40));
     assert_eq!(direct.choice, Choice::ReRead);
     assert_eq!(
         direct.why,
@@ -207,6 +232,10 @@ fn hold_inputs_read_the_baseline_and_loads_tsv() {
     let direct = first_inputs(&same, &times, &loads);
     let costs: Vec<(u64, bool)> = direct.edges.iter().map(|e| (e.bytes, e.allowed)).collect();
     assert_eq!((costs, direct.reread_us), (vec![(320, true)], 700));
+    assert_eq!(
+        direct.reread_bytes, 1440,
+        "a re-read adds q0's own lineitem load to its root"
+    );
     // Other columns: the edge above q0's inserted project carries its own load's bytes.
     let other = crate::prototypes::fuser::tests::held_pair(&[0, 4], &[0, 5]);
     let selected = first_inputs(&other, &times, &loads);

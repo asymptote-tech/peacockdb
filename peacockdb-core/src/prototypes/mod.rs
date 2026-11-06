@@ -4,8 +4,9 @@
 //!
 //! Behind `test-support`, as `test_support` is, so `cargo build` cannot name it, and its API is
 //! declared here under `test_support`'s rules. No engine module may depend on anything here: no
-//! file outside `prototypes/` and the tests names `prototypes::`, which cost-report's
-//! `test_source_formatting/prototypes.rs` checks. `llm-wiki/architecture.md`, "Prototypes".
+//! file outside `prototypes/` and the tests names `prototypes` but to declare it, which
+//! cost-report's `test_source_formatting/prototypes.rs` checks. `llm-wiki/architecture.md`,
+//! "Prototypes".
 
 // Part of its API is reached by its own tests alone: the fused benchmark's modules call one
 // another directly, and a rust-only build has no benchmark at all.

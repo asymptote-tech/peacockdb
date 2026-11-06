@@ -1095,8 +1095,9 @@ Prototype code measures an idea; it does not ship. It lives in
 `test_support/` is, so `cargo build` cannot name it. Its facade, `prototypes/mod.rs`, follows
 `test_support`'s rules. Each prototype's module doc says what it is and the scale it runs at.
 
-**No file outside `prototypes/` and the tests names `prototypes::`.** The engine never depends
-on a prototype. `cost-report`'s `test_source_formatting/prototypes.rs` enforces it.
+**No file outside `prototypes/` and the tests names `prototypes`**, `lib.rs`'s declaration
+aside: not as a path, an alias or a brace-list item. The engine never depends on a prototype.
+`cost-report`'s `test_source_formatting/prototypes.rs` enforces it.
 
 - **`fuser`** (query-fuser). It fuses N tp1_single plans into one DAG on the driver's fused
   plans ([Execution](#execution)). Only sources are merged: the scans of one file become one

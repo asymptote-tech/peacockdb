@@ -186,6 +186,11 @@ pub(crate) fn fused_problem(section: &FusedSection, batch: &str, at: &str) -> Re
     if section.field("outcome") != Some("measured") {
         return Ok(());
     }
+    if section.field("answers") != Some("match") {
+        return Err(format!(
+            "{at}: a measured batch whose answers are not `answers=match`"
+        ));
+    }
     let (load, execute, device) = (count("load_us")?, count("execute_us")?, count("device_us")?);
     if section.tree_device_us() != device
         || section.tree_load_us() != load
@@ -344,6 +349,8 @@ fn a_fused_section_that_does_not_add_up_is_refused() {
         ("pipelined_estimate_us=150", "pipelined_estimate_us=151"),
         ("reads=[lineitem:1,orders:1]", "reads=[lineitem:2,orders:1]"),
         ("estimate_bytes=500", "estimate_bytes=901"),
+        ("answers=match\n", "answers=mismatch\n"),
+        ("answers=match\n", ""),
     ] {
         assert!(FUSED.contains(from), "{from}");
         assert!(

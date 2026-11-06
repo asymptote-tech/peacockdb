@@ -186,6 +186,7 @@ pub(crate) fn baseline_for(text: &str, queries: &[String]) -> Baseline {
     let parsed: Vec<_> = queries
         .iter()
         .map(|query| {
+            // The tree's writer, `merged_text`, puts each query in once: the first is the one.
             let (_, body) = sections
                 .iter()
                 .find(|(name, _)| name == query)

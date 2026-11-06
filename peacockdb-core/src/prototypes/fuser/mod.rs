@@ -29,7 +29,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::executor::RunError;
-use crate::plan::{Batching, GpuNode, PlanError};
+use crate::plan::{Batching, GpuNode, PlanDag, PlanError};
 use crate::prototypes::FusedSection;
 use crate::test_support::{BenchSection, DeviceCase};
 
@@ -48,8 +48,9 @@ pub(crate) enum Unshared {
     /// The union's row groups can hold a NULL in this column, and the scan's own could not:
     /// its plan's null handling was planned from its own groups.
     Nulls { column: String },
-    /// It reads rows only, beside scans that read columns: a column selection cannot make the
-    /// row marker.
+    /// It is alone on its side of the rows-only split: it reads rows only beside scans that
+    /// read columns, or columns beside scans that read rows only. A column selection cannot
+    /// make the row marker, and the label names the split, not the scan.
     RowsOnly,
 }
 
@@ -252,18 +253,14 @@ pub(crate) struct MergeHint {
     pub(crate) saved_us: u64,
 }
 
-/// What merging the identical subtrees above the shared sources would save. A report, not an
-/// execution. The model, by the fused DAG's nodes:
-/// - Each node's key is its plan line and its children's keys; a shared source's is its
-///   sharing key, and a `GpuHoldBuffer`'s its child's, since it computes nothing.
-/// - A group is two or more nodes of one key whose subtree reaches a shared source, each
-///   standing for a node of its query's own tree. A root, the crossing to the host, is in none.
-/// - An entry is a group no other group of the same size contains member for member (each
-///   member's parent, through any buffer, in it). A copy's time is Σ baseline `total_us` over
-///   its subtree, loads, inserted projects and buffers excluded; the entry saves Σ − max: one
-///   copy stays, the dearest. Entries come largest saving first.
-/// - The batch saves Σ over every group of (Σ own `total_us` − max own `total_us`): each node is
-///   in one group, so nothing is counted twice.
+/// What merging the identical subtrees above the shared sources would save: a report, not an
+/// execution. A node's key is its plan line and its children's keys (a shared source's is its
+/// sharing key, a buffer's its child's). A group is two or more nodes of one key whose subtree
+/// reaches a shared source; no root is in one. An entry is a group no same-size group contains
+/// member for member (each member's parent, through any buffer, in it). It saves Σ − max of its
+/// copies' Σ baseline `total_us` over their subtrees, loads, inserted projects and buffers
+/// excluded; one copy stays. Entries come largest saving first. The batch saves Σ over every
+/// group of (Σ own `total_us` − max own `total_us`), each node being in one group.
 pub(crate) fn merge_hint(fused: &Fused, baseline: &Baseline) -> MergeHint {
     merge::merge_hint(fused, baseline)
 }
@@ -337,6 +334,9 @@ pub(crate) struct EdgeCost {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HoldInputs {
     pub(crate) reread_us: u64,
+    /// What a re-read adds to its root: the reader's own load's recorded `batch_bytes`, which
+    /// its root is charged again once the load is not shared.
+    pub(crate) reread_bytes: u64,
     /// In path order, lowest first; the edge right above the shared load is not among them.
     pub(crate) edges: Vec<EdgeCost>,
 }
@@ -347,27 +347,38 @@ pub(crate) fn place_buffer(edges: &[EdgeCost]) -> Option<&EdgeCost> {
     holds::place_buffer(edges)
 }
 
-/// The hold rule's choice: a buffer at [`place_buffer`]'s edge where one exists and its bytes
-/// fit `headroom_bytes`, else a re-read, which costs `reread_us` either way and is recorded.
-/// `why` says which: `fits: {bytes} <= {headroom}`, `too large: {bytes} > {headroom}`, or
-/// `no edge: …` with the reason none was allowed.
-pub(crate) fn decide(inputs: &HoldInputs, headroom_bytes: u64) -> HoldDecision {
-    holds::decide(inputs, headroom_bytes)
+/// What the budget leaves for a buffer: bytes to spare, or none, the charged bytes being over
+/// it already.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Headroom {
+    Left(u64),
+    Over,
 }
 
-/// The hold rule's numbers for one held reader, all the sf40 baseline's, per origin node:
-/// - An edge's bytes are its child's Σ `batch_bytes`; a project inserted to select from the
-///   shared load stands for the reader's own load. The edge right above the shared load carries
-///   the union, which nothing recorded, so it is left out.
-/// - A buffer above a join runs that join early, so it also keeps the join's build child's
-///   Σ `batch_bytes`, for every join below it on the path.
-/// - An edge is allowed where every join below it on the path recorded no more rows
-///   (Σ `batch_rows`) than its child on the path: it did not increase cardinality there. Where
-///   the reader's root waits for the cap (`held.waits`), for a join's hold as for the cap's, it
-///   is also allowed only where nothing at or under it keeps state, which a waiting root may
-///   not have below its buffer.
-/// - A re-read costs the reader's own load's `loads.tsv` `load_us`, keyed by `names` and the
-///   seq of its `CudfScan` recipe in `seqs` (per query, by pre-order).
+/// The hold rule's choice, with a buffer at [`place_buffer`]'s edge where one exists. Within
+/// the budget, the buffer where its bytes fit the headroom, else a re-read. Over it, the
+/// buffer where its bytes are below `reread_bytes`, what a re-read adds to its root, else a
+/// re-read. A re-read costs `reread_us`, recorded either way. `why`: `fits: {b} <= {h}`,
+/// `too large: {b} > {h}`, `over budget: {b} < re-read {r}`, `over budget: {b} >= re-read
+/// {r}`, or `no edge: …` with the reason none was allowed.
+pub(crate) fn decide(inputs: &HoldInputs, headroom: Headroom) -> HoldDecision {
+    holds::decide(inputs, headroom)
+}
+
+/// The first node at or under `at` that keeps state: what a waiting root may not have below
+/// its buffer (`validate_cap`).
+pub(crate) fn state_under(dag: &PlanDag<'_>, at: usize) -> Option<usize> {
+    holds::state_under(dag, at)
+}
+
+/// The hold rule's numbers for one held reader, all the sf40 baseline's, per origin node. An
+/// edge's bytes are its child's Σ `batch_bytes` (an inserted project stands for the reader's
+/// own load; the edge right above the shared load is left out), plus the build child's for
+/// each join below it on the path, which a buffer runs early. An edge is allowed where no such
+/// join recorded more rows than its child on the path and, where the reader's root waits
+/// (`held.waits`), where nothing at or under it keeps state. A re-read costs the reader's own
+/// load's `loads.tsv` `load_us` (by `names` and its `CudfScan` seq in `seqs`) and adds its
+/// `batch_bytes` to its root. In full: `llm-wiki/tasks/query-fuser-detail.md`, "The hold rule".
 pub(crate) fn hold_inputs(
     fused: &Fused,
     held: &HeldReader,

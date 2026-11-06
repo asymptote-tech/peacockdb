@@ -17,6 +17,7 @@ use crate::plan::{PlanDag, PlanError, Schema, SharedSource, as_node_ref, new_hol
 use crate::plan::{rebuild, validate_dag};
 use crate::planner::{partition, row_group_metadata};
 
+use super::state_under;
 use super::{Choice, Chooser, Fused, HeldReader, HoldRecord, Origin, Query, ShareGroup, Unshared};
 
 impl fmt::Display for Unshared {
@@ -207,14 +208,18 @@ fn gained_null(own: &GpuLoadParquet, union: &GpuLoadParquet) -> Option<String> {
         .map(|(position, _)| fields.field(position).name().clone())
 }
 
-/// One load of the members' file over the union of their columns and of their row groups, its
-/// metadata read again so its bytes and NULLs are the union's, and its batches cut again.
 fn union_load(
     scans: &[Scan<'_>],
     members: &[usize],
     batching: Batching,
 ) -> Result<GpuLoadParquet, PlanError> {
     let loads: Vec<&GpuLoadParquet> = members.iter().map(|at| scans[*at].load).collect();
+    union_of(&loads, batching)
+}
+
+/// One load of the loads' file over the union of their columns and of their row groups, its
+/// metadata read again so its bytes and NULLs are the union's, and its batches cut again.
+fn union_of(loads: &[&GpuLoadParquet], batching: Batching) -> Result<GpuLoadParquet, PlanError> {
     let projection: Vec<u32> = loads
         .iter()
         .flat_map(|load| load.projection.iter().copied())
@@ -341,7 +346,7 @@ fn resolve(
 ) -> Result<Fused, PlanError> {
     loop {
         let (hold, reader, slot) = match validate_dag(&refs(&fused.roots), cap) {
-            Ok(()) => return Ok(fused),
+            Ok(()) => return regrouped(fused),
             Err(PlanError::UnbufferedHold {
                 hold, reader, slot, ..
             }) => (hold, reader, slot),
@@ -356,6 +361,9 @@ fn resolve(
         held.waits = cap.is_some_and(|cap| held.query >= cap.get());
         let member = held.member;
         let decision = choose(&fused, &held);
+        if let (true, Choice::Buffer { edge }) = (held.waits, decision.choice) {
+            refuse_state_below(&fused, &held, edge)?;
+        }
         let above = match decision.choice {
             Choice::ReRead => None,
             Choice::Buffer { edge } => {
@@ -393,6 +401,94 @@ fn resolve(
         });
         fused = refreshed(fused);
     }
+}
+
+/// A waiting reader's buffer on `edge` refused where state lies at or under it: the cap would
+/// not hold that state, validation would take the buffer out, and the chooser would put it
+/// back, for ever.
+fn refuse_state_below(
+    fused: &Fused,
+    held: &HeldReader,
+    edge: (usize, usize),
+) -> Result<(), PlanError> {
+    let roots = refs(&fused.roots);
+    let dag = PlanDag::of(&roots);
+    let Some(state) = state_under(&dag, dag.nodes[edge.0].children[edge.1]) else {
+        return Ok(());
+    };
+    Err(PlanError::Invalid(format!(
+        "the chooser placed a buffer on edge {edge:?} for query {}'s reader of {}, above {} \
+         (node {state}), which keeps state, though its root waits for the cap",
+        held.query,
+        fused.shared[held.group].table,
+        dag.nodes[state].node.name()
+    )))
+}
+
+/// `fused` with each group's shared load rebuilt over the members still reading it, since a
+/// re-read takes its member out: the union of their own loads, every reader re-pointed at it
+/// as [`consumer`] reads one. A member left alone reads its own load, and its group is gone.
+fn regrouped(mut fused: Fused) -> Result<Fused, PlanError> {
+    let own_load = |member: Origin| match as_node_ref(original(&fused, member)) {
+        NodeRef::LoadParquet(load) => load,
+        _ => unreachable!("a group's member is a load"),
+    };
+    let mut sources = Vec::new();
+    for group in &fused.shared {
+        let loads: Vec<&GpuLoadParquet> = group.members.iter().map(|m| own_load(*m)).collect();
+        sources.push(match loads.len() {
+            0 | 1 => None,
+            _ => Some(SharedSource::new(union_of(&loads, Batching::Off)?)),
+        });
+    }
+    let group_of: HashMap<Origin, usize> = fused
+        .shared
+        .iter()
+        .enumerate()
+        .flat_map(|(at, group)| group.members.iter().map(move |member| (*member, at)))
+        .collect();
+    let read = |member: Origin| {
+        let own = original(&fused, member);
+        match &sources[group_of[&member]] {
+            Some(source) => consumer(own, source),
+            None => copy_of(own),
+        }
+    };
+    let walk = Walk::of(&fused);
+    let roots = refs(&fused.roots);
+    let dag = PlanDag::of(&roots);
+    let rebuilt: Vec<Box<dyn GpuNode>> = dag
+        .roots
+        .iter()
+        .map(|root| reread_through(&dag, &walk, *root, None, &read))
+        .collect();
+    fused.roots = rebuilt;
+    fused.shared.retain(|group| group.members.len() > 1);
+    Ok(refreshed(fused))
+}
+
+/// The tree under `at`, reached over `edge`, copied with each member's reader of a shared load,
+/// the source or the project inserted over it, replaced by `read` of that member.
+fn reread_through(
+    dag: &PlanDag<'_>,
+    walk: &Walk,
+    at: usize,
+    edge: Option<(usize, usize)>,
+    read: &dyn Fn(Origin) -> Box<dyn GpuNode>,
+) -> Box<dyn GpuNode> {
+    if walk.inserted_project[at] {
+        return read(walk.members[&(at, 0)]);
+    }
+    if dag.nodes[at].node.sharing_key().is_some() {
+        return read(walk.members[&edge.expect("a shared source has a reader")]);
+    }
+    let children = dag.nodes[at]
+        .children
+        .iter()
+        .enumerate()
+        .map(|(slot, child)| reread_through(dag, walk, *child, Some((at, slot)), read))
+        .collect();
+    rebuild(dag.nodes[at].node, children)
 }
 
 /// `fused` without the lowest `GpuHoldBuffer` above node `at`, and without its hold's record.

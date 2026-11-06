@@ -168,7 +168,7 @@ fn a_rendered_section_reads_back() {
     );
     let section = parse_fused_section(&text).expect("a recorded outcome");
     assert_eq!(section.field("queries"), Some("[q1,q2]"));
-    assert_eq!(section.field("shared"), Some("[lineitem:q2]"));
+    assert_eq!(section.field("shared"), Some("[]"), "q2 is left alone");
     assert_eq!(section.field("reads"), Some("[orders:1,lineitem:2]"));
     assert_eq!(section.count("rereads"), Some(1));
     assert_eq!(section.count("buffers"), Some(0));

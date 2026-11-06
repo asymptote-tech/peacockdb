@@ -224,12 +224,71 @@ fn a_held_reader_is_re_read() {
         "q0's filter reads its own load"
     );
     assert_eq!(load_of(own).projection, [0, 4]);
-    assert_eq!(fused.shared[0].consumers, [1]);
+    assert!(fused.shared.is_empty(), "q1 is left alone in the group");
     assert_eq!(
         fused.reads,
         [("orders".to_string(), 1), ("lineitem".to_string(), 2)]
     );
     validate_dag(&refs(&fused.roots), None).expect("the fused roots validate");
+}
+
+#[test]
+fn a_group_left_with_one_reader_reads_its_own_load() {
+    let trees = held_pair(&[0, 4], &[0, 5]);
+    let fused = fused_with(&trees, &mut re_read_every_hold);
+    assert!(fused.shared.is_empty(), "q1 alone reads lineitem now");
+    let roots = refs(&fused.roots);
+    let dag = PlanDag::of(&roots);
+    assert!(
+        dag.nodes
+            .iter()
+            .all(|node| node.node.sharing_key().is_none()),
+        "no shared source is left"
+    );
+    let own = child(child(fused.roots[1].as_ref(), 0), 0);
+    assert_eq!(
+        load_of(own).projection,
+        [0, 5],
+        "its own columns, not the union's"
+    );
+    assert_eq!(
+        fused.reads,
+        [("orders".to_string(), 1), ("lineitem".to_string(), 2)]
+    );
+    validate_dag(&roots, None).expect("the fused roots validate");
+}
+
+#[test]
+fn a_group_that_lost_a_reader_loads_only_what_the_rest_read() {
+    let mut trees = held_pair(&[0, 4], &[0, 1]);
+    trees.push(unload(filter(lineitem(&[0, 2], &[0, 1, 2]))));
+    let fused = fused_with(&trees, &mut re_read_every_hold);
+    assert_eq!(fused.shared.len(), 1);
+    assert_eq!(fused.shared[0].consumers, [1, 2]);
+    let roots = refs(&fused.roots);
+    let dag = PlanDag::of(&roots);
+    let sources: Vec<&GpuLoadParquet> = dag
+        .nodes
+        .iter()
+        .filter(|node| node.node.sharing_key().is_some())
+        .map(|node| load_of(node.node))
+        .collect();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(
+        sources[0].projection,
+        [0, 1, 2],
+        "the union of q1's and q2's columns, without the re-read q0's"
+    );
+    let ctx = crate::build_session_state(1).task_ctx();
+    let fused_run = run_roots::<CpuBackend>(&roots, &ctx, None, None).expect("the fused roots run");
+    for (root, tree) in trees.iter().enumerate() {
+        let alone = run::<CpuBackend>(tree.as_ref(), &ctx, None).expect("it runs alone");
+        assert_eq!(
+            answers(&fused_run.answers[root]),
+            answers(&alone.batches),
+            "root {root}"
+        );
+    }
 }
 
 #[test]
@@ -359,6 +418,31 @@ fn a_root_waiting_on_the_cap_is_resolved() {
         (1, "GpuUnload")
     );
     validate_dag(&refs(&capped.roots), Some(one)).expect("the capped roots validate");
+}
+
+#[test]
+fn a_chooser_buffering_a_waiting_reader_above_state_is_refused() {
+    let trees = vec![
+        unload(coalesce(filter(lineitem(&[0, 4], &[0])))),
+        unload(coalesce(filter(lineitem(&[0, 4], &[0])))),
+    ];
+    let fused = fused_with(&trees, &mut buffer_every_hold_lowest);
+    assert!(fused.holds.is_empty(), "no join holds a reader");
+    let one = std::num::NonZeroUsize::new(1).unwrap();
+    let mut highest = |_: &Fused, held: &HeldReader| HoldDecision {
+        choice: Choice::Buffer {
+            edge: *held.path.last().expect("a path"),
+        },
+        bytes: 0,
+        reread_us: 0,
+        why: "test: highest edge".to_string(),
+    };
+    let refused = resolve_cap_holds(fused, one, &mut highest);
+    let Err(PlanError::Invalid(why)) = refused else {
+        panic!("not refused as invalid: {:?}", refused.err());
+    };
+    assert!(why.contains("the chooser"), "{why}");
+    assert!(why.contains("GpuCoalesceAllBatches"), "{why}");
 }
 
 fn answers(batches: &[CpuBatch]) -> String {

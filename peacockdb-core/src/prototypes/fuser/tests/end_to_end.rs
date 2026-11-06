@@ -75,20 +75,34 @@ async fn tpch_q3_q5_q10_fused_answer_as_alone() {
         .map(|(tree, name)| alone(tree.as_ref(), &ctx, name))
         .collect();
     let queries = queries_of(&trees, &names);
-    let choosers: [(&str, &mut dyn FnMut(&Fused, &HeldReader) -> HoldDecision); 2] = [
-        ("re-read", &mut re_read_every_hold),
-        ("buffer", &mut buffer_every_hold_lowest),
+    // Re-reading every held reader can leave a group one reader, which then reads its own
+    // load; buffering keeps every group.
+    let choosers: [(
+        &str,
+        &mut dyn FnMut(&Fused, &HeldReader) -> HoldDecision,
+        &[&str],
+    ); 2] = [
+        ("re-read", &mut re_read_every_hold, &[]),
+        (
+            "buffer",
+            &mut buffer_every_hold_lowest,
+            &["lineitem", "orders", "customer"],
+        ),
     ];
-    for (what, choose) in choosers {
+    for (what, choose, shared) in choosers {
         let fused = fuse(&queries, Batching::Off, choose)
             .unwrap_or_else(|why| panic!("{what}: the plans do not fuse: {why}"));
         let tables: Vec<&str> = fused.shared.iter().map(|g| g.table.as_str()).collect();
-        for table in ["lineitem", "orders", "customer"] {
+        for table in shared {
             assert!(
-                tables.contains(&table),
+                tables.contains(table),
                 "{what}: {table} is not shared: {tables:?}"
             );
         }
+        assert!(
+            fused.shared.iter().all(|group| group.members.len() > 1),
+            "{what}: a group of one is left: {tables:?}"
+        );
         assert!(!fused.holds.is_empty(), "{what}: no reader sat in a hold");
         let run = run_roots::<CpuBackend>(&refs(&fused.roots), &task, None, None)
             .unwrap_or_else(|why| panic!("{what}: the fused plan does not run: {why}"));
