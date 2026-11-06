@@ -1951,3 +1951,19 @@ e1db88a04d8f808735d2cb57c6e3659fff1963b0696281bcad20786ea0ce2cff  web_sales.parq
 a07f1b70678847300ee61d5aa6e3968eab84c814dc03d367ed865cfd56926d46  web_site.parquet
 ```
 
+
+## Task 11: the H100 run's records
+
+The run's three segment records, kept outside git until Step 3 settles their publish. Each
+segment wrote its own; a failed case wrote no rows, so the first holds 47 tpch and 79 tpcds
+cases. All three headings carry the same `# run: allocator=` line (a 69.0 GiB pool of 78.7 GiB
+free) and the same five.
+
+| segment | modes and datasets | rows | bytes | sha256 |
+|---|---|--:|--:|---|
+| 1 | `tp1-single`, tpch and tpcds | 56,070 | 5,393,769 | `8a1e9465217edb8cb5179c0763247c0dac100bc52ff445f7a7c32485c82891a1` |
+| 2 | `tp4-single`, tpch and tpcds | 2,914,990 | 264,802,230 | `bc97d540e109e03296f21416eb3a8b75f211d11897961ef2aeefb98a1bc1f7f9` |
+| 3 | `tp4-sized`, tpcds only: q10, q11, q13–q17, then cut | 1,115,450 | 102,688,797 | `17983b6cb696180114e5426400be4cc3c678fd365d65c1e87185feea0260d052` |
+
+Segment 3's seven cases have no section in the committed tree: its `tp4_sized` file was dropped
+with the mode (`UNTIMED`).

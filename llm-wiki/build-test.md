@@ -23,7 +23,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3401 cases: `--lib` 905, `test_cpu_corpus` 2447, `test_corpus_goldens` 46, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3407 cases: `--lib` 905, `test_cpu_corpus` 2447, `test_corpus_goldens` 52, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -87,7 +87,7 @@ tie
 the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions;
 one binary per engine, since `inventory` collects per linked binary
 
-| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 46 |
+| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_coverage](../peacockdb-core/tests/test_corpus_goldens/benchmark_coverage.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 52 |
 |---|---|--:|
 
 the committed sections against their own arithmetic, with no dataset and no run: `consumed +
@@ -100,18 +100,23 @@ a release build, every timed (query, mode) is enabled on a device in `corpus_cas
 timed at a row-group mode, and the case list is, byte for byte, what the registry's enabled device
 cells for tpch and tpcds write at the other three.
 Every case the list declares has its section, timed or a failure's record, in every device's tree
-but `h200/`, which is held to `h200/cases.inc`, the list it was measured from. Every file lies at
-`<device>/<dataset>.sf<sf>/<mode>.benchmark.txt` under its device's slug, its timed trailers ending
-with the five provenance keys and a failure's record holding its status line and the five. Only
-`h200/`, from before provenance, may have timed trailers without them. Over synthesized trees: its
-sections under another device's name are refused, and are short of the list there; a file short of
-one declared section is named; a trailer naming another card than its directory is refused, and one
-naming its own passes; a failure's record without the five is refused even under `h200/`. Over a
-temp file, a run's write path: a case that panics is recorded on one line and the next case is
-measured into the same file; a resumed run keeps the section this run's five measured, byte for
-byte and without running the case, and runs again one measured under another cuDF, one that failed
-and one never reached; a run that does not resume measures a section with this run's five again;
-the rows go in before the section, and rows the record refuses fail the case.
+but `h200/`, which is held to `h200/cases.inc`, the list it was measured from. A device's modes
+named in `UNTIMED`, with the reason, are not read: today `h100-80gb-hbm3/` at `tp4_sized`. An entry
+is refused when the list declares its mode nowhere, its device has no tree, or the tree carries a
+file at its mode. Every file lies at `<device>/<dataset>.sf<sf>/<mode>.benchmark.txt` under its
+device's slug, its timed trailers ending with the five provenance keys and a failure's record
+holding its status line and the five. Only `h200/`, from before provenance, may have timed trailers
+without them. Over synthesized trees: its sections under another device's name are refused, and are
+short of the list there; a file short of one declared section is named; a trailer naming another
+card than its directory is refused, and one naming its own passes; a failure's record without the
+five is refused even under `h200/`; an `UNTIMED` entry excuses its device's missing file at its mode
+and nothing else, not another mode and not another device, and is refused when the list declares its
+mode nowhere, its device has no tree, or the tree carries that file. Over a temp file, a run's write
+path: a case that panics is recorded on one line and the next case is measured into the same file; a
+resumed run keeps the section this run's five measured, byte for byte and without running the case,
+and runs again one measured under another cuDF, one that failed and one never reached; a run that
+does not resume measures a section with this run's five again; the rows go in before the section,
+and rows the record refuses fail the case.
 `PEACOCK_BENCH_RESUME` is unset, `0` or `1`, and anything else is refused. Before any case, a
 missing dataset is refused, and a record another run wrote. The record, which lives in S3, is held
 to its writer instead: a row that lost a cell is refused, a bare `calls` row names the seq it was
@@ -1038,8 +1043,9 @@ sha256 matches local). Notes on the rows above:
   column holds it. Objects are keyed by device and content,
   `<device>/<dataset>.sf<sf>/<sha256>.tsv`, and never replaced. The H200's predate devices and
   are `<dataset>.sf<sf>/<sha256>.tsv` until [#226](tickets/benchmarks.md#t226) moves them.
-  `testdata/calibration/records.sha256`, committed, names the sha256 each device's dataset tree
-  was measured beside. `scripts/calibration/fetch_record.sh tpch.sf40` fetches the H200's object
+  `testdata/calibration/records.sha256`, committed, names the sha256 each published device's
+  dataset tree was measured beside; `h100-80gb-hbm3/`'s record is unpublished.
+  `scripts/calibration/fetch_record.sh tpch.sf40` fetches the H200's object
   into `testdata/calibration/tpch.sf40/records.tsv` and checks its sha256;
   `fetch_record.sh <device>/tpch.sf40` fetches another device's into
   `calibration/<device>/tpch.sf40/`. The aws CLI it runs is `$AWS`, `aws` by default: on shad-gpu `/home/info/bin/aws` with credentials in `~/.aws`; in
@@ -1353,11 +1359,11 @@ What the arrows are there to make checkable:
   `.benchmark.txt` tree, `calls.tsv`, `hbm.tsv` and every panel are in git, rewritten in place
   by each collection, so `git diff` shows how the numbers moved. The record is 26 MB at sf40
   and grows with every case, so it lives in S3 and git holds its sha256: `--pull-benchmarks`
-  writes both, and the commit that moves the tree moves the pin. The two `.sqlite` exports are
-  undiffable binary that only the scripts above read. The counters one grows ~27 MB a second
-  of run with the whole gh100 set at 20 kHz, ~100 GB over the corpus, so it is taken a case at a
-  time and never leaves the host: each case is joined there and deleted before the next, and
-  only `hbm.tsv` comes home.
+  writes both, and the commit that moves the tree moves the pin — where the record is published.
+  The two `.sqlite` exports are undiffable binary that only the scripts above read. The counters
+  one grows ~27 MB a second of run with the whole gh100 set at 20 kHz, ~100 GB over the corpus,
+  so it is taken a case at a time and never leaves the host: each case is joined there and
+  deleted before the next, and only `hbm.tsv` comes home.
   `testdata/.gitignore` is deny-by-default over `calibration/`, re-including the pin and the
   derived files only. `calls.tsv` and `hbm.tsv` in git cover three cases of an earlier run —
   q6 at `tp1-single` and `tp4-sized`, q19 at `tp1-single` — whose record is in git's history.
@@ -2611,8 +2617,22 @@ nation, which do not grow with sf, so its rows describe the host prologue. At th
 a scan is one call per row group, a thousand-odd per pass, so those six cases are most of the H200's
 record — 254 thousand rows, 26 MB for tpch, too large for git; tpcds's is 1,060 rows. The records
 live in the `calibration` bucket under their sha256, and `testdata/calibration/records.sha256` names
-the ones that go with the committed tree. The 26 on an empty H200 took an hour (3,602 s), most of it
+the ones that go with `h200/`. The 26 on an empty H200 took an hour (3,602 s), most of it
 q1 and `shuffle_additive_avg` at the rowgroup modes, ~90 s and ~44 s a pass, eleven passes each.
+
+The committed `h100-80gb-hbm3/` tree is one run of the whole list on an H100 80GB HBM3, at
+`tp1_single` and `tp4_single`: 48 tpch and 82 tpcds sections at each. Four are failures' records,
+all at `tp1_single`. tpch `anti_join`'s answer has a string column, `o_comment`, past 2 GiB: it
+exports as `LargeUtf8`, and the unload refuses it against the declared `Utf8`. tpcds q17, q25 and
+q29 are refused by the planner at the 2 GiB tier every mode plans at (`TIER` and `BUDGET` in
+`test_support`), on any card: what the accumulators hold is already the whole budget. `tp4_sized`
+is absent: its run was stopped after seven tpcds cases, and those seven are not kept. `UNTIMED` in
+`benchmark_coverage.rs` names that gap, so the tree is held to the rest of the list. The run's
+records are not published, and `records.sha256` names only the H200's. The run was made in three
+segments, each writing its own record, and `split_record.py` refuses a record short of the list,
+which the failed cases and the missing mode make this one. No Nsight capture was taken on the
+H100, so `calls.tsv` and `hbm.tsv` describe the H200 alone; the panels do too, drawn from the
+published records.
 
 **A failed case, and a rerun.** A case that panics on the device writes its section as the record
 of the failure, and its test fails; the next case runs. The record is one status line, the panic
@@ -2726,8 +2746,8 @@ trailers' `cudf=` tells them apart.
 
 **The tree**: one file per (device, dataset, mode) at
 `testdata/benchmark-results/<device>/<dataset>.sf<sf>/<mode>.benchmark.txt`, a `== <query>`
-section each. The committed H200 run is under `h200/`. A section is the plan tree with one
-line under every node:
+section each. The committed H200 run is under `h200/`, the H100's under `h100-80gb-hbm3/`. A
+section is the plan tree with one line under every node:
 
     time_us=[[22,37,40],[55,1,30]] total_us=185
 

@@ -746,15 +746,19 @@ A developer who does not know the setup readies a VM, starts a chain on it and r
 
 ### Task 11: the benchmark run on an 80 GB A100 or H100
 
-- [ ] **Step 1:** the human creates the machine on nebius. The rowgroup modes (`tp1_rowgroup`,
+- [x] **Step 1:** the human creates the machine on nebius. The rowgroup modes (`tp1_rowgroup`,
   `tp4_rowgroup`) check correctness and are not benchmarked: a run times the other three.
   tpcds sf40 comes from the bucket `tpcds-sf40`, so every device reads the same parquet files
   (their row-group layout is part of what is measured). It is published (detail file, "tpcds
   sf40 in its bucket"); its sums are compared with the copy the H200 results were measured on
   once shad-gpu is back, and `prepare` checks the files against the bucket.
-- [ ] **Step 2:** binaries built in the build image (`--features gpu`, the benchmark target);
+  - Done: an H100 80GB HBM3.
+  - [ ] the tpcds sf40 sums against the H200's copy, once shad-gpu is back
+- [x] **Step 2:** binaries built in the build image (`--features gpu`, the benchmark target);
   `gpu.sh <host> prepare && ship && run bench && pull`, the idle watcher's four-hour limit handled
   (the run in segments, or the watcher configured for it on that host).
+  - Done in three segments: `tp1_single` and `tp4_single` whole for both datasets. `tp4_sized`
+    was stopped after seven tpcds cases, and those seven are not kept.
 - [ ] **Step 3:** publishing a run made of segments, resumed (`PEACOCK_BENCH_RESUME=1`) cases and
   failures. Each segment writes its own record (`run-tests.sh bench` refuses one holding rows),
   their `# run: allocator=` headings differ (it names the free GiB each process saw), a held case
@@ -763,6 +767,9 @@ A developer who does not know the setup readies a VM, starts a chain on it and r
   rows are in two segments' records; `split_record.py` refuses a record short of the list.
   Decide how the segments' records join into one per dataset, and what a failed or deferred case
   means to the publish; failing tests first, in `scripts/calibration/tests/`.
+  - tpcds q17, q25 and q29 fail at `tp1_single` on every device, refused by the planner at the
+    2 GiB tier, so no record of the whole list is ever all-passing: the publish has to decide
+    what a failed case means.
 - [ ] **Step 4:** results under `benchmark-results/<slug>/`, the record split, uploaded and pinned
   per device; the benchmark golden tests green on the new tree. Commit. Task 9 settled which trees
   the list holds: a new device's tree is held to the whole list, `h200/` to its own
@@ -770,6 +777,13 @@ A developer who does not know the setup readies a VM, starts a chain on it and r
   `every_declared_case_has_a_section_in_the_tree` is red if the run times fewer cases than the list
   declares; committing such a tree needs a named exception in that test (device, modes, reason)
   that the human approves.
+  - Tree: `h100-80gb-hbm3/` at `tp1_single` and `tp4_single`, 48 tpch and 82 tpcds sections each,
+    four of them failures' records. `UNTIMED` in `benchmark_coverage.rs` names the device's
+    `tp4_sized` with the reason, and is refused once the list declares `tp4_sized` nowhere, the
+    device has no tree, or the tree carries a `tp4_sized` file. The benchmark golden tests are
+    green on it.
+  - Open: the record split, upload and pin. They wait on Step 3: this run's records are three
+    segments, and short of the list. No Nsight capture was taken on the H100.
 
 
 ### Task 12: the ensemble end to end on a scratch chain
