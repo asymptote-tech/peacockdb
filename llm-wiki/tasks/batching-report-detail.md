@@ -81,6 +81,7 @@ Branch `ENS-batching-report`, forked from `ENS-query-fuser` at `413366c4` on 202
     `/tmp/br-mpl`, as in Task 1); `test_source_formatting` 39 passed; `--check` 0.
     `git status --short testdata/` shows only `testdata/calibration/hbm-parts/`, query-fuser's
     untracked leftover, not this task's and not to be staged.
+- 2026-11-06: plan complete. PR #201 against `ENS-query-fuser`; board `reviewing`; reviewer round 1 dispatched.
 
 ## Checkpoints
 
