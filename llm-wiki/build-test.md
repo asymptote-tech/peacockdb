@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3719 cases: `--lib` 1201, `test_cpu_corpus` 2451, `test_corpus_goldens` 64, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3720 cases: `--lib` 1202, `test_cpu_corpus` 2451, `test_corpus_goldens` 64, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -935,16 +935,17 @@ a `.benchmark.txt` section read per node in pre-order, `batch_rows` and `batch_b
 over lanes and batches, the trailer's load, execute and peak; a section without one panics
 naming it, and a baseline of another plan is refused naming the query and the node
 
-| Hold rule and concurrency cap | [prototypes::fuser::holds::tests](../peacockdb-core/src/prototypes/fuser/holds/tests.rs), [prototypes::fuser::cap::tests](../peacockdb-core/src/prototypes/fuser/cap/tests.rs), [prototypes::fuser::loads::tests](../peacockdb-core/src/prototypes/fuser/loads/tests.rs) | 24 |
+| Hold rule and concurrency cap | [prototypes::fuser::holds::tests](../peacockdb-core/src/prototypes/fuser/holds/tests.rs), [prototypes::fuser::cap::tests](../peacockdb-core/src/prototypes/fuser/cap/tests.rs), [prototypes::fuser::loads::tests](../peacockdb-core/src/prototypes/fuser/loads/tests.rs) | 25 |
 |---|---|--:|
 
 the fuser's memory rules on chosen numbers and hand-built fused plans: a buffer goes on the
 smallest allowed recorded edge, the lower on a tie, never above a join that grew the rows, and
 charges the builds of the joins it runs early; it is chosen where it fits the headroom and a
-re-read otherwise, the ledger spending the headroom in order; `loads.tsv` read back by case, a
+re-read otherwise, the ledger charging the buffers the plan holds at each decision; `loads.tsv` read back by case, a
 missing row a panic; the cap admits the largest roots that fit, shared loads and buffers
 charged whatever it is, a root its peak less its shared loads; settling a batch buffers or
-re-reads every root the cap makes wait, never above a waiting root's state, and validates
+re-reads every root the cap makes wait, never above a waiting root's state, a join's buffer
+placed above state in a root that comes to wait taken out and decided again, and validates
 
 | Merge hint | [prototypes::fuser::merge::tests](../peacockdb-core/src/prototypes/fuser/merge/tests.rs) | 5 |
 |---|---|--:|

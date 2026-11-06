@@ -232,3 +232,50 @@ fn a_waiting_root_is_never_buffered_above_its_state() {
     assert_eq!(settled.holds[0].decision.bytes, 50, "below the accumulator");
     validate_dag(&refs(&settled.roots), Some(cap(1))).expect("it validates under a cap of one");
 }
+
+#[test]
+fn a_join_hold_in_a_root_that_waits_is_never_buffered_above_its_state() {
+    // Each lineitem reader sits in its join's probe hold, and the cheapest edge is above the
+    // accumulator. A join's hold allows a buffer there, but once the cap makes the second root
+    // wait, the accumulator under that buffer would keep its state outside the cap.
+    let trees: Vec<Box<dyn GpuNode>> = ["orders", "customer"]
+        .iter()
+        .map(|table| {
+            unload(join(
+                coalesce(key_of(table)),
+                coalesce(filter(lineitem(&[0, 4], &[0]))),
+            ))
+        })
+        .collect();
+    let mut times = baseline(&trees, |_, _| 1);
+    for query in &mut times.per_query {
+        query.peak_bytes = 80;
+        // unload, join, coalesce, build load, coalesce, filter, lineitem
+        query.batch_bytes = vec![1, 1, 1, 1, 5, 50, 0];
+    }
+    let names: Vec<String> = ["a", "b"].map(String::from).to_vec();
+    let loads = load_times(&[("a", 0, 70), ("b", 0, 70)]);
+    let seqs = seqs_of(&times);
+    // A budget of 135: one root of 80 at a time.
+    let mut ledger = ledger(&trees, &times, &loads, &seqs, &names, 150);
+    let fused = fused_with(&trees, &mut |f, h| ledger.choose(f, h));
+    assert!(
+        fused
+            .holds
+            .iter()
+            .all(|hold| hold.decision.bytes == 5 && hold.hold == "GpuHashJoin"),
+        "with no cap yet, each join's buffer sits above the accumulator"
+    );
+    let (settled, decision) = settle(fused, &times, &mut ledger).expect("the batch settles");
+    assert_eq!(decision.cap, cap(1));
+    let waiting: Vec<_> = settled.holds.iter().filter(|h| h.query == 1).collect();
+    assert_eq!(
+        waiting.len(),
+        1,
+        "the waiting root's reader is decided once"
+    );
+    assert!(matches!(waiting[0].decision.choice, Choice::Buffer { .. }));
+    assert_eq!(waiting[0].decision.bytes, 50, "below the accumulator");
+    assert_eq!(decision.estimate_bytes, 5 + 50 + 80);
+    validate_dag(&refs(&settled.roots), Some(cap(1))).expect("it validates under a cap of one");
+}

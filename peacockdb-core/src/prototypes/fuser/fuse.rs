@@ -331,7 +331,9 @@ fn refs(roots: &[Box<dyn GpuNode>]) -> Vec<&dyn GpuNode> {
 
 /// `fused` with every held reader resolved: validation names one, the chooser decides it,
 /// and the plan is validated again, until it passes. `cap` adds the readers of the roots that
-/// wait for it. Any refusal but an unbuffered hold ends the loop with that refusal.
+/// wait for it. A buffer a join's hold placed above state, in a root that now waits, is taken
+/// out, so validation names its reader again, to be decided as a waiting root's. Any other
+/// refusal ends the loop with that refusal.
 fn resolve(
     mut fused: Fused,
     cap: Option<NonZeroUsize>,
@@ -343,10 +345,15 @@ fn resolve(
             Err(PlanError::UnbufferedHold {
                 hold, reader, slot, ..
             }) => (hold, reader, slot),
+            Err(PlanError::UncappedAccumulator { node, .. }) if cap.is_some() => {
+                fused = without_the_buffer_above(fused, node);
+                continue;
+            }
             Err(other) => return Err(other),
         };
         let walk = Walk::of(&fused);
-        let held = walk.held_reader(&fused, hold, reader, slot);
+        let mut held = walk.held_reader(&fused, hold, reader, slot);
+        held.waits = cap.is_some_and(|cap| held.query >= cap.get());
         let member = held.member;
         let decision = choose(&fused, &held);
         let above = match decision.choice {
@@ -386,6 +393,74 @@ fn resolve(
         });
         fused = refreshed(fused);
     }
+}
+
+/// `fused` without the lowest `GpuHoldBuffer` above node `at`, and without its hold's record.
+fn without_the_buffer_above(mut fused: Fused, at: usize) -> Fused {
+    let walk = Walk::of(&fused);
+    let roots = refs(&fused.roots);
+    let dag = PlanDag::of(&roots);
+    let mut buffer = at;
+    while !matches!(as_node_ref(dag.nodes[buffer].node), NodeRef::HoldBuffer(_)) {
+        buffer = walk.parent[buffer].expect("a buffer lies above the node").0;
+    }
+    let above = walk.stands_for((buffer, 0));
+    let record = fused
+        .holds
+        .iter()
+        .position(|record| {
+            record.query == above.query
+                && record.above == Some(above.node)
+                && matches!(record.decision.choice, Choice::Buffer { .. })
+        })
+        .expect("every buffer has its hold's record");
+    let mut shared = HashMap::new();
+    fused.roots = dag
+        .roots
+        .iter()
+        .map(|root| copied_skipping(&dag, *root, buffer, &mut shared))
+        .collect();
+    fused.holds.remove(record);
+    refreshed(fused)
+}
+
+/// The tree under `at` copied, as [`edited`] copies it, with node `skip` replaced by its child.
+fn copied_skipping(
+    dag: &PlanDag<'_>,
+    at: usize,
+    skip: usize,
+    shared: &mut HashMap<usize, SharedSource>,
+) -> Box<dyn GpuNode> {
+    if at == skip {
+        return copied_skipping(dag, dag.nodes[at].children[0], skip, shared);
+    }
+    let node = dag.nodes[at].node;
+    if let Some(source) = shared_copy(node, shared) {
+        return source;
+    }
+    let children = dag.nodes[at]
+        .children
+        .iter()
+        .map(|child| copied_skipping(dag, *child, skip, shared))
+        .collect();
+    rebuild(node, children)
+}
+
+/// A shared source's copy, one per key so every reader of it reads one source; `None` for any
+/// other node.
+fn shared_copy(
+    node: &dyn GpuNode,
+    shared: &mut HashMap<usize, SharedSource>,
+) -> Option<Box<dyn GpuNode>> {
+    let key = node.sharing_key()?;
+    let source = shared.entry(key).or_insert_with(|| {
+        let load = rebuild(node, Vec::new())
+            .into_any_box()
+            .downcast::<GpuLoadParquet>()
+            .expect("only a load is shared");
+        SharedSource::new(*load)
+    });
+    Some(Box::new(source.clone()))
 }
 
 /// `fused` with what is read off its roots recomputed: the origins, and the loads per table.
@@ -450,15 +525,8 @@ fn copied<F: FnOnce(Box<dyn GpuNode>) -> Box<dyn GpuNode>>(
     shared: &mut HashMap<usize, SharedSource>,
 ) -> Box<dyn GpuNode> {
     let node = dag.nodes[at].node;
-    if let Some(key) = node.sharing_key() {
-        let source = shared.entry(key).or_insert_with(|| {
-            let load = rebuild(node, Vec::new())
-                .into_any_box()
-                .downcast::<GpuLoadParquet>()
-                .expect("only a load is shared");
-            SharedSource::new(*load)
-        });
-        return Box::new(source.clone());
+    if let Some(source) = shared_copy(node, shared) {
+        return source;
     }
     let children = dag.nodes[at]
         .children
@@ -573,6 +641,7 @@ impl Walk {
             hold,
             path,
             member,
+            waits: false,
         }
     }
 

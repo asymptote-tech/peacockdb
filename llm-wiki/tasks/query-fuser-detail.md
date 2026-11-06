@@ -320,6 +320,67 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
 - Not exercised anywhere yet: the out-of-memory path end to end, the first20 marker path (neither
   list is short enough), and the answer check against each query alone on the device.
 
+- 2026-11-06, Task 9 (developer), **stopped on a fuser bug after tpch first3 and first10**;
+  the fix is made locally, test first, and not committed. Nothing is committed or staged.
+  - **Build (Step 1).** nebius-cpu128: `df -h /` 60 GB free; `nebius-sync.sh … --no-data`,
+    `check-build-image.sh` exit 0, `stage-install.sh` in the build image exit 0 (about 6 min,
+    warm `target-img-25.02`), rsynced to `/home/dmitry/build/peacock/query-fuser/install`
+    (749 MB, both `rust-benchmarks/` binaries), VM stopped.
+  - **H100 (Step 2).** `df -h /` 79 GB free, card idle. `install-watch` **without**
+    `--key-file`: editor-eu's key is embedded, and build-test.md says install-watch refuses a
+    key file for it (the plan's `--key-file ~/.nebius/sa-key.pem` is drift). Exit 0; the
+    installed watcher names `prototype_fused_benchmarks`. `prepare` exit 0 in 11 min (sf40
+    kept 8 + 24 files, the time is their checksums). `ship --install` exit 0; the five
+    run-time inputs are on the VM.
+  - **tpch (Step 3).** `first3` measured: `run_us=933135` (load 593180, execute 335989), cap 3,
+    8 buffers, 1 re-read, accountant's peak 42.4 GB, `answers=match`, prefill 8 files
+    42.4 GB in 22.5 s; 35 s wall. `first10` measured: `run_us=4065107` (load 3261477, execute
+    786620), cap 1, `over_budget=true`, 0 buffers and 38 re-reads (lineitem read 9 times),
+    accountant's peak 26.8 GB, `answers=match`; 73 s wall. `first20` and `all` **failed** in
+    4 s each, before any device work, `status=failed` sections written:
+    `does not settle under its cap: invalid plan: GpuCoalesceAllBatches (node 24) sits below a
+    GpuHoldBuffer of the root GpuUnload (node 10), which waits for the cap`. A code bug, not
+    an out-of-memory outcome, so per the dispatch: pulled, H100 stopped, nothing more run.
+  - **Not run:** the four tpcds batches and both profiles (Steps 4 and 5).
+  - **Root cause.** `hold_inputs` forbade state below a buffer only for the cap's own hold
+    (`dag.roots.contains(&held.hold)`). A *join's* hold, decided in `fuse` before any cap
+    exists, may buffer above a `GpuCoalesceAllBatches`. When `settle` then makes that root
+    wait, dag-driver's `capped_roots_keep_their_state` refuses it (`UncappedAccumulator`), and
+    `resolve` passed that refusal straight out. `first10` (cap 1) passed only because none of
+    its join buffers sat above state. RED: `a_join_hold_in_a_root_that_waits_is_never_buffered_above_its_state`
+    (`cap::tests`) failed with the device's exact refusal.
+  - **Fix** (`fuse.rs`, `holds.rs`, `mod.rs`): `HeldReader.waits` (its root's ordinal is at or
+    past the cap being resolved) replaces the cap-hold test in `hold_inputs`, so every hold in
+    a waiting root keeps state above its buffer. `resolve` under a cap answers
+    `UncappedAccumulator` by taking out the lowest buffer above the named node, and its
+    record (`without_the_buffer_above`, copying the DAG as `edited` does, the shared-source
+    copy now one helper, `shared_copy`); validation then names that reader again and it is
+    decided with `waits`. The ledger's `B` is now the buffers the fused plan holds at each
+    decision, not a running sum, so a buffer taken out stops being charged. A mutation
+    leaving `waits` false makes `resolve` loop (the test hangs; killed at 60 s).
+  - **Checks:** `--lib` 1199 → 1200 passed, 2 ignored; `test_corpus_goldens` 63 of 64 with
+    the pulled fused file present: `the_benchmark_report_matches_the_trees` fails only because
+    the page lacks the new fused tables (Task 10 regenerates it), and passes with the file set
+    aside, as does `every_fused_section_adds_up` over it; cost-report formatting 39;
+    `cargo-cudf.sh check --features gpu,test-support --tests` clean; rustfmt on the touched
+    files. build-test.md: `--lib` 1201 → 1202 and the cap row 24 → 25.
+  - **Pulled, not committed:** `testdata/benchmark-results/h100-80gb-hbm3/fused/tpch.sf40/tp1_single.fused.txt`
+    (first3, first10 measured; first20, all failed), `testdata/calibration/fused/tpch.sf40/{first3,first10}.records.tsv`
+    (gitignored), the logs in `~/.cache/peacock/run-gpu/peacockdb-beta/`. The pull also
+    brought `testdata/calibration/hbm-parts/` (79 `bench_tpcds_sf40_*` parts): sf40-baseline's
+    metrics-pass leftovers on the VM, untracked, not this task's; do not commit them.
+  - **For the rerun (a new H100 session, after the fix is committed and restaged):**
+    - Rebuild on nebius-cpu128 first: the shipped binary has the bug.
+    - The first3 and first10 sections were written by the old binary. Their decisions should
+      be the same under the fix (their join buffers held no state below, and the cap's holds
+      were already ruled this way), but `PEACOCK_BENCH_RESUME=1` keeps a section by its five
+      provenance keys, which do not name the binary. Running tpch first3 without resume costs
+      about 2 minutes and leaves one binary's file.
+    - Step 5 needs `PCK_BENCH_HBM_FREQ=10000` beside the plan's two variables: build-test.md
+      ("sf40 baseline") says the H100 read 101 % of peak at the default 20 kHz.
+    - dev's `/` has 12 GB free. The trace pass brings each batch's `capture-<batch>.sqlite`
+      home, and the corpus's capture was 1.2 GB, so watch `df -h /` during Step 5.
+
 ## The hold rule (spec 1a)
 
 All numbers are the sf40-baseline tree's, per origin node: Σ `batch_bytes` and Σ `batch_rows`
@@ -331,14 +392,18 @@ over lanes and batches. The rule is `decide`, `hold_inputs` and `HoldLedger::cho
 - A buffer above a join runs that join early, so it also keeps the join's build child's bytes,
   for every join below it on the path.
 - An edge is allowed where every join below it on the path recorded no more rows than its child
-  on the path. Under the cap's hold, also only where nothing at or under it keeps state.
+  on the path. In a root that waits for the cap, also only where nothing at or under it
+  keeps state, for every hold there, a join's as well as the cap's (`HeldReader.waits`). A
+  join's buffer placed above state before the cap was known, in a root that then waits, is
+  taken out with its record, and its reader decided again under that rule.
 - Placement: the allowed edge with the fewest bytes; a tie goes to the lower edge.
 - A re-read costs the reader's own load's `loads.tsv` `load_us`, keyed by the query and the seq
   of its `CudfScan` recipe. It is recorded either way.
 - The choice: a buffer where one is placed and its bytes fit the headroom, else a re-read.
-- Headroom: `budget − (S + B + max root_bytes)`, saturating. `S`, the roots and any earlier
-  buffers come from `cap_inputs` at the first decision; `B` is what this chooser has buffered
-  since. Readers are decided in the order validation names them.
+- Headroom: `budget − (S + B + max root_bytes)`, saturating. `S` and the roots come from
+  `cap_inputs` at the first decision; `B` is the buffers the fused plan holds at each decision,
+  so a buffer taken out is no longer charged. Readers are decided in the order validation
+  names them.
 
 ## The cap rule (spec 4)
 
@@ -448,3 +513,5 @@ Keys:
 
 | VM | start (local) | stop (local) | hours |
 |---|---|---|---|
+| nebius-cpu128 | 2026-11-06 05:17:59 | 2026-11-06 05:26:58 | 0.15 |
+| nebius-h100 | 2026-11-06 05:27:02 | 2026-11-06 05:44:50 | 0.30 |

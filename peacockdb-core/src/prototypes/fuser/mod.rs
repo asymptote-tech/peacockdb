@@ -80,6 +80,8 @@ pub(crate) struct HeldReader {
     pub(crate) path: Vec<(usize, usize)>,
     /// The reader's own load, the member of the group it stands in for: what a re-read loads.
     pub(crate) member: Origin,
+    /// Its root waits for the cap being resolved, so no buffer of it may keep state below.
+    pub(crate) waits: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -360,9 +362,10 @@ pub(crate) fn decide(inputs: &HoldInputs, headroom_bytes: u64) -> HoldDecision {
 /// - A buffer above a join runs that join early, so it also keeps the join's build child's
 ///   Σ `batch_bytes`, for every join below it on the path.
 /// - An edge is allowed where every join below it on the path recorded no more rows
-///   (Σ `batch_rows`) than its child on the path: it did not increase cardinality there. Under
-///   the cap's hold it is also allowed only where nothing at or under it keeps state, which a
-///   waiting root may not have below its buffer.
+///   (Σ `batch_rows`) than its child on the path: it did not increase cardinality there. Where
+///   the reader's root waits for the cap (`held.waits`), for a join's hold as for the cap's, it
+///   is also allowed only where nothing at or under it keeps state, which a waiting root may
+///   not have below its buffer.
 /// - A re-read costs the reader's own load's `loads.tsv` `load_us`, keyed by `names` and the
 ///   seq of its `CudfScan` recipe in `seqs` (per query, by pre-order).
 pub(crate) fn hold_inputs(
@@ -383,10 +386,8 @@ pub(crate) struct HoldLedger<'b> {
     loads: &'b LoadTimes,
     seqs: &'b [Vec<Option<u64>>],
     names: &'b [String],
-    /// Shared loads, buffers and the largest root, from [`cap_inputs`] at the first decision.
+    /// Shared loads and the largest root, from [`cap_inputs`] at the first decision.
     charged: Option<u64>,
-    /// The bytes of the buffers this ledger chose.
-    spent: u64,
 }
 
 impl<'b> HoldLedger<'b> {
@@ -404,13 +405,13 @@ impl<'b> HoldLedger<'b> {
             seqs,
             names,
             charged: None,
-            spent: 0,
         }
     }
 
     /// [`decide`] with headroom `budget − (S + B + max root_bytes)`, saturating: `S` and the
-    /// roots as [`cap_inputs`] charged them at the first call, `B` the buffers since. So readers
-    /// are decided in the order validation names them, and each buffer spends what it keeps.
+    /// roots as [`cap_inputs`] charged them at the first call, `B` the buffers `fused` holds at
+    /// this one. So readers are decided in the order validation names them, each buffer spends
+    /// what it keeps, and a buffer taken out spends nothing.
     pub(crate) fn choose(&mut self, fused: &Fused, held: &HeldReader) -> HoldDecision {
         holds::choose(self, fused, held)
     }

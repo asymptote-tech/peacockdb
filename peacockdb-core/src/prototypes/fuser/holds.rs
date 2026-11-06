@@ -74,7 +74,6 @@ pub(crate) fn hold_inputs(
             times.batch_bytes[origin.node],
         )
     };
-    let capped = dag.roots.contains(&held.hold);
     let (mut grown, mut builds, mut below) = (false, 0, None);
     let mut edges = Vec::new();
     for (parent, slot) in &held.path {
@@ -91,7 +90,7 @@ pub(crate) fn hold_inputs(
         edges.push(EdgeCost {
             edge: (*parent, *slot),
             bytes: recorded(child).1 + builds,
-            allowed: !grown && !(capped && keeps_state(&dag, child)),
+            allowed: !grown && !(held.waits && keeps_state(&dag, child)),
         });
     }
     let seq = seqs[member.query][member.node].expect("the reader's own load has a scan seq");
@@ -129,11 +128,15 @@ pub(crate) fn choose(
     let charged = *ledger.charged.get_or_insert_with(|| {
         let at_first = cap_inputs(fused, ledger.baseline, ledger.pool_bytes);
         let largest_root = at_first.root_bytes.iter().max().copied().unwrap_or(0);
-        at_first.shared_bytes.iter().sum::<u64>()
-            + at_first.buffer_bytes.iter().sum::<u64>()
-            + largest_root
+        at_first.shared_bytes.iter().sum::<u64>() + largest_root
     });
-    let headroom = budget_of(ledger.pool_bytes).saturating_sub(charged + ledger.spent);
+    let buffered: u64 = fused
+        .holds
+        .iter()
+        .filter(|record| matches!(record.decision.choice, Choice::Buffer { .. }))
+        .map(|record| record.decision.bytes)
+        .sum();
+    let headroom = budget_of(ledger.pool_bytes).saturating_sub(charged + buffered);
     let inputs = hold_inputs(
         fused,
         held,
@@ -142,9 +145,5 @@ pub(crate) fn choose(
         ledger.seqs,
         ledger.names,
     );
-    let decision = decide(&inputs, headroom);
-    if let Choice::Buffer { .. } = decision.choice {
-        ledger.spent += decision.bytes;
-    }
-    decision
+    decide(&inputs, headroom)
 }
