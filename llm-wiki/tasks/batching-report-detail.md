@@ -83,11 +83,23 @@ Branch `ENS-batching-report`, forked from `ENS-query-fuser` at `413366c4` on 202
     untracked leftover, not this task's and not to be staged.
 - 2026-11-06: plan complete. PR #201 against `ENS-query-fuser`; board `reviewing`; reviewer round 1 dispatched.
 
+## Review round 1 (2026-11-06)
+
+0 blocking, 5 important, 8 nits; every generated number recomputed and right. All to the developer except N8 (checkpoint row, coordinator).
+
+- **I1.** DuckDB's per-process floor (30 ms tpch, 36 ms tpcds) is neither named nor subtracted; each batch sums N floors. tpcds first3 "level (1.00x)" is 0.82x floors out. Fix: `floor_ms` in `DUCKDB_KEYS`, say what one DuckDB time holds, give the ratio floors out (or both), test.
+- **I2.** The intro's "each file loaded once for every scan of it" is false (tpch all 46 loads of 8 files; tpcds all 426 of 24). Use build-test.md's wording; optionally `rereads` beside folded scans.
+- **I3.** Nothing in CI runs `--check`. **Decided:** add a `pipeline.yml` step beside `generate_pbench.sh --check`, and update build-test.md.
+- **I4.** A batch in `failed.tsv` hides a valid `<batch>.loads.tsv`. Show the split whenever the file exists; the reason only when it does not; tests for both.
+- **I5.** `query-batching.md:169` inverts the ratio ("fused is 1.60x-2.48x DuckDB's").
+- Nits N1-N7 for the developer: N1 no plateau within 22 tpch queries; N2 split parts exceed load by 1-4 % (overlap, separate medians); N3 name non-`yes` DuckDB `warm` rows; N4 the pipelining model has no memory term; N5 prefill `max` keeps the cold first of four ties; N6 tpcds "all" is the 82 tp1_single lines; N7 test name says host, asserts threads.
+
 ## Checkpoints
 
 | step | commit | note |
 |---|---|---|
 | Task 1 Step 5 | `1db1dc48` | batching-report: a generator for the query-batching page, tested on a fixture tree; test_batching_report 27, calibration tests 104, formatting 39 |
+| Task 2 Step 5 | `672fe067` | batching-report: fused vs unfused vs DuckDB per batch size, sf40; test_batching_report 28, formatting 39 |
 
 ## VM time
 
