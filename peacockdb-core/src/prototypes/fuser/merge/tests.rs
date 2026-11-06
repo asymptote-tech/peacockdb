@@ -1,0 +1,146 @@
+//! The mergeability hint over hand-built fused plans and a baseline whose times are chosen
+//! per node: which identical subtrees are entries, what each saves, and the batch's total.
+
+use crate::plan::GpuNode;
+use crate::prototypes::fuser::tests::{buffer_every_hold_lowest, re_read_every_hold};
+use crate::prototypes::fuser::tests::{count, filter, filter_above, fused_with, held_pair};
+use crate::prototypes::fuser::tests::{lineitem, unload};
+use crate::prototypes::fuser::{Baseline, MergeHint, Origin, QueryTimes, merge_hint};
+
+/// Each tree's nodes in pre-order: names, and children as indices.
+fn pre_order(tree: &dyn GpuNode) -> (Vec<String>, Vec<Vec<usize>>) {
+    fn walk(node: &dyn GpuNode, names: &mut Vec<String>, children: &mut Vec<Vec<usize>>) {
+        let at = names.len();
+        names.push(node.name().to_string());
+        children.push(Vec::new());
+        for child in node.children() {
+            children[at].push(names.len());
+            walk(child, names, children);
+        }
+    }
+    let (mut names, mut children) = (Vec::new(), Vec::new());
+    walk(tree, &mut names, &mut children);
+    (names, children)
+}
+
+/// A baseline for `trees` in which query `q`'s node of name `n` took `us(q, n)`.
+fn baseline(trees: &[Box<dyn GpuNode>], us: impl Fn(usize, &str) -> u64) -> Baseline {
+    let per_query = trees
+        .iter()
+        .enumerate()
+        .map(|(query, tree)| {
+            let (names, children) = pre_order(tree.as_ref());
+            let zeros = vec![0; names.len()];
+            QueryTimes {
+                total_us: names.iter().map(|name| us(query, name)).collect(),
+                names,
+                children,
+                batch_rows: zeros.clone(),
+                batch_bytes: zeros,
+                load_us: 0,
+                execute_us: 0,
+                peak_bytes: 0,
+            }
+        })
+        .collect();
+    Baseline { per_query }
+}
+
+/// Filters take `filters[q]`, aggregates `counts[q]`, loads 100 and unloads 7.
+fn times(filters: &[u64], counts: &[u64]) -> impl Fn(usize, &str) -> u64 {
+    let (filters, counts) = (filters.to_vec(), counts.to_vec());
+    move |query, name| match name {
+        "GpuFilter" => filters[query],
+        "GpuAggregate" => counts[query],
+        "GpuLoadParquet" => 100,
+        _ => 7,
+    }
+}
+
+fn hint_of(trees: &[Box<dyn GpuNode>], baseline: &Baseline) -> MergeHint {
+    let fused = fused_with(trees, &mut re_read_every_hold);
+    merge_hint(&fused, baseline)
+}
+
+fn origin(query: usize, node: usize) -> Origin {
+    Origin { query, node }
+}
+
+#[test]
+fn identical_filters_over_one_source_are_one_entry() {
+    let trees = vec![
+        unload(filter(lineitem(&[0, 4], &[0]))),
+        unload(filter(lineitem(&[0, 4], &[0]))),
+    ];
+    let hint = hint_of(&trees, &baseline(&trees, times(&[30, 50], &[])));
+    assert_eq!(hint.entries.len(), 1);
+    let entry = &hint.entries[0];
+    assert!(entry.node.starts_with("GpuFilter"), "{}", entry.node);
+    assert_eq!(entry.members, [origin(0, 1), origin(1, 1)]);
+    assert_eq!((entry.saved_us, hint.saved_us), (30, 30));
+}
+
+#[test]
+fn different_predicates_are_no_entry() {
+    let trees = vec![
+        unload(filter(lineitem(&[0, 4], &[0]))),
+        unload(filter_above(lineitem(&[0, 4], &[0]), 7)),
+    ];
+    let hint = hint_of(&trees, &baseline(&trees, times(&[30, 50], &[])));
+    assert!(hint.entries.is_empty());
+    assert_eq!(hint.saved_us, 0);
+}
+
+#[test]
+fn only_the_largest_identical_subtree_is_an_entry() {
+    let trees = vec![
+        unload(count(filter(lineitem(&[0, 4], &[0])))),
+        unload(count(filter(lineitem(&[0, 4], &[0])))),
+    ];
+    let hint = hint_of(&trees, &baseline(&trees, times(&[30, 50], &[5, 9])));
+    assert_eq!(hint.entries.len(), 1);
+    let entry = &hint.entries[0];
+    assert!(entry.node.starts_with("GpuAggregate"), "{}", entry.node);
+    assert_eq!(entry.members, [origin(0, 1), origin(1, 1)]);
+    assert_eq!(entry.saved_us, (30 + 5) + (50 + 9) - (50 + 9));
+    assert_eq!(hint.saved_us, (30 + 50 - 50) + (5 + 9 - 9));
+}
+
+#[test]
+fn a_nested_group_of_fewer_members_is_counted_once_in_the_total() {
+    let trees = vec![
+        unload(count(filter(lineitem(&[0, 4], &[0])))),
+        unload(count(filter(lineitem(&[0, 4], &[0])))),
+        unload(filter(lineitem(&[0, 4], &[0]))),
+    ];
+    let hint = hint_of(&trees, &baseline(&trees, times(&[10, 20, 40], &[3, 4, 0])));
+    let saved: Vec<(&str, u64)> = hint
+        .entries
+        .iter()
+        .map(|entry| (entry.node.split(':').next().unwrap(), entry.saved_us))
+        .collect();
+    assert_eq!(
+        saved,
+        [
+            ("GpuFilter", 10 + 20 + 40 - 40),
+            ("GpuAggregate", 13 + 24 - 24)
+        ]
+    );
+    assert_eq!(hint.entries[0].members.len(), 3);
+    assert_eq!(hint.saved_us, (10 + 20 + 40 - 40) + (3 + 4 - 4));
+}
+
+#[test]
+fn a_buffer_does_not_split_a_group() {
+    let trees = held_pair(&[0, 4], &[0, 4]);
+    let fused = fused_with(&trees, &mut buffer_every_hold_lowest);
+    assert_eq!(
+        fused.holds.len(),
+        1,
+        "q0's filter reads the source through a buffer"
+    );
+    let hint = merge_hint(&fused, &baseline(&trees, times(&[30, 50], &[])));
+    assert_eq!(hint.entries.len(), 1);
+    assert!(hint.entries[0].node.starts_with("GpuFilter"));
+    assert_eq!(hint.entries[0].saved_us, 30);
+}

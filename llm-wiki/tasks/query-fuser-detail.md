@@ -69,6 +69,23 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
   - Extra tests beyond the plan's: `tpch_batches_only_its_twenty_two_queries`,
     `an_empty_batch_set_panics_naming_the_dataset`, `ordered_queries_read_the_h100_list`,
     `first3_runs_whatever_the_list`.
+- 2026-11-06, Task 3 (developer). Checkpoint `fuser: the mergeability hint` reported, not
+  committed. `--lib` +10 (5 `prototypes::fuser::baseline::tests`, 5 `…::merge::tests`).
+  - **The test plan helpers moved** from `fuse/tests.rs` into `fuser/tests.rs` (`pub(crate)`,
+    beside the choosers), so the baseline, merge and later tests build plans the same way;
+    `count` (a keyless aggregate) and `filter_above` were added there. `pub(crate) mod` is
+    refused outside a test directory, which `fuser/tests.rs` is not, so they are items of that
+    module rather than a child of their own.
+  - **`node_line_of` carries no `#[allow(dead_code)]`**: `plan_text` already allows it for
+    the whole component outside test builds, and in a test build the merge hint calls it.
+  - **Roots are in no merge group.** With them, two identical queries make the `GpuUnload`s the
+    largest identical subtree, and the plan's own case (`agg(filter(S))` twice: the aggregate is
+    the entry) could not hold. A root is the crossing to the host, one per query by nature.
+  - **Merge keys are interned** (`(plan line, child key ids)` → id), not concatenated text:
+    a tpcds plan's nested load lines would make string keys quadratic in size.
+  - A node is a group candidate only where it stands for a node of its query's own tree, so
+    inserted projects (time 0) never form an entry.
+  - `MergeEntry.members` are in fused pre-order; entries with equal savings keep group order.
 
 ## Checkpoints
 

@@ -20,7 +20,7 @@ pub(crate) fn render_plans(roots: &[&dyn GpuNode]) -> String {
     })
 }
 
-fn node_line(node: &dyn GpuNode) -> String {
+pub(crate) fn node_line(node: &dyn GpuNode) -> String {
     let mut parts = node_line_parts(node);
     if let Some(schema) = node.kind().schema() {
         parts.push(schema_text(schema));

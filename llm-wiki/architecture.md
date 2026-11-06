@@ -1105,7 +1105,9 @@ on a prototype. `cost-report`'s `test_source_formatting/prototypes.rs` enforces 
   unshared, with the reason recorded: a scan a limit cut to a prefix (`limit-cut`), a scan whose
   columns would gain NULLs (`nulls:<col>`), and a rows-only scan beside column scans
   (`rows-only`). Every reader of a shared scan inside a hold is buffered or re-reads the table,
-  as a chooser decides. It runs at sf40 only. Decisions and formats:
+  as a chooser decides. It reports, without executing, the identical subtrees above the shared
+  sources and what merging them would save (the merge hint). It runs at sf40 only. Decisions
+  and formats:
   `tasks/query-fuser-detail.md`.
 
 ## The wire format

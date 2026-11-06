@@ -8,15 +8,17 @@
 //! only: the benchmark's chooser reads the sf40 baseline, and nothing else may supply figures.
 //! `llm-wiki/tasks/query-fuser-detail.md` records the decisions.
 
+mod baseline;
 mod fuse;
 mod lists;
+mod merge;
 #[cfg(test)]
 mod tests;
 
 use std::num::NonZeroUsize;
 
 use crate::plan::{Batching, GpuNode, PlanError};
-use crate::test_support::DeviceCase;
+use crate::test_support::{BenchSection, DeviceCase};
 
 /// One query of a batch: its name, and its own planned tree.
 pub(crate) struct Query<'a> {
@@ -169,4 +171,71 @@ pub(crate) fn ordered_queries(dataset: &str) -> Vec<String> {
 /// (`first3` aside, which always runs), a marker saying it is the same set as `all`.
 pub(crate) fn batches(list: &[String]) -> Vec<(&'static str, Result<Vec<String>, String>)> {
     lists::batches(list)
+}
+
+/// The sf40 baseline of a batch, one entry per query in batch order.
+pub(crate) struct Baseline {
+    pub(crate) per_query: Vec<QueryTimes>,
+}
+
+/// One query's `.benchmark.txt` section, every vector by the node's pre-order index in the
+/// query's own tree, which is what an [`Origin`] indexes.
+pub(crate) struct QueryTimes {
+    pub(crate) names: Vec<String>,
+    pub(crate) children: Vec<Vec<usize>>,
+    pub(crate) total_us: Vec<u64>,
+    /// Σ over lanes and batches.
+    pub(crate) batch_rows: Vec<u64>,
+    /// Σ over lanes and batches.
+    pub(crate) batch_bytes: Vec<u64>,
+    pub(crate) load_us: u64,
+    pub(crate) execute_us: u64,
+    pub(crate) peak_bytes: u64,
+}
+
+impl Baseline {
+    /// One [`QueryTimes`] per section. Panics naming the query and node when a section lacks
+    /// `batch_rows` or `batch_bytes`, or its trailer `load_us`, `execute_us` or `peak_bytes`.
+    pub(crate) fn of(sections: &[BenchSection<'_>]) -> Baseline {
+        baseline::of(sections)
+    }
+
+    /// `Ok` when each query's own tree, in pre-order, has its section's node names; else the
+    /// first mismatch, naming the query and the node index.
+    pub(crate) fn check(&self, queries: &[Query<'_>]) -> Result<(), String> {
+        baseline::check(self, queries)
+    }
+}
+
+/// One identical subtree several queries compute, and what merging it would save.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MergeEntry {
+    /// The subtree root's plan line.
+    pub(crate) node: String,
+    /// Each copy's subtree root, as a node of its own query.
+    pub(crate) members: Vec<Origin>,
+    pub(crate) saved_us: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MergeHint {
+    /// Largest saving first.
+    pub(crate) entries: Vec<MergeEntry>,
+    pub(crate) saved_us: u64,
+}
+
+/// What merging the identical subtrees above the shared sources would save. A report, not an
+/// execution. The model, by the fused DAG's nodes:
+/// - Each node's key is its plan line and its children's keys; a shared source's is its
+///   sharing key, and a `GpuHoldBuffer`'s its child's, since it computes nothing.
+/// - A group is two or more nodes of one key whose subtree reaches a shared source, each
+///   standing for a node of its query's own tree. A root, the crossing to the host, is in none.
+/// - An entry is a group no other group of the same size contains member for member (each
+///   member's parent, through any buffer, in it). A copy's time is Σ baseline `total_us` over
+///   its subtree, loads, inserted projects and buffers excluded; the entry saves Σ − max: one
+///   copy stays, the dearest. Entries come largest saving first.
+/// - The batch saves Σ over every group of (Σ own `total_us` − max own `total_us`): each node is
+///   in one group, so nothing is counted twice.
+pub(crate) fn merge_hint(fused: &Fused, baseline: &Baseline) -> MergeHint {
+    merge::merge_hint(fused, baseline)
 }
