@@ -186,6 +186,10 @@ nothing.
   (`batching_report.py --check` now exits 1: the page is stale with the tp4_sized files in the
   tree, and CI runs that check). Scratch: `/tmp/tp4-sized/` (records, split records, case files,
   the tpch capture, logs). The VM keeps the tpch capture in `~/peacock/peacockdb-beta/testdata/calibration/`.
+- 2026-11-06 (coordinator) decisions after the first H100 session:
+  - **tpcds profiles: option (b), bounded.** Estimate each tpcds case's capture size from its tp4_sized record rows (tpch's 32 GB raw for 351 k rows is the scale). Capture one case at a time where it fits the H100's free disk with margin. Derive `calls.tsv`, `loads.tsv` and `hbm.tsv` on the VM, and never pull a capture to dev (dev has about 7 GB free). Every case that does not fit is listed as a failed capture, with the estimated size as its reason, as the spec's Profiles paragraph allows. If the estimate for the cases that fit exceeds 6 H100 hours, report before starting.
+  - **The stray tp4_sized answers** in `testdata/goldens/{tpch,tpcds}.sf40/gpu-result.txt` were dropped (`git checkout`). They are outside the spec's scope, and nothing reads them.
+  - **The benchmark files, `cases.csv`, `records.sha256` and the regenerated page are held** (uncommitted) until Task 4 regenerates `llm-wiki/reports/query-batching.md`. Committed alone they would turn CI's page `--check` red. Task 3's commit takes them together with Task 4's page.
 
 ## Checkpoints
 
