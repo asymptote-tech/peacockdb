@@ -495,7 +495,7 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     a resolve, a re-read charges its root its own load at once, while the group's union is
     rebuilt only when the resolve ends. So the ledger can read over budget mid-resolve though
     the settled plan is within it; tpcds first10 did, from its 32nd decision, after q4's two
-    `catalog_sales` re-reads, and 5 of round 1's buffers became re-reads (+97 ms). Each
+    `catalog_sales` re-reads, and net 5 of round 1's buffers became re-reads (6 to re-reads, 1 to a buffer) (+97 ms). Each
     section's merge and pipelining hints estimate what more is available.
   - **Step 2, the profiles** (the round-2 rerun's). All 725 rows of the eight `loads.tsv` have
     `load_us > 0`, `host_read_us ≤ load_us`, `unattributed_us ≤ load_us` and
@@ -705,6 +705,7 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     `~/.cache/peacock/run-gpu/peacockdb-beta/`. `testdata/calibration/hbm-parts/` is still the
     untracked sf40-baseline leftover.
 - 2026-11-06: H100 rerun after round 2 committed. **Decided:** tpcds first10's 2.3 % slowdown (a group's shared load is rebuilt only at the end of a resolve, so mid-resolve re-reads overstate the ledger) is accepted as a stated limit of the prototype, not fixed: seven of eight batches got faster or held, and another rebuild-per-decision change would need a fourth H100 session for a ~0.1 s effect. Reviewer round 3 dispatched.
+- 2026-11-06: review round 3: 0 blocking, 0 important, 1 nit (wording, fixed by the coordinator). Board `completing`; completeness pass (fresh reviewer, fresh analyst) dispatched.
 
 ## The hold rule (spec 1a)
 
