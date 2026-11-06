@@ -49,6 +49,7 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
 
 | step | commit | note |
 |---|---|---|
+| Task 1 Step 6 | `09949303` | fuser: one shared load per file across N plans; lib 1121, goldens 61, formatting 38 |
 
 ## VM time
 
