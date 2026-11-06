@@ -55,6 +55,7 @@ Branch `ENS-batching-report`, forked from `ENS-query-fuser` at `413366c4` on 202
 
 | step | commit | note |
 |---|---|---|
+| Task 1 Step 5 | `1db1dc48` | batching-report: a generator for the query-batching page, tested on a fixture tree; test_batching_report 27, calibration tests 104, formatting 39 |
 
 ## VM time
 
