@@ -24,7 +24,9 @@
 #include <cudf/unary.hpp>
 #include <cudf/utilities/type_dispatcher.hpp>
 
+#include <arrow/api.h>
 #include <arrow/buffer.h>
+#include <arrow/c/bridge.h>
 #include <arrow/io/memory.h>
 #include <arrow/ipc/reader.h>
 #include <arrow/record_batch.h>

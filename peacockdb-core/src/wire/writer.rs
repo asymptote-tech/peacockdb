@@ -21,6 +21,10 @@ fn at_seq(why: PlanError, seq: Seq) -> PlanError {
     match why {
         PlanError::Unsupported(what) => PlanError::Unsupported(format!("{what} at #{seq}")),
         PlanError::Invalid(what) => PlanError::Invalid(format!("{what} at #{seq}")),
+        // Refusals of a plan's holds; validation makes them, and no payload does.
+        held @ (PlanError::UnbufferedHold { .. }
+        | PlanError::HoldCycle { .. }
+        | PlanError::UncappedAccumulator { .. }) => held,
     }
 }
 
@@ -30,10 +34,16 @@ pub(crate) struct Payload {
     pub value: WIPOffset<UnionWIPOffset>,
 }
 
+/// A written node, which a second parent of a shared node takes again.
+pub(crate) type NodeOffset<'a> = WIPOffset<fb::PlanNode<'a>>;
+
 pub(crate) struct Writer<'a> {
     builder: FlatBufferBuilder<'a>,
     /// Created and not yet taken as somebody's child, oldest first.
-    pool: Vec<WIPOffset<fb::PlanNode<'a>>>,
+    pool: Vec<NodeOffset<'a>>,
+    /// The roots finished so far, in order: out of the pool, so a later root's node never
+    /// takes one as a child.
+    roots: Vec<NodeOffset<'a>>,
     next_seq: Seq,
     join_scratch_bytes: u64,
 }
@@ -44,6 +54,7 @@ impl<'a> Writer<'a> {
         Self {
             builder: FlatBufferBuilder::new(),
             pool: Vec::new(),
+            roots: Vec::new(),
             next_seq: 0,
             join_scratch_bytes: bytes,
         }
@@ -127,6 +138,18 @@ impl<'a> Writer<'a> {
         (seq, node)
     }
 
+    /// A node already written, offered again for the next node to take: the second parent
+    /// of a shared node holds the same offset, which both sides index once, at its first
+    /// visit. Nothing is created, so no seq is spent.
+    pub(crate) fn reuse(&mut self, offset: NodeOffset<'a>) {
+        self.pool.push(offset);
+    }
+
+    /// The offset a node left after [`Writer::reduce`]: what its later readers reuse.
+    pub(crate) fn last(&self) -> NodeOffset<'a> {
+        *self.pool.last().expect("every node leaves one offset")
+    }
+
     /// How many nodes are unconsumed — a caller's mark for [`Writer::reduce`].
     pub(crate) fn mark(&self) -> usize {
         self.pool.len()
@@ -156,20 +179,46 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
-    /// Finish on the one offset left, which is the root by construction: the last node
-    /// created is the last visited in post-order. Returns the bytes and how many fb nodes
-    /// went into them — stubs and structural unions included, since the C++ indexes those.
-    pub(crate) fn finish(mut self) -> Result<(Vec<u8>, Seq), PlanError> {
-        let root = match self.pool.as_slice() {
-            [root] => *root,
-            other => {
-                return Err(PlanError::Invalid(format!(
-                    "the recipe plan ended with {} unconsumed nodes rather than one root",
-                    other.len()
-                )));
+    /// A root's walk has ended on the one offset left, which is that root by construction:
+    /// the last node created is the last visited in post-order.
+    pub(crate) fn end_root(&mut self) -> Result<(), PlanError> {
+        match self.pool.as_slice() {
+            [root] => {
+                self.roots.push(*root);
+                self.pool.clear();
+                Ok(())
             }
+            other => Err(PlanError::Invalid(format!(
+                "a root's walk ended with {} unconsumed nodes rather than one",
+                other.len()
+            ))),
+        }
+    }
+
+    /// Finish on the roots in order, the one still in the pool ending as the last: one is
+    /// written as `root`, so a single query's bytes are what they always were, and several as
+    /// `roots`. Returns the bytes and how many fb nodes went into them — stubs and structural
+    /// unions included, since the C++ indexes those.
+    pub(crate) fn finish(mut self) -> Result<(Vec<u8>, Seq), PlanError> {
+        if !self.pool.is_empty() {
+            self.end_root()?;
+        }
+        let args = match self.roots.as_slice() {
+            [] => {
+                return Err(PlanError::Invalid(
+                    "the recipe plan has no root".to_string(),
+                ));
+            }
+            [root] => fb::GpuPlanArgs {
+                root: Some(*root),
+                roots: None,
+            },
+            several => fb::GpuPlanArgs {
+                root: None,
+                roots: Some(self.builder.create_vector(several)),
+            },
         };
-        let plan = fb::GpuPlan::create(&mut self.builder, &fb::GpuPlanArgs { root: Some(root) });
+        let plan = fb::GpuPlan::create(&mut self.builder, &args);
         self.builder.finish(plan, None);
         Ok((self.builder.finished_data().to_vec(), self.next_seq))
     }

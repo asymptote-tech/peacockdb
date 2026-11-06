@@ -3,8 +3,8 @@
 //! calls each of a lane's backend calls made.
 
 use super::mock::{Script, spec};
-use super::plans::*;
 use super::*;
+use crate::tests::plans::*;
 
 /// Pre-order: the unload, the init, the source.
 const INIT: usize = 1;

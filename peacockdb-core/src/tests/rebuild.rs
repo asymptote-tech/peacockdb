@@ -27,6 +27,7 @@ use crate::plan::{
     GpuCoalesceAllBatches, GpuCrossJoin, GpuEmitPartitions, GpuEmpty, GpuFilter, GpuHashJoin,
     GpuInterleave, GpuLimit, GpuLoadParquet, GpuMergePartitions, GpuMergeSortedPartitions,
     GpuNestedLoopJoin, GpuProject, GpuSort, GpuUnion, GpuUnload, NodeRef, as_node_ref,
+    new_hold_buffer,
 };
 use crate::plan::{Expr, NamedExpr};
 use crate::plan::{JoinFilterColumn, JoinSide};
@@ -135,6 +136,7 @@ pub(crate) fn rebuild(node: &dyn GpuNode, children: Vec<Box<dyn GpuNode>>) -> Bo
         )),
         NodeRef::Union(_) => Box::new(GpuUnion::new(children.collect(), schema_of(node))),
         NodeRef::Interleave(_) => Box::new(GpuInterleave::new(children.collect(), schema_of(node))),
+        NodeRef::HoldBuffer(_) => Box::new(new_hold_buffer(one())),
         NodeRef::Unload(unload) => Box::new(GpuUnload::new(one(), unload.interval)),
     }
 }
@@ -385,6 +387,8 @@ pub(crate) fn every_kind() -> Vec<Box<dyn GpuNode>> {
         Box::new(GpuUnload::new(other_source(), None)),
         Box::new(GpuEmpty::new(columns())),
         Box::new(GpuEmpty::new(other_columns())),
+        Box::new(new_hold_buffer(source())),
+        Box::new(new_hold_buffer(other_source())),
     ]
 }
 

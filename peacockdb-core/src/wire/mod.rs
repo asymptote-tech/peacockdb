@@ -293,7 +293,8 @@ pub(crate) enum Payloads {
 }
 
 /// Every node's recipe, indexed by the post-order position the estimator and the memory
-/// golden already number by, plus the bytes those recipes address.
+/// golden already number by — `PlanDag`'s, a node several parents read counted once — plus
+/// the bytes those recipes address.
 ///
 /// That index is a position in the TREE and a [`Seq`] is an address in the recipe plan:
 /// they part company at the first node with two calls, and a driver holding both at once
@@ -367,7 +368,19 @@ pub(crate) fn attach_recipes(
     root: &dyn GpuNode,
     join_scratch_bytes: u64,
 ) -> Result<RecipePlan, PlanError> {
-    attach::attach_recipes(root, join_scratch_bytes)
+    attach_recipes_for_roots(&[root], join_scratch_bytes)
+}
+
+/// [`attach_recipes`] over several roots, as one buffer and one seq space: the recipes are
+/// indexed by `PlanDag`'s post-order, a node several parents read is written once and
+/// numbered once, and the roots cross as `GpuPlan.roots` — one root still as `root`, so a
+/// single query's bytes are unchanged. A `GpuHoldBuffer` writes nothing: its child's offset
+/// is what its reader takes.
+pub(crate) fn attach_recipes_for_roots(
+    roots: &[&dyn GpuNode],
+    join_scratch_bytes: u64,
+) -> Result<RecipePlan, PlanError> {
+    attach::attach_recipes_for_roots(roots, join_scratch_bytes)
 }
 
 /// `gpu_plan.fbs`'s `JoinLimits.DefaultChunkBytes`, 1 GiB: `CudfJoin.chunk_bytes`'s default.

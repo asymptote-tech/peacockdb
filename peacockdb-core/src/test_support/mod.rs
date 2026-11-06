@@ -1070,6 +1070,34 @@ pub(crate) fn schema_of(batch: &GpuBatch) -> DeviceSchema {
     device_schema::schema_at(batch.executor(), batch.handle())
 }
 
+// --- a fused plan on the device --------------------------------------------------
+// The device half of the fused tests: one tree in a session of its own, and several roots as
+// one plan in one session. They name a plan node, so they stay `pub(crate)`; their callers
+// are the device rung, so every other shape sees them as dead.
+
+/// `tree`'s answer on the device, run alone through a session over it.
+#[cfg(not(feature = "rust-only"))]
+#[cfg_attr(not(all(test, feature = "gpu")), allow(dead_code))]
+pub(crate) fn answer_on_the_device(
+    tree: &dyn GpuNode,
+    join_scratch: u64,
+    what: &str,
+) -> Vec<RecordBatch> {
+    gpu_session::answer_alone(tree, join_scratch, what)
+}
+
+/// Each root's answer on the device, in root order, the roots run as one plan through one
+/// session over all of them.
+#[cfg(not(feature = "rust-only"))]
+#[cfg_attr(not(all(test, feature = "gpu")), allow(dead_code))]
+pub(crate) fn answers_of_roots_on_the_device(
+    roots: &[&dyn GpuNode],
+    join_scratch: u64,
+    what: &str,
+) -> Vec<Vec<RecordBatch>> {
+    gpu_session::answers_of_roots(roots, join_scratch, what)
+}
+
 // --- the schema validator ---------------------------------------------------------
 // A driver output hook holding every batch a node emits to that node's declared schema, in
 // the sink's spelling. Both flavours name an engine type, so they stay `pub(crate)`: the

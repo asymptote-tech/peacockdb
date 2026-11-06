@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 7883 test cases — Rust 6058, C++ 278, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 8011 test cases — Rust 6178, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3509 cases: `--lib` 994, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3623 cases: `--lib` 1108, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -161,7 +161,7 @@ is off is never decoded and would arm itself when that cell is enabled
 
 *crate integration, internal*
 
-| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting` and `schema_validation` beneath it | 44 |
+| End to end | [tests::end_to_end](../peacockdb-core/src/tests/end_to_end.rs), with `limits`, `dimensions`, `accounting`, `schema_validation` and `dag` beneath it | 52 |
 |---|---|--:|
 
 SQL in, rows out: 18 queries planned and run at all five modes against DataFusion on the same
@@ -187,9 +187,13 @@ companions, a DISTINCT argument holding NULLs, an empty keyless input answering 
 and two on an answer with no rows — an ordered query answering zero rows under its one column at
 every mode, and the empty sort's and merge's own emissions read off the run, which the answer
 cannot show; and an aggregate beside a full outer join over an input no row survives, and a count
-over a scan no row group survives answering 0. Two of the 44 are `#[ignore]`d against
+over a scan no row group survives answering 0. Eight run fused plans (`dag`), at tp1-single
+and tp4-sized: two tpch roots over one shared lineitem, and three over a shared lineitem and a
+shared orders, each root answering as its query alone; the three holding each shared batch
+once; and TPC-DS q95 at tp1-single, its four `web_sales` loads one source, refused without
+buffers and answering as q95 alone with its four. Two of the 52 are `#[ignore]`d against
 [#182](tickets/memory.md#t182) — the budget boundary and the rebatcher's peak, both
-properties that pricing a batch from the plan's schema took away — so 42 run. The first tier
+properties that pricing a batch from the plan's schema took away — so 50 run. The first tier
 where the planner, the recipes, the executors and both drivers run together rather than each
 against a fixture of the last one's shape — so what it tests is the joins between them
 
@@ -376,7 +380,7 @@ the payload subset at tp4-rowgroup — chosen as a cover over every fb kind and 
 mode goldens hold, and asserted to be one — plus `nested-limits`, for `CudfScan.rows_only` — so the membership grows when the mapping does; pbench's `empty-side-left-join` is the one whose `GpuEmpty` holds its slot with a stub scan — with
 every payload rendered and a sha256 over the bytes beside it
 
-| Recipes per join type | [every_join_node_writes_one_cudf_join_leaf](../peacockdb-core/src/wire/tests.rs) | 31 |
+| Recipes per join type | [every_join_node_writes_one_cudf_join_leaf](../peacockdb-core/src/wire/tests.rs) | 37 |
 |---|---|--:|
 
 the kinds whose recipe is more than one call, the joins first: the one `CudfJoin` each join
@@ -388,27 +392,34 @@ recipe with no plan, and an empty relation doing the same, so a plan of it alone
 unbudgeted mode writing that default, the enum and the field default agreeing, and the plan text
 printing only a value that is not the default; an interval literal printing as its three parts.
 Three plan pbench SQL to the writer: a date plus an interval literal crosses, and one inside a
-CASE operand or as `date_bin`'s argument is refused naming #249. The trivial kinds are not here — the plan goldens run them over every
+CASE operand or as `date_bin`'s argument is refused naming #249. A hold buffer crosses as
+nothing: the same bytes and wire nodes as without it, and no recipe of its own. Several roots:
+one buffer and one seq space, a shared source written once and read by each parent at one
+offset, a buffered shared reader taking the source's own, the reader indexing it once, and one
+root still written as `root` in the same bytes. The trivial kinds are not here — the plan goldens run them over every
 corpus query
 
-| Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 15 |
+| Plan text | [every_column_reference_renders_name_at_ordinal](../peacockdb-core/src/plan_text/tests.rs) | 20 |
 |---|---|--:|
 
 the renderer against what the planner emits from real SQL: every column reference prints name
 at ordinal, every node carrying a fetch prints it, a join prints its keys and projection by
 name — a mark join's mark among them — a null decimal prints as `NULL`, a source prints its
-mapping verbatim, a name that is not a token is backquoted, and no node name carries an exec
-suffix
+mapping verbatim, a name that is not a token is backquoted, no node name carries an exec
+suffix, and a hold buffer prints a line of its own. Over several roots: one root printing no
+header, a shared node printed once and referenced as `@1` after, a buffered reader's buffer above
+the reference, and the memory section drawn the same way
 
-| One driver, two backends | [one_generic_driver_serves_two_backends_with_different_batch_types](../peacockdb-core/src/executor/tests.rs) | 1 |
+| One driver, two backends | [one_generic_driver_serves_two_backends_with_different_batch_types](../peacockdb-core/src/executor/tests.rs) | 2 |
 |---|---|--:|
 
 one source step written once over `Backend` and driven against two backends with different
-batch types, so the trait's associated types are exercised the way both engines use them
+batch types, so the trait's associated types are exercised the way both engines use them; and
+a `CpuBatch`'s share holding the same Arrow buffers as the batch, column by column
 
 *subcomponent*
 
-| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 125 |
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 167 |
 |---|---|--:|
 
 flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
@@ -417,9 +428,13 @@ as its own and not at a forwarder, a refusal failing the run at that node and la
 hook's words, and `None` leaving the report as `run` makes it): the schedule and the two holds, both limit lowerings by
 the calls not made and a mid-plan limit judged by the rows it emitted, never its input, what
 each node emitted and consumed (the two records the corpus goldens
-read), the accountant through the drivers, a backend failure stopping the query with the
-accounting still reconciling, the execution golden's text with every number chosen by the
-script, every empty scatter lane dropped while a lane that owes its probe reaches `SetBuild` with no
+read), the accountant through the drivers, a backend failure or a call refused before it runs
+stopping the query with the accounting still reconciling, a satisfied limit excusing no root
+that never ended, a limit satisfied before any step still letting the next capped root in, a
+fused root answering its rows alone with their order pinned where it unions a shared source
+with its own,
+the execution golden's text with every number chosen by the
+script — over several roots a shared node rendered once — every empty scatter lane dropped while a lane that owes its probe reaches `SetBuild` with no
 batch, a zero-row build draining like none, and the mock against its own
 script; then the measurement side: the ABI-call record indexed by the lanes a node is driven on,
 holding the backend's calls and not the driver's own, a backend that names no seq leaving every
@@ -428,7 +443,30 @@ execution golden's node for node, and its load every loader's total rather than 
 a call without a region and
 a region without a call each refused, a region the clock rounded to nothing still counted as
 ran, and the recorded node index the post-order rather than the walk order; and a sink that
-received nothing answering one zero-row batch under its input's columns, which no node emitted
+received nothing answering one zero-row batch under its input's columns, which no node emitted.
+Then the hold buffer under a join's hold: the subtree below it running during the build, held
+taking only what it is offered, emitting in arrival order once the hold lifts, one store per
+lane at 4 lanes, unheld forwarding as if it were not there, its batches held in the accountant,
+and a failed build with batches kept still reconciling. Then several roots over shared
+sources: each root answering what it answers alone, a shared batch loaded, held and released
+once and taken by every reader in order, the hook seeing it once, the two deadlock shapes
+answering with buffers, an unbuffered hold refused by `run_roots` before any executor is built,
+every reader of a four-lane source taking every lane, a root that received nothing answering
+its own empty batch, a batch's bytes leaving at its last reader or after it, at a buffer
+keeping a share, and a failure with a share queued still reconciling. A limit per root: a
+satisfied root retiring its reader of a shared source the other root still reads in full,
+`LIMIT 0` retiring it before any step, a retired reader giving back what it alone still wanted,
+a source with every reader satisfied stopping, a buffer under a satisfied limit giving back its
+store, and a buffer keeping its charge after a limit retired the other reader. The cap: a cap
+of one running roots one at a time, a waiting root's buffer taking all of a shared source while
+nothing queues, a satisfied root freeing its slot, every cap giving the same answers, an
+uncapped schedule deterministic, and capped roots with joins accepted and answering as alone.
+And `validate_dag` tied
+to the driver over 500 random DAGs — several roots, shared sources, joins, buffers on random
+edges, and no cap or one below the root count: every DAG it accepts finishes, reconciles and never queues more than a batch per lane;
+every DAG the driver cannot finish it refused; every DAG with an accumulator below a waiting
+root's buffer refused as `UncappedAccumulator`; and every other DAG with each unbuffered hold
+buffered is accepted and finishes
 
 | CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 92 |
 |---|---|--:|
@@ -478,12 +516,19 @@ finalizing node reads
 
 *module unit*
 
-| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 43 |
+| Driver internals | [executor::driver::scheduler::tests](../peacockdb-core/src/executor/driver/scheduler/tests.rs) | 63 |
 |---|---|--:|
 
-the accountant's formula, cache and two checks on plain figures; the plan index's numbering
-and per-lane slots; the scheduler's corners
-enumerated and then a differential test against a naive rescan on randomized shapes; the lane
+the accountant's formula, cache and two checks on plain figures, and a charge released only by
+its last holder; a reader queue's cursors — one reader a FIFO with no share, a non-last reader
+taking a share, a retired last reader handing back the originals, a retired reader abandoning
+every row it never took, a drain counting the readers left; the plan index's numbering,
+readers, regions and per-lane slots, on a tree as before and over shared sources; the
+scheduler's corners enumerated, holds over regions a second root reads into, a held hold
+buffer still picked for intake and a limit still holding one, a satisfied consumer retiring its
+reader and a source with none left satisfied in turn, none retired on a tree, a cap holding the
+roots past it, admitting the next as a root finishes and stopping at a buffer, and then a
+differential test against a naive rescan on randomized DAG shapes with buffers among them; the lane
 state machine one call at a time with no tree around it
 
 | Rollup's shuffle keys, and DISTINCT reaching decompose | [planner::translator::aggregate::tests](../peacockdb-core/src/planner/translator/aggregate/tests.rs) | 4 |
@@ -785,16 +830,37 @@ over every line of `testdata/fixtures/row-range-clamp.txt`, the case table C++'s
 DataFusion's expression, this engine's, and DataFusion's again must all read the same column
 out of the same rows — asserted on the array each produces, not on shape
 
-| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs) | 43 |
+| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs), [plan::layout::tests](../peacockdb-core/src/plan/layout/tests.rs), [plan::aggregate::tests](../peacockdb-core/src/plan/aggregate/tests.rs) | 60 |
 |---|---|--:|
 
-validation's shape rules — a plan ends in a crossing, a sink sits at the root, a limit has a
+validation's shape rules — a plan ends in a crossing, every root is a sink and nothing reads
+one, under one root or several, no root given twice, a shared node is checked once, a limit has a
 real consumer, no node declares no column ([#63](archive/archived-tickets.md#t63)), no schema — an aggregate's intermediate included — literal, cast or function
 names a view type the device cannot hold; a pass-through
 node declares its input's column count and its fields;
-layout canonical forms and equality; whether a hash survives a regrouping
+layout canonical forms and equality; whether a hash survives a regrouping. Then holds over
+several roots: an unbuffered reader of a shared source inside a join's hold refused by name, a
+join reading one source on both sides refused at its probe edge, two roots whose builds wait on
+each other's probe refused, each passing with a buffer on the edge, no tree ever needing one;
+the wait-for graph's cycle finder and its message, a join waiting on the hold its build sits
+in, `validate_dag` refusing what its parts refuse, and the fixture that buffers every refused
+edge. Then the cap: a waiting root's unbuffered reader of a shared source refused naming the
+first root that waits, a cap at or above the root count needing no buffer, a waiting root
+never waiting on its own region nor a join on its own root's cap, and an accumulator below a
+waiting root's buffer refused by name while stateless nodes there are accepted
 
-| Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 14 |
+| Plan DAG walk | [plan::dag::tests](../peacockdb-core/src/plan/dag/tests.rs) | 10 |
+|---|---|--:|
+
+the walk over several roots: on every `every_kind()` fixture it numbers as the tree walk did,
+pre-order, post-order, depth as height, regions as contiguous subtrees; a shared source is one
+node with a reader per edge, the roots number in the order given, a shared node's height is
+below its deepest reader, a region skips a node read from outside it, a join reading one source
+on both sides holds nothing below its probe edge; a hold stops at a `GpuHoldBuffer` and a node
+also read around the buffer is still held; only a `SharedSource` has a sharing key, and
+`share_sources` makes equal loads one node
+
+| Memory estimation | [planner::memory_estimation::tests](../peacockdb-core/src/planner/memory_estimation/tests.rs) | 19 |
 |---|---|--:|
 
 the model's rules from SQL over the minimal dataset: an accumulator ends the walk and what it
@@ -802,7 +868,11 @@ holds comes off the budget first, a batch is charged once per lane in force, a l
 by the batches its mapping makes, amplification is the widest point on the path, a target lands
 on the coarse grid, constants that cannot be less and exceed the budget are a plan-time
 error, a join that answers at the finish — hash or nested loop — is charged its `matched` byte a
-build row, a RightSemi its distinct build keys, and an empty relation is no source the budget sizes
+build row, a RightSemi its distinct build keys, an empty relation is no source the budget sizes,
+and a hold buffer is charged everything its input emits while passing its batches on unchanged.
+Over several roots: a shared source charged and given a share once, left at one batch per lane
+when a buffered reader keeps the rest, amplified by its widest reader, and two roots' accumulators
+summing to what each charges alone
 
 | Translator expressions and scan mapping | [planner::translator::expr::tests](../peacockdb-core/src/planner/translator/expr/tests.rs), [scan_mapping::partition::tests](../peacockdb-core/src/planner/translator/scan_mapping/partition/tests.rs) | 31 |
 |---|---|--:|
@@ -855,7 +925,7 @@ release is null-guarded on the executor
 the Rust side of the same no-device answer: `NoDevice`, `off no-device`, a session's option
 reaching the C side as `Session` and pinning nothing, a prefill `Err(Off)`
 
-#### gpu — `--features gpu`: shad-gpu only. 2411 cases: `--lib -- gpu_tests::` 742, `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 659, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 2417 cases: `--lib -- gpu_tests::` 748, `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 659, `test_node_timing` 1
 
 *crate integration, external*
 
@@ -972,6 +1042,14 @@ no probe matched, and Inner, Right and LeftAnti on each key type; the cross join
 loop of every type, each with and without a projection; and each aggregate's init, the merges,
 and the sum, avg, stddev and var finalizes, grouped on each key type and global
 
+| Fused plans on a device | [tests::gpu_tests::dag_cases](../peacockdb-core/src/tests/gpu_tests/dag_cases.rs) | 5 |
+|---|---|--:|
+
+`end_to_end::dag`'s fused plans on the device. Each query runs alone in its own session, then
+all of them as one plan in one session (`Session::open_roots`), and each root's answer equals its
+query's alone, sorted. Two tpch roots over one shared lineitem and three over two shared sources,
+at tp1-single and tp4-sized; TPC-DS q95 at tp1-single, with its four buffers
+
 *component*
 
 | Recipe walk on a device | [an_average_finalizes_to_the_digits_the_oracle_computes](../peacockdb-core/src/wire/gpu_tests/mod.rs), [an_avg_partial_holds_a_string_key_a_scale_2_sum_and_an_int64_count](../peacockdb-core/src/wire/gpu_tests/mod.rs)  | 28 |
@@ -1021,12 +1099,14 @@ seventh and has no caller; its arm reads the child's lane count. The contract ta
 half is the one case in `contract.rs`; and under `Events`, a slice and an export are charged to
 the node that produced the handle
 
-| Per-call ABI | [executor::gpu_backend::gpu_tests::abi](../peacockdb-core/src/executor/gpu_backend/gpu_tests/abi.rs) | 4 |
+| Per-call ABI | [executor::gpu_backend::gpu_tests::abi](../peacockdb-core/src/executor/gpu_backend/gpu_tests/abi.rs) | 5 |
 |---|---|--:|
 
 three of the four per-call symbols on a live GPU — a scan's row groups, an export range, a
 slice; `handle_schema` is `test_support`'s schema read — and
-the release skipped exactly where a call consumed the handle
+the release skipped exactly where a call consumed the handle; and a `GpuBatch`'s share, through
+`peacock_handle_duplicate`, reading the same rows under the same producer after the original
+is dropped
 
 *module unit*
 
@@ -1068,9 +1148,9 @@ that crate is never staged: no peacockdb-core test reads the checkout beyond tes
 | Nebius scripts (Python) | `nebius.sh` against fake nebius, ssh and ssh-keyscan: every exit code, and the host-key rule; `--instance-id`/`--profile`, the per-instance alias, and the soft stop on a CPU VM; `install-watch`'s one profile, its embedded key and the install file; the idle watcher's decision over a process snapshot and a clock, for both kinds, and the hourly checker's verdict over the watcher's last log line; `watch.sh` and the hourly workflow's three legs, each skipped with a notice rather than failed; that only an actor on `GPU_ALLOWED_ACTORS` reaches the host; `ci-ship.sh` with real rsync into a local home — `lib/`'s symlinks and exec bits, a cache mirroring each run, retries that end red; and `nebius-test.sh`'s list over stub binaries — what runs, with what, and what is red. No VM, no secret | [test_nebius.py](../scripts/nebius/tests/test_nebius.py), [test_idle_watch.py](../scripts/nebius/tests/test_idle_watch.py), [test_install_watch.py](../scripts/nebius/tests/test_install_watch.py), [test_watch.py](../scripts/nebius/tests/test_watch.py), [test_ci_ship.py](../scripts/nebius/tests/test_ci_ship.py), [test_nebius_instances.py](../scripts/nebius/tests/test_nebius_instances.py), [test_idle_watch_kinds.py](../scripts/nebius/tests/test_idle_watch_kinds.py), [test_watch_workflow.py](../scripts/nebius/tests/test_watch_workflow.py) | cost-report | 170 |
 | Images (Python) | the images' committed inputs and the scripts that build and run them: `docker/pins.env` against the specs, the specs' hashes and the venv lock; `image.sh`'s build line, its tags, its `peacockdb.inputs` label holding every `docker/` file its Dockerfile reads and only the pins it declares, a pin left out only where another version's stage declares it, the same in every locale, and the pushes it refuses; the cmake wrapper's redirects to the prefetched rapids-cmake and flatbuffers; the DuckDB extension directory; the static-cudart guard; `images.yml` started by a dispatch alone, its four steps unconditional and of a fixed shape, building and pushing through `image.sh` with the job's own token and nothing else, its disk gate run over fakes, and the reader it is parsed with refusing what it does not read. The embeddings cache over its pinned origins, with a fake curl: CI, GITHUB_ACTIONS and PEACOCK_NO_FETCH refusing before any call; nothing fetched that a full cache holds, and a missing query set fetched from its origin, resumed; through a symlink, the cache beside the link; an unzip killed midway leaving no GloVe text a re-run accepts; and the committed pin naming each artifact once. The calibration bucket's endpoint and region from `AWS_ENDPOINT_URL` and `AWS_REGION`, keeping the old storage when no endpoint is named and refusing an endpoint without a region. `bootstrap-vm.sh` over a fake docker and sudo: what it refuses before its first install, root among it; a `--ref` the clone is not on refused, naming both branches; one `apt-get update` before any install; the machine-wide data directory, `/var/lib/peacock` unless `PEACOCK_DATA_DIR` names another, before any download; and a whole run: no marker, `DISABLE_AUTOUPDATER=1` in `~/.bashrc` and no `CLAUDE_CONFIG_DIR`, no other script named; an image of other inputs or without the label refused before any run in it; the registry fetched with the clone read-only; sf1 chosen by generator inputs and generated once, offline; one cuDF checkout a commit, sparse, reused, the clone's own submodule never read, and a commit it cannot fetch refused; what it writes in the data directory group-writable; two runs at once generating once and fetching in turn. `provision-vm.sh` over a fake ssh and VM: the laptop's files and their modes, the developer's user, groups and keys, bootstrap on every run, the GPU key `--gpu-key` names copied to the VM and a missing key or `.pub` refused with no key made, the secrets on ssh's stdin alone, the PAT in no argv and not in the VM's env file, another key in `peacock.env` refused by name, an incomplete env file, a missing git identity and a token it cannot use refused, the env file kept with no CR and a final newline, `--env` naming the laptop's own file too, and its comments skipped, a `--ref` the VM's clone is not on refused, a rerun skipping what is done, without a terminal Claude's login named as a command that works rather than run, `--new-pat` on every VM it reaches, help printed without sed and a bash older than 4.4 refused. `fetch-sf40.sh` over a fake aws and buckets: the endpoint and region from the env file, the keys in no argv and in no environment but aws's, from a file or stdin, one missing refused; a second run fetching nothing; a short file refetched, a short download refused and not kept; a parquet the manifest does not name, a manifest naming a path, an unknown dataset refused; the aggregate in C order against its pin, a wrong one refused, an unpinned one printed; the pinned aws CLI installed when there is none, a zip of another sha refused. `install-duckdb.sh` over a fake curl: the pinned CLI installed, a zip of another sha or version refused with nothing installed, a failed download named, the pinned version skipped, another replaced, sudo where the prefix is not writable. `run-gpu.sh` over a fake `nebius.sh` and VM: every call through `nebius.sh`, with `--instance-id` and `--profile` as given, none without `--instance-id`, and never `start` or `stop`; its exit 64 as 2, and 69 and 75 passed on; a stale build or run image refused naming the file, `run` too, reading the label without a pull, and a VM without the run image refused as `prepare` first, an old driver as 3 naming both versions, admin-only counters as 4 after `update-initramfs`; the storage keys on stdin alone; the cuDF prefix copied once per image; the install shipped by `--dir`, the staged one by default, a missing one refused; the committed testdata shipped, the datasets linked at their absolute paths and mounted at their own; the run's hostname, filter, resume, case timeout, answer switch and the pinned cache's and scan reader's switches passed on when set, a run in progress refused, its exit as the run's; results, record, the device's answers and log pulled home. `check-build-image.sh` over the same fakes: the build image pulled, then its label read, on the VM; one of other inputs or without a label refused; none without `--instance-id`. `stage-install.sh` over a fake cargo: four gpu binaries and a release benchmark staged from empty and stripped, a failed build named, another image's cuDF refused. `create_nsys_profile.sh --ssh`: every call and rsync through the given command, the two switches exported on the host, and the load breakdown written when the call breakdown refuses the capture; `--cases` a device list's `ok` and `wrong` rows as both passes' cases, the trace pass by name and narrowed by a filter, a missing list refused, and `--device` the records from the device's directory. `bench-each.sh` over a fake `run-gpu.sh` and `nebius.sh`: one process per query in file order, at its mode's lines only and within a device list's `ok` and `wrong` rows; resume, the case timeout and the answer switch on every run, `--dir` to `run-gpu.sh` alone; a failed section kept on a rerun; each record set aside by attempt, the VM's removed; a record a killed run left set aside first; a killed case measured again and exit 1 until it is; a host it cannot reach stopping the run with that exit; bad input, and a run without `--instance-id`, refused before any call. With the images built: each image as a uid it does not know with no network, every library the staged binaries need resolving in the run image, and `run-tests.sh` over fake binaries | [test_image.py](../scripts/env/tests/test_image.py), [test_images_workflow.py](../scripts/env/tests/test_images_workflow.py), [test_embeddings.py](../scripts/env/tests/test_embeddings.py), [test_s3.py](../scripts/env/tests/test_s3.py), [test_bootstrap.py](../scripts/env/tests/test_bootstrap.py), [test_provision.py](../scripts/env/tests/test_provision.py), [test_fetch_sf40.py](../scripts/env/tests/test_fetch_sf40.py), [test_install_duckdb.py](../scripts/env/tests/test_install_duckdb.py), [test_run_gpu.py](../scripts/env/tests/test_run_gpu.py), [test_check_build_image.py](../scripts/env/tests/test_check_build_image.py), [test_stage_install.py](../scripts/env/tests/test_stage_install.py), [test_run_tests.py](../scripts/env/tests/test_run_tests.py), [test_bench_each.py](../scripts/env/tests/test_bench_each.py) | manual | 250 |
 | DuckDB benchmark script (Python) | `duckdb_minimal.sh` against the real DuckDB CLI 1.5.4 over the sf1 parquet: a device list's `ok` and `wrong` rows timed in file order, the `skipped` row not, saying once that nothing is verified; the answers one table per query, in DuckDB's row order, under the oracle's integer division; the results file's preamble (version, threads as DuckDB reports them, host, a one-word CPU, the `SELECT 1` floor in whole ms) and its columns, in the shared fixture's shape; tpcds's tables every parquet file; `--answers` without `--cases` or with `--skip-verify`, tpcds without a query set and a missing list refused with nothing written; `--build-only` checking the row counts and timing nothing; the default run's minimal set unchanged. Needs `duckdb` on PATH and the generated sf1 | [test_duckdb_minimal.py](../benchmarks/tests/test_duckdb_minimal.py) | manual | 9 |
-| C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule over the same shared case table the Rust clamp reads, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; `TableResult::of`'s two refusals, Final and Single modes refused by name, and a `ColumnRef` resolved by index and name, and `MERGE_M2`'s count type — `INT32` before cuDF 25.06, `INT64` from it, and the type this build's headers pick. The pinned host file cache over a counting `malloc` allocator: a hit reuses the buffer; eviction is least recently used, never of a leased entry, also while another thread reads one; a second reader waits for a fill, and a failed fill wakes its waiters; concurrent fills stay under the capacity; a changed file is reloaded while a reader keeps the old bytes; short and interrupted reads are looped, a short read at EOF is a changed file; a scan that does not fit, a refused allocation and a capacity of 0 read every path, the fallback said once; the default capacity and the cgroup parse; the device classification; the prefill: idempotent, refusing before pinning anything with leases counted against its limit, reloading, evicting, and its `Io` and `Off` outcomes; and the process's cache: `PEACOCK_PINNED_HOST_CACHE_BYTES` a decimal count or refused by name, the environment over the session over the default, nothing pinned without a device or on an integrated one, and the line its first use says. The scan's reader switch, `PEACOCK_SCAN_READER`: unset or `chunked` is the chunked reader, `read_parquet` the whole-file call, any other value refused by name, and the variable read once per process; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp), [PinnedHostCache.ConcurrentReadAndEviction](../cpp/tests/cpu/test_pinned_host_cache.cpp), [ScanReader.TheSwitchIsReadOnce](../cpp/tests/cpu/test_scan_reader_switch.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 63 |
+| C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule over the same shared case table the Rust clamp reads, the two refusals of the test-only upload symbol, `peacock_handle_duplicate` refused with no plan loaded, a session indexing a node two parents hold once and several roots in order and refusing a plan that sets both `root` and `roots`, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; `TableResult::of`'s two refusals, Final and Single modes refused by name, and a `ColumnRef` resolved by index and name, and `MERGE_M2`'s count type — `INT32` before cuDF 25.06, `INT64` from it, and the type this build's headers pick. The pinned host file cache over a counting `malloc` allocator: a hit reuses the buffer; eviction is least recently used, never of a leased entry, also while another thread reads one; a second reader waits for a fill, and a failed fill wakes its waiters; concurrent fills stay under the capacity; a changed file is reloaded while a reader keeps the old bytes; short and interrupted reads are looped, a short read at EOF is a changed file; a scan that does not fit, a refused allocation and a capacity of 0 read every path, the fallback said once; the default capacity and the cgroup parse; the device classification; the prefill: idempotent, refusing before pinning anything with leases counted against its limit, reloading, evicting, and its `Io` and `Off` outcomes; and the process's cache: `PEACOCK_PINNED_HOST_CACHE_BYTES` a decimal count or refused by name, the environment over the session over the default, nothing pinned without a device or on an integrated one, and the line its first use says. The scan's reader switch, `PEACOCK_SCAN_READER`: unset or `chunked` is the chunked reader, `read_parquet` the whole-file call, any other value refused by name, and the variable read once per process; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp), [PinnedHostCache.ConcurrentReadAndEviction](../cpp/tests/cpu/test_pinned_host_cache.cpp), [ScanReader.TheSwitchIsReadOnce](../cpp/tests/cpu/test_scan_reader_switch.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 67 |
 | cuDF GPU smoke (C++) | the GPU is alive; the RMM pool reserves the budget the binary declared; `peacock_device_info` names the device, gives the runtime's version, and refuses a null output; the pinned cache's allocator returns host-pinned memory, and a refused `cudaHostAlloc` leaves no CUDA error for cuDF's next read. The two hardcoded-comet partition-id cases are gone: they were a third copy of the lane rule, and the live gate proves the kernel against the production rule instead | [CudfGpu.SequenceSum](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp), [PeacockGpu.DeviceInfoDescribesTheDevice](../cpp/tests/gpu/test_cudf.cpp), [PinnedHostCache.RefusedAllocationClearsTheCudaError](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 5 |
-| Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node — a join through the session's build, probe and finish, laid out as the wire lays it, its two sides and the `CudfJoin` leaf under one structural union — plus the per-call entry points at their contract edges (row-group override, export range, slice), a scan of no column answering its row count from the footer — whole, one row group, under a limit — and a project of no expression refused, the sqrt arm on both evaluators, a value-form CASE with and without ELSE — the first match winning, a NULL comparand or WHEN never matching — `date_part` answering in the type the wire names for three fields, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, a decimal literal under a cast to `Float64` or `Int64` kept on the AST, every wire type walked through the dispatch, the LIKE guard, `IS [NOT] DISTINCT FROM` against a typed null on each evaluator — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region. The handle's own rules are ten of these: a slice and a selection share their columns' owners, and five shapes are refused — a table of no columns, a name count that does not match, an ordinal past the columns, a selection of no ordinals, and a column appended at the wrong row count, a slice's string bytes are its own rows' and not its parent's, a scatter's partitions share one table and outlive their siblings and concatenate back to the input, an empty lane is a zero-row slice of no string bytes, two input handles are refused rather than concatenated, a scatter's peak and its requested total are those of partitioning the same input alone, measured with the RMM statistics adaptor over a fixed-width table and a string one; the total is the bound that discriminates on both shapes, since a string column's gather in cuDF already costs more than the copies did and so set the peak all along — and `slice_handle` still owns its rows; and the operator exit paths, nine of these: a bare `ColumnRef` evaluates to a view of the input's own column and allocates nothing, a non-AST predicate allocates no more than the comparison and the filter alone, a fused filter projection no more than the same filter without one, a project of column references nothing at all, a window no more than its own result column, and an aggregate no more than cuDF's groupby — each bound measured on the same input, since a hand formula would bake a cuDF cost into a constant; plus a filter whose projection repeats an ordinal, which answers both columns over one owner, and two that bound a release rather than an allocation, since no allocation bound can see an operator retaining what it should drop: a filter narrowed to one column gives back the dropped column's own bytes, and a project holds its shared column exactly once and frees the rest; and the grouping id's value and width from one key to sixty-four, each width boundary from both sides, and its refusal past them; and an aggregate's init handed no input answering over its declared input's zero-row table, where a merge handed none still refuses; the aggregate's request builder per function and phase, the Welford state with no NULL over an all-NULL group or merge, and a keyless Welford through the builder, with rows and over none, and a `ColumnRef` refused past the width, with no name, or under another column's name; and a date or timestamp ± an interval literal, each expected value DataFusion's: the month-end clamp in a leap and a common year, both ways, a mixed interval at every timestamp unit in the months-days-nanoseconds order, a sub-day part truncated on a date and floored on a timestamp, the interval on the left, a NULL interval, zero rows keeping the type, and any other interval use refused naming #249; a scan from the pinned host cache equal to the path's, column by column, and a prefilled file scanned three times with no fill, fallback or reload, a cached scan that reads the cached bytes and not the file overwritten under it; and the scan's reader: the one-chunk chunked reader equal to `read_parquet` column by column, over every row group and over one, and several chunks from a small limit concatenating to the same table | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [ExitCopies.AProjectOfColumnRefsAllocatesNothing](../cpp/tests/gpu/test_plan_executor.cpp), [test_grouping_id.cpp](../cpp/tests/gpu/test_grouping_id.cpp), [test_aggregate_no_input.cpp](../cpp/tests/gpu/test_aggregate_no_input.cpp), [test_column_refs.cpp](../cpp/tests/gpu/test_column_refs.cpp), [test_aggregate_builder.cpp](../cpp/tests/gpu/test_aggregate_builder.cpp), [test_interval_arithmetic.cpp](../cpp/tests/gpu/test_interval_arithmetic.cpp), [test_pinned_scan.cpp](../cpp/tests/gpu/test_pinned_scan.cpp), [test_scan_reader.cpp](../cpp/tests/gpu/test_scan_reader.cpp) | shad-gpu | 132 |
+| Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node — a join through the session's build, probe and finish, laid out as the wire lays it, its two sides and the `CudfJoin` leaf under one structural union — plus the per-call entry points at their contract edges (row-group override, export range, slice), a scan of no column answering its row count from the footer — whole, one row group, under a limit — and a project of no expression refused, the sqrt arm on both evaluators, a value-form CASE with and without ELSE — the first match winning, a NULL comparand or WHEN never matching — `date_part` answering in the type the wire names for three fields, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, a decimal literal under a cast to `Float64` or `Int64` kept on the AST, every wire type walked through the dispatch, the LIKE guard, `IS [NOT] DISTINCT FROM` against a typed null on each evaluator — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region. `peacock_handle_duplicate` is four: it allocates nothing and its handle reads the rows after the original is released, either handle is released on its own, an export of the duplicate is charged to the original's producer and the duplicate opens no region, and an unknown handle is refused by number and ends the session. The handle's own rules are ten of these: a slice and a selection share their columns' owners, and five shapes are refused — a table of no columns, a name count that does not match, an ordinal past the columns, a selection of no ordinals, and a column appended at the wrong row count, a slice's string bytes are its own rows' and not its parent's, a scatter's partitions share one table and outlive their siblings and concatenate back to the input, an empty lane is a zero-row slice of no string bytes, two input handles are refused rather than concatenated, a scatter's peak and its requested total are those of partitioning the same input alone, measured with the RMM statistics adaptor over a fixed-width table and a string one; the total is the bound that discriminates on both shapes, since a string column's gather in cuDF already costs more than the copies did and so set the peak all along — and `slice_handle` still owns its rows; and the operator exit paths, nine of these: a bare `ColumnRef` evaluates to a view of the input's own column and allocates nothing, a non-AST predicate allocates no more than the comparison and the filter alone, a fused filter projection no more than the same filter without one, a project of column references nothing at all, a window no more than its own result column, and an aggregate no more than cuDF's groupby — each bound measured on the same input, since a hand formula would bake a cuDF cost into a constant; plus a filter whose projection repeats an ordinal, which answers both columns over one owner, and two that bound a release rather than an allocation, since no allocation bound can see an operator retaining what it should drop: a filter narrowed to one column gives back the dropped column's own bytes, and a project holds its shared column exactly once and frees the rest; and the grouping id's value and width from one key to sixty-four, each width boundary from both sides, and its refusal past them; and an aggregate's init handed no input answering over its declared input's zero-row table, where a merge handed none still refuses; the aggregate's request builder per function and phase, the Welford state with no NULL over an all-NULL group or merge, and a keyless Welford through the builder, with rows and over none, and a `ColumnRef` refused past the width, with no name, or under another column's name; and a date or timestamp ± an interval literal, each expected value DataFusion's: the month-end clamp in a leap and a common year, both ways, a mixed interval at every timestamp unit in the months-days-nanoseconds order, a sub-day part truncated on a date and floored on a timestamp, the interval on the left, a NULL interval, zero rows keeping the type, and any other interval use refused naming #249; a scan from the pinned host cache equal to the path's, column by column, and a prefilled file scanned three times with no fill, fallback or reload, a cached scan that reads the cached bytes and not the file overwritten under it; and the scan's reader: the one-chunk chunked reader equal to `read_parquet` column by column, over every row group and over one, and several chunks from a small limit concatenating to the same table | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [ExitCopies.AProjectOfColumnRefsAllocatesNothing](../cpp/tests/gpu/test_plan_executor.cpp), [test_grouping_id.cpp](../cpp/tests/gpu/test_grouping_id.cpp), [test_aggregate_no_input.cpp](../cpp/tests/gpu/test_aggregate_no_input.cpp), [test_column_refs.cpp](../cpp/tests/gpu/test_column_refs.cpp), [test_aggregate_builder.cpp](../cpp/tests/gpu/test_aggregate_builder.cpp), [test_interval_arithmetic.cpp](../cpp/tests/gpu/test_interval_arithmetic.cpp), [test_pinned_scan.cpp](../cpp/tests/gpu/test_pinned_scan.cpp), [test_scan_reader.cpp](../cpp/tests/gpu/test_scan_reader.cpp), [test_handle_duplicate.cpp](../cpp/tests/gpu/test_handle_duplicate.cpp) | shad-gpu | 136 |
 | Join session (C++) | the four `peacock_join_*` symbols through the C ABI alone — plan bytes in, Arrow batches up, IPC answers down — over the matrix of [join-rewrite-design.md](tasks/join-rewrite-design.md) §5.6: all nine join types against keys only, a cross residual the AST takes and one it refuses, a residual reading one side alone, a nested loop whose conjuncts are all AST-able, partly so, or not at all, and a cross join; NULL keys on both sides under either `null_equals_null`, many-to-many keys, a composite key with a NULL in its second column; a build that is absent, zero rows or all-NULL keys, a probe that is absent, one batch, or three with a zero-row batch between; a projection absent, crossing sides, or empty and refused. Left and Full pad a NULL-key build row rather than dropping it. Five cases probe three batches with a zero-row batch between, no batch matching what another did, because `matched` is an OR folded across calls and a single batch cannot tell that from the last call's answer — which is the whole of #136. Four properties no answer can show get a case each — hoisting a one-side operand keeps a nested loop off the cross product, bounded by the same join whose condition needs no hoisting plus the build's own bytes; a probe hands its gathered columns over without a copy (#154), its peak bounded by the same cuDF calls on tables of the same shape and its `net` bounded *both* ways, since an upper bound is the only thing that sees a session retaining the batch it consumed; releasing a session, and ending the plan under a live one, give back the build side's own measured bytes; each call opens exactly one region; and the two `size_type` ceilings refuse by name rather than wrapping, asked on sizes because no test host holds a table that big | [JoinSession.LeftPadsEveryBuildRowNoProbeMatchedIncludingANullKey](../cpp/tests/gpu/test_join_session.cpp), [JoinSession.HoistingKeepsANestedLoopOffTheCrossProduct](../cpp/tests/gpu/test_join_session.cpp) | shad-gpu | 56 |
 | TPC-H sf40 bare-cuDF (C++) | hand-written cuDF pipelines vs DuckDB sf40; the benchmark vehicle | [TpchSf40.Q1GroupByAggregates](../cpp/tests/gpu/test_tpch.cpp), [Q3JoinsGroupByTopN](../cpp/tests/gpu/test_tpch.cpp) | manual: shad-gpu alone, which holds sf40 and is down; `run-gpu.sh` skips it | 4 |
 | TPC-H+V sf40 bare-cuDF (C++) | the same for the vector-embedding queries | [TpchSf40.Q11VectorBruteForce](../cpp/tests/gpu/test_tpchv.cpp) | manual: shad-gpu alone, which holds sf40 and is down; `run-gpu.sh` skips it | 4 |

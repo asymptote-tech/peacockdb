@@ -1,5 +1,5 @@
 //! Driving the C ABI from Rust on a live GPU: a scan read one row-group subset at a
-//! time, a row range on the export, and slicing a resident handle.
+//! time, a row range on the export, slicing a resident handle, and duplicating one.
 //!
 //! The C++ suite proves the same kernels against cuDF tables; what only this side can
 //! prove is the boundary the driver will actually cross — the exported IPC decoded back
@@ -8,7 +8,7 @@
 use datafusion::arrow::array::{Array, Int64Array, RecordBatch};
 use datafusion::arrow::ipc::reader::StreamReader;
 
-use crate::executor::GpuBatch;
+use crate::executor::{Batch, GpuBatch};
 use crate::planner;
 use crate::planner::{BatchSizing, PlanKnobs, SMALL_TABLE_BYTES};
 use crate::wire::{AbiSymbol, Seq, attach_recipes, join_scratch_bytes};
@@ -251,4 +251,32 @@ async fn a_dropped_batch_releases_its_handle_and_a_consumed_one_does_not() {
         plan.export(kept, 0, u64::MAX).is_ok(),
         "consume released a handle it was handing to an FFI call"
     );
+}
+
+#[tokio::test]
+async fn a_duplicate_reads_the_same_rows_after_the_original_is_released() {
+    let plan = LoadedPlan::new().await;
+    let (handle, stats) = plan.scan(&[1]);
+    let whole = plan.keys(handle, 0, u64::MAX);
+    let original = GpuBatch::new(
+        plan.executor,
+        handle,
+        plan.scan_seq as Seq,
+        stats.rows as usize,
+        8 * stats.rows as usize,
+    );
+
+    let share = original.share().expect("a resident handle duplicates");
+    assert_ne!(share.handle(), handle);
+    // A share is the same node's output: an export of it is charged where the original's is.
+    assert_eq!(share.producer(), original.producer());
+    assert_eq!(share.num_rows(), original.num_rows());
+    assert_eq!(share.byte_size(), original.byte_size());
+
+    drop(original);
+    assert!(
+        plan.export(handle, 0, u64::MAX).is_err(),
+        "dropping the original left its handle resident"
+    );
+    assert_eq!(plan.keys(share.handle(), 0, u64::MAX), whole);
 }

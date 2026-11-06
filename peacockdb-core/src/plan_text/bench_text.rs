@@ -11,10 +11,11 @@
 use std::fmt::Write as _;
 
 use super::LOAD_NODE;
+use super::dag_walk;
 use super::node_text::{join_parts, lanes_of, node_line_parts};
+use crate::executor::PlanIndex;
 use crate::executor::{Measured, Measurements, RunReport};
-use crate::executor::{PlanIndex, ROOT};
-use crate::plan::GpuNode;
+use crate::plan::{GpuNode, PlanDag};
 
 /// One call's device microseconds, as this file reports them.
 ///
@@ -33,48 +34,33 @@ fn call_us(call: &Option<Measured>) -> u64 {
     }
 }
 
-/// `root` as it was timed: one node per line with the microseconds its calls spent on the
-/// device beneath it, and the batches `report`, the same run, says it emitted.
-pub(crate) fn render_timings(
-    root: &dyn GpuNode,
+/// The roots as they were timed: one node per line with the microseconds its calls spent on
+/// the device beneath it, and the batches `report`, the same run, says it emitted.
+pub(crate) fn render_timings_of_roots(
+    roots: &[&dyn GpuNode],
     times: &Measurements,
     report: &RunReport,
 ) -> String {
-    let index = PlanIndex::build(root).expect("the tree the run was made over indexes");
-    let mut text = String::new();
-    render_node(&index, times, report, ROOT, 0, &mut text);
-    text
-}
-
-fn render_node(
-    index: &PlanIndex<'_>,
-    times: &Measurements,
-    report: &RunReport,
-    node: usize,
-    depth: usize,
-    text: &mut String,
-) {
-    let indent = "  ".repeat(depth);
-    let _ = writeln!(
-        text,
-        "{indent}{}",
-        join_parts(node_line_parts(index.nodes[node].node))
-    );
-    // Lanes outermost and calls within, the nesting `batch_rows` and `partition_groups`
-    // use. `time_us` is by driving lane and call, the batches by output lane and batch: an
-    // accumulator makes many calls and emits one batch.
-    let batches = &report.emitted[node];
-    let _ = writeln!(
-        text,
-        "{indent}  time_us={} total_us={} batch_rows={} batch_bytes={}",
-        time_lanes(times, node),
-        total_of(times, node),
-        lanes_of(batches, |batch| batch.rows),
-        lanes_of(batches, |batch| batch.bytes as u64),
-    );
-    for child in &index.nodes[node].children {
-        render_node(index, times, report, *child, depth + 1, text);
-    }
+    let dag = PlanDag::of(roots);
+    dag_walk::render(&dag, &mut |at, indent, prefix, text| {
+        let _ = writeln!(
+            text,
+            "{indent}{prefix}{}",
+            join_parts(node_line_parts(dag.nodes[at].node))
+        );
+        // Lanes outermost and calls within, the nesting `batch_rows` and `partition_groups`
+        // use. `time_us` is by driving lane and call, the batches by output lane and batch:
+        // an accumulator makes many calls and emits one batch.
+        let batches = &report.emitted[at];
+        let _ = writeln!(
+            text,
+            "{indent}  time_us={} total_us={} batch_rows={} batch_bytes={}",
+            time_lanes(times, at),
+            total_of(times, at),
+            lanes_of(batches, |batch| batch.rows),
+            lanes_of(batches, |batch| batch.bytes as u64),
+        );
+    })
 }
 
 /// `[[22,37,40],[55,1,30]]` — one list per driving lane, one entry per call that lane made.

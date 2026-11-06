@@ -11,7 +11,8 @@
 //! both, so a join's co-partitioning is the knob neither turns.
 //!
 //! The children make the claims a result comparison cannot: `limits` and `dimensions` read
-//! the calls off the trace, `accounting` the budget a run needs.
+//! the calls off the trace, `accounting` the budget a run needs, and `dag` runs several
+//! queries fused into one plan against each run alone.
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::DataType;
@@ -29,6 +30,7 @@ use crate::test_support::{
 };
 
 mod accounting;
+mod dag;
 mod dimensions;
 mod limits;
 mod schema_validation;

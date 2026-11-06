@@ -265,3 +265,120 @@ async fn a_join_filter_resolves_each_reference_onto_the_side_it_came_from() {
         "{text}"
     );
 }
+
+#[test]
+fn a_buffer_prints_its_own_line() {
+    use crate::plan::new_hold_buffer;
+    use crate::tests::plans::{coalesce_all, filter, join, source, unload};
+    let plan = unload(join(
+        coalesce_all(source("b", 1)),
+        Box::new(new_hold_buffer(filter(source("p", 1)))),
+    ));
+    let text = render_plan(plan.as_ref());
+    let at = |prefix: &str| {
+        text.lines()
+            .position(|line| line.trim_start().starts_with(prefix))
+            .unwrap_or_else(|| panic!("no line starts {prefix}:\n{text}"))
+    };
+    let (join_line, buffer_line, filter_line) = (
+        at("GpuHashJoin"),
+        at("GpuHoldBuffer: lanes=1"),
+        at("GpuFilter"),
+    );
+    assert_eq!(
+        (join_line + 3, buffer_line + 1),
+        (buffer_line, filter_line),
+        "{text}"
+    );
+}
+
+// -- several roots -----------------------------------------------------------------
+
+fn refs(roots: &[Box<dyn GpuNode>]) -> Vec<&dyn GpuNode> {
+    roots.iter().map(|root| root.as_ref()).collect()
+}
+
+const FILTER_LINE: &str = "GpuFilter: predicate=k@0, lanes=1, batches=multiple, schema=[k:Int64]";
+const S_LINE: &str = "GpuLoadParquet: table=s, projections=[k@0], partition_groups=[[[0]]], \
+                      lanes=1, batches=multiple, schema=[k:Int64]";
+
+#[test]
+fn one_root_prints_no_header() {
+    use crate::tests::plans::{filter, source, unload};
+    let root = unload(filter(source("s", 1)));
+    let expected = format!("GpuUnload\n  {FILTER_LINE}\n    {S_LINE}\n");
+    assert_eq!(render_plans(&[root.as_ref()]), expected);
+    assert_eq!(render_plan(root.as_ref()), expected);
+}
+
+#[test]
+fn a_shared_node_prints_once_and_is_referenced_after() {
+    use crate::tests::plans::{filter, shared, unload};
+    let s = shared("s", 1);
+    let roots = vec![
+        unload(filter(Box::new(s.clone()))),
+        unload(filter(Box::new(s.clone()))),
+    ];
+    assert_eq!(
+        render_plans(&refs(&roots)),
+        format!(
+            "root 0:\n  GpuUnload\n    {FILTER_LINE}\n      @1 {S_LINE}\nroot 1:\n  GpuUnload\n    \
+             {FILTER_LINE}\n      @1\n"
+        )
+    );
+}
+
+#[test]
+fn a_buffered_reader_of_a_shared_node_prints_the_buffer_above_the_reference() {
+    use crate::plan::new_hold_buffer;
+    use crate::tests::plans::{coalesce_all, filter, join, shared, source, unload};
+    let s = shared("s", 1);
+    let roots = vec![
+        unload(filter(Box::new(s.clone()))),
+        unload(join(
+            coalesce_all(source("b", 1)),
+            Box::new(new_hold_buffer(Box::new(s.clone()))),
+        )),
+    ];
+    let text = render_plans(&refs(&roots));
+    let lines: Vec<&str> = text.lines().collect();
+    let buffer = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with("GpuHoldBuffer: lanes=1"))
+        .unwrap_or_else(|| panic!("no buffer line:\n{text}"));
+    let indent = |line: &str| line.len() - line.trim_start().len();
+    assert_eq!(lines[buffer + 1].trim_start(), "@1", "{text}");
+    assert_eq!(
+        indent(lines[buffer + 1]),
+        indent(lines[buffer]) + 2,
+        "{text}"
+    );
+    assert_eq!(
+        lines.len(),
+        buffer + 2,
+        "nothing follows the reference:\n{text}"
+    );
+}
+
+#[test]
+fn the_memory_section_prints_a_shared_node_once() {
+    use crate::planner::estimate_roots;
+    use crate::tests::plans::{filter, project, shared, unload};
+    let s = shared("s", 1);
+    let roots = vec![
+        unload(filter(Box::new(s.clone()))),
+        unload(project(Box::new(s.clone()))),
+    ];
+    let model = estimate_roots(&refs(&roots), 1 << 30).expect("estimate the plan");
+    let text = render_plans_memory(&refs(&roots), &model);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[1], "root 0:", "{text}");
+    assert!(
+        lines[4].starts_with("      @1 GpuLoadParquet: estimated_max_resident_size="),
+        "{text}"
+    );
+    assert!(lines[4].contains("target_batch_bytes="), "{text}");
+    assert_eq!(lines[5], "root 1:", "{text}");
+    assert_eq!(lines[8], "      @1", "{text}");
+    assert_eq!(lines.len(), 9, "{text}");
+}

@@ -9,7 +9,10 @@
 //! Nothing here knows about backends, batches or executors: it takes events and returns a
 //! node. That is what makes a scheduling corner reachable from a test that builds no plan.
 
+use std::num::NonZeroUsize;
+
 use crate::executor::{JoinShape, PlanShape};
+use crate::plan::Reader;
 
 pub(crate) struct Scheduler {
     /// rank -> node, sorted by (height, index): the first set bit is the pick.
@@ -25,21 +28,39 @@ pub(crate) struct Scheduler {
     /// index where a readiness index belongs is caught here in debug builds; a release
     /// build writes into the next node's flags.
     lane_count: Vec<usize>,
-    /// Counters, not flags: one node can sit in two joins' probe subtrees, and a lift of
+    /// Counters, not flags: one node can sit in two joins' probe regions, and a lift of
     /// one of them must not free it from the other.
     build_holds: Vec<u32>,
     limit_holds: Vec<u32>,
+    /// The cap's hold, on the region of each root still waiting for admission. A flag in all
+    /// but name: the regions of two roots never meet.
+    cap_holds: Vec<u32>,
+    /// How many roots may run at once; `None` admits every root at the start.
+    cap: Option<NonZeroUsize>,
+    cap_regions: Vec<Vec<usize>>,
+    /// Per root, in root order.
+    admitted: Vec<bool>,
+    finished: Vec<bool>,
+    roots: Vec<usize>,
     /// per join, lanes that have yet to leave their build phase
     building: Vec<usize>,
     joins: Vec<JoinShape>,
     satisfied: Vec<bool>,
-    subtree: Vec<(usize, usize)>,
+    regions: Vec<Vec<usize>>,
+    readers: Vec<Vec<Reader>>,
+    /// Per node, per reader ordinal, whether that reader sits in a satisfied region the node
+    /// is outside of: it will never take another batch.
+    retired: Vec<Vec<bool>>,
+    /// A hold buffer stays in the schedule under a join's hold, taking what it is offered;
+    /// only a limit's, which never lifts, takes it out.
+    buffers: Vec<bool>,
 }
 
 impl Scheduler {
-    /// A join holds its probe subtree from time zero: no lane has left build yet, and a
-    /// probe batch produced before `set_build` has nowhere to go.
-    pub(crate) fn new(shape: &PlanShape) -> Self {
+    /// A join holds its probe region from time zero: no lane has left build yet, and a
+    /// probe batch produced before `set_build` has nowhere to go. The cap holds every root's
+    /// region, then admits the first `cap` roots.
+    pub(crate) fn with_cap(shape: &PlanShape, cap: Option<NonZeroUsize>) -> Self {
         let n = shape.node_count();
         let mut node_of_rank: Vec<usize> = (0..n).collect();
         node_of_rank.sort_by_key(|node| (shape.heights[*node], *node));
@@ -63,17 +84,75 @@ impl Scheduler {
             lane_count: shape.lanes.clone(),
             build_holds: vec![0; n],
             limit_holds: vec![0; n],
+            cap_holds: vec![0; n],
+            cap,
+            cap_regions: shape.cap_regions.clone(),
+            admitted: vec![false; shape.roots.len()],
+            finished: vec![false; shape.roots.len()],
+            roots: shape.roots.clone(),
             building: shape.joins.iter().map(|join| join.lanes).collect(),
             joins: shape.joins.clone(),
             satisfied: vec![false; n],
-            subtree: shape.subtree.clone(),
+            regions: shape.regions.clone(),
+            readers: shape.readers.clone(),
+            retired: shape
+                .readers
+                .iter()
+                .map(|readers| vec![false; readers.len()])
+                .collect(),
+            buffers: shape.buffers.clone(),
         };
         for join in &shape.joins {
-            for node in join.probe.0..join.probe.1 {
-                scheduler.build_holds[node] += 1;
+            for node in &join.probe {
+                scheduler.build_holds[*node] += 1;
             }
         }
+        for region in &shape.cap_regions {
+            for node in region {
+                scheduler.cap_holds[*node] += 1;
+            }
+        }
+        scheduler.admit();
         scheduler
+    }
+
+    /// The root has every lane done, or was satisfied. Its slot under the cap frees, and the
+    /// next roots in order are admitted; what comes back is every node whose cap hold lifted,
+    /// in which a hold buffer now does something else with the same inputs. A second report
+    /// of one root changes nothing.
+    pub(crate) fn root_finished(&mut self, root: usize) -> Vec<usize> {
+        let ordinal = self
+            .roots
+            .iter()
+            .position(|at| *at == root)
+            .expect("a root reports its own node");
+        if std::mem::replace(&mut self.finished[ordinal], true) {
+            return Vec::new();
+        }
+        self.admit()
+    }
+
+    fn admit(&mut self) -> Vec<usize> {
+        let mut lifted = Vec::new();
+        for ordinal in 0..self.roots.len() {
+            if self.admitted[ordinal] {
+                continue;
+            }
+            let running = (0..self.roots.len())
+                .filter(|at| self.admitted[*at] && !self.finished[*at])
+                .count();
+            if self.cap.is_some_and(|cap| running >= cap.get()) {
+                break;
+            }
+            self.admitted[ordinal] = true;
+            for at in 0..self.cap_regions[ordinal].len() {
+                let node = self.cap_regions[ordinal][at];
+                self.cap_holds[node] -= 1;
+                self.refresh(node);
+                lifted.push(node);
+            }
+        }
+        lifted
     }
 
     /// The pick: the runnable node of smallest height, ties leftmost. `None` ends the run.
@@ -107,8 +186,9 @@ impl Scheduler {
     }
 
     /// One lane of a join has run `set_build`. The hold lifts when every lane has, since
-    /// a lane still building still cannot take a probe batch.
-    pub(crate) fn lane_left_build(&mut self, join_node: usize) {
+    /// a lane still building still cannot take a probe batch; `true` is that lift, after
+    /// which a hold buffer under it does something else with the same inputs.
+    pub(crate) fn lane_left_build(&mut self, join_node: usize) -> bool {
         let index = self
             .joins
             .iter()
@@ -120,28 +200,53 @@ impl Scheduler {
         );
         self.building[index] -= 1;
         if self.building[index] > 0 {
-            return;
+            return false;
         }
-        let probe = self.joins[index].probe;
-        for node in probe.0..probe.1 {
+        for at in 0..self.joins[index].probe.len() {
+            let node = self.joins[index].probe[at];
             self.build_holds[node] -= 1;
             self.refresh(node);
         }
+        true
     }
 
     /// Enough rows have passed this node that no later one can change its answer. It
-    /// holds its whole subtree, itself included, and the hold never lifts — so this is
-    /// where a run ends with lanes not done and queues non-empty.
-    pub(crate) fn satisfy(&mut self, node: usize) {
-        if self.satisfied[node] {
-            return;
+    /// holds its whole region, itself included, through any buffer, and the hold never
+    /// lifts — so this is where a run ends with lanes not done and queues non-empty.
+    ///
+    /// Returns each `(producer, reader ordinal)` whose reader is inside the region and whose
+    /// producer is not: those readers retire. A producer left with no live reader is
+    /// satisfied in turn, its own pairs returned too. On a tree nothing enters a region from
+    /// outside, so the list is empty.
+    pub(crate) fn satisfy(&mut self, node: usize) -> Vec<(usize, usize)> {
+        let mut retired = Vec::new();
+        let mut pending = vec![node];
+        while let Some(node) = pending.pop() {
+            if std::mem::replace(&mut self.satisfied[node], true) {
+                continue;
+            }
+            let mut inside = vec![false; self.satisfied.len()];
+            for at in 0..self.regions[node].len() {
+                let held = self.regions[node][at];
+                inside[held] = true;
+                self.limit_holds[held] += 1;
+                self.refresh(held);
+            }
+            for producer in (0..inside.len()).filter(|producer| !inside[*producer]) {
+                let mut any = false;
+                for (ordinal, reader) in self.readers[producer].iter().enumerate() {
+                    if inside[reader.parent] && !self.retired[producer][ordinal] {
+                        self.retired[producer][ordinal] = true;
+                        retired.push((producer, ordinal));
+                        any = true;
+                    }
+                }
+                if any && self.retired[producer].iter().all(|gone| *gone) {
+                    pending.push(producer);
+                }
+            }
         }
-        self.satisfied[node] = true;
-        let (start, end) = self.subtree[node];
-        for held in start..end {
-            self.limit_holds[held] += 1;
-            self.refresh(held);
-        }
+        retired
     }
 
     /// Whether this node's own interval was satisfied. What the golden's `early_exit=`
@@ -157,11 +262,15 @@ impl Scheduler {
     }
 
     pub(crate) fn is_held(&self, node: usize) -> bool {
-        self.build_holds[node] > 0 || self.limit_holds[node] > 0
+        self.build_holds[node] > 0 || self.limit_holds[node] > 0 || self.cap_holds[node] > 0
     }
 
     fn refresh(&mut self, node: usize) {
-        let runnable = self.ready_lanes[node] > 0 && !self.is_held(node);
+        let masked = match self.buffers[node] {
+            true => self.limit_holds[node] > 0,
+            false => self.is_held(node),
+        };
+        let runnable = self.ready_lanes[node] > 0 && !masked;
         let rank = self.rank_of_node[node];
         let (word, bit) = (rank / 64, 1u64 << (rank % 64));
         if runnable {

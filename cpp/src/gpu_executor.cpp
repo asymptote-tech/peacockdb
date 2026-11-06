@@ -618,6 +618,26 @@ void peacock_handle_release(peacock_executor_t* executor, uint64_t handle) {
   if (executor && executor->session) executor->session->release(handle);
 }
 
+int peacock_handle_duplicate(peacock_executor_t* executor, uint64_t handle, uint64_t* out_handle) {
+  if (!executor || !out_handle) return 1;
+  if (!executor->session) {
+    executor->last_error = "no plan loaded (call peacock_executor_begin_plan first)";
+    return 1;
+  }
+  try {
+    *out_handle = executor->session->duplicate_handle(handle);
+    return 0;
+  } catch (const std::exception& e) {
+    executor->last_error = e.what();
+    executor->session.reset();
+    return 1;
+  } catch (...) {
+    executor->last_error = "unknown exception";
+    executor->session.reset();
+    return 1;
+  }
+}
+
 void peacock_executor_end_plan(peacock_executor_t* executor) {
   if (executor) executor->session.reset();
 }
