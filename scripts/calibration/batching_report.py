@@ -234,7 +234,8 @@ def named(path):
 
 
 def gather(testdata, dataset, cases):
-    """Everything the page says about one dataset, checked against today's list."""
+    """Everything the page says about one dataset. Each batch is its fused section's own
+    queries, checked against the unfused tree; one that is not today's prefix is stale."""
     device = testdata / "benchmark-results" / DEVICE
     unfused_path = device / f"{dataset}.sf{SF}" / f"{MODE}.benchmark.txt"
     fused_path = device / "fused" / f"{dataset}.sf{SF}" / f"{MODE}.fused.txt"
@@ -247,18 +248,27 @@ def gather(testdata, dataset, cases):
     extra = [name for name in fused if name not in dict(BATCH_SIZES)]
     if extra:
         raise Refused(f"{fused_path}: {extra} are not batches of {[n for n, _ in BATCH_SIZES]}")
-    listed = batches(queries)
-    for name, batch in listed:
-        if name not in fused:
-            raise Refused(f"{fused_path}: no `== {name}` section")
-        check_batch(fused_path, name, batch, fused_batch(fused[name]), len(queries))
-    timings = {query: timing(unfused_path, unfused, query) for query in queries}
+    missing = [name for name, _ in BATCH_SIZES if name not in fused]
+    if missing:
+        raise Refused(f"{fused_path}: no `== {missing[0]}` section")
+    listed = []
+    for name, expected in batches(queries):
+        read = fused_batch(fused[name])
+        if "marker" in read:
+            batch = None
+        elif "failed" in read:
+            batch = expected  # a failed section names no queries; today's prefix stands in
+        else:
+            batch = read["queries"]
+        listed.append((name, batch, read, staleness(read, batch, expected, len(queries))))
+    batched = list(dict.fromkeys(q for _, batch, _, _ in listed for q in batch or []))
+    timings = {query: timing(unfused_path, unfused, query) for query in batched}
     loads = [row for row in record.read_tsv(loads_path, "query", "mode", "host_read_source",
                                             *LOAD_COLUMNS) if row["mode"] == LOADS_MODE]
-    by_query = {query: [row for row in loads if row["query"] == query] for query in queries}
+    by_query = {query: [row for row in loads if row["query"] == query] for query in batched}
     unprofiled = [query for query, rows in by_query.items() if not rows]
     if unprofiled:
-        raise Refused(f"{loads_path}: no {LOADS_MODE} row for the counted {unprofiled}")
+        raise Refused(f"{loads_path}: no {LOADS_MODE} row for the batched {unprofiled}")
     preamble, duck = duckdb(duckdb_path.read_text())
     if "floor_ms" not in preamble:
         raise Refused(f"{duckdb_path}: no floor_ms in its preamble, so its times cannot be "
@@ -267,9 +277,8 @@ def gather(testdata, dataset, cases):
     fused_dir = profiles / "fused" / f"{dataset}.sf{SF}"
     failed_profiles = profile_failures(fused_dir / "failed.tsv")
     out = []
-    for name, batch in listed:
-        read = fused_batch(fused[name])
-        entry = {"name": name, "queries": batch, "fused": read}
+    for name, batch, read, stale in listed:
+        entry = {"name": name, "queries": batch, "fused": read, "stale": stale}
         if batch is not None:
             entry["unfused"] = [sum(int(timings[q][key]) for q in batch)
                                 for key in ("load_us", "execute_us")]
@@ -293,6 +302,7 @@ def gather(testdata, dataset, cases):
     return {"dataset": dataset, "queries": queries, "batches": out, "notes": notes(cases, dataset),
             "duckdb": (preamble, duck), "floor_ms": millis(preamble["floor_ms"]), "tp4": tp4,
             "unfused": unfused, "fused": fused, "lines": lines_of(cases, dataset),
+            "batched": batched,
             "sources": sorted({row["host_read_source"] for row in loads})}
 
 
@@ -332,20 +342,23 @@ def partial_sum(batch, values):
     return sum(have), len(have), [q for q in batch if values.get(q) is None]
 
 
-def check_batch(path, name, batch, read, listed):
-    """The fused section must be the batch today's list makes, or the sums would be of
-    other queries than the fused run's."""
-    if "failed" in read:
-        return
-    if batch is None and "marker" not in read:
-        raise Refused(f"{path}: {name} ran as a batch, and today's list ({listed} queries) "
-                      "makes it the same set as all")
-    if batch is not None and "marker" in read:
-        raise Refused(f"{path}: {name} is a marker, and today's list makes it {len(batch)} "
-                      "queries")
-    if batch is not None and read["queries"] != batch:
-        raise Refused(f"{path}: {name} fused {read['queries']}, and today's list's prefix is "
-                      f"{batch}: the list changed after the fused run")
+def staleness(read, batch, expected, listed):
+    """Why a fused section is not the batch today's list makes, or `None`: the list changed
+    after the fused run, which only a rerun on the H100 mends."""
+    if "failed" in read or batch == expected:
+        return None
+    if batch is None:
+        return (f"the fused file has it as the same set as all, and today's list makes it "
+                f"{len(expected)} queries")
+    if expected is None:
+        return f"today's list ({listed} queries) makes it the same set as all"
+    added = [q for q in expected if q not in batch]
+    dropped = [q for q in batch if q not in expected]
+    if not added and not dropped:
+        return "its fused run holds today's prefix in another order"
+    said = [f"adds {' '.join(added)}" if added else "",
+            f"drops {' '.join(dropped)}" if dropped else ""]
+    return "today's prefix " + " and ".join(part for part in said if part)
 
 
 def profile_failures(path):
@@ -446,12 +459,12 @@ def main_notes(data):
         return ", ".join(e["name"] for e in measured if query in e["queries"])
 
     wrong = dict(data["notes"])
-    for query in data["queries"]:
+    for query in data["batched"]:
         if wrong.get(query, "").startswith(WRONG):
             lines.append(f"- {query}: counted, though its answer is wrong "
                          f"({wrong[query][len(WRONG):]}); in {holding(query)}.")
     preamble, duck = data["duckdb"]
-    for query in data["queries"]:
+    for query in data["batched"]:
         if query not in duck:
             lines.append(f"- DuckDB: {query} has no row; counted out of {holding(query)}.")
         elif duck[query]["status"] != "ok":
@@ -459,7 +472,7 @@ def main_notes(data):
         elif duck[query]["warm"] != "yes":
             lines.append(f"- DuckDB: {query} ran warm={duck[query]['warm']} ({holding(query)}).")
     if data["tp4"] is not None:
-        for query in data["queries"]:
+        for query in data["batched"]:
             body = data["tp4"].get(query)
             if body is None:
                 lines.append(f"- tp4_sized: {query} has no section; counted out of "
@@ -467,6 +480,8 @@ def main_notes(data):
             elif trailer(body) is None:
                 lines.append(f"- tp4_sized: {query} {body.splitlines()[0]}; counted out of "
                              f"{holding(query)}.")
+    lines += [f"- {e['name']} is stale: {e['stale']}. Its numbers are the fused run's queries; "
+              "rerun it on the H100." for e in data["batches"] if e["stale"]]
     return lines
 
 

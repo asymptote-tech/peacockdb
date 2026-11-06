@@ -559,18 +559,70 @@ def test_a_counted_query_without_load_rows_is_refused():
     assert code == 1 and "q2" in err and "loads.tsv" in err, err
 
 
-def test_a_fused_batch_of_other_queries_is_refused():
+def stale_lines(text, heading=TPCH):
+    return [line for line in section_after(text, heading).splitlines() if "is stale" in line]
+
+
+def test_nothing_is_stale_when_the_fused_runs_are_todays_prefixes():
+    assert stale_lines(rendered()) == []
+
+
+def test_a_fused_batch_in_another_order_is_named_stale_and_summed_as_run():
     s = spec()
     s["fused"]["tpch"]["first3"]["queries"] = ["q1", "q6", "q3"]
-    code, err = refused(s)
-    assert code == 1 and "first3" in err, err
+    text = rendered(s)
+    assert stale_lines(text) == [
+        "- first3 is stale: its fused run holds today's prefix in another order. Its numbers "
+        "are the fused run's queries; rerun it on the H100."]
+    assert row(text, TPCH, "first3")[4:6] == ["6.0", "1.5"]
 
 
-def test_a_fused_marker_where_the_list_has_a_batch_is_refused():
+def test_a_query_the_list_gained_names_the_batches_stale_rather_than_refusing():
+    # An engine fix lets q2 run: today's list grows, the fused runs predate it, and q2 has no
+    # timed unfused section yet. Each batch keeps the queries its fused run took.
+    s = spec()
+    s["cases"].insert(1, "tpch,40,q2,tp1_single,ok,")
+    text = rendered(s)
+    assert stale_lines(text) == [
+        "- first3 is stale: today's prefix adds q2 and drops q6. Its numbers are the fused "
+        "run's queries; rerun it on the H100.",
+        "- all is stale: today's prefix adds q2. Its numbers are the fused run's queries; "
+        "rerun it on the H100."]
+    assert row(text, TPCH, "first3")[1:6] == ["3", "4.0", "1.4", "6.0", "1.5"]
+    assert row(text, TPCH, "all")[1] == "4"
+    with tempfile.TemporaryDirectory() as tmp:
+        root = tree(tmp, s)
+        report = pathlib.Path(tmp) / "page.md"
+        report.write_text(f"# page\n{batching_report.BEGIN}\n{batching_report.END}\n")
+        assert run_main(root, report) == (0, "")
+
+
+def test_a_fused_marker_where_the_list_now_has_a_batch_is_named_stale():
     s = spec()
     s["cases"] += [f"tpch,40,q{n},tp1_single,ok," for n in (15, 16, 17, 18, 19, 20, 21)]
+    text = rendered(s)
+    assert row(text, TPCH, "first10")[1] == "same set as all"
+    assert stale_lines(text)[0] == (
+        "- first10 is stale: the fused file has it as the same set as all, and today's list "
+        "makes it 10 queries. Its numbers are the fused run's queries; rerun it on the H100.")
+
+
+def test_a_fused_batch_the_list_now_makes_a_marker_is_named_stale():
+    s = spec()
+    s["fused"]["tpch"]["first10"] = fused(["q1", "q3", "q6", "q14"], 7000, 1900)
+    s["fused_loads"]["tpch"]["first10"] = s["fused_loads"]["tpch"]["all"]
+    text = rendered(s)
+    assert row(text, TPCH, "first10")[1] == "4"
+    assert stale_lines(text)[0] == (
+        "- first10 is stale: today's list (4 queries) makes it the same set as all. Its "
+        "numbers are the fused run's queries; rerun it on the H100.")
+
+
+def test_a_fused_query_without_an_unfused_section_is_refused():
+    s = spec()
+    s["fused"]["tpch"]["first3"]["queries"] = ["q1", "q3", "q99"]
     code, err = refused(s)
-    assert code == 1 and "first10" in err, err
+    assert code == 1 and "q99" in err and "tp1_single.benchmark.txt" in err, err
 
 
 def test_a_missing_fused_section_is_refused():

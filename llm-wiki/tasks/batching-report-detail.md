@@ -136,6 +136,31 @@ Branch `ENS-batching-report`, forked from `ENS-query-fuser` at `413366c4` on 202
     lists the batch, the row reads the file and a line under the split table says so, with the
     reason; no failure, no line.
 - 2026-11-06: review round 3: 0 blocking, 0 important, 2 nits (the workflow header comment and a build-test.md sentence, both fixed by the coordinator). Board `completing`; completeness pass dispatched.
+- 2026-11-06, completeness pass (developer): both items, test first. Not committed. No VM.
+  - **1, stale rather than refused.** Each batch is its fused section's own `queries=` (a marker
+    stays a marker; a failed section names none, so today's prefix stands in). Every query a
+    batch holds must have a timed unfused section and `loads.tsv` rows, or it is refused, as
+    before. A section that is not today's prefix gets a line under its table: `- <batch> is
+    stale: <why>. Its numbers are the fused run's queries; rerun it on the H100.`, where why is
+    another order, `today's prefix adds … and drops …`, a marker the list now makes a batch, or
+    a batch the list now makes a marker. The per-query notes (wrong answer, DuckDB, tp4_sized)
+    now run over the queries the batches hold, so a newly counted query in no batch is not
+    noted as "counted out of" nothing. Tests: two refusals became stale tests, plus a new query
+    in the list (the engine-fix case: q2 counted, no unfused section, `main` exits 0), a batch
+    that became a marker, a fused query with no unfused section refused, and nothing stale by
+    default; red on the refusal, then 41 passed. The committed page regenerates byte-identical
+    (`--check` 0 before writing; written, `git diff` empty; no `is stale` line).
+  - **2, the CI guard.** `ci_coverage.rs`: `line_runs_the_batching_check` (a folded line that is
+    not a comment and holds `…batching_report.py`, `llm-wiki/reports/query-batching.md` and
+    `--check` as words), its own test (live line yes; commented-out and `--check`-less no) and
+    `the_batching_report_check_is_named_by_a_ci_step`. Red on a stub returning false, then 41
+    passed. Against the real workflow: with the step's two lines commented out (a copy kept in
+    /tmp, restored and compared with `cmp`), the guard failed. rustfmt over `ci_coverage.rs`
+    also reordered one existing import, its only diff outside the new code.
+  - pipeline.yml: the step's comment says a changed `cases.csv` is named stale, not refused, and
+    that `ci_coverage.rs` guards the line. build-test.md: "Fused batches" (the stale rule), the
+    calibration row (114 → 118), the CI wiring guard row (12 → 14, two scripted guards), the
+    header 8181 → 8187 (Rust 6301, Python 1600); the tables sum to 8187.
 
 ## Review round 1 (2026-11-06)
 
