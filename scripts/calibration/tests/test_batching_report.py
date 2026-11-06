@@ -43,7 +43,8 @@ def timed(load, execute, **knobs):
 def fused(queries, load, execute, **knobs):
     values = dict(queries=queries, outcome="measured", cap=3, estimate=10 * 2**30,
                   budget=60 * 2**30, over_budget="false", merge=(20, [20]),
-                  pipeline=(3000, 2000, 1000), run=timed(load, execute, **knobs.pop("run", {})))
+                  pipeline=(3000, 2000, 1000), shared="lineitem:q1+q3",
+                  run=timed(load, execute, **knobs.pop("run", {})))
     values.update(knobs)
     return values
 
@@ -161,7 +162,7 @@ def fused_text(body):
              f"outcome={body['outcome']}"]
     if body["outcome"] == "out-of-memory":
         lines.append("reason=std::bad_alloc: out of memory")
-    lines += ["shared=[lineitem:q1+q3]", "unshared=[]", "reads=[lineitem:1]", "buffers=1",
+    lines += [f"shared=[{body['shared']}]", "unshared=[]", "reads=[lineitem:1]", "buffers=1",
               "buffer_bytes=100", "rereads=0",
               "hold query=q3 table=lineitem hold=GpuHashJoin choice=buffer above=7 bytes=100 "
               "reread_us=10 why=fits: 100 <= 900",
@@ -543,9 +544,18 @@ def test_the_hints_row_carries_both_estimates():
     s["fused"]["tpch"]["first3"]["run"]["peak"] = 3 * 2**30
     text = rendered(s)
     assert row(text, TPCH_HINTS, "first3") == [
-        "first3", "3", "10.0 / 60.0", "3.0", "0.0", "1", "1.0", "4.4"]
+        "first3", "3", "10.0 / 60.0", "3.0", "0.0", "1", "1.0", "4.4", "1 (0)"]
     body = section_after(text, TPCH_HINTS)
     assert "two or more queries" in body and "one loader and one executor" in body, body
+
+
+def test_folded_scans_count_a_querys_own_repeats_apart():
+    s = spec()
+    s["fused"]["tpch"]["first3"]["shared"] = "lineitem:q1+q3,region:q6+q6+q3"
+    # lineitem folds 2 scans into 1 load; region 3 into 1, one of them q6 repeating itself.
+    assert row(rendered(s), TPCH_HINTS, "first3")[8] == "3 (1)"
+    body = section_after(rendered(s), TPCH_HINTS)
+    assert "a query's own" in body and "a batch of one" in body, body
 
 
 def test_provenance_lists_every_distinct_value():
