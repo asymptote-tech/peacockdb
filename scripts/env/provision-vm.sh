@@ -2,13 +2,13 @@
 # Ready a VM, or record a GPU host, for one developer, from their own machine (llm-wiki/build-test.md).
 #
 #   provision-vm.sh <login>@<address> [--env <file>] [--user <name>] [--name <vm>] [--ref <branch>] [--new-pat]
-#   provision-vm.sh --new-pat
+#   provision-vm.sh --new-pat | --gpu-key
 #   provision-vm.sh --gpu-host <name> <user>@<address> [--provider <p>] [--instance-id <id>] [--provider-config <file>]
-#
 # A VM: <login> has sudo; bootstrap-vm.sh runs as --user, this machine's, at --ref; --env is needed until
 # ~/.config/peacock holds the storage keys; the PAT and GPU key go on ssh's stdin; --name, the address by
 # default, is up.sh's default VM. --new-pat replaces the PAT on every recorded VM. A GPU host: hosts/<name>.env
-# and the provider CLI's config written, the GPU key put there once (its password typed), hosts/ copied to every VM.
+# and the provider CLI's config written, the GPU key put there once (its password typed), hosts/ copied to every
+# VM. --gpu-key makes the GPU key when missing and prints its .pub, and does nothing else.
 [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; } || {
   echo "${0##*/}: this machine's bash is $BASH_VERSION, older than 4.4: install a current one (on macOS, brew install bash)" >&2; exit 2; }
 # Above, in bash 3.2's syntax and before any source: macOS ships 3.2, and what follows needs 4.4.
@@ -19,8 +19,9 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 shopt -s inherit_errexit
 
 die() { echo "provision-vm.sh: $*" >&2; exit 2; }
+gpu_key_whole() { [ -f "$PEACOCK_GPU_KEY" ] && [ -f "$PEACOCK_GPU_KEY.pub" ]; }
 
-target="" env_in="" user="" name="" ref="" new_pat="" gpu_host="" provider="" instance_id="" provider_config=""
+target="" env_in="" user="" name="" ref="" new_pat="" gpu_host="" gpu_key="" provider="" instance_id="" provider_config=""
 take() { [ -z "${!1}" ] || die "one $2 per call"; printf -v "$1" %s "$3"; }
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -35,11 +36,16 @@ while [ $# -gt 0 ]; do
       take "$var" "$1" "$2"
       shift 2 ;;
     --new-pat) take new_pat "$1" 1; shift ;;
+    --gpu-key) take gpu_key "$1" 1; shift ;;
     -*) die "unknown flag $1" ;;
     *) take target "<login>@<address>" "$1"; shift ;;
   esac
 done
-if [ -n "$gpu_host" ]; then
+if [ -n "$gpu_key" ]; then
+  [ -z "$target$env_in$user$name$ref$new_pat$gpu_host$provider$instance_id$provider_config" ] \
+    || die "--gpu-key takes no other argument: it makes and prints the GPU key, and does nothing else"
+  gpu_key_whole || command -v ssh-keygen > /dev/null || die "no ssh-keygen to make the GPU key"
+elif [ -n "$gpu_host" ]; then
   [ -n "$target" ] || die "name the GPU host's login: provision-vm.sh --gpu-host <name> <user>@<address>"
   [ -z "$env_in$user$name$ref$new_pat" ] || die "--env, --user, --name, --ref and --new-pat ready a VM, not a GPU host"
   host_name_is_valid "$gpu_host" || die "a GPU host's name is letters, digits, ., _ and -: $gpu_host"
@@ -62,7 +68,7 @@ if [ -n "$gpu_host" ]; then
     [ -n "$config_name" ] || die "--provider-config is for a provider whose CLI reads a config; $provider's does not"
     [ -f "$provider_config" ] || die "no --provider-config $provider_config"
   fi
-  command -v ssh-keygen > /dev/null || [ -f "$PEACOCK_GPU_KEY" ] || die "no ssh-keygen to make the GPU key"
+  gpu_key_whole || command -v ssh-keygen > /dev/null || die "no ssh-keygen to make the GPU key"
 elif [ -n "$provider$instance_id$provider_config" ]; then
   die "--provider, --instance-id and --provider-config record a GPU host: provision-vm.sh --gpu-host <name> <user>@<address>"
 elif [ -z "$target" ]; then
@@ -94,11 +100,11 @@ if [ -n "$target" ]; then
   [ -f "$env_src" ] || die "no env file $env_src"
   peacock_env_is_storage_only "$env_src"
   peacock_env_has_storage "$env_src"
-  if [ ! -f "$PEACOCK_GPU_KEY" ]; then command -v ssh-keygen > /dev/null || die "no ssh-keygen to make the GPU key"; fi
+  gpu_key_whole || command -v ssh-keygen > /dev/null || die "no ssh-keygen to make the GPU key"
 fi
 
 # The token is read and checked before anything is kept, so a wrong one leaves nothing behind.
-if [ -z "$gpu_host" ] && { [ -n "$new_pat" ] || [ ! -s "$PEACOCK_PAT" ]; }; then
+if [ -z "$gpu_host$gpu_key" ] && { [ -n "$new_pat" ] || [ ! -s "$PEACOCK_PAT" ]; }; then
   command -v gh > /dev/null || die "no gh on this machine to check the token with"
   owner=${PEACOCK_REPO%/*} repo=${PEACOCK_REPO#*/}
   cat << EOF
@@ -127,6 +133,25 @@ if [ -n "${token:-}" ]; then
   unset token
 fi
 
+# gpu_key_made — the GPU key pair, made when missing; a lost .pub is made again from the key.
+gpu_key_made() {
+  if [ ! -f "$PEACOCK_GPU_KEY" ]; then
+    ssh-keygen -q -t ed25519 -N '' -C "peacock-gpu $(id -un)" -f "$PEACOCK_GPU_KEY"
+  elif [ ! -f "$PEACOCK_GPU_KEY.pub" ]; then
+    ssh-keygen -y -f "$PEACOCK_GPU_KEY" > "$PEACOCK_GPU_KEY.pub"
+  fi
+  chmod 600 "$PEACOCK_GPU_KEY" "$PEACOCK_GPU_KEY.pub"
+}
+gpu_key_printed() {
+  echo "The key to GPU hosts, $PEACOCK_GPU_KEY.pub: put it on a GPU host when you create one."
+  cat "$PEACOCK_GPU_KEY.pub"
+}
+if [ -n "$gpu_key" ]; then
+  gpu_key_made
+  gpu_key_printed
+  exit 0
+fi
+
 ssh_opts=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
 on() { local who=$1; shift; ssh "${ssh_opts[@]}" -- "$who" "$@"; }
 # remote_test <command> — <command>'s status as the developer on the VM; an ssh failure stops the run.
@@ -153,10 +178,7 @@ copy_hosts() {
 # The GPU key on the host, then the host file, then the file on every VM. ssh asks for the password
 # itself, on the terminal; the key goes on its stdin.
 if [ -n "$gpu_host" ]; then
-  if [ ! -f "$PEACOCK_GPU_KEY" ]; then
-    ssh-keygen -q -t ed25519 -N '' -C "peacock-gpu $(id -un)" -f "$PEACOCK_GPU_KEY"
-  fi
-  chmod 600 "$PEACOCK_GPU_KEY" "$PEACOCK_GPU_KEY.pub"
+  gpu_key_made
   key_login() {
     ssh "${ssh_opts[@]}" -i "$PEACOCK_GPU_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -- "$gpu_target" true \
       < /dev/null > /dev/null 2>&1
@@ -193,12 +215,8 @@ fi
 
 if [ -n "$target" ]; then
   if [ -n "$env_in" ]; then peacock_env_normalised "$env_in" "$PEACOCK_ENV"; fi
-  if [ ! -f "$PEACOCK_GPU_KEY" ]; then
-    ssh-keygen -q -t ed25519 -N '' -C "peacock-gpu $(id -un)" -f "$PEACOCK_GPU_KEY"
-  fi
-  chmod 600 "$PEACOCK_GPU_KEY" "$PEACOCK_GPU_KEY.pub"
-  echo "The key to GPU hosts, $PEACOCK_GPU_KEY.pub: put it on a GPU host when you create one."
-  cat "$PEACOCK_GPU_KEY.pub"
+  gpu_key_made
+  gpu_key_printed
 
   # The developer's own Linux user, reached with <login>'s keys. Its sudo widens nothing: the docker
   # group is root already. Joining the groups before its first login makes them its session's.

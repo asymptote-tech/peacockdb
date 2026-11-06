@@ -18,6 +18,7 @@ import os
 import pathlib
 import select
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -651,3 +652,11 @@ def stderr_line(process, words, seconds=60):
             if words in line:
                 return line
     raise AssertionError(f"{words!r} never came")
+
+
+def dropped(rig, *args, env=None):
+    """gpu.sh run <args>, its session dropped once the device run has started."""
+    first = rig.gpu(NAME, "run", *args, env=env, background=True)
+    until(lambda: rig.host_calls(rig.host, "runs"), "the run started")
+    os.killpg(first.pid, signal.SIGKILL)
+    first.wait()

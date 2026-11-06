@@ -5,7 +5,7 @@
 #   on-gpu-host.sh install | pull <image> | label <image> | sf1 <image> | sf40-missing | settle | busy
 #   on-gpu-host.sh hold <seconds> [<instance dir>] | sf40 <image> <dataset>... (keys on stdin) | fetch …
 #   on-gpu-host.sh run <image id> <mode> [NAME=value]... | run-state | follow <mode> <stamp> [NAME=value]...
-#   on-gpu-host.sh cancel
+#   on-gpu-host.sh cancel | clear (`<sha256> <record>` lines on stdin)
 #
 # The data directory is /var/lib/peacock or $PEACOCK_DATA_DIR. Every step, and each gpu.sh command whole,
 # holds the activity lock shared, which busy tests. A failure that is not a refusal (2) is exit 1.
@@ -498,6 +498,35 @@ cancel() {
   fi
 }
 
+# records_cleared — removes each records-*.tsv of the instance whose sha256 a line on stdin gives, its
+# copy pulled home being the same bytes, and says of each other one why it stays. records.tsv, a run's
+# record not yet kept under its own name, is never removed. Under the instance's run lock: no run is going.
+records_cleared() {
+  local dir=$instance_dir/testdata/calibration sum name record host none=1
+  local -A home=()
+  while read -r sum name; do home[$name]=$sum; done
+  run_probe
+  case "$RUN" in going) going_run ;; busy) busy_instance ;; esac
+  run_lock
+  flock -n "$own" || busy_instance
+  host=$(hostname)
+  for record in "$dir"/records-*.tsv; do
+    [ -f "$record" ] || continue
+    name=${record##*/} none=""
+    read -r sum _ < <(sha256sum < "$record")
+    if [ -z "${home[$name]:-}" ]; then
+      echo "kept $name on $host: it was not pulled home"
+    elif [ "${home[$name]}" != "$sum" ]; then
+      echo "kept $name on $host: the copy pulled home differs"
+    else
+      rm -f "$record"
+      echo "removed $name from $host: the copy pulled home is the same"
+    fi
+  done
+  if [ -f "$dir/records.tsv" ]; then echo "kept records.tsv on $host: a run's record, not yet kept under its own name"; fi
+  if [ -n "$none" ]; then echo "no records-*.tsv of $instance on $host to clear"; fi
+}
+
 # container_removed <name> — stopped and removed; one already gone is no failure, one still there is.
 container_removed() {
   docker stop -t 30 "$1" > /dev/null 2>&1 || true
@@ -529,7 +558,7 @@ follow_command() {
   exit "$(cat "${log%.log}.status")"
 }
 
-[ $# -gt 0 ] || die "want a command: install, pull, label, sf1, sf40-missing, sf40, settle, hold, busy, run, run-state, follow or cancel; see --help"
+[ $# -gt 0 ] || die "want a command: install, pull, label, sf1, sf40-missing, sf40, settle, hold, busy, run, run-state, follow, cancel or clear; see --help"
 command=$1
 shift
 case "$command" in
@@ -539,7 +568,7 @@ case "$command" in
   hold) [ $# -ge 1 ] && [ $# -le 2 ] || die "hold <seconds> [<instance dir>]"; hold "$@" ;;
   fetch) [ $# = 2 ] || die "fetch <bucket> <dir>"; fetch "$@" ;;
   runner) data_ready; runner "$@" ;;
-  pull|label|sf1|sf40-missing|sf40|settle|run|run-state|follow|cancel)
+  pull|label|sf1|sf40-missing|sf40|settle|run|run-state|follow|cancel|clear)
     data_ready
     active
     case "$command" in
@@ -562,6 +591,7 @@ case "$command" in
         case "$RUN" in going) echo "running $running $stamp" ;; busy) busy_instance ;; *) echo idle ;; esac ;;
       follow) [ $# -ge 2 ] || die "follow <mode> <stamp> [NAME=value]..."; follow_command "$@" ;;
       cancel) [ $# = 0 ] || die "cancel takes no argument"; cancel ;;
+      clear) [ $# = 0 ] || die "clear takes no argument"; records_cleared ;;
     esac ;;
   *) die "unknown command $command" ;;
 esac

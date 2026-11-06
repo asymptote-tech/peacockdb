@@ -48,5 +48,6 @@ separate service.
 ## Developing
 
 peacockdb is developed by a chain of agents. To run one on a VM of your own, with its GPU steps on
-a GPU host: [Getting started on a VM](llm-wiki/README.md#getting-started-on-a-vm). Everything
-else an agent or a developer needs is in [`llm-wiki/`](llm-wiki/).
+a GPU host, or to run the device tiers or a benchmark on a GPU host from your own machine:
+[Deploying peacockdb](scripts/env/README.md). Everything else an agent or a developer needs is in
+[`llm-wiki/`](llm-wiki/).

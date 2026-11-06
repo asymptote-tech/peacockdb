@@ -2,13 +2,13 @@
 # The device run on a GPU host, from a built tree (llm-wiki/build-test.md, "GPU hosts").
 #
 #   gpu.sh <host> prepare [--cudf <v> | --image <tag>] [--instance <name>] [--env <file>]
-#   gpu.sh <host> run <list|filter|bench> [--cudf <v> | --image <tag>] [--instance <name>]
-#   gpu.sh <host> ship | pull | cancel [--instance <name>]
+#   gpu.sh <host> run <list|filter|bench> [--filter <f>] [--cudf <v> | --image <tag>] [--instance <name>]
+#   gpu.sh <host> ship | pull [--clear] | cancel [--instance <name>]
 #   gpu.sh <host> start | stop [--force]
-# --instance, outside an instance, names the tree's dir on the host, ~/peacock/<instance>/; --env the
-# storage keys' file there, peacock.env by default. prepare readies the host and its data; ship sends
-# the built tree; run runs it there, detached, followed; pull brings the results home; cancel stops
-# the instance's run. A host its adapter powers is started by each, and soft-stopped when it exits.
+# Outside an instance, --instance names the tree's dir on the host, ~/peacock/<name>/, once: the tree records
+# it in .gpu-test/.instance. --env is the storage keys' file, peacock.env by default. prepare readies the
+# host; ship sends the tree; run runs it there, detached, followed; pull brings the results home, and --clear
+# then removes the host's records now home; cancel stops the run. A powered host is started and soft-stopped.
 [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; } || {
   echo "${0##*/}: this machine's bash is $BASH_VERSION, older than 4.4: install a current one (on macOS, brew install bash)" >&2; exit 2; }
 # Above, in bash 3.2's syntax and before any source: macOS ships 3.2, and what follows needs 4.4.
@@ -26,6 +26,9 @@ fail() { echo "gpu.sh: $*" >&2; exit 1; }
 . "$here/../lib/host.sh"
 . "$here/../lib/portable.sh"
 tree=$(cd "$here/../.." && pwd)
+# Three lines: the instance's name, the tree's id, its path. A host name begins with a letter or digit, so
+# no host's .gpu-test/<name>/ is this file.
+RECORD=.gpu-test/.instance
 
 # What the host needs of the tree before anything else runs there: on-gpu-host.sh, the libraries it
 # sources, and what the sf1 hash and its generation read.
@@ -36,16 +39,17 @@ SHIPPED=(testdata/tpch-queries testdata/tpcds-queries testdata/tpch.minimal test
          testdata/tpch-vec-queries testdata/pbench-queries testdata/pbench.sf1 testdata/cost-registry.csv
          testdata/fixtures)
 
-name="" verb="" cudf="" image="" instance="" env="" force="" words=()
+name="" verb="" cudf="" image="" instance="" env="" filter="" force="" clear="" words=()
 take() { [ -z "${!1}" ] || die "one $2 per call"; printf -v "$1" %s "$3"; }
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) peacock_usage "${BASH_SOURCE[0]}" ;;
-    --cudf|--image|--instance|--env)
+    --cudf|--image|--instance|--env|--filter)
       [ -n "${2:-}" ] || die "$1 needs a value"
       take "${1#--}" "$1" "$2"
       shift 2 ;;
     --force) take force "$1" 1; shift ;;
+    --clear) take clear "$1" 1; shift ;;
     -*) die "unknown flag $1" ;;
     *) if [ -z "$name" ]; then name=$1; elif [ -z "$verb" ]; then verb=$1; else words+=("$1"); fi; shift ;;
   esac
@@ -62,6 +66,7 @@ case "$verb" in
   *) die "unknown command $verb: prepare, ship, run, pull, cancel, start or stop" ;;
 esac
 [ -z "$force" ] || [ "$verb" = stop ] || die "--force is for stop, not $verb"
+[ -z "$clear" ] || [ "$verb" = pull ] || die "--clear is for pull, not $verb"
 case "$verb" in
   prepare|run)
     [ -z "$image" ] || [ -z "${PEACOCK_IMAGE_TAG:-}" ] \
@@ -86,18 +91,37 @@ fi
 case "$verb" in
   start|stop) [ -z "$instance" ] || die "--instance is for prepare, ship, run, pull and cancel" ;;
   *)
+    recorded="" tree_id="" fresh=""
     if [ -n "${PEACOCK_INSTANCE:-}" ]; then
       [ -z "$instance" ] || die "--instance names a tree outside an instance; this is instance $PEACOCK_INSTANCE"
-      instance=$PEACOCK_INSTANCE
+      instance=$PEACOCK_INSTANCE tree_id=instance:$PEACOCK_INSTANCE
+    elif [ -e "$tree/$RECORD" ]; then
+      path="" here_path=$(cd "$tree" && pwd -P)
+      { IFS= read -r recorded && IFS= read -r tree_id && IFS= read -r path; } < "$tree/$RECORD" || true
+      [[ "$recorded" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$tree_id" =~ ^[0-9a-f]{32}$ && "$path" == /* ]] \
+        || die "$RECORD is not an instance's name, an id and a path, a line each: remove it, and give --instance"
+      [ "$path" = "$here_path" ] || die "$RECORD was written for $path, not this tree: a copy needs an instance" \
+        "of its own, so remove $RECORD and give --instance <a new name>"
+      [ -z "$instance" ] || [ "$instance" = "$recorded" ] \
+        || die "this tree is instance $recorded, as $RECORD records, not $instance: to move it, remove $RECORD first"
+      if [ -z "$instance" ]; then echo "instance $recorded, as $RECORD records for this tree"; fi
+      instance=$recorded
     fi
     [ -n "$instance" ] || die "not in an instance: --instance <name> names this tree's dir on the host, ~/peacock/<name>/"
-    [[ "$instance" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "not an instance name: $instance" ;;
+    [[ "$instance" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "not an instance name: $instance"
+    if [ -z "$tree_id" ]; then fresh=1 tree_id=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n'); fi ;;
 esac
 
-filter=${PCK_TEST_FILTER:-} resume=${PEACOCK_BENCH_RESUME:-}
+if [ -n "$filter" ]; then
+  [ "$verb" = run ] || die "--filter is for run filter and run bench, not $verb"
+  [ "$mode" != list ] || die "run list runs the whole list, but --filter $filter is given: run filter"
+  [ -z "${PCK_TEST_FILTER:-}" ] || [ "$PCK_TEST_FILTER" = "$filter" ] \
+    || die "--filter $filter and PCK_TEST_FILTER=$PCK_TEST_FILTER differ: give one"
+fi
+filter=${filter:-${PCK_TEST_FILTER:-}} resume=${PEACOCK_BENCH_RESUME:-}
 case "$mode" in
   list) [ -z "$filter" ] || die "run list runs the whole list, but PCK_TEST_FILTER=$filter is set: run filter" ;;
-  filter) [ -n "$filter" ] || die "run filter needs PCK_TEST_FILTER" ;;
+  filter) [ -n "$filter" ] || die "run filter needs --filter <f> or PCK_TEST_FILTER" ;;
 esac
 case "$resume" in ""|0|1) ;; *) die "PEACOCK_BENCH_RESUME is unset, 0 or 1, not $resume" ;; esac
 BEAT=${PEACOCK_HOLD_BEAT:-60} HOLD_TIMEOUT=${PEACOCK_HOLD_TIMEOUT:-300}
@@ -217,7 +241,7 @@ released() {
 # file is a new one, so a runner bash is still reading keeps the script it started with.
 tools_shipped() {
   local rc=0
-  tar -C "$tree" -cf - "${TOOLS[@]}" | on "mkdir -p $dir && tar --unlink-first -C $dir -xf -" || rc=$?
+  tar -C "$tree" -cf - "${TOOLS[@]}" | on "mkdir -p $dir && $claim && tar --unlink-first -C $dir -xf -" || rc=$?
   case "$rc" in
     0) ;;
     255) fail "lost the ssh connection to $name while shipping gpu.sh's scripts" ;;
@@ -311,6 +335,23 @@ err=$(on true 2>&1 < /dev/null > /dev/null) || {
   if [ -n "$powered" ]; then hint="check it: $adapter $name status"; else hint=$by_hand; fi
   fail "cannot reach $name ($remote): ${err##*$'\n'}. If the host is down, $hint"
 }
+
+# The instance's dir is one tree's: its .tree holds the id of the tree that made it, or of the first to
+# reach a dir made before .tree was. Another tree's command, a copy's or a namesake's, is refused before
+# it ships, runs or clears anything. A dir not made yet is claimed by the command that makes it.
+claim="{ (set -C && echo $tree_id > $dir/.tree) 2> /dev/null || true; }"
+rc=0
+owner=$(on "if [ -d $dir ]; then $claim && cat $dir/.tree; fi" < /dev/null) || rc=$?
+[ "$rc" != 255 ] || fail "lost the ssh connection to $name while reading ~/$dir/.tree"
+[ "$rc" = 0 ] || fail "reading ~/$dir/.tree on $name failed (exit $rc)"
+if [ -n "$owner" ] && [ "$owner" != "$tree_id" ]; then
+  if [ -n "${PEACOCK_INSTANCE:-}" ]; then die "~/$dir on $name is another tree's, not instance $instance's"; fi
+  die "~/$dir on $name is another tree's: give this tree an instance name no one else on $HOST_USER@$name uses"
+fi
+if [ -n "$fresh" ]; then
+  mkdir -p "$tree/.gpu-test"
+  printf '%s\n' "$instance" "$tree_id" "$(cd "$tree" && pwd -P)" > "$tree/$RECORD"
+fi
 
 pin() { sed -n "s/^$1=//p" "$tree/docker/pins.env"; }
 
@@ -458,9 +499,16 @@ case "$verb" in
     finished "$status" ;;
   pull)
     held
+    if [ -n "$clear" ]; then
+      state=$(step "reading the run's state" run-state < /dev/null)
+      if [[ "$state" == "running "* ]]; then
+        read -r _ running stamp <<< "$state"
+        die "the $running run of $instance started $stamp is still going on $name: pull without --clear, or once it ends"
+      fi
+    fi
     step "keeping a killed run's record" settle < /dev/null
     # Every source made first, as an rsync without --ignore-missing-args (macOS's) needs.
-    on "mkdir -p $dir/testdata/benchmark-results $dir/testdata/calibration $dir/logs" < /dev/null \
+    on "mkdir -p $dir/testdata/benchmark-results $dir/testdata/calibration $dir/logs && $claim" < /dev/null \
       || fail "making ~/$dir on $name failed over ssh (exit $?)"
     stage=$tree/.gpu-test/$name/pull
     rm -rf "$stage"
@@ -471,10 +519,31 @@ case "$verb" in
     synced -a -e "$rsh" "$remote:$dir/logs/" "$stage/logs/"
     kept=""
     merged "$stage/testdata/calibration" "$tree/testdata/calibration" never
+    # What the host may clear: each record pulled, by the sha256 of the copy now home.
+    home=()
+    if [ -n "$clear" ]; then
+      while IFS= read -r -d '' rel; do
+        rel=${rel#./}
+        if [ -f "$tree/testdata/calibration/$rel" ]; then
+          read -r sum _ < <(sha256sum < "$tree/testdata/calibration/$rel")
+          home+=("$sum $rel")
+        fi
+      done < <(cd "$stage/testdata/calibration" && find . -type f -print0)
+    fi
     rm -rf "$stage/testdata/calibration"
     merged "$stage/testdata" "$tree/testdata" newer
     merged "$stage/logs" "$tree/.gpu-test/$name/logs" newer
     rm -rf "$stage"
+    if [ -n "$clear" ]; then
+      rc=0
+      if [ ${#home[@]} -gt 0 ]; then printf '%s\n' "${home[@]}"; fi | on_host clear || rc=$?
+      case "$rc" in
+        0) ;;
+        2) echo "gpu.sh: the pull itself completed; $name cleared nothing" >&2; exit 2 ;;
+        255) fail "lost the ssh connection to $name while clearing its records; the pull itself completed" ;;
+        *) fail "clearing the records failed on $name (exit $rc); the pull itself completed" ;;
+      esac
+    fi
     [ -z "$kept" ] || exit 1
     echo "pulled from $name: testdata/benchmark-results/, testdata/calibration/records-*.tsv, .gpu-test/$name/logs/" ;;
   cancel)

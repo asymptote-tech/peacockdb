@@ -226,7 +226,48 @@ def test_provision_has_help():
         r = lap.provision("--help")
         assert r.returncode == 0 and "provision-vm.sh <login>@<address>" in r.stdout and "--new-pat" in r.stdout, r
         assert "--gpu-host <name> <user>@<address>" in r.stdout, r.stdout
+        assert "--gpu-key" in r.stdout, r.stdout
         assert lap.ssh_calls() == []
+
+
+def test_provision_gpu_key_makes_and_prints_the_key_alone():
+    with Laptop() as lap:
+        r = ok(lap.provision("--gpu-key"))
+        pub = (lap.config / "gpu_ed25519.pub").read_text().strip()
+        assert pub.startswith("ssh-ed25519 ") and pub.endswith(f" peacock-gpu {getpass.getuser()}"), pub
+        assert pub in r.stdout.splitlines(), r.stdout
+        assert mode(lap.config) == 0o700, oct(mode(lap.config))
+        assert sorted(p.name for p in lap.config.iterdir()) == ["gpu_ed25519", "gpu_ed25519.pub"]
+        for name in ("gpu_ed25519", "gpu_ed25519.pub"):
+            assert mode(lap.config / name) == 0o600, (name, oct(mode(lap.config / name)))
+        assert lap.ssh_calls() == [] and lap.gh_calls() == [], (lap.ssh_calls(), lap.gh_calls())
+        assert (lap.config / "gpu_ed25519").read_text().splitlines()[1] not in r.stdout + r.stderr
+
+        key = (lap.config / "gpu_ed25519").read_bytes()
+        r = ok(lap.provision("--gpu-key"))
+        assert (lap.config / "gpu_ed25519").read_bytes() == key, "the GPU key was made again"
+        assert pub in r.stdout.splitlines(), r.stdout
+
+
+def test_provision_gpu_key_makes_a_lost_pub_again_from_the_key():
+    with Laptop() as lap:
+        ok(lap.provision("--gpu-key"))
+        key, pub = (lap.config / "gpu_ed25519").read_bytes(), (lap.config / "gpu_ed25519.pub").read_text()
+        (lap.config / "gpu_ed25519.pub").unlink()
+        r = ok(lap.provision("--gpu-key"))
+        again = (lap.config / "gpu_ed25519.pub").read_text()
+        assert again.split()[:2] == pub.split()[:2], (again, pub)
+        assert (lap.config / "gpu_ed25519").read_bytes() == key, "the GPU key was made again"
+        assert mode(lap.config / "gpu_ed25519.pub") == 0o600, oct(mode(lap.config / "gpu_ed25519.pub"))
+        assert again.split()[1] in r.stdout, r.stdout
+
+
+def test_provision_gpu_key_is_the_key_a_vm_then_gets():
+    with Laptop() as lap:
+        ok(lap.provision("--gpu-key"))
+        key = (lap.config / "gpu_ed25519").read_bytes()
+        readied(lap)
+        assert (lap.config / "gpu_ed25519").read_bytes() == key, "the GPU key was made again"
 
 
 GPU = "ubuntu@gpu1.test"
@@ -305,7 +346,12 @@ def test_provision_gpu_host_refuses_bad_arguments_before_any_call():
                "/nonexistent/c.yaml"), "/nonexistent/c.yaml"),
              ((TARGET, "--provider-config", "/etc/hostname"), "--provider-config"),
              ((TARGET, "--provider", "ssh"), "--provider"),
-             ((TARGET, "--instance-id", "computeinstance-x1"), "--instance-id")]
+             ((TARGET, "--instance-id", "computeinstance-x1"), "--instance-id"),
+             (("--gpu-key", TARGET), "--gpu-key"),
+             (("--gpu-key", "--gpu-host", "l40s", GPU), "--gpu-key"),
+             (("--gpu-key", "--new-pat"), "--gpu-key"),
+             (("--gpu-key", "--provider", "ssh"), "--gpu-key"),
+             (("--gpu-key", "--gpu-key"), "--gpu-key")]
     for args, words in cases:
         with Laptop() as lap:
             lap.add_gpu_host("gpu1.test")
