@@ -193,6 +193,7 @@ nothing.
 |---|---|---|
 | Task 1 Step 5 | tp4-sized: the h100 list is written at tp1_single and tp4_sized | reported; coordinator commits |
 | Task 1 Step 5 | `49a0d619` | tp4-sized: the h100 list is written at tp1_single and tp4_sized; test_corpus_goldens 66, cpu suite green |
+| Task 2 (part) | `de71ced0` | tp4-sized: nsys_calls reads a region's own calls, not the rest of its thread; interim: benchmark done (126 cases, 5 failed), files held until the page regenerates; calibration tests 119 |
 
 ## VM time
 
