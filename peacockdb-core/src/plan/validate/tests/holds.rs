@@ -292,3 +292,54 @@ fn a_capped_root_never_waits_on_its_own_region() {
         Ok(())
     );
 }
+
+/// What `UncappedAccumulator` names: the waiting root and the accumulator, or a panic naming
+/// whatever came back instead.
+fn uncapped(result: Result<(), PlanError>) -> (usize, usize, String) {
+    match result {
+        Err(PlanError::UncappedAccumulator { root, node, what }) => (root, node, what),
+        other => panic!("expected an uncapped accumulator, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_accumulator_between_a_waiting_roots_buffer_and_its_source_is_refused() {
+    use crate::tests::plans::{coalesce_all, filter, projected_join, source};
+    let cap = std::num::NonZeroUsize::new(1);
+    // The cap holds root 1 only down to its buffer, so a coalesce below it would fill with
+    // everything S emits while root 1 waits: state alive outside the cap.
+    let s = shared_source("s");
+    let roots = vec![
+        crate::tests::plans::unload(filter(read(&s))),
+        crate::tests::plans::unload(buffered(coalesce_all(read(&s)))),
+    ];
+    let (root, node, what) = uncapped(validate_cap(&refs(&roots), cap));
+    assert_eq!((root, node), (3, 5));
+    assert!(what.contains("GpuCoalesceAllBatches (node 5)"), "{what}");
+    assert!(what.contains("GpuUnload (node 3)"), "{what}");
+    // A join's build is state too, and `validate_dag` reaches the same rule.
+    let s = shared_source("s");
+    let roots = vec![
+        crate::tests::plans::unload(filter(read(&s))),
+        crate::tests::plans::unload(buffered(projected_join(
+            coalesce_all(source("b", 1)),
+            buffered(filter(read(&s))),
+        ))),
+    ];
+    let (root, node, what) = uncapped(validate_dag(&refs(&roots), cap));
+    assert_eq!((root, node), (3, 5));
+    assert!(what.contains("GpuHashJoin (node 5)"), "{what}");
+}
+
+#[test]
+fn stateless_nodes_between_a_waiting_roots_buffer_and_its_source_are_accepted() {
+    use crate::tests::plans::{filter, project};
+    let s = shared_source("s");
+    let roots = vec![
+        crate::tests::plans::unload(filter(read(&s))),
+        crate::tests::plans::unload(buffered(project(filter(read(&s))))),
+    ];
+    let cap = std::num::NonZeroUsize::new(1);
+    assert_eq!(validate_cap(&refs(&roots), cap), Ok(()));
+    assert_eq!(validate_dag(&refs(&roots), cap), Ok(()));
+}

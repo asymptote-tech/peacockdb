@@ -22,7 +22,9 @@ fn at_seq(why: PlanError, seq: Seq) -> PlanError {
         PlanError::Unsupported(what) => PlanError::Unsupported(format!("{what} at #{seq}")),
         PlanError::Invalid(what) => PlanError::Invalid(format!("{what} at #{seq}")),
         // Refusals of a plan's holds; validation makes them, and no payload does.
-        held @ (PlanError::UnbufferedHold { .. } | PlanError::HoldCycle { .. }) => held,
+        held @ (PlanError::UnbufferedHold { .. }
+        | PlanError::HoldCycle { .. }
+        | PlanError::UncappedAccumulator { .. }) => held,
     }
 }
 

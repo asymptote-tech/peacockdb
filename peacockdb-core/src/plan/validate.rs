@@ -52,6 +52,7 @@ pub(crate) fn validate_dag(
     validate_roots(roots)?;
     let dag = PlanDag::of(roots);
     capped_roots_are_buffered(&dag, cap)?;
+    capped_roots_keep_their_state(&dag, cap)?;
     match first_cycle(&wait_for_edges(&dag, cap)) {
         Some(holds) => Err(hold_cycle(&dag, holds)),
         None => Ok(()),
@@ -62,7 +63,9 @@ pub(crate) fn validate_cap(
     roots: &[&dyn GpuNode],
     cap: Option<NonZeroUsize>,
 ) -> Result<(), PlanError> {
-    capped_roots_are_buffered(&PlanDag::of(roots), cap)
+    let dag = PlanDag::of(roots);
+    capped_roots_are_buffered(&dag, cap)?;
+    capped_roots_keep_their_state(&dag, cap)
 }
 
 /// The roots of ordinal `cap` and above, the ones that can wait for admission, each with the
@@ -103,6 +106,54 @@ fn capped_roots_are_buffered(
         }
     }
     Ok(())
+}
+
+/// The cap holds a waiting root only down to its buffers, so whatever lies below one runs
+/// while the root waits. A stateless node there is a batch in and a batch out, kept by the
+/// buffer above it; an accumulator would hold its state outside the cap, which exists to
+/// bound the state alive at once.
+fn capped_roots_keep_their_state(
+    dag: &PlanDag<'_>,
+    cap: Option<NonZeroUsize>,
+) -> Result<(), PlanError> {
+    for (root, held) in waiting_roots(dag, cap) {
+        let mut below_a_buffer = dag
+            .region_of_node(root)
+            .into_iter()
+            .filter(|node| !held.contains(node));
+        if let Some(node) = below_a_buffer.find(|node| holds_state(dag.nodes[*node].node)) {
+            let name = |at: usize| dag.nodes[at].node.name();
+            return Err(PlanError::UncappedAccumulator {
+                root,
+                node,
+                what: format!(
+                    "{} (node {node}) sits below a GpuHoldBuffer of the root {} (node {root}), \
+                     which waits for the cap, so its state would live outside the cap; only \
+                     stateless nodes may sit between a waiting root's buffer and its source",
+                    name(node),
+                    name(root)
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// The accumulators: the kinds whose state grows with what they are fed. These are the
+/// memory estimator's (`held_by_accumulator`), the buffer aside, which is the cap's own answer.
+fn holds_state(node: &dyn GpuNode) -> bool {
+    matches!(
+        try_as_node_ref(node),
+        Some(
+            NodeRef::CoalesceAllBatches(_)
+                | NodeRef::MergeSortedPartitions(_)
+                | NodeRef::AccumulateBatchesAndSort(_)
+                | NodeRef::AggregateBatches(_)
+                | NodeRef::Join(_)
+                | NodeRef::NestedLoopJoin(_)
+                | NodeRef::CrossJoin(_)
+        )
+    )
 }
 
 /// A join's probe is its second child, which is the side its hold covers.

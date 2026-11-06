@@ -152,15 +152,16 @@ holds it. Type widths are for columns the plan creates rather than reads.
 size is how the planner spends it, so an estimator pass (`planner/memory_estimation.rs`)
 solves for it per source.
 
-The walk starts at each source and follows its batch upward to the nearest accumulator, passing
-through a limit and an aggregate's init, which hold nothing and transform per batch. Every
+The walk starts at each source and follows its batch up every reader's path to the nearest
+accumulator, passing through a limit, an aggregate's init and a hold buffer, which transform per
+batch or only keep it; the figure is the largest over those paths. Every
 node in between is a per-batch transform, so what it holds is proportional to the source batch,
 and the **amplification** is a product along the path: filter selectivity, the width change
 across a project, a join's cardinality, and the lane count in force at that point. A source's
 figure is the maximum over its path, not the value at either end — a batch is rarely widest
 where it starts, and above a merge point it costs one lane's worth rather than n.
 
-Accumulators end the walk because they are where residency stops scaling with batch size: a
+A hold buffer is charged like an accumulator but does not end the walk. Accumulators end the walk because they are where residency stops scaling with batch size: a
 join's build side holds a whole relation, an aggregate's state one row per group. Those are
 constants, so they come off the budget first.
 
@@ -486,7 +487,8 @@ leave the device is a statement about which rows are worth moving across the bou
 driver then owns three behaviours keyed on that node. A batch entirely outside the interval is
 never unloaded, its handle released where it stands — trimming after unload ships an unbounded
 `skip` prefix across PCIe to drop it. The two batches straddling the ends are unloaded with a
-row range. And once satisfied, the whole plan is held and pulls cease.
+row range. And once satisfied, its root's region is held and pulls cease there; a shared source
+another root still reads keeps running.
 
 **Mid-plan** it is a real `GpuLimit` over a **one-lane** input, since an interval over N lanes
 names no rows; the node checks that itself, because a statement about its child's layout belongs
@@ -686,7 +688,9 @@ broadcast filter is the optimization #27 was archived for.)
 The driver runs one tree per query, or a *fused plan*. A fused plan is several queries' trees as
 one DAG, with one root per query. A load two of them read alike is one `SharedSource`: it loads
 each batch once, and every reader takes it. `run_roots` runs it. It calls `validate_dag` first,
-and answers each root separately, as that query answers alone. The planner builds no fused plan.
+and answers each root separately with the rows that query answers alone; their order matches
+where the root reads one source per stream, since a shared source's place in the schedule comes
+from the whole plan. The planner builds no fused plan.
 query-fuser will; until then tests build them by hand (`src/tests/share.rs`). The rules follow:
 what may be shared ([Traits](#traits)); holds, hold buffers and why nothing deadlocks
 ([The scheduling rule](#the-scheduling-rule)); limits per reader
@@ -791,7 +795,8 @@ order, forwarding one batch per visit, skipping empty sources and retiring finis
 ### The scheduling rule
 
 Two drivers, both single-threaded, push-based and deterministic. In `executor/driver/`,
-`partitioned.rs` owns the tree, the queues and the three cross-lane categories;
+`partitioned.rs` owns the plan (one tree or a fused DAG), its reader queues (`driver/queue.rs`),
+the hold buffers' stores and the three cross-lane categories;
 `single_partition.rs` owns one lane of one lane-scoped node as a state machine; and
 `scheduler.rs` decides what runs next from plain numbers, with no backend, batch or executor in
 sight. The driver also takes an optional output hook, `OutputHook`, through `run_with_hook`
@@ -845,7 +850,7 @@ argument is shorter: the build subtree is disjoint from the probe subtree, compl
 lifts the hold, and nested joins resolve outermost-first.
 
 Several roots run as one plan through `run_roots`, which calls `validate_dag` first and answers
-one batch list per root, each what that root alone answers. A single tree goes through `run`,
+one batch list per root, each with the rows that root alone answers. A single tree goes through `run`,
 which needs no such proof: a tree never needs a buffer.
 
 **The concurrency cap.** `run_roots` takes an optional cap: at most that many roots run at
@@ -854,7 +859,9 @@ first `cap` at the start and the next whenever an admitted root finishes, all it
 its limit satisfied. A root waiting for admission is held by the cap over its region, stopping
 at buffers as a join's hold does, since the cap lifts. So "the only unbounded storage is a node you can see" (below) applies to
 every root that can wait, the roots of ordinal `cap` and above: an edge into its region from outside ends at a
-buffer, or `validate_cap` refuses the plan as `UnbufferedHold` naming the root. A shared source
+buffer, or `validate_cap` refuses the plan as `UnbufferedHold` naming the root. Between that
+buffer and the source only stateless nodes may run, or the plan is refused as
+`UncappedAccumulator`: state below the buffer would escape the cap. A shared source
 is in no root's region, so it never waits on an unadmitted root: it runs on into that root's
 buffer. In `validate_dag`'s wait-for graph a waiting root waits only on the roots before it
 finishing, never on its own region, and a join inside it never waits on its cap, which lifted
@@ -900,14 +907,15 @@ ready bitset over it, per-node ready-lane counters, and hold counters — counte
 flags, since one node can sit in two joins' probe regions. Holds are regions, lists of nodes
 the index computes once (`PlanShape.regions`, `JoinShape.probe`, `PlanShape.cap_regions`): a
 building join holds its probe edge's, a satisfied limit its own node's, the cap a waiting root's. A pick is the lowest set bit. A step re-checks the node
-that ran and the parent of each of its readers and nothing else, because nothing else can have
+that ran and every node that reads it; a join's hold lifting or a root's admission under the cap
+also re-checks the hold buffers it covered (`hold_lifted`, `report_root`). Nothing else can have
 changed. A naive rescan survives as a test-only oracle compared pick by pick, since an
-incremental schedule that disagrees with it is wrong by definition. A Python model of these
-same rules — the scheduler, both drivers, the accountant, operators over pandas — is
+incremental schedule that disagrees with it is wrong by definition. A Python model of the
+single-tree rules (no shared source, reader queue, region, hold buffer, cap or retirement) — the scheduler, both drivers, the accountant, operators over pandas — is
 `scripts/exec_model/`, which is where a rule is cheapest to argue with; build-test.md says what
 it runs. Two things differ at the empty case. Its driver answers nothing where the sink received
 nothing (`partitioned_driver.py`, `results`); the engine's answers one zero-row batch under the
-sink's input columns (`Driver::answer`). Its accumulators emit one empty batch even over no
+sink's input columns (`Driver::answers`, one answer per root). Its accumulators emit one empty batch even over no
 arrival (`operators/accumulators.py`); the engine's lane that received nothing answers nothing,
 but for a keyless init, which answers its identity row. Two rules differ. The model runs the init
 as an `Exec`, per batch, a zero-row one included. And it still judges a mid-plan limit by its
@@ -920,7 +928,7 @@ merge's later lanes.
 
 ### Early exit at a limit
 
-The driver holds the subtree of every satisfied interval. It keeps the count itself for one
+The driver holds the region of every satisfied interval (on a tree, its subtree), through any hold buffer. It keeps the count itself for one
 carrier, a `GpuUnload` with a root-adjacent interval. Its
 executor is per lane and the count is across lanes, so the count cannot live in the executor;
 and nothing can signal "done" from below, because satisfaction is a fact about rows that have
@@ -1077,7 +1085,7 @@ A new node meets the rule by construction: what it owes over an empty input, it 
 input.
 
 A query's answer is the same rule one level up: a root that received nothing answers one zero-row
-batch under the sink's input schema, made by the driver (`Driver::answer`) and recorded as no
+batch under the sink's input schema, made by the driver (`Driver::answers`) and recorded as no
 node's emission, so an answer's schema never depends on how its rows ran out.
 
 ## The wire format
@@ -1614,7 +1622,7 @@ batch's validity and offset padding, and any change to the lane rule moves it ev
 node or lane count changes. Any growth shows as a regression, and the gate fails past 10 %
 (`REGRESSION_FAIL_PCT`); changing how a key hashes is expected to show some. Every real category is
 1.0 but one. The forwarders (`GpuMergePartitions`, `GpuUnion`, `GpuInterleave`) relabel lanes and
-hand batches on without a copy, so they sit at 0.0. The scatter (`GpuEmitPartitions`) is charged its
+hand batches on without a copy, so they sit at 0.0, as does `GpuHoldBuffer`, which only keeps them. The scatter (`GpuEmitPartitions`) is charged its
 bytes. The weights exist so a phase can be priced without moving the goldens that record it. Three
 placeholder phases sit at 0.0 and one category names no node at all — kept because dropping a
 category rewrites the line list of every committed cost golden.

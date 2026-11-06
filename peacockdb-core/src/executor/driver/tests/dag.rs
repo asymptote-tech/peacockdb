@@ -1,5 +1,5 @@
-//! Several roots over shared sources: each root answers what it answers alone, a shared batch
-//! is loaded, held and released once, and every reader takes every batch.
+//! Several roots over shared sources: each root answers the rows it answers alone, a shared
+//! batch is loaded, held and released once, and every reader takes every batch.
 
 use std::sync::Arc;
 
@@ -424,4 +424,33 @@ fn a_limit_retiring_a_reader_keeps_the_charge_a_buffer_holds() {
     assert_eq!(rows_of(&fused.answers[1]).iter().sum::<usize>(), 1);
     assert_accounted(&fused.report);
     assert_conserved_over(&refs, &fused.report);
+}
+
+/// A fused root answers the rows it answers alone, not always in the same order. Root 1
+/// unions a source of its own with one it shares, and the shared source's height and index
+/// come from the whole DAG, not from root 1. So the order holds only where a root reads one
+/// source per stream; here it is pinned, so a scheduler change shows.
+#[test]
+fn a_fused_root_answers_its_rows_alone_though_not_always_in_their_order() {
+    let script = three("s").source("t", vec![vec![spec(1, 8), spec(2, 16), spec(3, 24)]]);
+    let s = shared("s", 1);
+    let roots = vec![
+        unload(filter(read(&s))),
+        unload(union(vec![source("t", 1), read(&s)])),
+    ];
+    let fused = run_roots(&refs(&roots), &script);
+    let alone = run(
+        unload(union(vec![source("t", 1), source("s", 1)])).as_ref(),
+        &script,
+    );
+    let (fused_order, alone_order) = (rows_of(&fused.answers[1]), rows_of(&alone.batches));
+    let sorted = |mut rows: Vec<usize>| {
+        rows.sort();
+        rows
+    };
+    assert_eq!(sorted(fused_order.clone()), sorted(alone_order.clone()));
+    // Alone, T is the lower-indexed source and drains first; fused, S was numbered under
+    // root 0, ahead of T, and drains first.
+    assert_eq!(alone_order, vec![1, 2, 3, 10, 20, 30]);
+    assert_eq!(fused_order, vec![10, 20, 30, 1, 2, 3]);
 }

@@ -10,7 +10,8 @@ impl fmt::Display for PlanError {
             Self::Unsupported(what) => write!(f, "unsupported: {what}"),
             Self::Invalid(what)
             | Self::UnbufferedHold { what, .. }
-            | Self::HoldCycle { what, .. } => write!(f, "invalid plan: {what}"),
+            | Self::HoldCycle { what, .. }
+            | Self::UncappedAccumulator { what, .. } => write!(f, "invalid plan: {what}"),
         }
     }
 }

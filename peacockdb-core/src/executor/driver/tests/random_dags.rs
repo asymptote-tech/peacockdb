@@ -7,6 +7,11 @@
 //! A reader's cursor never blocks its producer, so an unbuffered hold does not deadlock: the
 //! queue in front of it grows. That growth is what the buffer rule forbids, and what tells an
 //! accepted DAG from a refused one here.
+//!
+//! The generator also draws buffers above accumulators. In a root that waits for the cap, such
+//! an accumulator runs below the cap's hold and keeps its state outside it, which no buffer
+//! answers: `validate_dag` refuses it as `UncappedAccumulator`, and those DAGs are set aside
+//! from the "no refusal is false" arm, by an oracle written from the regions' definitions.
 
 use std::num::NonZeroUsize;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -14,7 +19,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use super::mock::{Mock, Script, spec};
 use super::{Driver, refs};
 use crate::executor::{FusedRun, RunError};
-use crate::plan::{GpuLoadParquet, GpuNode, SharedSource, new_hold_buffer, validate_dag};
+use crate::plan::{GpuLoadParquet, GpuNode, PlanDag, SharedSource};
+use crate::plan::{new_hold_buffer, validate_dag};
 use crate::tests::plans::{coalesce_all, filter, project, projected_join, source, unload};
 use crate::tests::share::buffer_unbuffered_holds;
 
@@ -116,6 +122,24 @@ fn cap_of(seed: u64, roots: usize) -> Option<NonZeroUsize> {
     NonZeroUsize::new(seed as usize % roots)
 }
 
+/// Whether a root waiting for `cap` has an accumulator below one of its buffers: in its region
+/// through buffers and not in the region the cap holds. The generator's accumulators are the
+/// join and the coalesce under its build.
+fn keeps_state_below_a_waiting_buffer(roots: &[&dyn GpuNode], cap: Option<NonZeroUsize>) -> bool {
+    let dag = PlanDag::of(roots);
+    let admitted = cap.map_or(dag.roots.len(), NonZeroUsize::get);
+    dag.roots.iter().skip(admitted).any(|root| {
+        let held = dag.held_region_of_node(*root);
+        dag.region_of_node(*root).into_iter().any(|node| {
+            !held.contains(&node)
+                && matches!(
+                    dag.nodes[node].node.name(),
+                    "GpuHashJoin" | "GpuCoalesceAllBatches"
+                )
+        })
+    })
+}
+
 /// The node whose queues held more than one batch per lane at once, if any.
 fn grown(fused: &FusedRun) -> Option<usize> {
     let report = &fused.report;
@@ -170,19 +194,22 @@ fn every_dag_validate_dag_accepts_finishes() {
 #[test]
 fn no_valid_dag_is_refused() {
     let script = script();
-    let mut buffered = 0;
+    let (mut buffered, mut stateful) = (0, 0);
     for seed in 0..500 {
         let roots = random_dag(seed);
         let shape = format!("{roots:?}");
         let cap = cap_of(seed, roots.len());
+        let stateful_here = keeps_state_below_a_waiting_buffer(&refs(&roots), cap);
         let outcome = catch_unwind(AssertUnwindSafe(|| buffer_unbuffered_holds(roots, cap)));
-        let (roots, inserted) = outcome.unwrap_or_else(|why| {
-            let why = why
-                .downcast_ref::<String>()
-                .cloned()
-                .unwrap_or_else(|| "a panic with no message".to_string());
-            panic!("seed {seed}: {why}\n{shape}")
-        });
+        let (roots, inserted) = match (outcome, stateful_here) {
+            (Ok(buffered), false) => buffered,
+            (Err(why), true) if message_of(&*why).contains(UNCAPPED) => {
+                stateful += 1;
+                continue;
+            }
+            (Ok(_), true) => panic!("seed {seed}: state below a waiting buffer, accepted\n{shape}"),
+            (Err(why), _) => panic!("seed {seed}: {}\n{shape}", message_of(&*why)),
+        };
         let refs = refs(&roots);
         assert_eq!(validate_dag(&refs, cap), Ok(()), "seed {seed}");
         let fused = simulate(&refs, &script, cap).unwrap_or_else(|said| {
@@ -195,4 +222,17 @@ fn no_valid_dag_is_refused() {
         buffered > 50,
         "only {buffered} of 500 needed a buffer: the generator is too tame"
     );
+    assert!(
+        stateful > 0,
+        "no DAG kept state below a waiting root's buffer: that refusal is not tested"
+    );
+}
+
+/// The phrase `UncappedAccumulator`'s message carries, which the fixture's panic repeats.
+const UNCAPPED: &str = "so its state would live outside the cap";
+
+fn message_of(why: &(dyn std::any::Any + Send)) -> String {
+    why.downcast_ref::<String>()
+        .cloned()
+        .unwrap_or_else(|| "a panic with no message".to_string())
 }

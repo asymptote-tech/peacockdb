@@ -1204,8 +1204,10 @@ pub(crate) type OutputHook<'a, B> =
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
 pub(crate) struct FusedRun {
-    /// One answer per root, in the order the roots were given; each is what that root
-    /// alone answers, in the order it alone answers it.
+    /// One answer per root, in the order the roots were given; each holds the rows that root
+    /// alone answers. The same rows; the same order where the root reads one source per
+    /// stream. Where it merges streams, a shared source is scheduled by its place in the
+    /// whole DAG, so the batches may come in another order.
     pub(crate) answers: Vec<Vec<CpuBatch>>,
     /// The run's figures over the whole DAG, indexed by `PlanIndex::build_roots`'s
     /// pre-order. `batches` is empty here: `answers` carries them.

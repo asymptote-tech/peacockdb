@@ -73,6 +73,15 @@ pub enum PlanError {
     },
     /// Holds that wait on each other, in cycle order, as `PlanDag::of(roots)` indices.
     HoldCycle { holds: Vec<usize>, what: String },
+    /// An accumulator below the buffer of a root that waits for the cap, between it and the
+    /// shared source the buffer answers: the cap holds the root only down to its buffer, so
+    /// this state would live while the root waits, outside the cap. `root` and `node` are
+    /// `PlanDag::of(roots)` indices; `what` names both.
+    UncappedAccumulator {
+        root: usize,
+        node: usize,
+        what: String,
+    },
 }
 
 // The expression IR. Types and literals are DataFusion's own — the coercions and the
@@ -1573,7 +1582,8 @@ pub(crate) fn validate_dag(
 /// admission, and its region stopping at buffers is a hold: an edge into it from outside ends
 /// at a `GpuHoldBuffer`, or the plan is refused as [`PlanError::UnbufferedHold`] naming the
 /// root. A shared source a waiting root reads is outside its region, so it runs on into the
-/// buffer.
+/// buffer. What lies below such a buffer runs while the root waits, so it must hold no
+/// state: an accumulator there is refused as [`PlanError::UncappedAccumulator`].
 // query-fuser calls it on its own; `validate_dag` reaches the same rule inside `validate`.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn validate_cap(

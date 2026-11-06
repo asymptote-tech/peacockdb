@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 8008 test cases — Rust 6175, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 8011 test cases — Rust 6178, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3620 cases: `--lib` 1105, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3623 cases: `--lib` 1108, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -419,7 +419,7 @@ a `CpuBatch`'s share holding the same Arrow buffers as the batch, column by colu
 
 *subcomponent*
 
-| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 166 |
+| Drivers over a mock backend | [executor::driver::tests](../peacockdb-core/src/executor/driver/tests/mod.rs) | 167 |
 |---|---|--:|
 
 flow, backpressure, limits and accounting, asserted on calls rather than rows — pull counts,
@@ -430,7 +430,9 @@ the calls not made and a mid-plan limit judged by the rows it emitted, never its
 each node emitted and consumed (the two records the corpus goldens
 read), the accountant through the drivers, a backend failure or a call refused before it runs
 stopping the query with the accounting still reconciling, a satisfied limit excusing no root
-that never ended, a limit satisfied before any step still letting the next capped root in,
+that never ended, a limit satisfied before any step still letting the next capped root in, a
+fused root answering its rows alone with their order pinned where it unions a shared source
+with its own,
 the execution golden's text with every number chosen by the
 script — over several roots a shared node rendered once — every empty scatter lane dropped while a lane that owes its probe reaches `SetBuild` with no
 batch, a zero-row build draining like none, and the mock against its own
@@ -462,8 +464,9 @@ uncapped schedule deterministic, and capped roots with joins accepted and answer
 And `validate_dag` tied
 to the driver over 500 random DAGs — several roots, shared sources, joins, buffers on random
 edges, and no cap or one below the root count: every DAG it accepts finishes, reconciles and never queues more than a batch per lane;
-every DAG the driver cannot finish it refused; and every DAG with each unbuffered hold buffered
-is accepted and finishes
+every DAG the driver cannot finish it refused; every DAG with an accumulator below a waiting
+root's buffer refused as `UncappedAccumulator`; and every other DAG with each unbuffered hold
+buffered is accepted and finishes
 
 | CPU backend executors | [executor::cpu_backend::tests](../peacockdb-core/src/executor/cpu_backend/tests/mod.rs) | 92 |
 |---|---|--:|
@@ -827,7 +830,7 @@ over every line of `testdata/fixtures/row-range-clamp.txt`, the case table C++'s
 DataFusion's expression, this engine's, and DataFusion's again must all read the same column
 out of the same rows — asserted on the array each produces, not on shape
 
-| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs), [plan::layout::tests](../peacockdb-core/src/plan/layout/tests.rs), [plan::aggregate::tests](../peacockdb-core/src/plan/aggregate/tests.rs) | 58 |
+| Plan types | [plan::validate::tests](../peacockdb-core/src/plan/validate/tests.rs), [plan::layout::tests](../peacockdb-core/src/plan/layout/tests.rs), [plan::aggregate::tests](../peacockdb-core/src/plan/aggregate/tests.rs) | 60 |
 |---|---|--:|
 
 validation's shape rules — a plan ends in a crossing, every root is a sink and nothing reads
@@ -842,8 +845,9 @@ each other's probe refused, each passing with a buffer on the edge, no tree ever
 the wait-for graph's cycle finder and its message, a join waiting on the hold its build sits
 in, `validate_dag` refusing what its parts refuse, and the fixture that buffers every refused
 edge. Then the cap: a waiting root's unbuffered reader of a shared source refused naming the
-first root that waits, a cap at or above the root count needing no buffer, and a waiting root
-never waiting on its own region nor a join on its own root's cap
+first root that waits, a cap at or above the root count needing no buffer, a waiting root
+never waiting on its own region nor a join on its own root's cap, and an accumulator below a
+waiting root's buffer refused by name while stateless nodes there are accepted
 
 | Plan DAG walk | [plan::dag::tests](../peacockdb-core/src/plan/dag/tests.rs) | 10 |
 |---|---|--:|
