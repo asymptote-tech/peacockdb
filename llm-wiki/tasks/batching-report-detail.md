@@ -135,6 +135,7 @@ Branch `ENS-batching-report`, forked from `ENS-query-fuser` at `413366c4` on 202
   - **N1** (test first, red then 37 passed): when `<batch>.loads.tsv` exists and `failed.tsv`
     lists the batch, the row reads the file and a line under the split table says so, with the
     reason; no failure, no line.
+- 2026-11-06: review round 3: 0 blocking, 0 important, 2 nits (the workflow header comment and a build-test.md sentence, both fixed by the coordinator). Board `completing`; completeness pass dispatched.
 
 ## Review round 1 (2026-11-06)
 

@@ -1791,11 +1791,11 @@ What the arrows are there to make checkable:
 
 `pipeline.yml` runs on pushes to master and on every PR, but not on documentation —
 `**.md` and `llm-wiki/**`, less `llm-wiki/reports/query-batching.md`, which a step checks
-against its inputs. It takes two layers: the triggers' `paths:` lists (`'**'`, the two docs
-patterns negated, the page re-included; GitHub documents `!` for `paths:`, not
-`paths-ignore`) skip a wholly-documentation diff, and the **changes** job skips a
-documentation-only push to a PR that carries code, which the trigger cannot see because it
-judges the whole PR diff. The job's grep and the lists must name the same files. Both fail
+against its inputs. It takes two layers. The triggers'
+`paths:` lists skip a wholly-documentation diff. Each is `'**'`, the two docs patterns negated,
+then the page re-included; GitHub documents `!` for `paths:`, not for `paths-ignore`. The
+**changes** job skips a documentation-only push to a PR that carries code, which the trigger
+cannot see because it judges the whole PR diff. The job's grep and the lists must name the same files. Both fail
 open. A `workflow_dispatch` always runs in full.
 
 No peacockdb-core test reads `llm-wiki/`, so a tickets-only commit cannot turn the rust tier

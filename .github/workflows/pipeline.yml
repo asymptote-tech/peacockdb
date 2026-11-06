@@ -1,18 +1,11 @@
 name: CI Pipeline
 
 # Documentation-only changes skip the whole pipeline. Nothing under llm-wiki/ or any
-# .md file is read by a build, a test or a golden — verified by grep, and the rule is
-# only safe while that stays true, so a doc file that ever becomes an input (a fixture,
-# a generated table someone asserts on) has to come off this list. One has:
-# llm-wiki/reports/query-batching.md, which a step asserts is what batching_report.py
-# makes. Both triggers re-include it and the `changes` job counts it as code.
-#
-# The triggers are `paths:` lists, everything less the docs: GitHub documents `!` and a
-# later re-include for `paths:` only, never for paths-ignore. A run starts when any changed
-# file is left in, so a commit touching the spec and the code it describes still runs in
-# full. No status check is required on master (no ruleset enforcement, no
-# required_status_checks), so a skipped run leaves a PR mergeable rather than stuck waiting
-# on a check that will never report.
+# .md file is read by a build, a test or a golden, so a doc file that becomes an input
+# has to come off this list. One has: llm-wiki/reports/query-batching.md, which a step
+# checks against batching_report.py. Both `paths:` triggers re-include it and the
+# `changes` job counts it as code. A run starts when any changed file is left in. No
+# status check is required on master, so a skipped run leaves a PR mergeable.
 on:
   push:
     branches: [master]
