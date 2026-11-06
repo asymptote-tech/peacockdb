@@ -116,3 +116,12 @@ Component-level API: none beyond what dag-driver adds.
   `cost-report` (`tests/test_source_formatting/`) enforces that no file outside `prototypes/` and
   the tests names `prototypes::`. `architecture.md` gains a short "Prototypes" section with that
   rule.
+
+## Signoff (2026-11-06)
+
+Solved under its constraints. Every Done-when item and the Profiles paragraph are met: all 8 sf40 batches measured on the H100 with `answers=match`, 7-26 % faster than their queries run alone, all from one binary, profiled. Three review rounds and a completeness pass. Shortcuts and limits, all recorded in `query-fuser-detail.md`:
+- The hold ledger reads the shared loads as the last rebuild left them, since groups are rebuilt at the end of each resolve. A mid-resolve re-read overstates it: tpcds first10 is +97 ms against round 1. Accepted.
+- A join's build child that is itself a shared load is priced as the reader's own load. tp1_single plans never have that shape.
+- Buffers left when a group dissolves are kept (at most 0.13 GB).
+- The profiles were taken before the merge hint was restricted to cross-query groups. The executed plans are identical, so they stand.
+- The fused format and the hold and cap rules live only in the detail file (spec item 7). Move them somewhere permanent before archiving it.
