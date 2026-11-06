@@ -5,7 +5,7 @@
 //! source and exists only to derive the real ones. The shape does not move between them.
 //!
 //! `translator` and `memory_estimation` are subcomponents, so only this file may reach them;
-//! the four entry points below are what a test drives instead.
+//! the entry points below are what a test, or a prototype, drives instead.
 mod memory_estimation;
 mod not_in;
 mod nullability;
@@ -20,11 +20,11 @@ use std::sync::Arc;
 
 use datafusion::physical_plan::ExecutionPlan;
 
-use crate::plan::{GpuNode, PlanError};
+use crate::plan::{Batching, GpuNode, PlanError, RowGroupMeta, ScanMetadata};
 
 // Only the two `#[cfg(test)]` entry points below name these.
 #[cfg(test)]
-use crate::plan::{Batching, Expr};
+use crate::plan::Expr;
 #[cfg(test)]
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 #[cfg(test)]
@@ -116,6 +116,29 @@ pub(crate) fn estimate_roots(
     budget: u64,
 ) -> Result<MemoryModel, PlanError> {
     memory_estimation::estimate_roots(roots, budget)
+}
+
+/// The row groups `keep` names in the parquet file at `path`, with their rows and their bytes
+/// over the file ordinals `projected`, and whether each projected column can hold a NULL in
+/// them. The translator's metadata pass, for a scan the prototypes rebuild.
+#[allow(dead_code)] // callers: prototypes::fuser and its tests, both outside a release build
+pub(crate) fn row_group_metadata(
+    path: &str,
+    projected: &[usize],
+    keep: Option<&[u32]>,
+) -> Result<ScanMetadata, PlanError> {
+    translator::row_group_metadata(path, projected, keep)
+}
+
+/// Surviving row groups cut into `n_partitions` lanes and then into batches, as the translator
+/// cuts a scan's.
+#[allow(dead_code)] // callers: prototypes::fuser and its tests, both outside a release build
+pub(crate) fn partition(
+    survivors: &[RowGroupMeta],
+    n_partitions: usize,
+    batching: Batching,
+) -> Result<Vec<Vec<Vec<u32>>>, PlanError> {
+    translator::partition(survivors, n_partitions, batching)
 }
 
 /// DataFusion's `NOT IN` is two-valued and so wrong wherever a key can be NULL (#80). This

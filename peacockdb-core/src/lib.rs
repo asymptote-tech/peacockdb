@@ -4,7 +4,8 @@
 //! vocabulary — the nodes, the layout and schema they declare, and the rules a tree has to
 //! satisfy. `wire` is what crosses to the C++ side. `planner` builds a plan, `executor` runs
 //! one, and `plan_text` renders any of it. `common` is the row-byte formula all four price
-//! by. `test_support` is the harness's and exists only behind its feature. The reasons
+//! by. `test_support` is the harness's and exists only behind its feature, as does
+//! `prototypes`, code that measures an idea and that no engine module may name. The reasons
 //! behind each shape are in `llm-wiki/architecture.md`.
 
 // Bare `pub` claims the CLI calls the item; the lint holds the claim once the components'
@@ -19,6 +20,8 @@ pub mod executor;
 pub mod plan;
 pub mod plan_text;
 pub mod planner;
+#[cfg(feature = "test-support")]
+pub mod prototypes;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 #[cfg(test)]

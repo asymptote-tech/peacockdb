@@ -3,7 +3,7 @@
 //!
 //! Two rewrites and two wraps. A rebatcher and a drained lane change the tree — one
 //! inserts a node, the other moves a lane's row groups to its neighbour — and are built on
-//! [`rebuild`](super::rebuild::rebuild). Zero-row batches and a degenerate hash are
+//! [`rebuild`](crate::plan::rebuild). Zero-row batches and a degenerate hash are
 //! behaviour no node carries, so they wrap the source and emit executors of a backend
 //! otherwise the CPU one. Lane counts are deliberately absent: `target_partitions` varies
 //! them through the planner already.
@@ -33,7 +33,8 @@ use crate::plan::{
     NodeRef, as_node_ref,
 };
 
-use super::rebuild::{key, lanes_of, rebuild, scan_of, schema_of, sorted, source};
+use super::rebuild::{key, lanes_of, schema_of, sorted, source};
+use crate::plan::{rebuild, scan_of};
 
 // The CPU backend's executors, named the way production code names them: through the
 // `Backend` impl, since `cpu_backend` is a subcomponent no crate-level module can see.

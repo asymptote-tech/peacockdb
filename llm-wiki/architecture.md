@@ -17,7 +17,7 @@ state stays resident, so the query fits a budget the table does not.
 ## Contents
 
 [Planning](#planning) · [The node set](#the-node-set) · [Joins](#joins) ·
-[Execution](#execution) · [The wire format](#the-wire-format) ·
+[Execution](#execution) · [Prototypes](#prototypes) · [The wire format](#the-wire-format) ·
 [Interfaces](#interfaces) · [Rehash and the comet hash](#rehash-and-the-comet-hash) ·
 [C++ executor layout](#c-executor-layout) · [Column indexing](#column-indexing) ·
 [cuDF options](#cudf-options) · [Node display](#node-display) ·
@@ -690,8 +690,8 @@ one DAG, with one root per query. A load two of them read alike is one `SharedSo
 each batch once, and every reader takes it. `run_roots` runs it. It calls `validate_dag` first,
 and answers each root separately with the rows that query answers alone; their order matches
 where the root reads one source per stream, since a shared source's place in the schedule comes
-from the whole plan. The planner builds no fused plan.
-query-fuser will; until then tests build them by hand (`src/tests/share.rs`). The rules follow:
+from the whole plan. The planner builds no fused plan. The query-fuser prototype does
+([Prototypes](#prototypes)), and tests build them by hand (`src/tests/share.rs`). The rules follow:
 what may be shared ([Traits](#traits)); holds, hold buffers and why nothing deadlocks
 ([The scheduling rule](#the-scheduling-rule)); limits per reader
 ([Early exit at a limit](#early-exit-at-a-limit)); one charge per batch
@@ -1087,6 +1087,26 @@ input.
 A query's answer is the same rule one level up: a root that received nothing answers one zero-row
 batch under the sink's input schema, made by the driver (`Driver::answers`) and recorded as no
 node's emission, so an answer's schema never depends on how its rows ran out.
+
+## Prototypes
+
+Prototype code measures an idea; it does not ship. It lives in
+`peacockdb-core/src/prototypes/<name>/`. The component is compiled only under `test-support`, as
+`test_support/` is, so `cargo build` cannot name it. Its facade, `prototypes/mod.rs`, follows
+`test_support`'s rules. Each prototype's module doc says what it is and the scale it runs at.
+
+**No file outside `prototypes/` and the tests names `prototypes::`.** The engine never depends
+on a prototype. `cost-report`'s `test_source_formatting/prototypes.rs` enforces it.
+
+- **`fuser`** (query-fuser). It fuses N tp1_single plans into one DAG on the driver's fused
+  plans ([Execution](#execution)). Only sources are merged: the scans of one file become one
+  `SharedSource` over the union of their columns and row groups. Each reader selects its own
+  columns through a column-ref `GpuProject`, or reads the source itself. Three shapes stay
+  unshared, with the reason recorded: a scan a limit cut to a prefix (`limit-cut`), a scan whose
+  columns would gain NULLs (`nulls:<col>`), and a rows-only scan beside column scans
+  (`rows-only`). Every reader of a shared scan inside a hold is buffered or re-reads the table,
+  as a chooser decides. It runs at sf40 only. Decisions and formats:
+  `tasks/query-fuser-detail.md`.
 
 ## The wire format
 

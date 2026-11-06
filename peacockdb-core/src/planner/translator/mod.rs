@@ -23,6 +23,7 @@ use crate::plan::Expr;
 use crate::plan::GpuNode;
 use crate::plan::GpuUnload;
 use crate::plan::PlanError;
+use crate::plan::{RowGroupMeta, ScanMetadata};
 mod aggregate;
 mod common;
 mod expr;
@@ -106,6 +107,24 @@ struct PerBatchSort {
     node: Box<dyn GpuNode>,
     keys: Vec<ColumnOrder>,
     fetch: Option<usize>,
+}
+
+/// The scan mapping's metadata pass over named row groups, relayed for `planner/mod.rs`.
+pub(crate) fn row_group_metadata(
+    path: &str,
+    projected: &[usize],
+    keep: Option<&[u32]>,
+) -> Result<ScanMetadata, PlanError> {
+    scan_mapping::row_group_metadata(path, projected, keep)
+}
+
+/// The scan mapping's partitioner, relayed for `planner/mod.rs`.
+pub(crate) fn partition(
+    survivors: &[RowGroupMeta],
+    n_partitions: usize,
+    batching: Batching,
+) -> Result<Vec<Vec<Vec<u32>>>, PlanError> {
+    scan_mapping::partition(survivors, n_partitions, batching)
 }
 
 /// One DataFusion physical expression in this engine's own vocabulary.

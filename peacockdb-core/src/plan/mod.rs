@@ -20,6 +20,7 @@ mod interval;
 mod join;
 mod layout;
 mod partition_ops;
+mod rebuild;
 mod shared;
 mod source;
 mod union;
@@ -1023,6 +1024,19 @@ pub(crate) struct GpuHoldBuffer {
 #[allow(dead_code)]
 pub(crate) fn new_hold_buffer(input: Box<dyn GpuNode>) -> GpuHoldBuffer {
     hold_buffer::over(input)
+}
+
+/// `node` rebuilt over `children`, the rewritten children in the order [`GpuNode::children`]
+/// reports them. Handed a node's own children back it is the identity.
+#[allow(dead_code)] // callers: src/tests and prototypes::fuser, both outside a release build
+pub(crate) fn rebuild(node: &dyn GpuNode, children: Vec<Box<dyn GpuNode>>) -> Box<dyn GpuNode> {
+    rebuild::rebuild(node, children)
+}
+
+/// The metadata read a loader was built from, back out of the fields it kept.
+#[allow(dead_code)] // callers: src/tests and prototypes::fuser, both outside a release build
+pub(crate) fn scan_of(load: &GpuLoadParquet) -> ScanMetadata {
+    rebuild::scan_of(load)
 }
 
 /// Output lanes are the sum of its branches', and output lane k is served by exactly one
