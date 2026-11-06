@@ -9,14 +9,19 @@
 //! `llm-wiki/tasks/query-fuser-detail.md` records the decisions.
 
 mod baseline;
+mod cap;
 mod fuse;
+mod holds;
 mod lists;
+mod loads;
 mod merge;
 mod pipeline;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::path::Path;
 
 use crate::plan::{Batching, GpuNode, PlanError};
 use crate::test_support::{BenchSection, DeviceCase};
@@ -66,6 +71,8 @@ pub(crate) struct HeldReader {
     /// project inserted to select from it, up to the hold's entry — `(join, probe)` or
     /// `(root, 0)`.
     pub(crate) path: Vec<(usize, usize)>,
+    /// The reader's own load, the member of the group it stands in for: what a re-read loads.
+    pub(crate) member: Origin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,6 +129,13 @@ pub(crate) struct Fused {
     pub(crate) origins: Vec<Vec<Origin>>,
     /// The queries' own trees, which `origins` index and a re-read loads from.
     originals: Vec<Box<dyn GpuNode>>,
+}
+
+impl Fused {
+    /// The node of a query's own tree that `origin` names.
+    pub(crate) fn original(&self, origin: Origin) -> &dyn GpuNode {
+        fuse::original(self, origin)
+    }
 }
 
 /// Decides one held reader. It sees the plan as fused so far.
@@ -278,4 +292,173 @@ pub(crate) fn pipeline_hint(load_us: &[u64], roots: &[RootNeeds]) -> PipelineHin
 /// baseline trailer's `execute_us`.
 pub(crate) fn pipeline_inputs(fused: &Fused, baseline: &Baseline) -> (Vec<u64>, Vec<RootNeeds>) {
     pipeline::pipeline_inputs(fused, baseline)
+}
+
+/// One case's `loads.tsv` rows: a load's time by the query and its `CudfScan` recipe seq.
+pub(crate) struct LoadTimes {
+    by_key: HashMap<(String, u64), u64>,
+}
+
+impl LoadTimes {
+    /// The load's `load_us`. Panics naming the key where `loads.tsv` has no row: no fallback.
+    pub(crate) fn load_us(&self, query: &str, recipe_seq: u64) -> u64 {
+        loads::load_us(self, query, recipe_seq)
+    }
+}
+
+/// The rows of `path` (pinned-loads' `loads.tsv`) for one case: `dataset`, `sf` and `mode` as
+/// the file spells them. The `#` preamble is skipped.
+pub(crate) fn read_load_times(path: &Path, dataset: &str, sf: &str, mode: &str) -> LoadTimes {
+    loads::read_load_times(path, dataset, sf, mode)
+}
+
+/// One edge of a held reader's path, as the hold rule prices it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EdgeCost {
+    pub(crate) edge: (usize, usize),
+    /// What a buffer here would keep, the builds of the joins it runs early included.
+    pub(crate) bytes: u64,
+    pub(crate) allowed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HoldInputs {
+    pub(crate) reread_us: u64,
+    /// In path order, lowest first; the edge right above the shared load is not among them.
+    pub(crate) edges: Vec<EdgeCost>,
+}
+
+/// The allowed edge whose recorded bytes are smallest; a tie goes to the lower edge, which runs
+/// less early.
+pub(crate) fn place_buffer(edges: &[EdgeCost]) -> Option<&EdgeCost> {
+    holds::place_buffer(edges)
+}
+
+/// The hold rule's choice: a buffer at [`place_buffer`]'s edge where one exists and its bytes
+/// fit `headroom_bytes`, else a re-read, which costs `reread_us` either way and is recorded.
+/// `why` says which: `fits: {bytes} <= {headroom}`, `too large: {bytes} > {headroom}`, or
+/// `no edge: …` with the reason none was allowed.
+pub(crate) fn decide(inputs: &HoldInputs, headroom_bytes: u64) -> HoldDecision {
+    holds::decide(inputs, headroom_bytes)
+}
+
+/// The hold rule's numbers for one held reader, all the sf40 baseline's, per origin node:
+/// - An edge's bytes are its child's Σ `batch_bytes`; a project inserted to select from the
+///   shared load stands for the reader's own load. The edge right above the shared load carries
+///   the union, which nothing recorded, so it is left out.
+/// - A buffer above a join runs that join early, so it also keeps the join's build child's
+///   Σ `batch_bytes`, for every join below it on the path.
+/// - An edge is allowed where every join below it on the path recorded no more rows
+///   (Σ `batch_rows`) than its child on the path: it did not increase cardinality there. Under
+///   the cap's hold it is also allowed only where nothing at or under it keeps state, which a
+///   waiting root may not have below its buffer.
+/// - A re-read costs the reader's own load's `loads.tsv` `load_us`, keyed by `names` and the
+///   seq of its `CudfScan` recipe in `seqs` (per query, by pre-order).
+pub(crate) fn hold_inputs(
+    fused: &Fused,
+    held: &HeldReader,
+    baseline: &Baseline,
+    loads: &LoadTimes,
+    seqs: &[Vec<Option<u64>>],
+    names: &[String],
+) -> HoldInputs {
+    holds::hold_inputs(fused, held, baseline, loads, seqs, names)
+}
+
+/// The benchmark's chooser: [`decide`] against the headroom left, spending it as it buffers.
+pub(crate) struct HoldLedger<'b> {
+    pub(crate) pool_bytes: u64,
+    baseline: &'b Baseline,
+    loads: &'b LoadTimes,
+    seqs: &'b [Vec<Option<u64>>],
+    names: &'b [String],
+    /// Shared loads, buffers and the largest root, from [`cap_inputs`] at the first decision.
+    charged: Option<u64>,
+    /// The bytes of the buffers this ledger chose.
+    spent: u64,
+}
+
+impl<'b> HoldLedger<'b> {
+    pub(crate) fn new(
+        pool_bytes: u64,
+        baseline: &'b Baseline,
+        loads: &'b LoadTimes,
+        seqs: &'b [Vec<Option<u64>>],
+        names: &'b [String],
+    ) -> Self {
+        Self {
+            pool_bytes,
+            baseline,
+            loads,
+            seqs,
+            names,
+            charged: None,
+            spent: 0,
+        }
+    }
+
+    /// [`decide`] with headroom `budget − (S + B + max root_bytes)`, saturating: `S` and the
+    /// roots as [`cap_inputs`] charged them at the first call, `B` the buffers since. So readers
+    /// are decided in the order validation names them, and each buffer spends what it keeps.
+    pub(crate) fn choose(&mut self, fused: &Fused, held: &HeldReader) -> HoldDecision {
+        holds::choose(self, fused, held)
+    }
+}
+
+/// The share of the pool the cap rule keeps back for what the accountant's peak leaves out.
+pub(crate) const MARGIN_PERCENT: u64 = 10;
+
+pub(crate) struct CapInputs {
+    pub(crate) pool_bytes: u64,
+    pub(crate) shared_bytes: Vec<u64>,
+    pub(crate) buffer_bytes: Vec<u64>,
+    pub(crate) root_bytes: Vec<u64>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct CapDecision {
+    pub(crate) cap: NonZeroUsize,
+    pub(crate) budget_bytes: u64,
+    pub(crate) estimate_bytes: u64,
+    pub(crate) over_budget: bool,
+}
+
+/// `pool_bytes − pool_bytes × MARGIN_PERCENT / 100`: what the cap rule may spend.
+pub(crate) fn budget_of(pool_bytes: u64) -> u64 {
+    cap::budget_of(pool_bytes)
+}
+
+/// The concurrency cap. The pool is the rmm pool the run installed, the device memory the
+/// engine may hold; the margin covers what the accountant's peak (a lower bound) leaves out.
+/// - `S = Σ shared_bytes` and `B = Σ buffer_bytes` are charged whatever the cap: the cap bounds
+///   executor state only, and a buffer keeps its batches until its hold lifts.
+/// - Roots are taken largest first; `cap` is the largest k with `S + B + Σ top k ≤ budget`, and
+///   at least 1. `estimate_bytes = S + B + Σ top cap`; `over_budget = S + B + max > budget`, and
+///   the run goes ahead regardless.
+pub(crate) fn cap_for(inputs: &CapInputs) -> CapDecision {
+    cap::cap_for(inputs)
+}
+
+/// The cap rule's inputs, from the sf40 baseline. Per shared load: its member with the largest
+/// recorded load `batch_bytes`, scaled from that member's planned bytes to the union's. Per
+/// buffer: its decision's bytes. Per root: its baseline `peak_bytes` less the recorded bytes of
+/// its loads that are now shared, saturating; a re-read load is not shared, so it stays.
+pub(crate) fn cap_inputs(fused: &Fused, baseline: &Baseline, pool_bytes: u64) -> CapInputs {
+    cap::cap_inputs(fused, baseline, pool_bytes)
+}
+
+/// `measured × plan_to / plan_from` without overflow; `measured` itself where `plan_from` is 0.
+pub(crate) fn scaled_bytes(measured: u64, plan_from: u64, plan_to: u64) -> u64 {
+    cap::scaled_bytes(measured, plan_from, plan_to)
+}
+
+/// `fused` under the cap its numbers give: a cap below the root count makes roots wait, a hold
+/// too, so their readers of shared loads are decided by `ledger` ([`resolve_cap_holds`]) and
+/// the cap recomputed, until it no longer falls.
+pub(crate) fn settle(
+    fused: Fused,
+    baseline: &Baseline,
+    ledger: &mut HoldLedger<'_>,
+) -> Result<(Fused, CapDecision), PlanError> {
+    cap::settle(fused, baseline, ledger)
 }

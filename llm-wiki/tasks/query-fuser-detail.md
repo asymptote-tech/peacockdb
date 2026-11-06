@@ -96,6 +96,60 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
   - A shared source's load time is the largest over the origins its fused node holds *now*:
     after a re-read the re-reading member is no longer one of them.
   - Extra test beyond the plan's: `a_root_needing_two_sources_waits_for_both`.
+- 2026-11-06, Task 5 (developer). Checkpoint `fuser: buffer or re-read, and the concurrency
+  cap rule` reported, not committed. `--lib` +24 (10 `holds`, 11 `cap`, 3 `loads`).
+  - **`HeldReader` gained `member: Origin`**, the reader's own load. The re-read cost
+    (`loads.tsv` by that load's seq) and an inserted project's bytes both need it, and Task 1's
+    walk already knew it; `Walk::held_reader` now returns it inside the struct.
+  - **Under the cap's hold, an edge is allowed only where nothing at or under it keeps
+    state** (`plan::holds_state`, now relayed by a `plan/mod.rs` delegate from
+    `validate.rs`). dag-driver refuses a waiting root whose buffer has an accumulator below it
+    (`UncappedAccumulator`); without this the smallest edge is often above one.
+    `a_waiting_root_is_never_buffered_above_its_state` fails with exactly that refusal when the
+    check is switched off.
+  - **`why` for no edge names its cause**: `no edge: the reader takes the shared load directly`
+    (the path's only edge is the one above the shared load, which nothing recorded), or
+    `no edge: each lies above a join that grew the rows, or above state a waiting root may not
+    keep`. The plan's single string could be wrong for both.
+  - The ledger's one-time charge is `S + Σ buffers + max root` from `cap_inputs` at its first
+    call, so buffers another chooser made before it are counted.
+  - `settle` returns the recomputed decision as soon as the cap stops falling.
+  - Extra tests: `a_disallowed_edge_is_never_placed`, `only_the_named_case_is_kept`,
+    `a_re_read_load_is_charged_in_full`, `a_waiting_root_is_never_buffered_above_its_state`.
+  - A test of mine first failed for its own numbers (a pool of 1000 let both roots run, so
+    none waited); fixed to a budget of 135, and re-checked red against the switched-off rule.
+
+## The hold rule (spec 1a)
+
+All numbers are the sf40-baseline tree's, per origin node: Σ `batch_bytes` and Σ `batch_rows`
+over lanes and batches. The rule is `decide`, `hold_inputs` and `HoldLedger::choose` in
+`prototypes/fuser/mod.rs`.
+- An edge's bytes are its child's. A project inserted to select from the shared load stands for
+  the reader's own load. The edge right above the shared load carries the union, which nothing
+  recorded, so it is not a candidate.
+- A buffer above a join runs that join early, so it also keeps the join's build child's bytes,
+  for every join below it on the path.
+- An edge is allowed where every join below it on the path recorded no more rows than its child
+  on the path. Under the cap's hold, also only where nothing at or under it keeps state.
+- Placement: the allowed edge with the fewest bytes; a tie goes to the lower edge.
+- A re-read costs the reader's own load's `loads.tsv` `load_us`, keyed by the query and the seq
+  of its `CudfScan` recipe. It is recorded either way.
+- The choice: a buffer where one is placed and its bytes fit the headroom, else a re-read.
+- Headroom: `budget − (S + B + max root_bytes)`, saturating. `S`, the roots and any earlier
+  buffers come from `cap_inputs` at the first decision; `B` is what this chooser has buffered
+  since. Readers are decided in the order validation names them.
+
+## The cap rule (spec 4)
+
+`budget = pool − pool × 10 / 100`, the pool being the rmm pool the run installed (69 GiB
+unless `PEACOCK_RMM_POOL_BYTES` says otherwise). The margin covers what the accountant's peak,
+a lower bound, leaves out. `S = Σ shared_bytes` and `B = Σ buffer_bytes` are charged whatever
+the cap. Roots are taken largest first; the cap is the largest k with `S + B + Σ top k ≤
+budget`, at least 1. `over_budget` is `S + B + max root > budget`, and the run goes ahead.
+Inputs: per shared load, its member with the largest recorded load bytes, scaled from that
+member's planned bytes to the union's; per buffer, its decision's bytes; per root, its
+`peak_bytes` less the recorded bytes of its loads now shared. `settle` loops: the cap, then
+`resolve_cap_holds` under it with the ledger, until the cap stops falling.
 
 ## Checkpoints
 

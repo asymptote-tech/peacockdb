@@ -1105,7 +1105,8 @@ on a prototype. `cost-report`'s `test_source_formatting/prototypes.rs` enforces 
   unshared, with the reason recorded: a scan a limit cut to a prefix (`limit-cut`), a scan whose
   columns would gain NULLs (`nulls:<col>`), and a rows-only scan beside column scans
   (`rows-only`). Every reader of a shared scan inside a hold is buffered or re-reads the table,
-  as a chooser decides. It reports, without executing, the identical subtrees above the shared
+  as a chooser decides. The benchmark's chooser and its concurrency cap are plain functions of
+  the sf40 baseline's numbers and the rmm pool, written down in the detail file. It reports, without executing, the identical subtrees above the shared
   sources and what merging them would save (the merge hint), and what overlapping loads with
   execution would save (the pipelining hint). It runs at sf40 only. Decisions
   and formats:

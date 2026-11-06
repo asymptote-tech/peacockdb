@@ -1607,6 +1607,13 @@ pub(crate) fn validate_cap(
     validate::validate_cap(roots, cap)
 }
 
+/// Whether `node` keeps state that grows with what it is fed: an accumulator or a join. A root
+/// waiting for the cap may have none below its buffers ([`validate_cap`]).
+#[allow(dead_code)] // caller: prototypes::fuser, outside a release build
+pub(crate) fn holds_state(node: &dyn GpuNode) -> bool {
+    validate::holds_state(node)
+}
+
 /// The canonical-form rules a driver needs to have been applied before it runs, so a mock
 /// plan meets the same refusal a planned one would; one root or several.
 pub(crate) fn check_canonical_form_of_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {

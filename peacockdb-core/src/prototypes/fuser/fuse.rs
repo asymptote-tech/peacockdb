@@ -346,7 +346,8 @@ fn resolve(
             Err(other) => return Err(other),
         };
         let walk = Walk::of(&fused);
-        let (held, member) = walk.held_reader(&fused, hold, reader, slot);
+        let held = walk.held_reader(&fused, hold, reader, slot);
+        let member = held.member;
         let decision = choose(&fused, &held);
         let above = match decision.choice {
             Choice::ReRead => None,
@@ -403,6 +404,10 @@ fn refreshed(mut fused: Fused) -> Fused {
     }
     fused.reads = reads;
     fused
+}
+
+pub(crate) fn original(fused: &Fused, origin: Origin) -> &dyn GpuNode {
+    nth(fused.originals[origin.query].as_ref(), origin.node)
 }
 
 /// The node at pre-order index `at` of a tree.
@@ -542,14 +547,8 @@ impl Walk {
         }
     }
 
-    /// The reader validation named, and the member load it reads for.
-    fn held_reader(
-        &self,
-        fused: &Fused,
-        hold: usize,
-        reader: usize,
-        slot: usize,
-    ) -> (HeldReader, Origin) {
+    /// The reader validation named.
+    fn held_reader(&self, fused: &Fused, hold: usize, reader: usize, slot: usize) -> HeldReader {
         let (member, mut edge) = match self.inserted_project[reader] {
             true => (
                 self.members[&(reader, 0)],
@@ -568,13 +567,13 @@ impl Walk {
             .iter()
             .position(|group| group.members.contains(&member))
             .expect("a shared source's reader is a member of its group");
-        let held = HeldReader {
+        HeldReader {
             query: member.query,
             group,
             hold,
             path,
-        };
-        (held, member)
+            member,
+        }
     }
 
     /// The node of its query's own tree that the child on `edge` stands for: the member load

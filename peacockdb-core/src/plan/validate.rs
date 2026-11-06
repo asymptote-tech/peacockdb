@@ -141,7 +141,7 @@ fn capped_roots_keep_their_state(
 
 /// The accumulators: the kinds whose state grows with what they are fed. These are the
 /// memory estimator's (`held_by_accumulator`), the buffer aside, which is the cap's own answer.
-fn holds_state(node: &dyn GpuNode) -> bool {
+pub(crate) fn holds_state(node: &dyn GpuNode) -> bool {
     matches!(
         try_as_node_ref(node),
         Some(

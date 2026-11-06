@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 8058 test cases — Rust 6225, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 8082 test cases — Rust 6249, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3664 cases: `--lib` 1149, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3688 cases: `--lib` 1173, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -911,6 +911,17 @@ prefix, `first3` always, a larger one marked as the same set as `all` once the l
 a `.benchmark.txt` section read per node in pre-order, `batch_rows` and `batch_bytes` summed
 over lanes and batches, the trailer's load, execute and peak; a section without one panics
 naming it, and a baseline of another plan is refused naming the query and the node
+
+| Hold rule and concurrency cap | [prototypes::fuser::holds::tests](../peacockdb-core/src/prototypes/fuser/holds/tests.rs), [prototypes::fuser::cap::tests](../peacockdb-core/src/prototypes/fuser/cap/tests.rs), [prototypes::fuser::loads::tests](../peacockdb-core/src/prototypes/fuser/loads/tests.rs) | 24 |
+|---|---|--:|
+
+the fuser's memory rules on chosen numbers and hand-built fused plans: a buffer goes on the
+smallest allowed recorded edge, the lower on a tie, never above a join that grew the rows, and
+charges the builds of the joins it runs early; it is chosen where it fits the headroom and a
+re-read otherwise, the ledger spending the headroom in order; `loads.tsv` read back by case, a
+missing row a panic; the cap admits the largest roots that fit, shared loads and buffers
+charged whatever it is, a root its peak less its shared loads; settling a batch buffers or
+re-reads every root the cap makes wait, never above a waiting root's state, and validates
 
 | Merge hint | [prototypes::fuser::merge::tests](../peacockdb-core/src/prototypes/fuser/merge/tests.rs) | 5 |
 |---|---|--:|

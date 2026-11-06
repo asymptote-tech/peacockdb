@@ -17,7 +17,8 @@ use crate::plan::{GpuNode, GpuUnload};
 use crate::planner::{partition, row_group_metadata};
 use crate::test_support::data_dir_for;
 
-use super::{Baseline, Choice, Fused, HeldReader, HoldDecision, Query, QueryTimes, fuse};
+use super::{Baseline, Choice, Fused, HeldReader, HoldDecision, LoadTimes, Query, QueryTimes};
+use super::{fuse, read_load_times};
 
 /// Every held reader reads its table again.
 pub(crate) fn re_read_every_hold(_: &Fused, _: &HeldReader) -> HoldDecision {
@@ -88,6 +89,11 @@ pub(crate) fn lineitem(projection: &[u32], keep: &[u32]) -> Box<dyn GpuNode> {
 
 pub(crate) fn orders(projection: &[u32], keep: &[u32]) -> Box<dyn GpuNode> {
     load(&tpch("orders"), projection, keep)
+}
+
+/// The first row group of a tpch table's first column, an Int64 key.
+pub(crate) fn key_of(table: &str) -> Box<dyn GpuNode> {
+    load(&tpch(table), &[0], &[0])
 }
 
 pub(crate) fn schema_of(node: &dyn GpuNode) -> Schema {
@@ -243,4 +249,30 @@ pub(crate) fn baseline(trees: &[Box<dyn GpuNode>], us: impl Fn(usize, &str) -> u
         })
         .collect();
     Baseline { per_query }
+}
+
+/// `loads.tsv` as the calibration tree writes it, its preamble included, for the tpch sf40
+/// tp1-single case: one row per `(query, recipe_seq, load_us)`, read back.
+pub(crate) fn load_times(rows: &[(&str, u64, u64)]) -> LoadTimes {
+    static WRITTEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let at = WRITTEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("fuser_loads_{}_{at}.tsv", std::process::id()));
+    std::fs::write(&path, loads_tsv(rows)).expect("the file writes");
+    let times = read_load_times(&path, "tpch", "40", "tp1-single");
+    std::fs::remove_file(&path).expect("the file is removed");
+    times
+}
+
+pub(crate) fn loads_tsv(rows: &[(&str, u64, u64)]) -> String {
+    let mut text = String::from(
+        "# Where one parquet load's time goes, from an Nsight trace capture.\n\
+         # The times are a profiled run's.\n\
+         dataset\tsf\tquery\tmode\trecipe_seq\texecutions\tcalls\tload_us\th2d_bytes\n",
+    );
+    for (query, seq, load_us) in rows {
+        text.push_str(&format!(
+            "tpch\t40\t{query}\ttp1-single\t{seq}\t10\t1\t{load_us}\t0\n"
+        ));
+    }
+    text
 }
