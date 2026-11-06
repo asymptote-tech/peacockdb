@@ -761,6 +761,8 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     Golden check: `--lib` 1209 passed, 2 ignored; `test_corpus_goldens` 64; cost-report
     formatting 39.
   - **Logs:** `/tmp/qf6-*.log`; `~/.cache/peacock/run-gpu/peacockdb-beta/`.
+- 2026-11-06: completeness approved (signoff in the spec). All three VMs hard-stopped 13:35Z. CI device run dispatched 2026-11-06T13:36:02Z on 6f67bf5b: run 42226803958. Waiting for it and the PR CI before `done`.
+- 2026-11-06: CI run 42226803958 green, GPU Tests (nebius-gpu) included; the PR's CI green. VMs hard-stopped. Board `done`.
 
 ## The hold rule (spec 1a)
 
