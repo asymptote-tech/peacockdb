@@ -447,15 +447,15 @@ def main_notes(data):
 def hints_table(data):
     columns = ["batch", "cap", "estimate / budget (GiB)", "accountant's peak (GiB)",
                "merge saves (ms, estimate)", "entries", "pipelining saves (ms, estimate)",
-               "pipelined estimate (ms)"]
+               "pipelined estimate (ms)", "folded scans (a query's own)"]
     rows, models = [], []
     for entry in data["batches"]:
         read = entry["fused"]
         if entry["queries"] is None:
-            rows.append([entry["name"], "same set as all"] + [""] * 6)
+            rows.append([entry["name"], "same set as all"] + [""] * 7)
             continue
         if "failed" in read:
-            rows.append([entry["name"], "failed"] + [""] * 6)
+            rows.append([entry["name"], "failed"] + [""] * 7)
             continue
         batch, pipeline = read["batch"], read["pipeline"]
         models.append(pipeline["model"])
@@ -467,7 +467,8 @@ def hints_table(data):
                      gib(read["run"]["peak_bytes"]) if measured else "—",
                      ms(read["merge"]["saved_us"]), str(len(read["merge"]["entries"])),
                      ms(pipeline["saved_us"]),
-                     ms(pipeline["pipelined_estimate_us"]) if measured else "—"])
+                     ms(pipeline["pipelined_estimate_us"]) if measured else "—",
+                     "{} ({})".format(*folded(batch["shared"]))])
     return table_lines(columns, rows) + [
         "",
         f"- Merge, an estimate: {MERGE_MODEL}.",
@@ -476,7 +477,21 @@ def hints_table(data):
         "it." if models else "- Pipelining: no batch carries the model.",
         "- The accountant's peak is a lower bound on device memory; the estimate and budget are "
         "the cap rule's (query-fuser).",
+        "- Folded scans: per shared load, its scans less one, from `shared=`; in brackets those "
+        "that are a query's own repeat of a scan it already makes, which a batch of one would "
+        "fold too. A count of loads, not of time.",
     ]
+
+
+def folded(shared):
+    """`(scans folded, of them a query's own repeats)` over `shared=[table:q+q+…,…]`: a load
+    shared by k scans of d distinct queries folds k − 1 scans, k − d of them repeats."""
+    total = own = 0
+    for group in filter(None, shared.strip("[]").split(",")):
+        readers = group.partition(":")[2].split("+")
+        total += len(readers) - 1
+        own += len(readers) - len(set(readers))
+    return total, own
 
 
 def split_table(data):
