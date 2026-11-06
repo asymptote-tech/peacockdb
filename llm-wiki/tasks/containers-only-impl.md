@@ -234,7 +234,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   - `--run` (cpu and rust-only modes) runs every derived target and the lib's rung with `cargo
     test`, and in cpu mode `ctest --test-dir cpp/build -L cpu`. It runs each even after a failure,
     and exits 1 if any failed.
-  - `--gpu --run` exits 2, naming `scripts/env/run-gpu.sh ship` and `run`.
+  - `--gpu --run` exits 2, naming `scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt ship` and `run`.
   - The mode ladder, `rust_only_targets`, `needs_cmake_targets` and the `GPUSET` heredoc of
     `gpu_runtime_targets` stay as they are (runners.rs reads them).
   - Removed flags exit 2, each naming its replacement: `--host --remote-dir --local-cudf-root
@@ -419,7 +419,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 - Test: `scripts/env/tests/test_run_gpu.py` (new-hosts' file for `run-gpu.sh`; extend it)
 
 **Interfaces:**
-- Consumes: `run-gpu.sh [--instance-id <id>] [--profile <name>] [--dir <i>] [--cudf <v>] prepare | ship [--install <d>] | run list|filter|bench|<staged binary> | pull` (new-hosts, `filter` a mode word read with `PCK_TEST_FILTER`; query-fuser, any other word a staged binary; with no VM option it targets nebius-gpu, the L40S),
+- Consumes: `run-gpu.sh --instance-id <id> [--profile <name>] [--dir <i>] [--cudf <v>] prepare | ship [--install <d>] | run list|filter|bench|<staged binary> | pull` (new-hosts, `filter` a mode word read with `PCK_TEST_FILTER`; query-fuser, any other word a staged binary; `--instance-id` required since new-hosts' review round 1, so nebius-gpu, the L40S, is `--instance-id computeinstance-e00tnrse7ayntnzcyt`),
   exit codes 0, 1 run failed, 2 bad input/stale image/busy, 3 old driver, 4 restart needed;
   container `peacock-<instance>`, instance = the repo root's basename; it calls
   `scripts/nebius.sh` for the host.
@@ -488,10 +488,10 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   4. nebius-setup (unchanged, no `profile:`);
   5. `echo "PEACOCK_RUN_IMAGE=$(scripts/env/image-ref.sh run 25.02)" >> "$GITHUB_ENV"`;
   6. the start loop, through `scripts/nebius.sh start`;
-  7. `Prepare nebius-gpu`: `scripts/env/run-gpu.sh prepare --no-sf40` (timeout 40);
-  8. `Ship the staged install`: `scripts/env/run-gpu.sh ship --install cpp/install`
+  7. `Prepare nebius-gpu`: `scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt prepare --no-sf40` (timeout 40);
+  8. `Ship the staged install`: `scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt ship --install cpp/install`
      (timeout 50);
-  9. `Run the L40S list`: `scripts/env/run-gpu.sh run list`;
+  9. `Run the L40S list`: `scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt run list`;
   10. cleanup, `if: always() && …start.outcome` as today:
       `scripts/nebius.sh ssh 'docker rm -f peacock-peacockdb' || true`, then `scripts/nebius.sh stop
       || echo …`.
@@ -509,7 +509,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     `the_pipeline_stages_through_stage_install`: the step `GPU_STAGING_STEP` contains
     `build-test.sh --gpu --build`.
   - `the_gpu_step_cannot_report_success_over_a_failure` is rewritten for run-tests.sh. The step
-    contains `run-gpu.sh run list` and no `|| true`/`; true`. run-tests.sh ends `exit
+    contains `run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt run list` and no `|| true`/`; true`. run-tests.sh ends `exit
     "$rc"`. Every `run_binary` line in `run_list`/`run_bench` is followed by a `judge` line.
     `judge` greps `Segmentation fault`. No `export LD_LIBRARY_PATH`.
   - `both_gpu_runners_pass_test_threads_one` reads `[RUN_TESTS, SHADGPU]`. For run-tests.sh,
@@ -536,7 +536,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   files.
 - [ ] **Step 5: `prepare` on nebius-gpu by hand, once, before any CI dispatch.** With the sandbox
   off: `scripts/nebius.sh start`; `scripts/nebius.sh ssh 'df -h /'` (below 10 GB free: stop, an
-  obstacle in the detail file, build-test.md "Disk"); `timeout 2400 scripts/env/run-gpu.sh prepare
+  obstacle in the detail file, build-test.md "Disk"); `timeout 2400 scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt prepare
   --no-sf40` → exit 0 (Docker, the toolkit, sf1 and the run image in place). An exit 4 is handled
   by `scripts/nebius.sh stop --force && scripts/nebius.sh start` and a second `prepare --no-sf40`.
   `scripts/nebius.sh ssh 'df -h /'` again; record both, the wall time and what the run image and
@@ -628,7 +628,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 - Modify: `llm-wiki/prompts.md` (line 192: the verda dispatch rule; lines 376–381: the L40S
   bracket builds first, then starts the VM: `scripts/build-test.sh --gpu --build` (local, in
   the build image, the L40S stopped) → `scripts/nebius.sh start` →
-  `scripts/env/run-gpu.sh ship` → `run --detach list`, polled with `status` →
+  `scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt ship` → `run --detach list`, polled with `status` →
   `scripts/nebius.sh stop`; the host roles and the H100 bracket new-hosts wrote beside it stay:
   nebius-gpu runs the L40S list only, the H100 sf40, benchmarks and Nsight, nebius-cpu128
   DuckDB and the H100's staged install (binaries for H100 runs are built on the CPU VM; local
@@ -654,7 +654,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 
   Then, with the sandbox off:
   - `scripts/nebius.sh start`;
-  - `scripts/env/run-gpu.sh prepare --no-sf40` (Task 6 Step 5 ran it first; this rerun is a no-op);
+  - `scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt prepare --no-sf40` (Task 6 Step 5 ran it first; this rerun is a no-op);
   - `ship`;
   - `run --detach list`;
   - `status` until it exits 0;

@@ -4,6 +4,10 @@ target/
 # scripts/build-test*.sh (target-cudf-<cudf_root_basename>, e.g. target-cudf-rapids,
 # target-cudf-rapids-cuda-12.2). Glob covers the plain legacy target-cudf too.
 target-cudf*/
+# A run in the build image keeps its cargo target, one per cuDF version, and its HOME in the
+# tree: docker run ... -e CARGO_TARGET_DIR=$PWD/target-img-<v> -e HOME=$PWD/.home-img.
+/target-img-*/
+/.home-img/
 
 # CMake / C++ build artifacts
 cpp/build/

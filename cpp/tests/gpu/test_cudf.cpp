@@ -6,11 +6,26 @@
 #include <cudf/types.hpp>
 
 #include <cstdint>
+#include <cstring>
 
 #include <gtest/gtest.h>
 
+#include <peacock_gpu.h>
 #include "plan_executor.h"
 #include "peacock/rmm_pool.hpp"
+
+// What a benchmark's provenance reads: a named device, and the runtime's version as
+// 1000 * major + 10 * minor. The null refusal is asserted here, not on the cpu tier: with no
+// device the runtime refuses first, so a missing check passes there.
+TEST(PeacockGpu, DeviceInfoDescribesTheDevice) {
+  EXPECT_NE(peacock_device_info(nullptr), 0);
+  PeacockDeviceInfo info{};
+  ASSERT_EQ(peacock_device_info(&info), 0);
+  const std::size_t length = strnlen(info.name, sizeof info.name);
+  EXPECT_GT(length, 0u);
+  EXPECT_LT(length, sizeof info.name);
+  EXPECT_GE(info.runtime, 11000);
+}
 
 TEST(CudfGpu, SequenceSum) {
   // Generate [1, 2, 3, ..., 100] on the GPU.

@@ -1,0 +1,85 @@
+name: Images
+
+# Builds and publishes the build and run images of each cuDF version (llm-wiki/build-test.md,
+# "Images"), one job per image, through scripts/env/image.sh: it tags the commit only from a clean
+# tree, and pushes only an image it built at HEAD. Started by hand only. GitHub can dispatch it
+# only once master holds it. A dispatch runs the workflow and the commit of the ref it names
+# (--ref, master by default), and moves :cudf-<v>. If the job's push is denied, give this
+# repository the Write role under the package's "Manage Actions access".
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: The image to build and push
+        type: choice
+        options: [build, run, all]
+        default: all
+      cudf:
+        description: The cuDF version
+        type: choice
+        options: ['25.02', '26.02', all]
+        default: all
+
+permissions:
+  contents: read
+  packages: write
+
+# Two runs pushing the same tag would race; the second waits.
+concurrency:
+  group: images
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: ${{ matrix.kind }} image, cuDF ${{ matrix.cudf }}
+    runs-on: ubuntu-latest
+    # A cold build downloads about 2.5 GB of conda packages and the toolchains; the push uploads
+    # 5–10 GB.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: ${{ fromJSON(inputs.kind == 'all' && '["build","run"]' || format('["{0}"]', inputs.kind)) }}
+        cudf: ${{ fromJSON(inputs.cudf == 'all' && '["25.02","26.02"]' || format('["{0}"]', inputs.cudf)) }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      KIND: ${{ matrix.kind }}
+      CUDF: ${{ matrix.cudf }}
+    steps:
+      # No submodules: image.sh reads third_party/cudf's commit from the index, and the image
+      # fetches what it needs of it.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # A standard runner has 14 GB of disk, and the largest build holds 12.2 GB at once
+      # (build-test.md, "Images"). The preinstalled SDKs go first, and the build does not start
+      # short of need_gb, in GB of 10^9 bytes as docker reports sizes.
+      - name: Free the disk
+        run: |
+          set -euo pipefail
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          docker image prune --all --force > /dev/null
+          echo "docker storage driver: $(docker info --format '{{.Driver}}')"
+          root=$(docker info --format '{{.DockerRootDir}}')
+          need_gb=16
+          free_gb=$(( $(df --output=avail -B1 "$root" | tail -1) / 1000000000 ))
+          echo "$free_gb GB free under $root"
+          if [ "$free_gb" -lt "$need_gb" ]; then
+            echo "::error::$free_gb GB free under $root; the largest image build needs $need_gb"
+            exit 1
+          fi
+
+      - name: Build
+        run: scripts/env/image.sh build "$KIND" "$CUDF"
+
+      - name: Push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
+          scripts/env/image.sh push "$KIND" "$CUDF"

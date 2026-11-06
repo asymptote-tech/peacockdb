@@ -4,7 +4,8 @@
 //! else, so a test that builds a path from `CARGO_MANIFEST_DIR` into `src/`, `tests/`,
 //! `llm-wiki/` or `.github/` passes locally and fails where it is shipped (#252). The one
 //! sanctioned read is `test_support/testdata.rs`, whose `PEACOCK_TESTDATA_DIR` wins on a
-//! remote host, and `build.rs`, which runs where the checkout is.
+//! remote host and whose `rewrite_source_file` only writes, returning no path into the
+//! checkout, and `build.rs`, which runs where the checkout is.
 
 use std::path::Path;
 

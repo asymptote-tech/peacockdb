@@ -23,6 +23,7 @@ create table CUPTI_ACTIVITY_KIND_MEMCPY (start integer, end integer, correlation
 create table CUPTI_ACTIVITY_KIND_MEMSET (start integer, end integer, correlationId integer);
 create table CUPTI_ACTIVITY_KIND_RUNTIME (start integer, globalTid integer,
                                           correlationId integer);
+create table TARGET_INFO_GPU (id integer, name text);
 create table TARGET_INFO_GPU_METRICS (metricId integer, metricName text);
 create table GPU_METRICS (timestamp integer, value real, metricId integer);
 """
@@ -31,9 +32,11 @@ create table GPU_METRICS (timestamp integer, value real, metricId integer);
 class Capture:
     """One capture under construction. `close()` when the file is complete."""
 
-    def __init__(self, path):
+    def __init__(self, path, gpus=("NVIDIA H200",)):
         self.conn = sqlite3.connect(path)
         self.conn.executescript(SCHEMA)
+        self.conn.executemany("insert into TARGET_INFO_GPU (id, name) values (?, ?)",
+                              list(enumerate(gpus)))
         self.domains = {}
         self.clock = 1_000_000
         self.correlation = 0

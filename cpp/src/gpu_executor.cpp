@@ -127,6 +127,23 @@ const char* peacock_gpu_version() {
   return "0.1.0";
 }
 
+int peacock_device_info(PeacockDeviceInfo* out_info) {
+  if (!out_info) return 1;
+  int device = 0;
+  int runtime = 0;
+  cudaDeviceProp prop{};
+  if (cudaGetDevice(&device) != cudaSuccess ||
+      cudaGetDeviceProperties(&prop, device) != cudaSuccess ||
+      cudaRuntimeGetVersion(&runtime) != cudaSuccess) {
+    return 1;
+  }
+  static_assert(sizeof out_info->name == sizeof prop.name);
+  std::memcpy(out_info->name, prop.name, sizeof out_info->name);
+  out_info->name[sizeof out_info->name - 1] = '\0';
+  out_info->runtime = runtime;
+  return 0;
+}
+
 // ---------------------------------------------------------------------------
 // Benchmark instrumentation
 // ---------------------------------------------------------------------------

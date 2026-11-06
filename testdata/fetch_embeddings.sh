@@ -1,23 +1,11 @@
 #!/bin/bash
 #
-# Fetch open-dataset embedding sources for `generate_testdata.sh --embeddings external`.
-#
-# LOCAL-ONLY. Downloads ~1.1GB into testdata/embeddings-cache/ and checksum-verifies
-# every artifact. The augmented parquet is generated locally and SHIPPED to the test
-# hosts as parquet — CI, verda and shad-gpu MUST NEVER run this (see the hard guard
-# below). Re-runs are skip-if-present: an artifact whose SHA256 already matches is not
-# re-downloaded.
-#
-# Sources (pinned, immutable objects):
-#   DEEP1B  image vectors, 96-dim float32, CC BY 4.0
-#           storage.yandexcloud.net/yandex-research/ann-datasets/DEEP/
-#   GloVe6B text vectors, 100-dim, PDDL / public domain
-#           downloads.cs.stanford.edu/nlp/data/glove.6B.zip
-#
-# Usage:
-#   ./testdata/fetch_embeddings.sh            # SF=1 (default): first 800k DEEP base vectors
-#   ./testdata/fetch_embeddings.sh --sf 10    # first 8M DEEP base vectors
-#
+# Fetch the embedding sources for `generate_testdata.sh --embeddings external` into
+# testdata/embeddings-cache/ beside this script (~1.1GB at SF=1), each checked against
+# testdata/embeddings.sha256; one already matching is not fetched again. The pinned, immutable
+# origins: DEEP1B (96-dim float32, CC BY 4.0) at storage.yandexcloud.net, GloVe6B (100-dim,
+# PDDL) at downloads.cs.stanford.edu. Which hosts may fetch: llm-wiki/build-test.md, "Datasets".
+#   ./testdata/fetch_embeddings.sh [--sf N]   # the first 800000*N DEEP base vectors
 set -euo pipefail
 
 SF=1
@@ -29,22 +17,11 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# HARD GUARD — never fetch from an AUTOMATED run. CI must never reach out to the
-# dataset origins (network policy + determinism: the bytes are pinned once and the
-# generated parquet is distributed).
-#
-# The guard is on the ENVIRONMENT, not the host, and that distinction matters: the
-# GPU host is BOTH the CI runner AND the only machine with the disk to generate the
-# large scale factors (sf200 needs ~380GB parquet + ~62GB of sources; dev boxes have
-# nowhere near that). So a MANUAL run on that host is legitimate and allowed, while a
-# CI run on the very same machine is still blocked — CI sets CI/GITHUB_ACTIONS, and
-# any other automation can set PEACOCK_NO_FETCH to opt out explicitly.
-#
-# LIMIT OF THE GUARD: our CI reaches this host over SSH, and ssh does NOT inherit the
-# runner's CI/GITHUB_ACTIONS — inside such a session the environment is the GPU host's,
-# so those two variables would be unset and the guard would NOT fire on its own. That is
-# why pipeline.yml passes PEACOCK_NO_FETCH=1 explicitly on its ssh commands. Any new
-# automation that shells in must do the same; the variables alone are not enough.
+# HARD GUARD, on the ENVIRONMENT rather than the host: no automated run fetches the origins
+# (network policy, and the bytes are pinned once). The GPU host is both a CI runner and the only
+# machine with the disk for the large SFs, so a manual run there is allowed and a CI run is not.
+# ssh does NOT carry the runner's CI/GITHUB_ACTIONS, so automation that shells in sets
+# PEACOCK_NO_FETCH=1 itself, as pipeline.yml's ssh commands do.
 if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${PEACOCK_NO_FETCH:-}" ]; then
   echo "error: fetch_embeddings.sh must not run from CI/automation" >&2
   echo "       (detected via CI / GITHUB_ACTIONS / PEACOCK_NO_FETCH)." >&2
@@ -52,9 +29,12 @@ if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${PEACOCK_NO_FETCH:
   exit 1
 fi
 
+# The cache goes beside $0, a symlink included (a cache kept outside the tree is made that way);
+# the pin is the tree's.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TREE_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 CACHE="${SCRIPT_DIR}/embeddings-cache"
-mkdir -p "$CACHE"
+PIN="${TREE_DIR}/embeddings.sha256"
 
 DEEP=https://storage.yandexcloud.net/yandex-research/ann-datasets/DEEP
 GLOVE_URL=https://downloads.cs.stanford.edu/nlp/data/glove.6B.zip
@@ -68,12 +48,24 @@ DEEP_DIMS=96
 N=$(( 800000 * SF ))
 BASE_BYTES=$(( 8 + N * DEEP_DIMS * 4 ))
 
+# embeddings_pinned_sha <pin file> <file> — every sha256 the pin names for <file>, one a line.
+embeddings_pinned_sha() { awk -v name="$2" '$2 == name { print $1 }' "$1"; }
+
+# pin <var> <file> — set <var> to the one sha256 the pin names for <file>, or stop.
+pin() {
+  local sha
+  sha=$(embeddings_pinned_sha "$PIN" "$2")
+  [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || { echo "error: $PIN pins no single sha256 for $2" >&2; exit 1; }
+  printf -v "$1" %s "$sha"
+}
+
 # Pinned SHA256, computed on the first pull from the immutable sources. Locking these
 # guarantees byte-identical embedding inputs on every later run / dev box.
-SHA_BASE_SF1=3e0dbaede4d3a989f53b19e6046e69dccd38654a92bb7387decece28b13b2e9e
-SHA_QUERY=8438fc763f14e0f9741fda15b3e11215aef089ce17d1ad47d53b52a7c9fda5bb
-SHA_GT=9429e662db0f1a24a78a279f41ab1a20405e372178875e79f342d3a57ced9970
-SHA_GLOVE_ZIP=617afb2fe6cbd085c235baf7a465b96f4112bd7f7ccb2b2cbd649fed9cbcf2fb
+pin SHA_BASE_SF1 deep_base.sf1.fbin
+pin SHA_QUERY deep_query.public.10K.fbin
+pin SHA_GT deep_groundtruth.public.10K.ibin
+pin SHA_GLOVE_ZIP glove.6B.zip
+mkdir -p "$CACHE"
 
 BASE_FILE="$CACHE/deep_base.sf${SF}.fbin"
 QUERY_FILE="$CACHE/deep_query.public.10K.fbin"
@@ -203,7 +195,9 @@ echo "==> GloVe 6B (zip once, extract 100d)"
 fetch "$GLOVE_URL" "$GLOVE_ZIP" "$SHA_GLOVE_ZIP" -C -
 if [ ! -f "$GLOVE_100D" ]; then
   echo "  extracting glove.6B.100d.txt ..."
-  unzip -o "$GLOVE_ZIP" glove.6B.100d.txt -d "$CACHE" >/dev/null
+  # Into a temporary name, so an interrupted unzip never leaves a short file a re-run accepts.
+  unzip -p "$GLOVE_ZIP" glove.6B.100d.txt > "$GLOVE_100D.partial"
+  mv -f "$GLOVE_100D.partial" "$GLOVE_100D"
 fi
 echo "  glove.6B.100d.txt: $(wc -l < "$GLOVE_100D") tokens"
 

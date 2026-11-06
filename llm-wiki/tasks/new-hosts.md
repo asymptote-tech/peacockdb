@@ -51,7 +51,8 @@ them serve three. Below, every name is the new one.
    CPU VM also gets DuckDB 1.5.4 (`docker/pins.env`) and the native `.duckdb` databases that
    `benchmarks/duckdb_minimal.sh` builds.
 6. **The H100 runs the device tiers and the benchmark in containers' run image.** That means
-   containers' unfinished device runner (`containers-impl.md` task 7), as
+   containers' unfinished device runner (task 7 of
+   `origin/ENS-containers:llm-wiki/tasks/containers-impl.md`), as
    `scripts/env/run-gpu.sh prepare|ship|run|pull`, with `nebius-h100` as its first VM. By the
    human's decision there are no host adapters: no `scripts/env/host/`, no host files under
    `~/.config/peacock/hosts/`. `run-gpu.sh` takes `nebius.sh`'s `--instance-id` and `--profile`
@@ -163,3 +164,14 @@ Component-level API: none.
 - Every ssh to the VMs from the Bash tool needs the sandbox off (`build-test.md`).
 - A VM this task starts is stopped again by this task, or left to its watcher, which must
   already be installed.
+
+## Signoff (2026-11-05)
+
+Solved under its constraints: three VMs named, guarded and proven live (watch runs 41899844185,
+41900251751); sf40 on both new VMs with agreeing pins; DuckDB and `tpch.sf40.duckdb` on the CPU VM;
+the sf1 list, one sf40 benchmark case and Nsight on the H100 through `run-gpu.sh`; provision verified
+twice on a fresh VM; host roles in the standing rules. The rename and guard reached master as
+`bf937124`/`e20db7e9`. Shortcuts: the sf40 C++ pair (`peacock_tpch_tests`, `peacock_tpchv_tests`)
+has no H100 path (`run-tests.sh` skips it; build-test.md says so); `scripts/env/tests` still runs by
+hand only, not in CI; `create_nsys_profile.sh --metrics` uses nsys's deprecated
+`--gpu-metrics-device` spelling, accepted on the H100.
