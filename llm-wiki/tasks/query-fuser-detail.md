@@ -159,6 +159,7 @@ member's planned bytes to the union's; per buffer, its decision's bytes; per roo
 | Task 2 Step 5 | `9ab20eed` | fuser: the ordered lists and fused answers against the corpus goldens; lib 1131, goldens 61, formatting 38 |
 | Task 3 Step 5 | `0d677c19` | fuser: the mergeability hint; lib 1141, goldens 61, formatting 38 |
 | Task 4 Step 5 | `018f4c70` | fuser: the pipelining hint; lib 1147, goldens 61, formatting 38 |
+| Task 5 Step 5 | `54596367` | fuser: buffer or re-read, and the concurrency cap rule; lib 1171, goldens 61, formatting 38 |
 
 ## VM time
 
