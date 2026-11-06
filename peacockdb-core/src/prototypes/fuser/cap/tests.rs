@@ -180,6 +180,48 @@ fn settling_buffers_the_roots_that_wait() {
     validate_dag(&refs(&settled.roots), Some(decision.cap)).expect("it validates under its cap");
 }
 
+/// q0's lineitem reader, held by its join, re-reads, which leaves q1 alone in the group, so
+/// lineitem is shared no more. q2 waits under the cap, and its reader of the shared customer
+/// fits only in the headroom that freed: the ledger prices it against the plan as it stands.
+#[test]
+fn a_cap_hold_is_priced_after_a_re_read_dissolved_a_group() {
+    let trees: Vec<Box<dyn GpuNode>> = vec![
+        unload(join(
+            coalesce(key_of("customer")),
+            filter(lineitem(&[0, 4], &[0])),
+        )),
+        unload(filter(lineitem(&[0, 4], &[0]))),
+        unload(filter(key_of("customer"))),
+    ];
+    let mut times = baseline(&trees, |_, _| 1);
+    // unload, join, coalesce, customer, filter, lineitem
+    times.per_query[0].batch_bytes = vec![0, 0, 0, 1, 60, 40];
+    // unload, filter, lineitem; then unload, filter, customer
+    times.per_query[1].batch_bytes = vec![0, 0, 40];
+    times.per_query[2].batch_bytes = vec![0, 20, 1];
+    for (query, peak) in [30, 30, 50].into_iter().enumerate() {
+        times.per_query[query].peak_bytes = peak;
+    }
+    let names: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+    let loads = load_times(&[("a", 0, 70), ("b", 0, 70), ("c", 0, 70)]);
+    let seqs = seqs_of(&times);
+    // A budget of 100. First, S = 40 + 1 and the largest root 50 − 1 leave 10: q0's 60 re-reads.
+    let mut ledger = ledger(&trees, &times, &loads, &seqs, &names, 111);
+    let fused = fused_with(&trees, &mut |f, h| ledger.choose(f, h));
+    assert_eq!(fused.holds.len(), 1);
+    assert_eq!(fused.holds[0].decision.why, "too large: 60 > 10");
+    assert_eq!(fused.shared.len(), 1, "lineitem is shared no more");
+    // Then S = 1, the roots 29, 30 and 49: cap 2, and 50 left for q2's buffer of 20.
+    let (settled, decision) = settle(fused, &times, &mut ledger).expect("the batch settles");
+    let waiting = &settled.holds[1];
+    assert_eq!((waiting.query, waiting.table.as_str()), (2, "customer"));
+    assert!(matches!(waiting.decision.choice, Choice::Buffer { .. }));
+    assert_eq!(waiting.decision.why, "fits: 20 <= 50");
+    assert_eq!(decision.cap, cap(2));
+    assert_eq!(decision.estimate_bytes, 1 + 20 + 49 + 30);
+    validate_dag(&refs(&settled.roots), Some(decision.cap)).expect("it validates under its cap");
+}
+
 #[test]
 fn settling_a_batch_with_joins_under_a_cap_validates() {
     let trees: Vec<Box<dyn GpuNode>> = ["orders", "customer", "part"]

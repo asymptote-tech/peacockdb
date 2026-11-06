@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 8134 test cases — Rust 6289, C++ 286, Python 1559.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 261 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 8143 test cases — Rust 6298, C++ 286, Python 1559.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 261 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3726 cases: `--lib` 1208, `test_cpu_corpus` 2451, `test_corpus_goldens` 64, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3728 cases: `--lib` 1210, `test_cpu_corpus` 2451, `test_corpus_goldens` 64, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -935,14 +935,16 @@ a `.benchmark.txt` section read per node in pre-order, `batch_rows` and `batch_b
 over lanes and batches, the trailer's load, execute and peak; a section without one panics
 naming it, and a baseline of another plan is refused naming the query and the node
 
-| Hold rule and concurrency cap | [prototypes::fuser::holds::tests](../peacockdb-core/src/prototypes/fuser/holds/tests.rs), [prototypes::fuser::cap::tests](../peacockdb-core/src/prototypes/fuser/cap/tests.rs), [prototypes::fuser::loads::tests](../peacockdb-core/src/prototypes/fuser/loads/tests.rs) | 28 |
+| Hold rule and concurrency cap | [prototypes::fuser::holds::tests](../peacockdb-core/src/prototypes/fuser/holds/tests.rs), [prototypes::fuser::cap::tests](../peacockdb-core/src/prototypes/fuser/cap/tests.rs), [prototypes::fuser::loads::tests](../peacockdb-core/src/prototypes/fuser/loads/tests.rs) | 30 |
 |---|---|--:|
 
 the fuser's memory rules on chosen numbers and hand-built fused plans: a buffer goes on the
 smallest allowed recorded edge, the lower on a tie, never above a join that grew the rows, and
-charges the builds of the joins it runs early; within the budget it is chosen where it fits the
+charges the builds of the joins it runs early, a build an earlier buffer holds priced as what
+it buffers; within the budget it is chosen where it fits the
 headroom, over it where it keeps less than the re-read adds to its root, and a re-read
-otherwise, the ledger charging the buffers the plan holds at each decision; a re-read's bytes
+otherwise, the ledger charging the plan as it stands at each decision, so a cap hold fits in
+what a group a re-read dissolved freed; a re-read's bytes
 are its own load's; `loads.tsv` read back by case, a
 missing row a panic; the cap admits the largest roots that fit, shared loads and buffers
 charged whatever it is, a root its peak less its shared loads; settling a batch buffers or

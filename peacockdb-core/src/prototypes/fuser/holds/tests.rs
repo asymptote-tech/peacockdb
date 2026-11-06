@@ -188,6 +188,50 @@ fn a_buffer_stays_below_a_join_that_grew_the_rows() {
     assert_eq!(placed.bytes, 50);
 }
 
+/// [`nested_joins`] beside a third query reading customer: q0's customer reader, the inner
+/// join's build, is buffered right under that join; its lineitem reader, priced after, still
+/// charges the build's recorded bytes, not its own load's.
+#[test]
+fn a_buffered_build_is_priced_as_what_it_buffers() {
+    let mut trees = nested_joins();
+    trees.push(unload(filter(key_of("customer"))));
+    let mut times = nested_times(&trees, &[(7, 5, 50), (4, 5, 30), (5, 1, 40), (8, 9, 1000)]);
+    times.per_query[1].batch_bytes[2] = 1000;
+    let names: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+    let loads = load_times(&[("a", 0, 70), ("b", 0, 80), ("c", 0, 90)]);
+    let seqs: Vec<Vec<Option<u64>>> = times
+        .per_query
+        .iter()
+        .map(|q| {
+            q.names
+                .iter()
+                .map(|n| (n == "GpuLoadParquet").then_some(0))
+                .collect()
+        })
+        .collect();
+    let mut priced = None;
+    let fused = fused_with(&trees, &mut |fused, held| {
+        if fused.shared[held.group].table == "customer" {
+            // path[0] lies under the coalesce; path[1] is the inner join's build edge.
+            return HoldDecision {
+                choice: Choice::Buffer { edge: held.path[1] },
+                bytes: 0,
+                reread_us: 0,
+                why: "test: the build edge".to_string(),
+            };
+        }
+        priced.get_or_insert_with(|| hold_inputs(fused, held, &times, &loads, &seqs, &names));
+        re_read_every_hold(fused, held)
+    });
+    assert_eq!(
+        fused.holds[0].table, "customer",
+        "the build's reader is decided first"
+    );
+    let inputs = priced.expect("the lineitem reader is decided");
+    let costs: Vec<(u64, bool)> = inputs.edges.iter().map(|e| (e.bytes, e.allowed)).collect();
+    assert_eq!(costs, [(50, true), (30 + 40, true)]);
+}
+
 /// q0 `unload(join(coalesce(orders), filter(lineitem)))` and q1 `unload(filter(lineitem))`,
 /// as the sf40 benchmark tree records them.
 const HELD: &str = "\

@@ -632,6 +632,33 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     untracked sf40-baseline leftover; not to be committed.
 - 2026-11-06: H100 rerun after round 1 committed (6e66896b, cf5ec195). Review round 2 returned; developer dispatched on its I1 and nit 7, then a full H100 rerun.
 
+- 2026-11-06, review round 2 (developer): I1, nit 7 and nit 2, local, test first. Checkpoint
+  reported, not committed; the H100 rerun waits for it.
+  - **I1.** `HoldLedger::choose` reads `S`, `B` and the largest root from `cap_inputs` over the
+    fused plan at every call; the cached `charged` is gone. RED:
+    `a_cap_hold_is_priced_after_a_re_read_dissolved_a_group` (`cap::tests`): q0's held lineitem
+    reader re-reads (`too large: 60 > 10`), which dissolves lineitem's group; q2 then waits
+    under cap 2, and its customer reader re-read against the stale headroom of 10 where it
+    fits the freed 50 (`fits: 20 <= 50`). "The hold rule" says so, and that within one
+    resolve the loads are as the last rebuild left them (groups are rebuilt as a resolve ends).
+  - **Nit 7.** `hold_inputs`' `recorded()` looks through an inserted `GpuHoldBuffer` (no
+    origins) to its child. RED: `a_buffered_build_is_priced_as_what_it_buffers`
+    (`holds::tests`): the nested joins beside a customer reader; customer, the inner join's
+    build, buffered under that join, then the lineitem edge through it cost `30 + 1000` (the
+    reader's own load) where it is `30 + 40`. Each fix disabled alone turns its own test red
+    and leaves the other green.
+  - **Left as it is:** a build child that is itself a shared load, or a project inserted over
+    one, still falls to the held reader's own load in `recorded()`: such a node stands for
+    several members, and `hold_inputs` cannot tell which is the build's. Not seen in the
+    figures; a pricing approximation in prototype code.
+  - **Nit 2.** build-test.md's header now matches the tables: 8143, Rust 6298 (the tables
+    summed to 8141 before this round's two tests); the cpu block 3728, `--lib` 1210; the
+    hold-rule row 30, its prose naming both new cases.
+  - **Checks:** `--lib` 1208 passed, 2 ignored; `test_corpus_goldens` 64; cost-report
+    formatting 39; `CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 scripts/cargo-cudf.sh
+    check -p peacockdb-core --features gpu,test-support --tests` clean, no warnings; rustfmt on
+    `holds.rs`, `holds/tests.rs`, `cap/tests.rs`, and `mod.rs` checked unchanged.
+
 ## The hold rule (spec 1a)
 
 All numbers are the sf40-baseline tree's, per origin node: Σ `batch_bytes` and Σ `batch_rows`
@@ -641,7 +668,8 @@ over lanes and batches. The rule is `decide`, `hold_inputs` and `HoldLedger::cho
   the reader's own load. The edge right above the shared load carries the union, which nothing
   recorded, so it is not a candidate.
 - A buffer above a join runs that join early, so it also keeps the join's build child's bytes,
-  for every join below it on the path.
+  for every join below it on the path. A build child that is a buffer an earlier decision
+  inserted is priced as the node it buffers (review round 2, nit 7).
 - An edge is allowed where every join below it on the path recorded no more rows than its child
   on the path. In a root that waits for the cap, also only where nothing at or under it
   keeps state, for every hold there, a join's as well as the cap's (`HeldReader.waits`). A
@@ -652,9 +680,11 @@ over lanes and batches. The rule is `decide`, `hold_inputs` and `HoldLedger::cho
   of its `CudfScan` recipe. It is recorded either way. It also adds that load's recorded
   `batch_bytes` back to its root (`reread_bytes`): the load is no longer shared.
 - Headroom: `budget − (S + B + max root_bytes)`; over budget when `S + B + max root_bytes >
-  budget`. `S` and the roots come from `cap_inputs` at the first decision; `B` is the buffers
-  the fused plan holds at each decision, so a buffer taken out is no longer charged. Readers
-  are decided in the order validation names them.
+  budget`. All three come from `cap_inputs` over the fused plan at each decision (review
+  round 2, I1): a group a re-read dissolved, and rebuilt, frees its bytes for the decisions
+  after, and a buffer taken out is no longer charged. Within one resolve the shared loads are
+  as the last rebuild left them, since groups are rebuilt when a resolve ends. Readers are
+  decided in the order validation names them.
 - The choice, where a buffer is placed. Within the budget: the buffer where its bytes fit the
   headroom, else a re-read. Over budget (review round 1, I2, the coordinator's decision): the
   buffer where its bytes are below `reread_bytes`, else a re-read; a buffer then costs less

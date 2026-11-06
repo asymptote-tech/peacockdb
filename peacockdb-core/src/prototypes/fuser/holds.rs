@@ -72,9 +72,15 @@ pub(crate) fn hold_inputs(
     let roots: Vec<&dyn GpuNode> = fused.roots.iter().map(|root| root.as_ref()).collect();
     let dag = PlanDag::of(&roots);
     let member = held.member;
-    // `(Σ batch_rows, Σ batch_bytes)` recorded for what a fused node stands for; the shared
-    // load and a project selecting from it stand for the reader's own load.
-    let recorded = |at: usize| {
+    // `(Σ batch_rows, Σ batch_bytes)` recorded for what a fused node stands for; an inserted
+    // buffer stands for its child, and the shared load and a project selecting from it for the
+    // reader's own load.
+    let recorded = |mut at: usize| {
+        while fused.origins[at].is_empty()
+            && matches!(as_node_ref(dag.nodes[at].node), NodeRef::HoldBuffer(_))
+        {
+            at = dag.nodes[at].children[0];
+        }
         let origin = match fused.origins[at].as_slice() {
             [origin] if dag.nodes[at].node.sharing_key().is_none() => *origin,
             _ => member,
@@ -130,22 +136,11 @@ pub(crate) fn state_under(dag: &PlanDag<'_>, at: usize) -> Option<usize> {
     None
 }
 
-pub(crate) fn choose(
-    ledger: &mut HoldLedger<'_>,
-    fused: &Fused,
-    held: &HeldReader,
-) -> HoldDecision {
-    let charged = *ledger.charged.get_or_insert_with(|| {
-        let at_first = cap_inputs(fused, ledger.baseline, ledger.pool_bytes);
-        let largest_root = at_first.root_bytes.iter().max().copied().unwrap_or(0);
-        at_first.shared_bytes.iter().sum::<u64>() + largest_root
-    });
-    let buffered: u64 = fused
-        .holds
-        .iter()
-        .filter(|record| matches!(record.decision.choice, Choice::Buffer { .. }))
-        .map(|record| record.decision.bytes)
-        .sum();
+pub(crate) fn choose(ledger: &HoldLedger<'_>, fused: &Fused, held: &HeldReader) -> HoldDecision {
+    let now = cap_inputs(fused, ledger.baseline, ledger.pool_bytes);
+    let largest_root = now.root_bytes.iter().max().copied().unwrap_or(0);
+    let charged = now.shared_bytes.iter().sum::<u64>() + largest_root;
+    let buffered: u64 = now.buffer_bytes.iter().sum();
     let (budget, spent) = (budget_of(ledger.pool_bytes), charged + buffered);
     let headroom = match spent > budget {
         true => Headroom::Over,
