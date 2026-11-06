@@ -438,7 +438,8 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     run reading pinned buffers. The rmm pool is the benchmark's 69 GiB. Each root's answer is
     checked against its query run alone on the device.
   - **Per batch** (replaced by the rerun after review round 2, below; round 1's numbers are
-    in git at `6e66896b`, round 0's at `57be22b8`). Shared and unshared are counts of loads;
+    in git at `6e66896b`, round 0's at `57be22b8`). The completeness pass's rerun executed the
+    same plans: its times are within ±1.5 % of these, and its file is the committed one. Shared and unshared are counts of loads;
     buffers are count and Σ bytes; re-reads count and Σ `reread_us`; load and execute in ms;
     peak is the accountant's (a lower bound), GB; cache is `pinned_cache=`'s `resident`, then
     this batch's prefill; wall is the test process's.
@@ -481,6 +482,24 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     | tpcds first20 | 20 | 13962 (8168 + 5748) | 11041 (5235 + 5746) | 0.79
     | tpcds all | 79 | 38671 (24066 + 14455) | 32043 (17290 + 14523) | 0.83
 
+  - **The merge hint**, across queries only since the completeness pass (`7b1db00e`), against
+    round 2's, which also counted a query's repeats of itself. µs; the largest entry's members
+    as `<query>:<pre-order index>`:
+
+    | batch | round 2 saved_us, entries | saved_us, entries | largest entry |
+    |---|--:|--:|---|
+    | tpch first3 | 266, 1 | 0, 0 | — |
+    | tpch first10 | 266, 1 | 0, 0 | — |
+    | tpch first20 | 4416, 4 | 20, 1 | 20, `GpuCoalesceAllBatches` over supplier, q2:36 + q5:16 |
+    | tpch all | 13965, 5 | 20, 1 | 20, the same |
+    | tpcds first3 | 77539, 2 | 0, 0 | — |
+    | tpcds first10 | 272407, 11 | 282, 1 | 282, `GpuCoalesceAllBatches` over date_dim, q1:15 + q1:26 + q7:15 |
+    | tpcds first20 | 658387, 18 | 1518, 3 | 631, `GpuCoalesceAllBatches`, q4 ×3 + q11 ×2 |
+    | tpcds all | 1050938, 79 | 92846, 31 | 32108, `GpuAggregateBatches` by customer name, q38:32 + q87:32 |
+
+    A group spanning two queries keeps every member, a query's own repeats among them
+    (tpcds first20's largest holds three q4 copies). Merging identical subtrees across queries
+    would save at most 93 ms of tpcds all's 14.5 s of execute, and nothing measurable in tpch.
   - **An honest reading.** Every batch runs faster than its queries alone, by 7-31 %. The two
     first3 batches run at cap 3 and tpcds first10 and first20 at cap 2, within the 90 % budget.
     tpcds all runs at cap 1 within budget: a second root does not fit beside its 8 GB of
@@ -495,9 +514,11 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     a resolve, a re-read charges its root its own load at once, while the group's union is
     rebuilt only when the resolve ends. So the ledger can read over budget mid-resolve though
     the settled plan is within it; tpcds first10 did, from its 32nd decision, after q4's two
-    `catalog_sales` re-reads, and net 5 of round 1's buffers became re-reads (6 to re-reads, 1 to a buffer) (+97 ms). Each
-    section's merge and pipelining hints estimate what more is available.
-  - **Step 2, the profiles** (the round-2 rerun's). All 725 rows of the eight `loads.tsv` have
+    `catalog_sales` re-reads, and net 5 of round 1's buffers became re-reads (6 to re-reads, 1 to a buffer) (+97 ms). The
+    merge hint finds little to merge across queries (above); each section's pipelining hint
+    estimates what overlapping loads with execution would add.
+  - **Step 2, the profiles** (the round-2 rerun's, `ec6935dd`, built from `51b27ddf`; they
+    stand for the completeness pass's binary, whose executed plans are the same). All 725 rows of the eight `loads.tsv` have
     `load_us > 0`, `host_read_us ≤ load_us`, `unattributed_us ≤ load_us` and
     `off_thread_device_us ≤ h2d_us + decompress_us + decode_us + other_device_us` (a script
     over the files; no violation). `host_read_source=none` throughout: the reads come from the
@@ -720,6 +741,26 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
   - **Checks:** `--lib` 1209 passed, 2 ignored; `test_corpus_goldens` 64; cost-report
     formatting 39; `scripts/cargo-cudf.sh check -p peacockdb-core --features gpu,test-support
     --tests` clean; no warnings; rustfmt on `merge.rs`, `merge/tests.rs`, `mod.rs`.
+- 2026-11-06, Task 9 Steps 1-4 and 6 and Task 10 Steps 1 and 4 (developer), **the H100 rerun
+  after the completeness fix (`7b1db00e`): the eight batches, no profiles.** Nothing committed
+  or staged.
+  - As the round-2 rerun: round 2's scratch area moved to `/tmp/qf-run4/`; the CPU-VM build
+    (60 GB free, `check-build-image.sh` and `stage-install.sh` exit 0, binary staged 12:52);
+    the H100 (77 GB free, card idle), `install-watch` without a key file, `prepare` skipped
+    (no `docker/` change), `ship`, the five inputs present, the shipped fused output and the
+    VM's `calibration/fused/` removed; tpch first3 without `PEACOCK_BENCH_RESUME`, the rest
+    `=1`. All eight exit 0, `outcome=measured`, `answers=match`.
+  - **The plans did not change.** Against round 2 (`755656e0`), per batch: the `--- batch ---`
+    block (holds, cap, estimate, shares, reads) is identical line for line; every tree is
+    identical but for `time_us` and `total_us` (same nodes, `batch_rows`, `batch_bytes`); the
+    accountant's peak is identical; run, load and execute are within ±1.5 % (tpcds first20
+    +0.7 %, tpch first10 −1.3 %). So 51b27ddf's profiles (`ec6935dd`) describe these plans, and
+    were not rerun. Only `--- merge ---` changed (the table in the Task 10 entry).
+  - **Task 10.** `every_fused_section_adds_up` passes; the page test failed before
+    regeneration and passes after, its diff the eight fused rows (their load and execute).
+    Golden check: `--lib` 1209 passed, 2 ignored; `test_corpus_goldens` 64; cost-report
+    formatting 39.
+  - **Logs:** `/tmp/qf6-*.log`; `~/.cache/peacock/run-gpu/peacockdb-beta/`.
 
 ## The hold rule (spec 1a)
 
@@ -905,3 +946,5 @@ Keys:
 | nebius-h100 | 2026-11-06 08:52:46 | 2026-11-06 10:01:42 | 1.15 |
 | nebius-cpu128 | 2026-11-06 10:46:41 | 2026-11-06 10:53:06 | 0.11 |
 | nebius-h100 | 2026-11-06 10:53:09 | 2026-11-06 11:58:03 | 1.08 |
+| nebius-cpu128 | 2026-11-06 12:47:15 | 2026-11-06 12:53:23 | 0.10 |
+| nebius-h100 | 2026-11-06 12:53:30 | 2026-11-06 13:22:59 | 0.49 |
