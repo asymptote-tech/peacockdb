@@ -1680,6 +1680,13 @@ pub fn append_records(rows: &[String], meta: &RunMeta<'_>) {
     record::append_records(rows, meta)
 }
 
+/// [`append_records`] to `path` rather than `$PEACOCK_RECORD_PATH`: the fused benchmark's record,
+/// which its batches write by path.
+#[cfg_attr(all(feature = "rust-only", not(test)), allow(dead_code))]
+pub(crate) fn append_records_to(path: &Path, rows: &[String], meta: &RunMeta<'_>) {
+    record::append_records_to(path, rows, meta)
+}
+
 /// One execution's rows against what its plan declares — every row a cell per column,
 /// every row naming a step its own node publishes, a step's calls numbered `0..n` with no
 /// gap. `declared` is per post-order node, the seqs its recipe publishes.

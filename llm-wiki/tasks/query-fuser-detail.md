@@ -119,6 +119,74 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
   - A test of mine first failed for its own numbers (a pool of 1000 let both roots run, so
     none waited); fixed to a budget of 135, and re-checked red against the switched-off rule.
 
+- 2026-11-06, Task 6 (developer), **in progress, stopped for context** after its CPU half
+  (Part A). Not a checkpoint: the plan's commit is Step 5, after the device flow. The tree
+  builds and tests green as it stands (rust-only `--lib`, goldens, source gates, and the
+  gpu `--tests` check).
+  - **Done (Part A):**
+    - `fuser/section.rs`: `render_fused_section` (Outcome `Measured | OutOfMemory`, the run
+      block passed in as text) and `parse_fused_section`, its own tree reader for
+      `render_timings_of_roots`'s `root <i>:` headers and `@k` nodes (the harness's
+      `parse_benchmark_section` reads neither, and its time-line helper is private).
+      `FusedSection` (+ `field`, `count`, `tree_device_us`, `tree_load_us`),
+      `parse_fused_section`, `fused_results_file`, `FUSED_ALL_RUNS` are `pub` in
+      `prototypes/mod.rs`.
+    - `fuser/benchmark.rs` (host side only): `is_out_of_memory`, `fused_results_file`,
+      `fused_record_path`, `case_name`, `replace_case_rows` (drops the case's rows, then
+      `append_records_to`). `test_support/record.rs` gained `append_records_to(path, …)`, which
+      `append_records` calls; `test_support/mod.rs` declares it `pub(crate)`.
+    - Tests: `section::tests` 6, `benchmark::tests` 4 (out of memory, file paths, rerun rows,
+      `plan_files` of a fused batch). Mutation-checked: no record replacement, `@k` read as no
+      edge. `test_corpus_goldens`: `every_fused_section_adds_up` (no file committed yet) over
+      `benchmark_checks.rs`'s `fused_problem`, with `a_fused_section_that_adds_up_passes` and
+      `a_fused_section_that_does_not_add_up_is_refused` (6 doctorings, and `all`'s run count).
+    - `.gitignore`: `testdata/calibration/fused/`.
+  - **Deviation:** the plan's check "the merge total is at least every entry's share" is false
+    under its own model (A: filter 10, agg 100; B: filter 50, agg 1 → entry 51, total 11), so
+    `fused_problem` checks the entries are largest first instead.
+  - **Left (Parts B, C, docs)**, for the next developer:
+    - **The test target and its gate were taken back out**, because they cannot compile before
+      `benchmark_fused` exists, and a gpu build of an unbuildable target breaks the tree. Redo
+      when Part C lands: `tests/prototype_fused_benchmarks.rs` (`#![cfg(feature = "gpu")]`,
+      the plan's `fused_benchmark!` and eight invocations); `[[test]] name =
+      "prototype_fused_benchmarks"`, `required-features = ["gpu", "test-support"]` in
+      `peacockdb-core/Cargo.toml` (no `[[test]]` exists there yet; one entry overrides only its
+      own target); in `ci_coverage.rs` `Exemption::ManualPrototype`, the entry, its arm in the
+      stale-entry message, and a `wired_nowhere(target, workflow_lines, staged, shadgpu_text)`
+      check (no `--test <target>` word pair in any folded workflow line, not in
+      `gpu_job_staged_targets()`, not in `build-test-shadgpu.sh`'s `RUST_TESTS=(` line), called
+      for each `ManualPrototype` entry from `every_rust_test_target_is_named_by_ci` and tested by
+      `a_manual_prototype_is_wired_nowhere` with doctored inputs. All of this was written and
+      green once: the guard named the target when its exemption was removed.
+    - **Reachability, a plan gap:** `benchmark_fused` lives in `prototypes`, and most of what it
+      consumes is private to `test_support`'s modules (`gpu_session::Session`,
+      `corpus_benchmark::{second_smallest, measured_of, assert_fit_to_measure, BENCH_POOL_BYTES}`,
+      `record::{record_rows, declared_steps, rows_match_the_recipes}`, `benchmark_section::
+      measure_into`, `benchmark_trailer::{RunTotals, run_section}`, `benchmark_prefill::
+      rounds_were_pinned`, `provenance::{of_this_run, fields}`, `corpus::plan_at`). Making them
+      `pub(crate)` in their files does not reach them: each needs a `pub(crate)` delegate in
+      `test_support/mod.rs` (gated `#[cfg(not(feature = "rust-only"))]` where the module is).
+      `Session` is a type, so rather than move it, add two harness functions in
+      `gpu_session.rs`: a fused run of `roots` under `cap` with its regions, and a prefill of
+      `files` on a session over `roots`. `second_smallest` takes `Vec<Run>` (private); make
+      it generic over a key, or pick the 2nd-min index locally. Engine delegates per the plan:
+      `nodes_as_recorded_of_roots` (`executor/driver/index.rs` + `executor/mod.rs`),
+      `timed_load_us_of_roots` (`plan_text/bench_text.rs` + `plan_text/mod.rs`).
+    - **The device flow** `fuser/benchmark/device.rs` behind `#[cfg(not(feature =
+      "rust-only"))]`, declared in `benchmark.rs`, with a one-expression `pub(crate) async fn`
+      delegate there (a `use` re-export is refused) and in `fuser/mod.rs`, and the `pub async fn
+      benchmark_fused` in `prototypes/mod.rs`. The plan's Task 6 flow, steps 1-8; the section is
+      `render_fused_section`, the out-of-memory run block `--- run ---` plus the five provenance
+      keys. Seqs per query: `attach_recipes` of its own tree, post-order → pre-order, the
+      `CudfScan` call's seq at each load. Type-check locally with
+      `CUDF_ROOT=/home/dmitry/miniforge3/envs/rapids-cuda-12.2 scripts/cargo-cudf.sh check -p
+      peacockdb-core --features gpu,test-support --tests` (works on this host, ~1.5 min warm).
+    - **Part B**: `run-gpu.sh run <staged name>`, `stage-install.sh`, `idle_watch.py`
+      `TEST_NAMES`, and their Python tests, as the plan lists them.
+    - **Docs**: build-test.md "Benchmarks" paragraph and the counts (`--lib` +10 → 1183,
+      `test_corpus_goldens` +3 → 64, cost-report +1 when the wiring test lands), and "The fused
+      format" section here.
+
 ## The hold rule (spec 1a)
 
 All numbers are the sf40-baseline tree's, per origin node: Σ `batch_bytes` and Σ `batch_rows`

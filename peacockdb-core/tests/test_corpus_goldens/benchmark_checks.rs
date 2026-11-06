@@ -2,6 +2,7 @@
 //! as well as the committed trees. The H200's tree carries no batches and no load, and the H100's
 //! passes every check, so only a literal can show those checks refusing a section.
 
+use peacockdb_core::prototypes::{FUSED_ALL_RUNS, FusedSection, parse_fused_section};
 use peacockdb_core::test_support::{BenchSection, MEASURED_RUNS, parse_benchmark_section};
 
 /// The device trees whose sections carry no batches and no load, execute, peak, cache or
@@ -135,6 +136,225 @@ pub(crate) fn section_problem(section: &BenchSection, at: &str) -> Result<(), St
         ));
     }
     Ok(())
+}
+
+/// What is wrong with one fused section, if anything. Every section: its hold lines agree
+/// with `buffers`, `rereads` and `buffer_bytes`, and the cap fits its budget unless it says it
+/// does not. A measured one also: bench-rows' tree arithmetic over each node once, the runs
+/// (`FUSED_ALL_RUNS` for `all`, `MEASURED_RUNS` otherwise) with `run_us` their second-smallest,
+/// the merge entries largest first, the pipelined estimate from the measured run, `Σ reads` the
+/// tree's loads and its `GpuHoldBuffer`s the buffers.
+pub(crate) fn fused_problem(section: &FusedSection, batch: &str, at: &str) -> Result<(), String> {
+    let count = |key: &str| {
+        section
+            .count(key)
+            .ok_or_else(|| format!("{at}: no `{key}`"))
+    };
+    let hold_field = |line: &str, key: &str| -> String {
+        let after = line.split(&format!(" {key}=")).nth(1).unwrap_or("");
+        after.split(' ').next().unwrap_or("").to_string()
+    };
+    let chose = |choice: &str| {
+        section
+            .holds
+            .iter()
+            .filter(|line| hold_field(line, "choice") == choice)
+            .collect::<Vec<_>>()
+    };
+    let (buffers, rereads) = (chose("buffer"), chose("re-read"));
+    if buffers.len() as u64 != count("buffers")? || rereads.len() as u64 != count("rereads")? {
+        return Err(format!(
+            "{at}: the hold lines disagree with buffers= or rereads="
+        ));
+    }
+    let kept: u64 = buffers
+        .iter()
+        .map(|line| hold_field(line, "bytes").parse::<u64>().unwrap_or(u64::MAX))
+        .sum();
+    if kept != count("buffer_bytes")? {
+        return Err(format!(
+            "{at}: buffer_bytes is not its buffer lines' bytes, {kept}"
+        ));
+    }
+    if section.field("over_budget") != Some("true")
+        && count("estimate_bytes")? > count("budget_bytes")?
+    {
+        return Err(format!(
+            "{at}: the estimate is over the budget and over_budget says not"
+        ));
+    }
+    if section.field("outcome") != Some("measured") {
+        return Ok(());
+    }
+    let (load, execute, device) = (count("load_us")?, count("execute_us")?, count("device_us")?);
+    if section.tree_device_us() != device
+        || section.tree_load_us() != load
+        || load + execute != device
+    {
+        return Err(format!(
+            "{at}: the tree does not add up to device_us, load_us and execute_us"
+        ));
+    }
+    for node in &section.nodes {
+        let calls: u64 = node.time_us.iter().flatten().sum();
+        if calls != node.total_us {
+            return Err(format!(
+                "{at}: {}'s total_us is not its time_us",
+                node.line.name
+            ));
+        }
+    }
+    let spread: Vec<u64> = section
+        .field("runs")
+        .ok_or_else(|| format!("{at}: no runs"))?
+        .trim_matches(|c| c == '[' || c == ']')
+        .split(',')
+        .map(|e| e.parse().map_err(|_| format!("{at}: runs entry {e:?}")))
+        .collect::<Result<_, String>>()?;
+    let wanted = if batch == "all" {
+        FUSED_ALL_RUNS
+    } else {
+        MEASURED_RUNS
+    };
+    let mut sorted = spread.clone();
+    sorted.sort_unstable();
+    if spread.len() != wanted || section.count("run_us") != sorted.get(1).copied() {
+        return Err(format!(
+            "{at}: runs {spread:?} are not {wanted} with run_us the second-smallest"
+        ));
+    }
+    let savings: Vec<u64> = section
+        .merge
+        .iter()
+        .filter_map(|line| line.strip_prefix("entry saved_us="))
+        .map(|rest| rest.split(' ').next().unwrap_or("").parse().unwrap_or(0))
+        .collect();
+    if savings.windows(2).any(|pair| pair[0] < pair[1]) {
+        return Err(format!("{at}: the merge entries are not largest first"));
+    }
+    if count("fused_measured_us")? != load + execute
+        || count("pipelined_estimate_us")? != (load + execute).saturating_sub(count("saved_us")?)
+    {
+        return Err(format!(
+            "{at}: the pipelined estimate is not the measured run less the saving"
+        ));
+    }
+    let reads: u64 = section
+        .field("reads")
+        .unwrap_or("[]")
+        .trim_matches(|c| c == '[' || c == ']')
+        .split(',')
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| {
+            entry
+                .rsplit(':')
+                .next()
+                .unwrap_or("")
+                .parse::<u64>()
+                .unwrap_or(0)
+        })
+        .sum();
+    let named = |name: &str| section.nodes.iter().filter(|n| n.line.name == name).count() as u64;
+    if reads != named("GpuLoadParquet") || named("GpuHoldBuffer") != count("buffers")? {
+        return Err(format!(
+            "{at}: reads= or buffers= is not what the tree holds"
+        ));
+    }
+    Ok(())
+}
+
+/// A measured fused batch of two roots over one shared load: q1 reads it directly, q2 through a
+/// buffer under a join that re-read nothing.
+const FUSED: &str = "\
+--- batch ---
+queries=[q1,q2]
+outcome=measured
+shared=[lineitem:q1+q2]
+unshared=[]
+reads=[lineitem:1,orders:1]
+buffers=1
+buffer_bytes=32
+rereads=0
+hold query=q2 table=lineitem hold=GpuHashJoin choice=buffer above=4 bytes=32 reread_us=900 why=fits: 32 <= 900
+cap=2
+pool_bytes=1000
+budget_bytes=900
+estimate_bytes=500
+over_budget=false
+answers=match
+--- merge ---
+saved_us=10
+entry saved_us=10 members=q1:1,q2:4 node=GpuFilter: predicate=x
+--- pipeline ---
+model=one loader and one executor
+load_order=[lineitem,orders]
+serial_us=300
+makespan_us=250
+saved_us=50
+fused_measured_us=200
+pipelined_estimate_us=150
+--- tree ---
+root 0:
+  GpuUnload
+    time_us=[[5]] total_us=5 batch_rows=[[1]] batch_bytes=[[17]]
+    GpuFilter: predicate=x
+      time_us=[[10]] total_us=10 batch_rows=[[4]] batch_bytes=[[32]]
+      @1 GpuLoadParquet: table=lineitem
+        time_us=[[100]] total_us=100 batch_rows=[[40]] batch_bytes=[[320]]
+root 1:
+  GpuUnload
+    time_us=[[5]] total_us=5 batch_rows=[[1]] batch_bytes=[[17]]
+    GpuHashJoin: on=x
+      time_us=[[6,4]] total_us=10 batch_rows=[[3]] batch_bytes=[[24]]
+      GpuLoadParquet: table=orders
+        time_us=[[60]] total_us=60 batch_rows=[[5]] batch_bytes=[[40]]
+      GpuHoldBuffer
+        time_us=[[]] total_us=0 batch_rows=[[4]] batch_bytes=[[32]]
+        GpuFilter: predicate=x
+          time_us=[[10]] total_us=10 batch_rows=[[4]] batch_bytes=[[32]]
+          @1
+--- run ---
+run_us=260
+device_us=200
+load_us=160
+execute_us=40
+peak_bytes=700
+runs=[270,260,250,280,290,300,310,320,330,340]
+";
+
+fn fused_checked(body: &str, batch: &str) -> Result<(), String> {
+    fused_problem(
+        &parse_fused_section(body).expect("a measured batch"),
+        batch,
+        "doctored",
+    )
+}
+
+#[test]
+fn a_fused_section_that_adds_up_passes() {
+    assert_eq!(fused_checked(FUSED, "first10"), Ok(()));
+}
+
+#[test]
+fn a_fused_section_that_does_not_add_up_is_refused() {
+    for (from, to) in [
+        ("load_us=160", "load_us=161"),
+        ("rereads=0", "rereads=1"),
+        ("buffer_bytes=32", "buffer_bytes=33"),
+        ("pipelined_estimate_us=150", "pipelined_estimate_us=151"),
+        ("reads=[lineitem:1,orders:1]", "reads=[lineitem:2,orders:1]"),
+        ("estimate_bytes=500", "estimate_bytes=901"),
+    ] {
+        assert!(FUSED.contains(from), "{from}");
+        assert!(
+            fused_checked(&FUSED.replace(from, to), "first10").is_err(),
+            "{to} passed"
+        );
+    }
+    assert!(
+        fused_checked(FUSED, "all").is_err(),
+        "all measures FUSED_ALL_RUNS"
+    );
 }
 
 /// tpch q3 at tp1-single as the H100 measured it on 2026-11-05 (bench-rows-detail.md, Task 5):

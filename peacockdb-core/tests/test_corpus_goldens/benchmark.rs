@@ -6,7 +6,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use super::benchmark_checks::{rows_problem, section_problem};
+use super::benchmark_checks::{fused_problem, rows_problem, section_problem};
+use peacockdb_core::prototypes::parse_fused_section;
 use peacockdb_core::test_support::{
     BUILD, FAILED, MODES, Mode, SKIPPED, benchmark_report_path, device_slug, line_difference,
     load_csv, ordered_sections, parse_benchmark_section, render_benchmark_report,
@@ -142,6 +143,33 @@ fn every_total_us_is_the_sum_of_the_time_us_beside_it() {
         "not one timing line in the committed tree: the format moved and this check is \
          reading past it"
     );
+}
+
+/// Every committed `*.fused.txt` section passes `fused_problem`; with none committed yet, there
+/// is nothing to check.
+#[test]
+fn every_fused_section_adds_up() {
+    let mut files = Vec::new();
+    fn walk(dir: &Path, into: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            match path.is_dir() {
+                true => walk(&path, into),
+                false if path.to_string_lossy().ends_with(".fused.txt") => into.push(path),
+                false => {}
+            }
+        }
+    }
+    walk(&testdata_root().join("benchmark-results"), &mut files);
+    for path in files {
+        let text = std::fs::read_to_string(&path).expect("a fused file");
+        for (batch, body) in ordered_sections(&text) {
+            if let Some(section) = parse_fused_section(&body) {
+                let at = format!("{} {batch}", path.display());
+                fused_problem(&section, &batch, &at).unwrap_or_else(|problem| panic!("{problem}"));
+            }
+        }
+    }
 }
 
 /// The committed trees were written by a release build.

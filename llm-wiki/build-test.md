@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 8082 test cases — Rust 6249, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 8095 test cases — Rust 6262, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3688 cases: `--lib` 1173, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3701 cases: `--lib` 1183, `test_cpu_corpus` 2451, `test_corpus_goldens` 64, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -97,14 +97,16 @@ tie
 the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions;
 one binary per engine, since `inventory` collects per linked binary
 
-| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_checks](../peacockdb-core/tests/test_corpus_goldens/benchmark_checks.rs), [benchmark_lists](../peacockdb-core/tests/test_corpus_goldens/benchmark_lists.rs), [benchmark_record](../peacockdb-core/tests/test_corpus_goldens/benchmark_record.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 61 |
+| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_checks](../peacockdb-core/tests/test_corpus_goldens/benchmark_checks.rs), [benchmark_lists](../peacockdb-core/tests/test_corpus_goldens/benchmark_lists.rs), [benchmark_record](../peacockdb-core/tests/test_corpus_goldens/benchmark_record.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 64 |
 |---|---|--:|
 
 the committed sections against their own arithmetic, with no dataset and no run: `consumed +
 abandoned == emitted` at every node, lane counts against `lanes=N`, the loader's `batch_rows` a
 prefix of its own lane's `partition_groups`, the root's `out_rows` against `.result.txt`, and the
 tree the indentation draws. The golden is written by the run it will later check, so a file that
-contradicts itself is the only witness to a renderer that is wrong. The benchmark tree gets the
+contradicts itself is the only witness to a renderer that is wrong. Each `*.fused.txt` section
+passes `fused_problem`, its holds, cap, tree, runs and pipelining estimate against each other
+(none is committed yet; two doctored cases hold the check). The benchmark tree gets the
 same reading, through its one reader, `parse_benchmark_section`, and each timed section through
 `section_problem`: every `total_us` is the sum of the `time_us` beside it and `device_us` the sum
 of the totals. Where a section carries them, `load_us` is the `GpuLoadParquet` totals,
@@ -904,6 +906,15 @@ every form readably
 which queries a fused batch holds: a case list's `ok` and `wrong` rows at tp1_single in file
 order, tpch's q1-q22 only; a missing list or an empty set panics naming it; each batch size a
 prefix, `first3` always, a larger one marked as the same set as `all` once the list is no longer
+
+| Fused format and benchmark rules | [prototypes::fuser::section::tests](../peacockdb-core/src/prototypes/fuser/section/tests.rs), [prototypes::fuser::benchmark::tests](../peacockdb-core/src/prototypes/fuser/benchmark/tests.rs) | 10 |
+|---|---|--:|
+
+a `.fused.txt` section read back, measured and out of memory, its shared tree nodes once and
+its `@k` references as edges, a marker untimed and a key held twice refused; a section rendered
+from a fused plan reads back as written; an out-of-memory error is recognised by its text; the
+fused file and record lie where the device tree's do; a rerun batch replaces its record rows;
+a fused batch's files are its queries' union
 
 | Fused batch baseline | [prototypes::fuser::baseline::tests](../peacockdb-core/src/prototypes/fuser/baseline/tests.rs) | 5 |
 |---|---|--:|

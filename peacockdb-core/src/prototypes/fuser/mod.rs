@@ -9,6 +9,7 @@
 //! `llm-wiki/tasks/query-fuser-detail.md` records the decisions.
 
 mod baseline;
+mod benchmark;
 mod cap;
 mod fuse;
 mod holds;
@@ -16,6 +17,7 @@ mod lists;
 mod loads;
 mod merge;
 mod pipeline;
+mod section;
 #[cfg(test)]
 mod tests;
 
@@ -23,8 +25,12 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::path::Path;
 
+use std::path::PathBuf;
+
+use crate::executor::RunError;
 use crate::plan::{Batching, GpuNode, PlanError};
-use crate::test_support::{BenchSection, DeviceCase};
+use crate::prototypes::FusedSection;
+use crate::test_support::{BenchSection, DeviceCase, RunMeta};
 
 /// One query of a batch: its name, and its own planned tree.
 pub(crate) struct Query<'a> {
@@ -461,4 +467,71 @@ pub(crate) fn settle(
     ledger: &mut HoldLedger<'_>,
 ) -> Result<(Fused, CapDecision), PlanError> {
     cap::settle(fused, baseline, ledger)
+}
+
+/// How a batch ended, and what only a measured run has.
+pub(crate) enum Outcome<'r> {
+    Measured {
+        /// `render_timings_of_roots` of the chosen run.
+        tree: &'r str,
+        /// The chosen run's `load_us + execute_us`.
+        measured_us: u64,
+        /// `run_section` of the chosen run, `--- run ---` first.
+        run: &'r str,
+    },
+    OutOfMemory {
+        reason: &'r str,
+        /// `--- run ---` and the five provenance keys.
+        run: &'r str,
+    },
+}
+
+/// One batch's section of the fused format (`query-fuser-detail.md`, "The fused format"):
+/// `--- batch ---`, `--- merge ---`, `--- pipeline ---`, and for a measured batch its tree.
+/// `queries` names the roots in order; `pool_bytes` is the pool the cap was computed against.
+pub(crate) fn render_fused_section(
+    queries: &[String],
+    fused: &Fused,
+    decision: &CapDecision,
+    pool_bytes: u64,
+    merge: &MergeHint,
+    pipeline: &PipelineHint,
+    outcome: Outcome<'_>,
+) -> String {
+    section::render_fused_section(
+        queries, fused, decision, pool_bytes, merge, pipeline, outcome,
+    )
+}
+
+/// One fused section read back, or `None` for a marker or a failed batch's record. Panics on
+/// a line the format does not allow, naming it.
+pub(crate) fn parse_fused_section(body: &str) -> Option<FusedSection<'_>> {
+    section::parse_fused_section(body)
+}
+
+/// Whether a run failed for want of device memory: rmm's `bad_alloc`/`out_of_memory`, or a
+/// CUDA `out of memory`. Such a batch is a recorded outcome, not a failure.
+pub(crate) fn is_out_of_memory(error: &RunError) -> bool {
+    benchmark::is_out_of_memory(error)
+}
+
+/// `benchmark-results/<device>/fused/<dataset>.sf<sf>/tp1_single.fused.txt`.
+pub(crate) fn fused_results_file(device: &str, dataset: &str, sf: &str) -> PathBuf {
+    benchmark::fused_results_file(device, dataset, sf)
+}
+
+/// `calibration/fused/<dataset>.sf<sf>/records.tsv`, which the metrics pass reads.
+pub(crate) fn fused_record_path(dataset: &str, sf: &str) -> PathBuf {
+    benchmark::fused_record_path(dataset, sf)
+}
+
+/// `bench_fused_<dataset>_sf40_<batch>_tp1_single`: the test, and its rows' `query`.
+pub(crate) fn case_name(dataset: &str, batch: &str) -> String {
+    benchmark::case_name(dataset, batch)
+}
+
+/// `rows` appended to the record at `path` after dropping every row of `meta.query`'s case, so
+/// a rerun batch replaces its rows rather than doubling them.
+pub(crate) fn replace_case_rows(path: &std::path::Path, rows: &[String], meta: &RunMeta<'_>) {
+    benchmark::replace_case_rows(path, rows, meta)
 }
