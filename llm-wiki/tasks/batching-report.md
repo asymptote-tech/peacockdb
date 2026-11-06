@@ -48,3 +48,11 @@ DuckDB warm alongside.
 | `scripts/calibration/batching_report.py`, `scripts/calibration/tests/test_batching_report.py` | the generator the report's tables come from, so no number is typed by hand |
 
 Component-level API: none.
+
+## Signoff (2026-11-06)
+
+Solved under its constraints. Done-when 1-5 and 4a are met. Every table cell was recomputed from the raw files by two reviewers. Three review rounds and a completeness pass. Shortcuts and limits, all recorded in `batching-report-detail.md`:
+- The Reading is written by hand from the generated tables, and `--check` does not cover it. tp4-sized must re-read it when it adds its sums.
+- A fused batch whose queries are no longer today's `cases.csv` prefix is named stale, not refused. A status change to a sf40 row then calls for an H100 rerun, without turning CI red.
+- The page is no longer documentation to CI's path filters, so a page-only change runs the full pipeline.
+- The DuckDB comparison is given both as measured and with the per-process floor taken off; TPC-DS first3 is DuckDB-faster only with the floor taken off.

@@ -1,31 +1,32 @@
 name: CI Pipeline
 
 # Documentation-only changes skip the whole pipeline. Nothing under llm-wiki/ or any
-# .md file is read by a build, a test or a golden — verified by grep, and the rule is
-# only safe while that stays true, so a doc file that ever becomes an input (a fixture,
-# a generated table someone asserts on) has to come off this list.
-#
-# paths-ignore skips only when EVERY changed file matches, so a commit touching the spec
-# and the code it describes still runs in full. No status check is required on master
-# (no ruleset enforcement, no required_status_checks), so a skipped run leaves a PR
-# mergeable rather than stuck waiting on a check that will never report.
+# .md file is read by a build, a test or a golden, so a doc file that becomes an input
+# has to come off this list. One has: llm-wiki/reports/query-batching.md, which a step
+# checks against batching_report.py. Both `paths:` triggers re-include it and the
+# `changes` job counts it as code. A run starts when any changed file is left in. No
+# status check is required on master, so a skipped run leaves a PR mergeable.
 on:
   push:
     branches: [master]
-    paths-ignore:
-      - '**.md'
-      - 'llm-wiki/**'
+    paths:
+      - '**'
+      - '!**.md'
+      - '!llm-wiki/**'
+      - 'llm-wiki/reports/query-batching.md'
   pull_request:
-    paths-ignore:
-      - '**.md'
-      - 'llm-wiki/**'
+    paths:
+      - '**'
+      - '!**.md'
+      - '!llm-wiki/**'
+      - 'llm-wiki/reports/query-batching.md'
   # The only way a branch reaches gpu-tests: `gh workflow run pipeline.yml --ref <branch>`, by
   # an actor with write access who is also listed in GPU_ALLOWED_ACTORS. It runs the whole
   # pipeline, as a push to master does (`changes` answers code=true for any non-PR event).
   workflow_dispatch:
 
 jobs:
-  # paths-ignore above is not enough on its own. For a pull_request event GitHub
+  # The path filter above is not enough on its own. For a pull_request event GitHub
   # evaluates it against the WHOLE PR diff, not the commits just pushed, so a PR that
   # touches any code runs the full pipeline on every later docs-only push — measured,
   # not assumed: a docs-only push to #118 started run 31644108948 with the filter live.
@@ -71,8 +72,9 @@ jobs:
 
           files=$(jq -r '(.files // [])[].filename' <<<"$cmp")
           echo "changed in this push:"; echo "${files:-(nothing)}" | sed 's/^/  /'
-          # Same two patterns as paths-ignore above; they must stay in step.
-          if grep -qvE '(\.md$|^llm-wiki/)' <<<"$files"; then
+          # The trigger lists' patterns above; they must stay in step, the page included.
+          if grep -qvE '(\.md$|^llm-wiki/)' <<<"$files" \
+              || grep -qxF 'llm-wiki/reports/query-batching.md' <<<"$files"; then
             everything "the push changes more than documentation"
           fi
           echo "code=false" >> "$GITHUB_OUTPUT"
@@ -185,6 +187,19 @@ jobs:
           # gen.sql makes under this exact DuckDB, including the float specials a dictionary
           # page would silently canonicalize (llm-wiki/tasks/pbench.md).
           testdata/generate_pbench.sh --check
+
+      # The query-batching page's numbers against the committed results they are read from:
+      # a commit that changes one of those inputs without rerunning batching_report.py fails
+      # here, and rerunning it locally mends that. A changed cases.csv is not refused: a fused
+      # batch it no longer matches is named stale on the page, for a rerun on the H100. Python
+      # over committed text, so one leg; beside pbench's --check, which proves the same of its
+      # parquet. cost-report's ci_coverage.rs fails if this line goes.
+      - name: Query-batching page is current (Python)
+        if: matrix.cudf == '25.02'
+        run: |
+          set -euo pipefail
+          python3 scripts/calibration/batching_report.py --testdata testdata \
+            --report llm-wiki/reports/query-batching.md --check
 
       # The exec-model prototype's statistics sidecars counted again from the data by
       # gen_stats.py with the DuckDB the generator step unpacked (its `export` ends with that
