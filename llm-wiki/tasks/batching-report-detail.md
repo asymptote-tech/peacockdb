@@ -82,6 +82,38 @@ Branch `ENS-batching-report`, forked from `ENS-query-fuser` at `413366c4` on 202
     `git status --short testdata/` shows only `testdata/calibration/hbm-parts/`, query-fuser's
     untracked leftover, not this task's and not to be staged.
 - 2026-11-06: plan complete. PR #201 against `ENS-query-fuser`; board `reviewing`; reviewer round 1 dispatched.
+- 2026-11-06, review round 1 (developer): I1-I5 and N1-N7, test first (12 new or changed tests
+  red on the missing behaviour, then 37 passed). Not committed. All local, no VM.
+  - **I1:** `floor_ms` joins the DuckDB provenance row; the note under each table says what one
+    DuckDB time holds and the floor's ms; a column `DuckDB / fused, floors out` takes
+    `n × floor_ms` off the DuckDB sum (`—` when the sum is `(n/N)`). Both ratios are kept: the
+    as-shown one is what benchmark-minimal.md compares. A `duckdb.tsv` without `floor_ms` is
+    refused. tpcds first3: 1.00× as shown, 0.82× floors out; the reading says DuckDB is faster
+    there with the floors out.
+  - **I2:** the intro uses build-test.md's wording (one shared load per file, plus a load per
+    re-read). The hints tables gain `loads (re-reads)`: Σ `reads=` and `rereads` (tpch all
+    46 (38), tpcds all 426 (402)), and the reading cites them.
+  - **I3:** `pipeline.yml`, dataset-matrix, a step `Query-batching page is current (Python)`
+    right after the one ending `generate_pbench.sh --check`, on the 25.02 leg only (python over
+    committed text). Checked by parsing the YAML (the step sits between "Generate SF-1 test
+    data" and the exec-model step) and `bash -n` on its rendered `run:`; run as written it exited
+    1 on the page before regeneration and 0 after. Not proved in CI. A push of only `.md` and
+    `llm-wiki/` files skips the pipeline (`changes`), so a hand edit of the page alone is caught
+    at the next push that runs it; build-test.md says so.
+  - **I4:** a measured batch's fused split comes from `<batch>.loads.tsv` whenever it exists;
+    `failed.tsv`'s reason shows only when it does not; neither is still refused.
+  - **I5, N1, N4:** the reading's DuckDB line rewritten (DuckDB's sum over fused's, both
+    datasets, as shown and floors out); TPC-H "no plateau within its 22 queries"; the
+    pipelining model line and the reading say it has no memory term.
+  - **N2:** the split footnote says the parts are separate medians that can overlap, so they
+    may add up past Σ load. **N3:** a counted query's DuckDB row with `warm` other than `yes` is
+    named under the table (none today). **N5:** the largest prefill names every section of that
+    size and the range of their times (tpch's four fused batches, 20.4-460.4 s). **N6:** a line
+    under each table says what `all` holds of the list's lines (tpch 22 of 48: 1 skipped, 25
+    micro queries; tpcds 79 of 82: 3 skipped). **N7:** the test asserts the host and the floor,
+    renamed `test_provenance_holds_the_protocol_and_the_duckdb_run`.
+  - build-test.md: the calibration row 105 → 114, the header 8172 → 8181 (Python 1596), the
+    tables sum to 8181; dataset-matrix's paragraph and "Fused batches" name the CI step.
 
 ## Review round 1 (2026-11-06)
 

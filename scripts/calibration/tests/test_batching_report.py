@@ -44,6 +44,7 @@ def fused(queries, load, execute, **knobs):
     values = dict(queries=queries, outcome="measured", cap=3, estimate=10 * 2**30,
                   budget=60 * 2**30, over_budget="false", merge=(20, [20]),
                   pipeline=(3000, 2000, 1000), shared="lineitem:q1+q3",
+                  reads="lineitem:1", rereads=0,
                   run=timed(load, execute, **knobs.pop("run", {})))
     values.update(knobs)
     return values
@@ -97,9 +98,10 @@ def spec():
             },
         },
         "duckdb": {
-            "tpch": {"q1": 10, "q3": 20, "q6": 30, "q14": 40, "aggregate_groupby": 5},
-            "tpcds": {"q1": 15, "q2": 25, "q3": 35},
+            "tpch": {"q1": 100, "q3": 200, "q6": 300, "q14": 400, "aggregate_groupby": 50},
+            "tpcds": {"q1": 150, "q2": 250, "q3": 350},
         },
+        "duckdb_floor": {"tpch": 30, "tpcds": 36},
         "loads": {
             "tpch": {
                 "aggregate-groupby": [load_row(70)],
@@ -162,8 +164,8 @@ def fused_text(body):
              f"outcome={body['outcome']}"]
     if body["outcome"] == "out-of-memory":
         lines.append("reason=std::bad_alloc: out of memory")
-    lines += [f"shared=[{body['shared']}]", "unshared=[]", "reads=[lineitem:1]", "buffers=1",
-              "buffer_bytes=100", "rereads=0",
+    lines += [f"shared=[{body['shared']}]", "unshared=[]", f"reads=[{body['reads']}]",
+              "buffers=1", "buffer_bytes=100", f"rereads={body['rereads']}",
               "hold query=q3 table=lineitem hold=GpuHashJoin choice=buffer above=7 bytes=100 "
               "reread_us=10 why=fits: 100 <= 900",
               f"cap={body['cap']}", "pool_bytes=74088185856", f"budget_bytes={body['budget']}",
@@ -200,16 +202,20 @@ def loads_text(rows_by_query, dataset):
     return "\n".join(lines) + "\n"
 
 
-def duckdb_text(rows, dataset):
+def duckdb_text(rows, dataset, floor):
+    """A row's value is its ms, `(ms, warm)`, or `None` for a failed row; `floor` `None`
+    leaves `floor_ms` out of the preamble."""
+    floor_key = "" if floor is None else f" floor_ms={floor}"
     lines = [f"# duckdb=1.5.4 threads=128 host=cpu-vm cpu=AMD_EPYC cores=128 memory_gib=503.7 "
-             f"db=/var/lib/peacock/{dataset}.sf40.duckdb resident_pct=100.0 floor_ms=30",
+             f"db=/var/lib/peacock/{dataset}.sf40.duckdb resident_pct=100.0{floor_key}",
              "query\tms_2nd_min\truns_ms\tworkset_bytes\tdisk_read_bytes\twarm\tstatus"]
-    for query, ms in rows.items():
-        if ms is None:
+    for query, value in rows.items():
+        if value is None:
             lines.append(f"{query}\t-\t-\t1024\t-\t-\tfailed")
         else:
+            ms, warm = value if isinstance(value, tuple) else (value, "yes")
             runs = ",".join(str(ms + i) for i in range(6))
-            lines.append(f"{query}\t{ms}\t{runs}\t1024\t0\tyes\tok")
+            lines.append(f"{query}\t{ms}\t{runs}\t1024\t0\t{warm}\tok")
     return "\n".join(lines) + "\n"
 
 
@@ -227,7 +233,7 @@ def tree(tmp, s=None):
         files[device / "fused" / f"{ds}.sf40" / "tp1_single.fused.txt"] = "".join(
             f"== {name}\n{fused_text(body)}" for name, body in s["fused"][ds].items())
         files[results / "duckdb-cpu128" / f"{ds}.sf40" / "duckdb.tsv"] = duckdb_text(
-            s["duckdb"][ds], ds)
+            s["duckdb"][ds], ds, s["duckdb_floor"][ds])
         calibration = root / "calibration" / "h100-80gb-hbm3"
         files[calibration / f"{ds}.sf40" / "loads.tsv"] = loads_text(s["loads"][ds], ds)
         for batch, rows in s["fused_loads"][ds].items():
@@ -406,6 +412,30 @@ def test_load_split_sums_columns_and_keeps_read_and_copy_apart():
     split = {r[1]: r[2:] for r in table(rendered(), TPCH_SPLIT) if r[0] == "first3"}
     assert split == {"unfused": ["5.0", "0.0", "1.0", "3.0", "0.2", "0.8"],
                      "fused": ["3.0", "0.0", "0.6", "1.9", "0.0", "0.0"]}, split
+    footnote = section_after(rendered(), TPCH_SPLIT)
+    assert "separate medians" in footnote and "overlap" in footnote, footnote
+
+
+def test_a_failed_profile_with_its_loads_file_still_shows_the_split():
+    s = spec()
+    s["fused_failed"]["tpch"] = "first3\tmetrics\tthe capture failed\n"
+    split = {r[1]: r[2:] for r in table(rendered(s), TPCH_SPLIT) if r[0] == "first3"}
+    assert split["fused"] == ["3.0", "0.0", "0.6", "1.9", "0.0", "0.0"], split
+
+
+def test_a_failed_profile_without_its_loads_file_shows_the_reason():
+    s = spec()
+    s["fused_failed"]["tpch"] = "first3\ttrace\tits capture did not come home\n"
+    del s["fused_loads"]["tpch"]["first3"]
+    split = {r[1]: r[2:] for r in table(rendered(s), TPCH_SPLIT) if r[0] == "first3"}
+    assert split["fused"][0] == "profile failed: trace: its capture did not come home", split
+
+
+def test_a_measured_batch_without_a_profile_or_a_failure_is_refused():
+    s = spec()
+    del s["fused_loads"]["tpch"]["first3"]
+    code, err = refused(s)
+    assert code == 1 and "first3.loads.tsv" in err, err
 
 
 # --- the main table --------------------------------------------------------------------------
@@ -414,8 +444,42 @@ def test_load_split_sums_columns_and_keeps_read_and_copy_apart():
 def test_the_first3_row_sums_its_three_queries():
     text = rendered()
     cells = row(text, TPCH, "first3")
-    # fused 4000 + 1400 µs; unfused q1 q3 q6: load 6000, execute 1500; DuckDB 10 + 20 + 30 ms.
-    assert cells == ["first3", "3", "4.0", "1.4", "6.0", "1.5", "60.0", "1.39×", "11.11×"]
+    # fused 4000 + 1400 µs; unfused q1 q3 q6: load 6000, execute 1500; DuckDB 100 + 200 + 300
+    # ms, and 600 − 3 × 30 with the floors out.
+    assert cells == ["first3", "3", "4.0", "1.4", "6.0", "1.5", "600.0", "1.39×", "111.11×",
+                     "94.44×"]
+
+
+def test_the_duckdb_floor_is_named_and_its_column_says_so():
+    text = rendered()
+    assert table(text, TPCH)[0][-2:] == ["DuckDB / fused", "DuckDB / fused, floors out"]
+    notes = section_after(text, TPCH)
+    assert "`SELECT 1`" in notes and "30 ms" in notes, notes
+    assert "36 ms" in section_after(text, "### TPC-DS sf40: fused against unfused and DuckDB")
+
+
+def test_a_duckdb_file_without_its_floor_is_refused():
+    s = spec()
+    s["duckdb_floor"]["tpcds"] = None
+    code, err = refused(s)
+    assert code == 1 and "floor_ms" in err and "tpcds.sf40" in err, err
+
+
+def test_a_duckdb_time_not_warm_is_named():
+    s = spec()
+    s["duckdb"]["tpch"]["q3"] = (200, "partial")
+    notes = section_after(rendered(s), TPCH).splitlines()
+    assert "- DuckDB: q3 ran warm=partial (first3, all)." in notes, notes
+    assert not any("warm=" in line for line in section_after(rendered(), TPCH).splitlines())
+
+
+def test_all_says_which_lines_of_the_list_it_holds():
+    notes = section_after(rendered(), TPCH).splitlines()
+    assert ("`all` is the list's 4 `ok` and `wrong` queries at tp1_single, of its 6 tpch "
+            "lines: 1 skipped, 1 micro query not batched.") in notes, notes
+    tpcds = section_after(rendered(), "### TPC-DS sf40: fused against unfused and DuckDB")
+    assert "`all` is the list's 3 `ok` and `wrong` queries at tp1_single, of its 3 tpcds " \
+           "lines." in tpcds.splitlines(), tpcds
 
 
 def test_a_marker_batch_reads_same_set_as_all():
@@ -459,8 +523,8 @@ def test_a_failed_duckdb_query_is_counted_out_and_named():
     text = rendered(s)
     cells = row(text, TPCH, "first3")
     assert cells[6].endswith("(2/3)"), cells
-    assert cells[6].startswith("30.0"), cells
-    assert cells[8] == "—", cells  # no DuckDB ratio over part of the batch
+    assert cells[6].startswith("300.0"), cells
+    assert cells[8] == cells[9] == "—", cells  # no DuckDB ratio over part of the batch
     assert row(text, TPCH, "all")[6].endswith("(3/4)")
     notes = section_after(text, TPCH).splitlines()
     assert any("DuckDB" in line and "q6" in line and "failed" in line for line in notes), notes
@@ -544,9 +608,16 @@ def test_the_hints_row_carries_both_estimates():
     s["fused"]["tpch"]["first3"]["run"]["peak"] = 3 * 2**30
     text = rendered(s)
     assert row(text, TPCH_HINTS, "first3") == [
-        "first3", "3", "10.0 / 60.0", "3.0", "0.0", "1", "1.0", "4.4", "1 (0)"]
+        "first3", "3", "10.0 / 60.0", "3.0", "0.0", "1", "1.0", "4.4", "1 (0)", "1 (0)"]
     body = section_after(text, TPCH_HINTS)
     assert "two or more queries" in body and "one loader and one executor" in body, body
+    assert "no memory term" in body, body
+
+
+def test_loads_count_each_table_read_and_the_rereads():
+    s = spec()
+    s["fused"]["tpch"]["first3"].update(reads="lineitem:2,orders:1", rereads=1)
+    assert row(rendered(s), TPCH_HINTS, "first3")[9] == "3 (1)"
 
 
 def test_folded_scans_count_a_querys_own_repeats_apart():
@@ -563,6 +634,15 @@ def test_provenance_lists_every_distinct_value():
     s["unfused"]["tpch"]["q1"]["cudf"] = "25.02.01"
     cells = row(rendered(s), PROVENANCE_H100, "cudf")
     assert "25.02.01 (1)" in cells[1] and "25.02.02 (" in cells[1], cells
+
+
+def test_the_largest_prefill_names_every_tie():
+    s = spec()
+    s["fused"]["tpch"]["first3"]["run"]["prefill"] = (8, 42442683465, 460368515)
+    s["fused"]["tpch"]["all"]["run"]["prefill"] = (8, 42442683465, 20606716)
+    cache = row(rendered(s), PROVENANCE_H100, "pinned host cache")[1]
+    assert ("largest prefill 42442683465 B in 20606716-460368515 µs (tpch first3 fused, "
+            "tpch all fused)") in cache, cache
 
 
 def test_provenance_states_the_cache():
@@ -594,14 +674,15 @@ def test_provenance_states_the_cache():
                                                          "pinned host cache")[1]
 
 
-def test_provenance_holds_the_protocol_and_the_duckdb_host():
+def test_provenance_holds_the_protocol_and_the_duckdb_run():
     text = rendered()
     protocol = section_after(text, "### Provenance: protocol")
     assert "2nd-minimum" in protocol and "prefilled" in protocol, protocol
     assert "all 3" in protocol and "first3 10" in protocol, protocol
     assert "6 runs (8)" in protocol, protocol  # DuckDB: 4 tpch + 3 tpcds + the micro query
-    duck = row(text, "### Provenance: DuckDB", "threads")
-    assert duck[1] == "128 (2)", duck
+    assert row(text, "### Provenance: DuckDB", "threads")[1] == "128 (2)"
+    assert row(text, "### Provenance: DuckDB", "host")[1] == "cpu-vm (2)"
+    assert row(text, "### Provenance: DuckDB", "floor_ms")[1] == "30 (1), 36 (1)"
     skipped = section_after(text, "### Provenance: skipped and wrong at sf40")
     assert "tpch q9 — skipped at sf40: timeout" in skipped, skipped
 

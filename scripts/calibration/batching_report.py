@@ -42,7 +42,7 @@ LOAD_COLUMNS = ("load_us", "host_read_us", "h2d_us", "decompress_us", "decode_us
                 "other_device_us", "unattributed_us")
 CACHE_MOVES = ("fallbacks", "evictions", "reloads")
 H100_KEYS = ("device", "driver", "cuda", "cudf", "host")
-DUCKDB_KEYS = ("duckdb", "threads", "host", "cpu", "cores")
+DUCKDB_KEYS = ("duckdb", "threads", "host", "cpu", "cores", "floor_ms")
 MERGE_MODEL = ("identical subtrees above a shared load, with members from two or more queries, "
                "run once and the dearest copy stays: Σ t − max t over each group, t the queries' "
                "own unfused node times (sf40-baseline)")
@@ -260,6 +260,9 @@ def gather(testdata, dataset, cases):
     if unprofiled:
         raise Refused(f"{loads_path}: no {LOADS_MODE} row for the counted {unprofiled}")
     preamble, duck = duckdb(duckdb_path.read_text())
+    if "floor_ms" not in preamble:
+        raise Refused(f"{duckdb_path}: no floor_ms in its preamble, so its times cannot be "
+                      "read with the floors out")
     tp4 = named(tp4_path) if tp4_path.exists() else None
     fused_dir = profiles / "fused" / f"{dataset}.sf{SF}"
     failed_profiles = profile_failures(fused_dir / "failed.tsv")
@@ -275,18 +278,30 @@ def gather(testdata, dataset, cases):
                 entry["tp4"] = [partial_sum(batch, tp4_times(tp4, key)) for key in
                                 ("load_us", "execute_us")]
             entry["split"] = {"unfused": load_split([r for q in batch for r in by_query[q]])}
-            if name in failed_profiles:
-                entry["split"]["fused"] = failed_profiles[name]
-            elif "run" in read and read["batch"]["outcome"] == "measured":
-                path = fused_dir / f"{name}.loads.tsv"
-                if not path.exists():
-                    raise Refused(f"{path}: the measured batch {name} has no profile")
+            path = fused_dir / f"{name}.loads.tsv"
+            measured = "run" in read and read["batch"]["outcome"] == "measured"
+            if measured and path.exists():
                 entry["split"]["fused"] = load_split(
                     record.read_tsv(path, "query", "mode", *LOAD_COLUMNS))
+            elif name in failed_profiles:
+                entry["split"]["fused"] = failed_profiles[name]
+            elif measured:
+                raise Refused(f"{path}: the measured batch {name} has no profile")
         out.append(entry)
     return {"dataset": dataset, "queries": queries, "batches": out, "notes": notes(cases, dataset),
-            "duckdb": (preamble, duck), "tp4": tp4, "unfused": unfused, "fused": fused,
+            "duckdb": (preamble, duck), "floor_ms": millis(preamble["floor_ms"]), "tp4": tp4,
+            "unfused": unfused, "fused": fused, "lines": lines_of(cases, dataset),
             "sources": sorted({row["host_read_source"] for row in loads})}
+
+
+def lines_of(cases, dataset):
+    """The dataset's lines in the list: `(all, skipped, micro, other)`, micro being TPC-H's
+    `ok` and `wrong` rows at tp1_single outside q1-q22, other those not at tp1_single."""
+    rows = [c for c in cases if c["dataset"] == dataset and c["sf"] == SF]
+    timed = [c for c in rows if c["status"] != "skipped"]
+    at_mode = [c for c in timed if MODE in c["modes"]]
+    return (len(rows), len(rows) - len(timed), len(at_mode) - len(counted(cases, dataset)),
+            len(timed) - len(at_mode))
 
 
 def timing(path, by_name, query):
@@ -381,7 +396,8 @@ def main_table(data):
     columns = ["batch", "queries", "fused load (ms)", "fused execute (ms)", "unfused load (ms)",
                "unfused execute (ms)"]
     columns += ["tp4_sized load (ms)", "tp4_sized execute (ms)"] if tp4 else []
-    columns += ["DuckDB warm (ms)", "unfused / fused", "DuckDB / fused"]
+    columns += ["DuckDB warm (ms)", "unfused / fused", "DuckDB / fused",
+                "DuckDB / fused, floors out"]
     rows = []
     for entry in data["batches"]:
         batch, read = entry["queries"], entry["fused"]
@@ -405,10 +421,12 @@ def main_table(data):
         duck_ms, n, missing = entry["duckdb"]
         row.append(counted_out(duck_ms, n, missing, len(batch)))
         if fused_total is None:
-            row += ["", ""]
+            row += ["", "", ""]
         else:
+            floors_out = (duck_ms - n * data["floor_ms"]) * 1000
             row.append(ratio(sum(unfused), fused_total))
             row.append("—" if missing else ratio(duck_ms * 1000, fused_total))
+            row.append("—" if missing else ratio(floors_out, fused_total))
         rows.append(row)
     return table_lines(columns, rows) + [""] + main_notes(data)
 
@@ -416,7 +434,11 @@ def main_table(data):
 def main_notes(data):
     measured = [e for e in data["batches"] if e["queries"] is not None]
     lines = ["Totals are `load + execute` per side; ratios above 1 mean fused is faster. `(n/N)`: "
-             "the sum covers n of the batch's N queries."]
+             "the sum covers n of the batch's N queries. One DuckDB time is one CLI process's "
+             "wall time: it starts, opens the database and runs the query. `SELECT 1` timed the "
+             f"same way took {data['floor_ms']:g} ms (`floor_ms`), what each time holds besides "
+             "its query; `floors out` takes it off once per query.",
+             all_line(data)]
 
     def holding(query):
         return ", ".join(e["name"] for e in measured if query in e["queries"])
@@ -432,6 +454,8 @@ def main_notes(data):
             lines.append(f"- DuckDB: {query} has no row; counted out of {holding(query)}.")
         elif duck[query]["status"] != "ok":
             lines.append(f"- DuckDB: {query} failed; counted out of {holding(query)}.")
+        elif duck[query]["warm"] != "yes":
+            lines.append(f"- DuckDB: {query} ran warm={duck[query]['warm']} ({holding(query)}).")
     if data["tp4"] is not None:
         for query in data["queries"]:
             body = data["tp4"].get(query)
@@ -444,18 +468,28 @@ def main_notes(data):
     return lines
 
 
+def all_line(data):
+    total, skipped, micro, other = data["lines"]
+    parts = [f"{skipped} skipped" if skipped else "",
+             (f"{micro} micro quer{'y' if micro == 1 else 'ies'} not batched" if micro else ""),
+             f"{other} not at {MODE}" if other else ""]
+    said = ", ".join(part for part in parts if part)
+    return (f"`all` is the list's {len(data['queries'])} `ok` and `wrong` queries at {MODE}, of "
+            f"its {total} {data['dataset']} lines" + (f": {said}." if said else "."))
+
+
 def hints_table(data):
     columns = ["batch", "cap", "estimate / budget (GiB)", "accountant's peak (GiB)",
                "merge saves (ms, estimate)", "entries", "pipelining saves (ms, estimate)",
-               "pipelined estimate (ms)", "folded scans (a query's own)"]
+               "pipelined estimate (ms)", "folded scans (a query's own)", "loads (re-reads)"]
     rows, models = [], []
     for entry in data["batches"]:
         read = entry["fused"]
         if entry["queries"] is None:
-            rows.append([entry["name"], "same set as all"] + [""] * 7)
+            rows.append([entry["name"], "same set as all"] + [""] * 8)
             continue
         if "failed" in read:
-            rows.append([entry["name"], "failed"] + [""] * 7)
+            rows.append([entry["name"], "failed"] + [""] * 8)
             continue
         batch, pipeline = read["batch"], read["pipeline"]
         models.append(pipeline["model"])
@@ -468,19 +502,29 @@ def hints_table(data):
                      ms(read["merge"]["saved_us"]), str(len(read["merge"]["entries"])),
                      ms(pipeline["saved_us"]),
                      ms(pipeline["pipelined_estimate_us"]) if measured else "—",
-                     "{} ({})".format(*folded(batch["shared"]))])
+                     "{} ({})".format(*folded(batch["shared"])),
+                     f"{loads_of(batch['reads'])} ({batch['rereads']})"])
     return table_lines(columns, rows) + [
         "",
         f"- Merge, an estimate: {MERGE_MODEL}.",
         f"- Pipelining, an estimate: {distinct(models) if len(set(models)) > 1 else models[0]}; "
         "the saving is serial − makespan, the pipelined estimate the fused measured total less "
-        "it." if models else "- Pipelining: no batch carries the model.",
+        "it. The model has no memory term: it does not ask whether loads made ahead of the "
+        "executor fit on the device beside what runs." if models
+        else "- Pipelining: no batch carries the model.",
         "- The accountant's peak is a lower bound on device memory; the estimate and budget are "
         "the cap rule's (query-fuser).",
         "- Folded scans: per shared load, its scans less one, from `shared=`; in brackets those "
         "that are a query's own repeat of a scan it already makes, which a batch of one would "
         "fold too. A count of loads, not of time.",
+        "- Loads: the distinct loads in the fused plan, Σ of `reads=` (one per shared load, plus "
+        "each re-read and unshared scan); in brackets the re-reads the hold rule chose.",
     ]
+
+
+def loads_of(reads):
+    return sum(int(group.rpartition(":")[2])
+               for group in filter(None, reads.strip("[]").split(",")))
 
 
 def folded(shared):
@@ -513,7 +557,8 @@ def split_table(data):
         "ms, from one profiled run per query process (per fused batch) under Nsight: each number "
         "is a per-execution median, summed over the batch's loads, and is not the timed tables' "
         f"time. Unfused `host_read_source`: {sources}. With `kvikio` the host read holds "
-        "kvikio's bounce copies, which H2D counts too, so the two are not added.",
+        "kvikio's bounce copies, which H2D counts too, so the two are not added. The parts are "
+        "separate medians and can overlap in time, so they may add up to more than Σ load.",
     ]
 
 
@@ -557,8 +602,12 @@ def cache_cell(timed):
     parts = [distinct(cache_label(text) for text in caches)]
     parts.append(f"resident ≤ {max(resident):.1f}GiB" if resident else "resident: never on")
     if prefilled:
-        size, us, label = max(prefilled, key=lambda p: p[0])
-        parts.append(f"largest prefill {size} B in {us} µs ({label})")
+        size = max(p[0] for p in prefilled)
+        ties = [p for p in prefilled if p[0] == size]
+        times = sorted({int(p[1]) for p in ties})
+        spent = f"{times[0]}" if len(times) == 1 else f"{times[0]}-{times[-1]}"
+        parts.append(f"largest prefill {size} B in {spent} µs "
+                     f"({', '.join(p[2] for p in ties)})")
     parts.append(f"cache not on: {', '.join(not_on) or 'none'}")
     parts.append(f"tree sections not prefilled: {', '.join(unfilled) or 'none'}")
     parts.append(f"fell back, evicted or reloaded: {', '.join(moved(timed)) or 'none'}")
