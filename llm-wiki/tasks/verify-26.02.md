@@ -57,9 +57,13 @@ place (26.02 at `~/miniforge3/envs/rapids-26.02`, 25.02 at `~/data/miniforge3/en
 4. The corpus benchmark on 26.02 and on 25.02, for the cells the chain turned on that the
    benchmark times: it times only tpch sf40 cases (`corpus_benchmark_cases.inc`), and tpcds and
    pbench have no sf40 data, so the comparison is the tpch sf40 cases among the flipped cells
-   (`join-rewrite-cell-estimate.md`'s comparison). Each run block names its cuDF (`cudf=`), and the
-   results go under `testdata/benchmark-results/cudf-<version>/`, so a 26.02 run never overwrites
-   25.02's.
+   (`join-rewrite-cell-estimate.md`'s comparison). Each run block names its cuDF (`cudf=`) with the
+   rest of its provenance, and the results go under the device's tree,
+   `testdata/benchmark-results/<device>/` ([containers' spec](../archive/archived-tasks.md)): one
+   tree per card, not per cuDF. The 25.02 run is committed first; the 26.02 run on the same card
+   then rewrites those files in the working tree, `git diff` against the commit is the comparison,
+   and the trailers' `cudf=` lines say which side each number is. Which run stays committed is
+   #244's.
 4b. The device's answers on 26.02: a corpus cycle with `PCK_WRITE_GPU_RESULT=26.02` writes
    `gpu-result-26.02.txt` (gitignored, never over the committed 25.02 file), compared with DuckDB
    by the same `duckdb_gpu_*` cases pointed at it; every divergence from DuckDB that 25.02 does
@@ -82,7 +86,7 @@ place (26.02 at `~/miniforge3/envs/rapids-26.02`, 25.02 at `~/data/miniforge3/en
 |---|---|
 | `scripts/build-test-shadgpu.sh` | `PEACOCK_CUDF=26.02`: the env, `cpp/build26`, the target dir, the remote dir, the cudart rung |
 | `cpp/include/peacock_gpu.h`, `cpp/src/gpu_executor.cpp`, `peacockdb-ffi` | `peacock_cudf_version()`, a new symbol naming the linked cuDF — `peacock_gpu_version()` is unchanged, since `cpp/tests/cpu/test_executor.cpp:9` pins it at `"0.1.0"` |
-| benchmark writers | `cudf=` per run block; the versioned tree |
+| benchmark writers | none: `cudf=` per run block and the per-device tree are containers' |
 | whatever the failures need | fixes, each with its case |
 | `testdata/benchmark-results/` | the numbers |
 | `scripts/lib/shadgpu-env.sh`, `scripts/build.sh` | the 26.02 environment and build dir |

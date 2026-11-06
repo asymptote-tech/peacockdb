@@ -5,7 +5,8 @@ Kind: production
 Query batching is measured against two baselines: peacockdb running the same queries one at a
 time, and DuckDB on 128 cores. DuckDB has no batching, so its side of a batch is the sum of its
 warm single-query times. This task records both. It also takes over containers' benchmark run on
-an 80 GB device (`containers-impl.md` task 11), with this chain's H100 as the device.
+an 80 GB device (task 11 of `origin/ENS-containers:llm-wiki/tasks/containers-impl.md`), with this
+chain's H100 as the device.
 
 ## The query set
 

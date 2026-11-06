@@ -884,6 +884,20 @@ impl Drop for NvtxRange {
     }
 }
 
+/// The current device, as a benchmark's provenance names it: the runtime's name for the card
+/// and its own version, `1000 * major + 10 * minor`.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) struct DeviceInfo {
+    pub(crate) name: String,
+    pub(crate) runtime: u32,
+}
+
+/// The current device, or `None` when the CUDA runtime has none to describe.
+#[cfg(not(feature = "rust-only"))]
+pub(crate) fn device_info() -> Option<DeviceInfo> {
+    instrument::device_info()
+}
+
 /// Install the pooled device allocator of `bytes` and report what happened. The budget is
 /// the caller's, as `kPoolBytes` is for the gtest binaries; a host that cannot meet it keeps
 /// rmm's default resource rather than a smaller pool. Idempotent; the guard lives in C++ so

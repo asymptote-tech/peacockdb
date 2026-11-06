@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""A benchmark run's record cut into one file per dataset, `<out-dir>/<dataset>.sf<sf>/records.tsv`.
+"""A benchmark run's record cut into one file per dataset, under the device that measured it.
 
     python3 scripts/calibration/split_record.py --record testdata/calibration/records.tsv \
         --cases peacockdb-core/tests/common/corpus_benchmark_cases.inc --out-dir <dir>
 
-Prints each `<dataset>.sf<sf>` it wrote, for `build-test-shadgpu.sh --pull-benchmarks` to publish:
-the run's heading and that dataset's rows in order, byte for byte. Refused, writing nothing,
-unless the heading says `capture=none` and each dataset's (query, mode) set is exactly what the
-case file declares: a run truncates the record when it starts, so a filtered run's is part of
-the full one under the same name. llm-wiki/build-test.md, *Benchmark data flow*, has the rest.
+Writes `<out-dir>/<device>/<dataset>.sf<sf>/records.tsv` (`<device>` the slug of `device=`): the
+heading and that dataset's rows, byte for byte. Prints each `<device>/<dataset>.sf<sf>` for
+`build-test-shadgpu.sh --pull-benchmarks` to publish. Refused, writing nothing, unless the heading
+says `capture=none` and names one device and each dataset's (query, mode) set is what the case
+file declares. llm-wiki/build-test.md, *Benchmark data flow*, has the rest.
 """
 
 import argparse
 import pathlib
 import sys
+
+import record
 
 MACRO = "corpus_query_benchmark!"
 
@@ -40,6 +42,16 @@ def declared(path):
     if not cases:
         sys.exit(f"{path} declares no {MACRO} case")
     return cases
+
+
+def device_of(path, heading):
+    """The slug of the heading's one `# run: device=` line."""
+    named = [line[len("# run: device="):].rstrip("\n") for line in heading
+             if line.startswith("# run: device=")]
+    if len(named) != 1:
+        sys.exit(f"{path} names {len(named)} `# run: device=` lines, and its rows are filed under "
+                 "the one device that measured them")
+    return record.device_slug(named[0])
 
 
 def read(path):
@@ -83,6 +95,7 @@ def main(argv=None):
 
     cases = declared(args.cases)
     heading, columns, rows = read(args.record)
+    device = device_of(args.record, heading)
     datasets = by_dataset(columns, rows)
 
     problems = []
@@ -98,7 +111,7 @@ def main(argv=None):
                  + "\n  ".join(problems))
 
     for (dataset, sf), (lines, _) in sorted(datasets.items()):
-        name = f"{dataset}.sf{sf}"
+        name = f"{device}/{dataset}.sf{sf}"
         path = pathlib.Path(args.out_dir) / name / "records.tsv"
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", newline="") as fh:

@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 6761 test cases — Rust 5296, C++ 232, Python 1233.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, and the external-embeddings sidecar recount, which is run by hand. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 7593 test cases — Rust 5959, C++ 233, Python 1401.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 156 image and VM tests under `scripts/env/tests/`, run by hand too. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -23,7 +23,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3376 cases: `--lib` 897, `test_cpu_corpus` 2447, `test_corpus_goldens` 29, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3414 cases: `--lib` 917, `test_cpu_corpus` 2447, `test_corpus_goldens` 47, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -87,22 +87,40 @@ tie
 the `cost-registry.csv` cpu column matches the cases the corpus expands to, both directions;
 one binary per engine, since `inventory` collects per linked binary
 
-| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs) | 29 |
+| Corpus goldens, self-consistency | [test_corpus_goldens](../peacockdb-core/tests/test_corpus_goldens.rs), [benchmark](../peacockdb-core/tests/test_corpus_goldens/benchmark.rs), [benchmark_run](../peacockdb-core/tests/test_corpus_goldens/benchmark_run.rs) | 47 |
 |---|---|--:|
 
 the committed sections against their own arithmetic, with no dataset and no run: `consumed +
 abandoned == emitted` at every node, lane counts against `lanes=N`, the loader's `batch_rows` a
-prefix of its own lane's `partition_groups`, the root's `out_rows` against `.result.txt`, and
-the tree the indentation draws. The golden is written by the run it will later check, so a file
-that contradicts itself is the only witness to a renderer that is wrong. The benchmark tree gets
-the same reading: every `total_us` is the sum of the `time_us` beside it, every committed tree
-reports a release build, every timed (query, mode) is enabled on a device in
-`corpus_cases.inc`, and every case the list declares has its section in the committed tree. The
-record, which lives in S3, is held to its writer instead: a row that lost a cell is refused, a
-bare `calls` row names the seq it was handed, and a record the harness's own writer produces
-carries `record_header()`'s preamble, read as its readers read it. The device check and the
-section check compile the case lists in, through the binary's own `corpus_query_benchmark!`
-and `corpus_query!`, and so do two more: every schema-validation mask
+prefix of its own lane's `partition_groups`, the root's `out_rows` against `.result.txt`, and the
+tree the indentation draws. The golden is written by the run it will later check, so a file that
+contradicts itself is the only witness to a renderer that is wrong. The benchmark tree gets the
+same reading: every `total_us` is the sum of the `time_us` beside it, every committed tree reports
+a release build, every timed (query, mode) is enabled on a device in `corpus_cases.inc`, and the
+case list is, byte for byte, what the registry's enabled device cells for tpch and tpcds write.
+Every case the list declares has its section, timed or a failure's record, in every device's tree
+that holds no `cases.csv`. A tree that holds one is held to its `ok` and `wrong` rows instead:
+`h200/` is held to `h200/cases.csv`, the list it was measured from. Every device list parses.
+Every file lies at
+`<device>/<dataset>.sf<sf>/<mode>.benchmark.txt` under its device's slug, its timed trailers ending
+with the five provenance keys and a failure's record holding its status line and the five. Only
+`h200/`, from before provenance, may have timed trailers without them. Over synthesized trees: its
+sections under another device's name are refused, and are short of the list there; a tree with
+its own list answers to its rows, a `skipped` row declaring no section; a file short of
+one declared section is named; a trailer naming another card than its directory is refused, and one
+naming its own passes; a failure's record without the five is refused even under `h200/`. Over a
+temp file, a run's write path: a case that panics is recorded on one line and the next case is
+measured into the same file; a resumed run keeps the section this run's five measured, byte for
+byte and without running the case, and runs again one measured under another cuDF, one that failed
+and one never reached; a run that does not resume measures a section with this run's five again;
+the rows go in before the section, and rows the record refuses fail the case.
+`PEACOCK_BENCH_RESUME` is unset, `0` or `1`, and anything else is refused. Before any case, a
+missing dataset is refused, and a record another run wrote. The record, which lives in S3, is held
+to its writer instead: a row that lost a cell is refused, a bare `calls` row names the seq it was
+handed, and a record the harness's own writer produces carries `record_header()`'s preamble, read
+as its readers read it. The enabled-on-a-device check and the section check compile the case
+lists in, through the binary's own `corpus_query_benchmark!` and `corpus_query!`, and so do two
+more: every schema-validation mask
 entry is one of its own line's device modes, and a mask entry for a cell its line never runs is
 refused as dead. The decoder is asked only about a mode a run reached, so an entry for a cell that
 is off is never decoded and would arm itself when that cell is enabled
@@ -478,12 +496,38 @@ the declared output
 
 what the export is told per column: a `Decimal128(p, _)` its `p`, every other column `0`
 
-| Record steps | [test_support::record::tests](../peacockdb-core/src/test_support/record/tests.rs) | 2 |
+| Record steps | [test_support::record::tests](../peacockdb-core/src/test_support/record/tests.rs) | 4 |
 |---|---|--:|
 
 the record's reading of a plan: a row's `node_seq` names the steps its `recipes` line prints,
-so the record and the plan golden agree on what a call is; and every cell of a written row
-sits under the column named for it, since `row()` is positional and the heading is not
+so the record and the plan golden agree on what a call is; every cell of a written row sits
+under the column named for it, since `row()` is positional and the heading is not; and the
+heading's `# run:` lines end with the five provenance keys, `device=` to `host=`, in order; and
+an append that stops partway leaves the file as it was, so no cut-off row is continued
+
+| Benchmark provenance | [test_support::provenance::tests](../peacockdb-core/src/test_support/provenance/tests.rs) | 4 |
+|---|---|--:|
+
+the directory a device's results go to, over `testdata/device_slugs.tsv`, the table
+`scripts/calibration/record.py`'s copy is held to as well: `NVIDIA H100 80GB HBM3` is `h100-80gb-hbm3`, and no
+name gives a slug with a `/` or a space, or one that slugs to something else. The runtime's
+`1000 * major + 10 * minor` read as `12.8`. The driver's release out of
+`/proc/driver/nvidia/version` in both module flavours' wording, nothing out of a text with no
+module line, two, or one naming no release or two, and an unreadable file refused naming it
+
+| Benchmark trailer | [test_support::benchmark_trailer::tests](../peacockdb-core/src/test_support/benchmark_trailer/tests.rs) | 1 |
+|---|---|--:|
+
+the `--- run ---` trailer a section ends with: its keys in order, the five provenance keys
+last, each with the run's own value
+
+| Device case lists | [test_support::device_cases::tests](../peacockdb-core/src/test_support/device_cases/tests.rs) | 11 |
+|---|---|--:|
+
+a device's `cases.csv`, through its one reader and writer: a list round-trips, and a note keeps
+its commas. A skipped row names a reason and no mode. An `ok` or `wrong` row names its modes. A
+`wrong` row's note is its `#NN` ticket, and an `ok` row has none. Refused, naming the line: a
+wrong header, an unknown mode or status, a row short of six fields, and a case listed twice
 
 | Golden merge | [test_support::corpus_golden::tests](../peacockdb-core/src/test_support/corpus_golden/tests.rs) | 9 |
 |---|---|--:|
@@ -526,7 +570,7 @@ the exact one, a digest, failing on the drift the tolerant one accepts; a NaN ag
 difference under both; the panicking wrapper still naming its query; and a `no_sort` rendering
 keeping the batches' row order
 
-| Device answer comparison | [test_support::device_answer::tests](../peacockdb-core/src/test_support/device_answer/tests.rs) | 13 |
+| Device answer comparison | [test_support::device_answer::tests](../peacockdb-core/src/test_support/device_answer/tests.rs) | 14 |
 |---|---|--:|
 
 the same for the device helper, ungated so it runs without a card: a wrong row and a missing one
@@ -536,8 +580,8 @@ spelling naming the accepted set, both axes decoded through `stringify!`'s spaci
 `golden(sort, …)` sorting a section written in engine order and `golden(no_sort, …)` failing on
 two swapped rows, an empty `PCK_WRITE_GPU_RESULT` reading as "record nothing", and
 cuDF's own `version_config.hpp` read as `25.02` — the minor padded to two digits, which is the
-spelling every path in the tree uses
-rather than as a version suffix
+spelling every path in the tree uses rather than as a version suffix; and the same header read
+as the release `25.02.02` a benchmark's `cudf=` names, the patch padded too
 
 | Harness datasets | [test_support::tests](../peacockdb-core/src/test_support/tests.rs) | 4 |
 |---|---|--:|
@@ -549,6 +593,13 @@ dataset would demonstrate nothing. Then pbench's data itself, read off the commi
 `dim` carries a key column of every type `fact` does, name and arrow type both, so a regeneration
 that drops one or writes a timestamp at the wrong unit goes red here rather than at the query
 somebody writes a year later
+
+| Source rewrite | [test_support::testdata::tests](../peacockdb-core/src/test_support/testdata/tests.rs) | 1 |
+|---|---|--:|
+
+the one write into the checkout, `rewrite_source_file`, which `UPDATE_CANONICAL` uses to rewrite a
+compiled-in list: the new text replaces the file whole, and the staged `<file>.new` is gone after
+the rename. Nothing hands out a path into the checkout, so no test can read source through it
 
 | Corpus helper | [test_support::corpus::tests](../peacockdb-core/src/test_support/corpus/tests.rs) | 10 |
 |---|---|--:|
@@ -689,7 +740,7 @@ what the batch reports, that `consume` hands the handle over without releasing i
 NVTX range name with an interior NUL is refused before the C side sees it. Needs no device: the
 release is null-guarded on the executor
 
-#### gpu — `--features gpu`: shad-gpu only. 1784 cases: `--lib -- gpu_tests::` 740, `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 34, `test_node_timing` 1
+#### gpu — `--features gpu`: shad-gpu only. 2409 cases: `--lib -- gpu_tests::` 740, `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 659, `test_node_timing` 1
 
 *crate integration, external*
 
@@ -721,17 +772,21 @@ device run under a regeneration writes no golden
 
 the gpu column of the registry, the other half of the pair
 
-| Corpus benchmark harness | [peacock_gpu_benchmarks](../peacockdb-core/tests/peacock_gpu_benchmarks.rs) | 34 |
+| Corpus benchmark harness | [peacock_gpu_benchmarks](../peacockdb-core/tests/peacock_gpu_benchmarks.rs) | 659 |
 |---|---|--:|
 
-the eight assertions the harness makes about its own output, run on every `gpu-tests` job
-under `--skip bench_`: a mode's results go to one file per (dataset, mode), sections ordered
+the nine assertions the harness makes about its own output and its run. They run on every
+`gpu-tests` job under `--skip bench_`: a mode's results go to one file per (device, dataset, mode), sections ordered
 numerically, a filtered run keeping the sections it did not produce, every declared mode naming
 the queries its file will hold, the record written only when `PEACOCK_RECORD_PATH` names it and
 checked against what the plan declares before a row lands, an append under a different `# run:`
-heading refused, and `PEACOCK_BENCHMARK_CAPTURE` naming neither pass refused. The twenty-six
-`bench_` cases — the case list in `tests/common/corpus_benchmark_cases.inc` — are the sf40
-measurement itself and run only under `--run-benchmarks` (*Corpus benchmarks*, below)
+heading refused, and `PEACOCK_BENCHMARK_CAPTURE` naming neither pass refused. The ninth reads this
+run's provenance the way a `bench_` case does. The device slugs to a clean directory name, the
+driver is a release, CUDA is 11.0 or later, cuDF is the release the binary was built against, and
+the host is named. The 650
+`bench_` cases — the case list in `tests/common/corpus_benchmark_cases.inc`, written from the
+registry — are the sf40 measurement itself and run only under `--run-benchmarks` (*Corpus
+benchmarks*, below)
 
 | GPU timing method | [events_are_free_and_land_where_they_claim](../peacockdb-core/tests/test_node_timing.rs) | 1 |
 |---|---|--:|
@@ -884,10 +939,11 @@ that crate is never staged: no peacockdb-core test reads the checkout beyond tes
 | Exec-model sidecar across embeddings (Python) | tpch sf1 generated with `--embeddings external`, counted by `gen_stats.py`, gives the committed sidecar byte for byte — the synthetic default is the dataset tier's own recount. It generates the dataset, a minute or two, and needs the embeddings cache, which no CI host may fetch; without the cache it fails rather than skips | [test_tpch_with_external_embeddings_gives_the_committed_sidecar](../scripts/exec_model/tests/optimizer/test_stats_embeddings.py) | manual — a host with the embeddings cache | 1 |
 | Exec-model engine plans (Python) | the engine's own plan goldens run by the prototype over sf1 against DuckDB: as planned (130), pruned by their dynamic filters before and after join order (73), with every join cluster disassembled and rebuilt (111), and reordered by DPhyp and oriented (111) | [test_engine_answers.py](../scripts/exec_model/tests/plans/test_engine_answers.py), [test_engine_optimized.py](../scripts/exec_model/tests/optimizer/test_engine_optimized.py) | manual — exec-model-corpus.yml, 3 shards | 425 |
 | Exec-model per-call model, measured (Python) | the per-call model fitted from the sf40 calibration record orders each query's modes as the device did: at least fifteen pairs of modes whose measured times differ by more than 10 %, none the wrong way round — 25 of the record's 30 today. The record is not in git: the job fetches it from S3, and the test fails naming the fetch script when it is absent | [test_the_measured_record_orders_each_query_s_modes_as_they_were_measured](../scripts/exec_model/tests/optimizer/test_call_cost_measured.py) | manual — exec-model-corpus.yml, call-cost job | 1 |
-| Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, each case is checked against its own dataset's plan golden, `hbm_bytes` lands on the right tuple, a call is the median of its executions, a capture of two datasets joins onto their two records, a case captured alone is refused under another case's name and parts merge into one file only when they cover the record, and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`, two datasets as two series in every pooled panel, a kind one dataset makes in that dataset's run-wide colour, an hbm file a row per execution draws the same per-call points as its fold, and a fold takes rows of both shapes each by its own. And the split a record is published by: a run of one dataset is its file byte for byte, two datasets are two files under one heading, a query is spelled as the benchmark macro spells it, and a run missing a declared case, timing an undeclared one or captured under Nsight is refused naming why, with nothing written; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_hbm.py](../scripts/calibration/tests/test_hbm.py), [test_plot.py](../scripts/calibration/tests/test_plot.py), [test_split.py](../scripts/calibration/tests/test_split.py) | cost-report | 29 |
+| Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, each case is checked against its own dataset's plan golden, `hbm_bytes` lands on the right tuple, a call is the median of its executions, a capture of two datasets joins onto their two records, a case captured alone is refused under another case's name and parts merge into one file only when they cover the record, and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`, two datasets as two series in every pooled panel, a kind one dataset makes in that dataset's run-wide colour, an hbm file a row per execution draws the same per-call points as its fold, and a fold takes rows of both shapes each by its own. And the split a record is published by: a run of one dataset is its file byte for byte, two datasets are two files under one heading, a query is spelled as the benchmark macro spells it, and a run missing a declared case, timing an undeclared one, captured under Nsight or naming no device or two is refused naming why, with nothing written; each file lies under its device's slug, the harness's rule. And the fetch: a device's record from its own key into its own directory, the H200's pin, which names no device, as it was, and a name that is not a pin path refused before any fetch. A capture is refused unless every GPU it lists is the card the record's heading names, a record naming none being the H200's, and refused naming the table when it has no GPU table or lists no GPU; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_hbm.py](../scripts/calibration/tests/test_hbm.py), [test_plot.py](../scripts/calibration/tests/test_plot.py), [test_split.py](../scripts/calibration/tests/test_split.py), [test_fetch.py](../scripts/calibration/tests/test_fetch.py) | cost-report | 41 |
 | Nebius scripts (Python) | `nebius.sh` against fake nebius, ssh and ssh-keyscan: every exit code, and the host-key rule; `--instance-id`/`--profile`, the per-instance alias, and the soft stop on a CPU VM; `install-watch`'s one profile, its embedded key and the install file; the idle watcher's decision over a process snapshot and a clock, for both kinds, and the hourly checker's verdict over the watcher's last log line; `watch.sh` and the hourly workflow's three legs, each skipped with a notice rather than failed; that only an actor on `GPU_ALLOWED_ACTORS` reaches the host; `ci-ship.sh` with real rsync into a local home — `lib/`'s symlinks and exec bits, a cache mirroring each run, retries that end red; and `nebius-test.sh`'s list over stub binaries — what runs, with what, and what is red. No VM, no secret | [test_nebius.py](../scripts/nebius/tests/test_nebius.py), [test_idle_watch.py](../scripts/nebius/tests/test_idle_watch.py), [test_install_watch.py](../scripts/nebius/tests/test_install_watch.py), [test_watch.py](../scripts/nebius/tests/test_watch.py), [test_ci_ship.py](../scripts/nebius/tests/test_ci_ship.py) | cost-report | 170 |
+| Images (Python) | the images' committed inputs and the scripts that build and run them: `docker/pins.env` against the specs, the specs' hashes and the venv lock; `image.sh`'s build line, its tags, its `peacockdb.inputs` label holding every `docker/` file its Dockerfile reads and only the pins it declares, a pin left out only where another version's stage declares it, the same in every locale, and the pushes it refuses; the cmake wrapper's redirects to the prefetched rapids-cmake and flatbuffers; the DuckDB extension directory; the static-cudart guard; `images.yml` started by a dispatch alone, its four steps unconditional and of a fixed shape, building and pushing through `image.sh` with the job's own token and nothing else, its disk gate run over fakes, and the reader it is parsed with refusing what it does not read. The embeddings cache over its pinned origins, with a fake curl: CI, GITHUB_ACTIONS and PEACOCK_NO_FETCH refusing before any call; nothing fetched that a full cache holds, and a missing query set fetched from its origin, resumed; through a symlink, the cache beside the link; an unzip killed midway leaving no GloVe text a re-run accepts; and the committed pin naming each artifact once. The calibration bucket's endpoint and region from `AWS_ENDPOINT_URL` and `AWS_REGION`, keeping the old storage when no endpoint is named and refusing an endpoint without a region. `bootstrap-vm.sh` over a fake docker and sudo: what it refuses before its first install, root among it; a `--ref` the clone is not on refused, naming both branches; one `apt-get update` before any install; the machine-wide data directory, `/var/lib/peacock` unless `PEACOCK_DATA_DIR` names another, before any download; and a whole run: no marker, `DISABLE_AUTOUPDATER=1` in `~/.bashrc` and no `CLAUDE_CONFIG_DIR`, no other script named; an image of other inputs or without the label refused before any run in it; the registry fetched with the clone read-only; sf1 chosen by generator inputs and generated once, offline; one cuDF checkout a commit, sparse, reused, the clone's own submodule never read, and a commit it cannot fetch refused; what it writes in the data directory group-writable; two runs at once generating once and fetching in turn. `provision-vm.sh` over a fake ssh and VM: the laptop's files and their modes, the developer's user, groups and keys, bootstrap on every run, the GPU key `--gpu-key` names copied to the VM and a missing key or `.pub` refused with no key made, the secrets on ssh's stdin alone, the PAT in no argv and not in the VM's env file, another key in `peacock.env` refused by name, an incomplete env file, a missing git identity and a token it cannot use refused, the env file kept with no CR and a final newline, `--env` naming the laptop's own file too, and its comments skipped, a `--ref` the VM's clone is not on refused, a rerun skipping what is done, `--new-pat` on every VM it reaches, help printed without sed and a bash older than 4.4 refused. With the images built: each image as a uid it does not know with no network, every library the staged binaries need resolving in the run image, and `run-tests.sh` over fake binaries | [test_image.py](../scripts/env/tests/test_image.py), [test_images_workflow.py](../scripts/env/tests/test_images_workflow.py), [test_embeddings.py](../scripts/env/tests/test_embeddings.py), [test_s3.py](../scripts/env/tests/test_s3.py), [test_bootstrap.py](../scripts/env/tests/test_bootstrap.py), [test_provision.py](../scripts/env/tests/test_provision.py), [test_run_tests.py](../scripts/env/tests/test_run_tests.py) | manual | 156 |
 | C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule over the same shared case table the Rust clamp reads, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; `TableResult::of`'s two refusals, Final and Single modes refused by name, and a `ColumnRef` resolved by index and name, and `MERGE_M2`'s count type — `INT32` before cuDF 25.06, `INT64` from it, and the type this build's headers pick; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 26 |
-| cuDF GPU smoke (C++) | the GPU is alive; the RMM pool reserves the budget the binary declared. The two hardcoded-comet partition-id cases are gone: they were a third copy of the lane rule, and the live gate proves the kernel against the production rule instead | [CudfGpu.SequenceSum](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 2 |
+| cuDF GPU smoke (C++) | the GPU is alive; the RMM pool reserves the budget the binary declared; `peacock_device_info` names the device, gives the runtime's version, and refuses a null output. The two hardcoded-comet partition-id cases are gone: they were a third copy of the lane rule, and the live gate proves the kernel against the production rule instead | [CudfGpu.SequenceSum](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp), [PeacockGpu.DeviceInfoDescribesTheDevice](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 3 |
 | Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node — a join through the session's build, probe and finish, laid out as the wire lays it, its two sides and the `CudfJoin` leaf under one structural union — plus the per-call entry points at their contract edges (row-group override, export range, slice), a scan of no column answering its row count from the footer — whole, one row group, under a limit — and a project of no expression refused, the sqrt arm on both evaluators, a value-form CASE with and without ELSE — the first match winning, a NULL comparand or WHEN never matching — `date_part` answering in the type the wire names for three fields, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, a decimal literal under a cast to `Float64` or `Int64` kept on the AST, every wire type walked through the dispatch, the LIKE guard, `IS [NOT] DISTINCT FROM` against a typed null on each evaluator — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region. The handle's own rules are ten of these: a slice and a selection share their columns' owners, and five shapes are refused — a table of no columns, a name count that does not match, an ordinal past the columns, a selection of no ordinals, and a column appended at the wrong row count, a slice's string bytes are its own rows' and not its parent's, a scatter's partitions share one table and outlive their siblings and concatenate back to the input, an empty lane is a zero-row slice of no string bytes, two input handles are refused rather than concatenated, a scatter's peak and its requested total are those of partitioning the same input alone, measured with the RMM statistics adaptor over a fixed-width table and a string one; the total is the bound that discriminates on both shapes, since a string column's gather in cuDF already costs more than the copies did and so set the peak all along — and `slice_handle` still owns its rows; and the operator exit paths, nine of these: a bare `ColumnRef` evaluates to a view of the input's own column and allocates nothing, a non-AST predicate allocates no more than the comparison and the filter alone, a fused filter projection no more than the same filter without one, a project of column references nothing at all, a window no more than its own result column, and an aggregate no more than cuDF's groupby — each bound measured on the same input, since a hand formula would bake a cuDF cost into a constant; plus a filter whose projection repeats an ordinal, which answers both columns over one owner, and two that bound a release rather than an allocation, since no allocation bound can see an operator retaining what it should drop: a filter narrowed to one column gives back the dropped column's own bytes, and a project holds its shared column exactly once and frees the rest; and the grouping id's value and width from one key to sixty-four, each width boundary from both sides, and its refusal past them; and an aggregate's init handed no input answering over its declared input's zero-row table, where a merge handed none still refuses; the aggregate's request builder per function and phase, the Welford state with no NULL over an all-NULL group or merge, and a keyless Welford through the builder, with rows and over none, and a `ColumnRef` refused past the width, with no name, or under another column's name; and a date or timestamp ± an interval literal, each expected value DataFusion's: the month-end clamp in a leap and a common year, both ways, a mixed interval at every timestamp unit in the months-days-nanoseconds order, a sub-day part truncated on a date and floored on a timestamp, the interval on the left, a NULL interval, zero rows keeping the type, and any other interval use refused naming #249 | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [ExitCopies.AProjectOfColumnRefsAllocatesNothing](../cpp/tests/gpu/test_plan_executor.cpp), [test_grouping_id.cpp](../cpp/tests/gpu/test_grouping_id.cpp), [test_aggregate_no_input.cpp](../cpp/tests/gpu/test_aggregate_no_input.cpp), [test_column_refs.cpp](../cpp/tests/gpu/test_column_refs.cpp), [test_aggregate_builder.cpp](../cpp/tests/gpu/test_aggregate_builder.cpp), [test_interval_arithmetic.cpp](../cpp/tests/gpu/test_interval_arithmetic.cpp) | shad-gpu | 126 |
 | Join session (C++) | the four `peacock_join_*` symbols through the C ABI alone — plan bytes in, Arrow batches up, IPC answers down — over the matrix of [join-rewrite-design.md](tasks/join-rewrite-design.md) §5.6: all nine join types against keys only, a cross residual the AST takes and one it refuses, a residual reading one side alone, a nested loop whose conjuncts are all AST-able, partly so, or not at all, and a cross join; NULL keys on both sides under either `null_equals_null`, many-to-many keys, a composite key with a NULL in its second column; a build that is absent, zero rows or all-NULL keys, a probe that is absent, one batch, or three with a zero-row batch between; a projection absent, crossing sides, or empty and refused. Left and Full pad a NULL-key build row rather than dropping it. Five cases probe three batches with a zero-row batch between, no batch matching what another did, because `matched` is an OR folded across calls and a single batch cannot tell that from the last call's answer — which is the whole of #136. Four properties no answer can show get a case each — hoisting a one-side operand keeps a nested loop off the cross product, bounded by the same join whose condition needs no hoisting plus the build's own bytes; a probe hands its gathered columns over without a copy (#154), its peak bounded by the same cuDF calls on tables of the same shape and its `net` bounded *both* ways, since an upper bound is the only thing that sees a session retaining the batch it consumed; releasing a session, and ending the plan under a live one, give back the build side's own measured bytes; each call opens exactly one region; and the two `size_type` ceilings refuse by name rather than wrapping, asked on sizes because no test host holds a table that big | [JoinSession.LeftPadsEveryBuildRowNoProbeMatchedIncludingANullKey](../cpp/tests/gpu/test_join_session.cpp), [JoinSession.HoistingKeepsANestedLoopOffTheCrossProduct](../cpp/tests/gpu/test_join_session.cpp) | shad-gpu | 56 |
 | TPC-H sf40 bare-cuDF (C++) | hand-written cuDF pipelines vs DuckDB sf40; the benchmark vehicle | [TpchSf40.Q1GroupByAggregates](../cpp/tests/gpu/test_tpch.cpp), [Q3JoinsGroupByTopN](../cpp/tests/gpu/test_tpch.cpp) | shad-gpu (sf40 is a hard precondition) | 4 |
@@ -943,7 +999,11 @@ Notes
 Host columns are audited, not assumed: they say whether the bytes were actually found
 there (`ls` + `sha256sum`, 2026-08-05). tpch.minimal and pbench.sf1 are in git; everything
 else is generated or fetched per host. S3 is Nebius object storage, endpoint
-`https://storage.eu-north1.nebius.cloud:443`, region `eu-north-1`.
+`https://storage.eu-north1.nebius.cloud:443`. It accepts region `eu-north-1` and `eu-north1`
+alike; both were checked against it. `scripts/lib/calibration-bucket.sh` takes the endpoint and
+region from `AWS_ENDPOINT_URL` and `AWS_REGION` (`scripts/lib/s3.sh`). `upload_datasets.sh` and `check_s3_datasets.py` still name the
+endpoint themselves. With `AWS_ENDPOINT_URL` unset, the calibration bucket uses the endpoint and
+region above, for `build-test-shadgpu.sh`.
 
 | Dataset | Shape | <sub>local</sub> | <sub>verda</sub> | <sub>shad-gpu</sub> | S3 bucket | Used by |
 |---|---|:-:|:-:|:-:|---|---|
@@ -953,7 +1013,7 @@ else is generated or fetched per host. S3 is Nebius object storage, endpoint
 | TPC-H+V sf1, synthetic vectors | same tables, hash-generated FLOAT[8] | — | — | — | — | CI only — regenerated every run |
 | TPC-DS sf1 | 24 tables, 764 MB | ✓ | ✓ | ✓ | — | plan + CPU + GPU subsets |
 | TPC-H+V sf40 | 8 tables, 40 GB | — | — | ✓ | `tpch-sf40` | `peacock_tpch(v)_tests`, `peacock_gpu_benchmarks`, multi-GPU (manual) |
-| TPC-DS sf40 | 24 tables, 15 GB | — | — | ✓ | — | `peacock_gpu_benchmarks` |
+| TPC-DS sf40 | 24 tables, 15.8 GB | — | — | ✓ | `tpcds-sf40` | `peacock_gpu_benchmarks` |
 | TPC-DS sf200 | 24 tables, 80 GB | — | — | ✓ | `tpcds-sf200` | no tests — S3 check, validate-large |
 | TPC-H sf200 | not generated yet | — | — | — | `tpch-sf200` | nothing yet |
 | embeddings cache | 1.8 GB local / 129 GB shad-gpu | ✓ | — | ✓ | — | generator input, not a test input |
@@ -979,24 +1039,34 @@ sha256 matches local). Notes on the rows above:
   both sides, every hashable key type, skew, empty sides — and a regenerated one would let those
   move without a diff.
 - **The embeddings cache is a per-host intermediate and is NOT syncable** — no
-  `--push`/`--pull` kind covers it; `fetch_embeddings.sh` is local-only and hard-guards
-  against running on CI/verda/shad-gpu. Regenerate it where you need it, or ship the
-  augmented parquet instead.
+  `--push`/`--pull` kind covers it. `fetch_embeddings.sh` fetches it from the origins by hand
+  only: CI, GITHUB_ACTIONS and PEACOCK_NO_FETCH refuse it. The check is on the environment, not
+  the host, so a manual run on shad-gpu passes, and automation that shells into a host sets
+  PEACOCK_NO_FETCH=1. Regenerate it where you need it, or ship the augmented parquet instead.
+- `testdata/embeddings.sha256`, committed, pins the four files `fetch_embeddings.sh` checks.
 - **The calibration record is fetched, not generated**, and fetched where it is used, so no host
-  column holds it. Objects are keyed by content, `<dataset>.sf<sf>/<sha256>.tsv`, and never
-  replaced. `testdata/calibration/records.sha256`, committed, names the sha256 each dataset's
-  tree was measured beside; `scripts/calibration/fetch_record.sh tpch.sf40` fetches that object
-  into `testdata/calibration/tpch.sf40/records.tsv` and checks its sha256. The aws CLI it runs
-  is `$AWS`, `aws` by default: on shad-gpu `/home/info/bin/aws` with credentials in `~/.aws`; in
+  column holds it. Objects are keyed by device and content,
+  `<device>/<dataset>.sf<sf>/<sha256>.tsv`, and never replaced. The H200's predate devices and
+  are `<dataset>.sf<sf>/<sha256>.tsv` until [#226](tickets/benchmarks.md#t226) moves them.
+  `testdata/calibration/records.sha256`, committed, names the sha256 each device's dataset tree
+  was measured beside. `scripts/calibration/fetch_record.sh tpch.sf40` fetches the H200's object
+  into `testdata/calibration/tpch.sf40/records.tsv` and checks its sha256;
+  `fetch_record.sh <device>/tpch.sf40` fetches another device's into
+  `calibration/<device>/tpch.sf40/`. The aws CLI it runs is `$AWS`, `aws` by default: on shad-gpu `/home/info/bin/aws` with credentials in `~/.aws`; in
   CI the runner's own with the `S3_*` secrets; a dev box without credentials runs it on
   shad-gpu, `AWS=/home/info/bin/aws scripts/calibration/fetch_record.sh --ssh shad-gpu tpch.sf40`.
   Only `build-test-shadgpu.sh --pull-benchmarks` writes the bucket.
 - **sf40 lives only on shad-gpu**, and its presence there is a hard precondition of the
   GPU job; the sf40 goldens are committed (see below), so CI compares without touching
   40 GB.
-- **tpcds sf40 is the benchmark's alone.** No CI job reads it and it is in no bucket. It was
-  made on shad-gpu beside tpch's by `generate_testdata.sh --bench tpcds --sf 40` (DuckDB
-  1.5.4, one thread): 9 min 41 s, peak RSS 60 GiB, nothing spilled. The benchmark run links
+- **tpcds sf40 is the benchmark's alone**: no test tier reads it, only the s3-datasets check
+  (`check_s3_datasets.py`) checks its bucket, `tpcds-sf40`. It is made by `generate_testdata.sh
+  --bench tpcds --sf 40` (DuckDB 1.5.4, one thread). On shad-gpu: 9 min 41 s, peak RSS 60 GiB,
+  nothing spilled. With 62 GB of RAM DuckDB holds about 50 GiB and spills the rest to its temp
+  directory (8 GB at most): 14 min 37 s, peak RSS 50.5 GiB, 15.8 GB of parquet. Single-threaded
+  with total-order sorts, the bytes follow from the script and DuckDB alone; the bucket's copy is
+  published by `upload_datasets.sh tpcds.sf40`, and the sha256 of its 24 files, sorted, sums to
+  `58610fc16152a12ea9769d645a6e72a4e03002e2498ec8d357862fcbd9bebb36` (`sha256sum *.parquet | sha256sum`). The benchmark run links
   each sf40 dataset the case list names into its testdata, as it does tpch's.
 - verda reaches the tree through a `/media/data/peacockdb` symlink to
   `~/peacockdb`. Every test binary honours `PEACOCK_TESTDATA_DIR`, but the plain cpu mode
@@ -1033,6 +1103,7 @@ The generator scripts live in `testdata/`.
 | `<bench>/tp1-single.cardinality.txt`, in `scripts/exec_model/testdata/goldens/` | `test_cardinality_corpus.py` with `UPDATE_CANONICAL=1` | the plan golden, `tp1-single-mini.cpu.txt`, the stats sidecar and the sf1 footers, `optimizer/cardinality.py`. One line per join: its estimate, its rows in the engine's run, the q-error | `test_cardinality_corpus` in dataset-matrix, the whole file |
 | `<bench>/<mode>.cpu.txt`, `<mode>.optimizer.txt`, `<mode>.plandiff.txt`, `<mode>.costs.txt` and `<mode>.optimizer.md`, in `scripts/exec_model/testdata/goldens/` | `scripts/exec_model/run.py`; with `--query` it rewrites only its own sections | the plan golden, the sf1 tables and sidecar, the whole optimizer, `cost_model.conf`, and pandas' byte counts. A `== <query>` section each: the optimized run in the `.cpu.txt` format plus each clustered join's `mj=`, what each rule did, the plan's diff, and both runs priced by the engine's cost function with the rules counted. The page has a `## <query>` section each, from the same report as `.optimizer.txt`: each cluster's successive orders and the dynamic filters. `.costs.txt` is not a function of the `.cpu.txt` beside it: it prices the planned run, the probe plans and the stopped runs too | nothing: generation only |
 | `cost_report.html`, in `scripts/exec_model/testdata/goldens/` | `run.py` at the end of every run, or `scripts/exec_model/cost_report.py` alone; committed with relative links | every `<bench>/<mode>.costs.txt` and `.optimizer.txt` beside it, the engine's `-mini.cost.txt` and the `<q>.duckdb_cost.txt` | the cost-report job renders it again with `--sha`, its links at the commit, and on master publishes it at `join-optimizer/` |
+| `peacockdb-core/tests/common/corpus_benchmark_cases.inc` (source, not testdata) | `the_benchmark_cases_follow_the_registry` in `test_corpus_goldens` with `UPDATE_CANONICAL=1`, published by rename | `testdata/cost-registry.csv`'s `gpu_*` columns, tpch and tpcds rows, timed at sf40 | that test, byte for byte |
 | `tpch.sf40/duckdb_<q>.csv`, `.count.csv` | `gen_duckdb_goldens.sh --sf 40`<br>on shad-gpu | sf40 parquet, query text from `tpch_query_sql.sh` | `peacock_tpch_tests` / `peacock_tpchv_tests` |
 
 How they hang together — parquet at the top, goldens derived left to right:
@@ -1227,14 +1298,14 @@ tpch.sf40, tpcds.sf40 (on the GPU host, outside the repo; each symlinked in as t
   │
   ├── build-test-shadgpu.sh --run-benchmarks        (peacock_gpu_benchmarks, event timing;
   │   build-test.sh --gpu --run-benchmarks           the same binary on a 26.02 host)
-  │     ├──► benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt   the chosen run, per node
+  │     ├──► benchmark-results/<device>/<dataset>.sf<sf>/<mode>.benchmark.txt   the chosen run, per node
   │     └──► calibration/records.tsv                one row per cuDF call × execution
   │           └── --pull-benchmarks brings both home  (the record gitignored), and
   │               split_record.py: a whole, plain, passing run per dataset, or nothing
-  │                 ├──► s3://calibration/<dataset>.sf<sf>/<sha256>.tsv
+  │                 ├──► s3://calibration/<device>/<dataset>.sf<sf>/<sha256>.tsv
   │                 └──► calibration/records.sha256      that sha256, committed with the tree
-  │                       └── fetch_record.sh <dataset>.sf<sf>
-  │                             └──► calibration/<dataset>.sf<sf>/records.tsv   (gitignored)
+  │                       └── fetch_record.sh <device>/<dataset>.sf<sf>
+  │                             └──► calibration/<device>/<dataset>.sf<sf>/records.tsv   (gitignored)
   │
   └── create_nsys_profile.sh [--host …]             (the same binary, under Nsight)
         ├── --trace     nvtx and cuda only; PEACOCK_BENCHMARK_CAPTURE=trace
@@ -1256,8 +1327,28 @@ calibration/<dataset>.sf<sf>/records.tsv (one --record each) + calibration/hbm.t
                   calibration/plots/index.html      one call, every panel
 ```
 
+`<device>` is the card's slug, `h100-80gb-hbm3` for `NVIDIA H100 80GB HBM3`. The H200's two
+records predate it: they are keyed, pinned and fetched as `<dataset>.sf<sf>`, one level up.
+`create_nsys_profile.sh` reads the pinned records at that level only,
+`calibration/<dataset>.sf<sf>/records.tsv`, one per dataset the case list names.
+
 What the arrows are there to make checkable:
 
+- **Every file says what it ran on.** A trailer and a record heading end with `device=`,
+  `driver=`, `cuda=`, `cudf=` and `host=`, in that order:
+  - the device is `cudaDeviceProp::name` and CUDA is `cudaRuntimeGetVersion` as `major.minor`,
+    both read through `peacock_device_info`;
+  - the driver is the kernel module's release, `580.95.05`, from `/proc/driver/nvidia/version`;
+  - cuDF is the release the binary was built against, `25.02.02`;
+  - the host is the kernel's host name. Inside a container that is the container's own name,
+    unless the container was started with `--hostname`.
+
+  The tree is one directory per device, so two card models never write one file. An append to a
+  record under another device, driver, CUDA, cuDF or host is refused. `nsys_hbm.py` refuses a
+  capture unless every GPU it lists is the record's device. A record naming no device predates
+  provenance and is taken as the H200's (`PREDATES_PROVENANCE`): both hosts that ran the
+  benchmark before, shad-gpu and verda-gpu, are H200s, and only shad-gpu published.
+  The H200 files predate all this and carry none of the five.
 - **Three runs, and only one of them is timed.** A capture serializes what it traces and the
   counters pass costs several percent more, so neither writes the tree, and the metrics pass's
   own record is read for its coordinates and never for its microseconds. The passes meet on the
@@ -1284,7 +1375,11 @@ What the arrows are there to make checkable:
   q6 at `tp1-single` and `tp4-sized`, q19 at `tp1-single` — whose record is in git's history.
   The panels are drawn from the two published records, all twenty-six cases; `hbm.tsv` joins a
   record by call, not by execution, so its three cases are drawn beside them, and it is still
-  a row per execution. The two derived files cover the twenty-six only after step 5.
+  a row per execution. The two derived files cover the H200's twenty-six only after step 5 runs
+  over them, and that step runs from a checkout carrying the 26-case list: a5c852e4 on
+  master, whose case lines are `h200/cases.csv`'s rows. `create_nsys_profile.sh --metrics`
+  takes every case of the list and checks its merge against the pinned records, which hold the
+  twenty-six.
 - **`hbm.tsv` is a row per call, not per execution.** Each reading is the median over the
   call's executions, and `executions` says how many. A row per execution would be ~255
   thousand rows and 25 MB over the corpus; a row per call is the record's 25,522 calls.
@@ -1302,10 +1397,11 @@ What the arrows are there to make checkable:
   into one file per dataset and refuses the lot unless each holds exactly the (query, mode)
   set `corpus_benchmark_cases.inc` declares, under `capture=none`. Before that, the pull
   requires the host's record to be the one it pulled (no run started since) and the run to have
-  exited 0, since a failing case appends its rows before it panics. A refused record leaves the
-  pin as it was, and the pull exits 1 with the tree home. Only shad-gpu publishes, through
-  `build-test-shadgpu.sh`: the key names no host (#226). `build-test.sh` keeps what it pulls, and
-  nebius-gpu runs no benchmark, so while shad-gpu is down no record is published.
+  exited 0, since a failed case is missing from it. A refused record leaves the
+  pin as it was, and the pull exits 1 with the tree home. A record that names no device, or two,
+  is refused too: its rows are filed under the device that measured them. Only shad-gpu publishes,
+  through `build-test-shadgpu.sh`. `build-test.sh` keeps what it pulls, and nebius-gpu runs no
+  benchmark, so while shad-gpu is down no record is published.
 
 ## CI structure (`.github/workflows/pipeline.yml`)
 
@@ -1386,6 +1482,8 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   pair is out on an L40S.
 - **nebius-watch.yml** — hourly and on dispatch: the hourly checker, which hard-stops an
   unused nebius-gpu (*Nebius host*). GitHub reads its schedule from master only.
+- **images.yml** — on dispatch only: builds and publishes the build and run images (*Images*).
+  GitHub can dispatch it only once master holds it.
 - **cost-report** — the report crate and its inputs, and the cheap script tests: python
   `testdata/test_*.py` by glob (the two DuckDB generators' own tests), the report widget's
   `scripts/test_ticket_widget.py`, the `scripts/exec_model/tests/**/test_*.py` prototype set
@@ -1873,6 +1971,233 @@ transcript on 2026-10-14. Reach the cloud through `nebius.sh`. Learn the CLI fro
   `<dir>/testdata` first — rsync makes no parent directories, and a push into a fresh one
   retries a hundred times before it fails.
 
+## Images
+
+Two images per cuDF version, built from `docker/` and published on `ghcr.io/asymptote-tech/`.
+`<v>` is a version with a committed spec in `docker/conda/`: 25.02 or 26.02. Sizes are docker's,
+in GB of 10^9 bytes.
+
+| image | holds | size (25.02, 26.02) |
+|---|---|---|
+| `peacockdb-build:cudf-<v>` | every build mode: rust-only, the FFI build, `--features gpu`, the staged binaries | 10.0 GB, 9.74 GB |
+| `peacockdb-run:cudf-<v>` | the runtime of the same cuDF and `run-tests.sh`; nothing to build with | 5.09 GB, 6.17 GB |
+
+Each image carries two tags. `:cudf-<v>` is the latest published. `:cudf-<v>-<commit>` names the
+commit it was built from, 12 hex digits; the label `org.opencontainers.image.revision` holds the
+same commit. Pulling needs no login: `docker pull ghcr.io/asymptote-tech/peacockdb-run:cudf-25.02`.
+No image holds a secret, a host or Claude Code. Both run as any uid: pass
+`--user "$(id -u):$(id -g)"`. The default user is `peacock`, uid 1000, never root.
+
+### The build image
+
+- `/opt/cudf` is the cuDF prefix (`CUDF_ROOT`), package for package the nebius-gpu environment the
+  committed device answers came from. Its `bin/` is not on PATH, and its `lib/` is not on the
+  loader path: an FFI test binary run in the image needs `-e LD_LIBRARY_PATH=/opt/cudf/lib`, or
+  it exits 127 on `libcudf.so`.
+- nvcc 12.9.86 in `/opt/nvcc`, gcc 12 (25.02) or 14 (26.02) as `CC`/`CXX`, cmake, ninja, rust,
+  ccache, patchelf. `scripts/build.sh` needs `--cudf_ROOT /opt/cudf --gcc-version "$GCC_VERSION"`.
+- DuckDB 1.5.4 with its tpch and tpcds extensions in `/opt/duckdb-ext`. The image sets
+  `PEACOCK_DUCKDB_EXTENSION_DIR`, so `generate_testdata.sh` installs them offline.
+- Python 3.13 in `/opt/venv`, exactly `docker/venv.lock`: the versions the committed costs ran on.
+- git, gh, ssh, rsync, jq, aws and nebius, with no configuration.
+- What a configure fetches is prefetched: rapids-cmake, flatbuffers and gtest. With the tree's
+  `third_party/cudf` checked out and a cargo registry mounted at `/opt/rust/cargo/registry` (filled
+  once by `cargo fetch` with the network on), the build and data generation run under
+  `--network none`.
+- HOME is not writable for a uid the image does not know. Set `-e HOME=<a mounted directory>`
+  when a tool needs one.
+
+### The run image
+
+The binaries and data are mounted, never in the image:
+
+    docker run --rm --gpus all --user "$(id -u):$(id -g)" --hostname "$(hostname)" \
+      -v <staged cpp/install>:/peacock/install:ro -v <testdata>:/peacock/testdata \
+      ghcr.io/asymptote-tech/peacockdb-run:cudf-25.02 list
+
+- `--hostname` gives the container the machine's name, which a benchmark writes as `host=`.
+  Without it the container's own name, its id, is written instead. A run split into several
+  `docker run`s needs the same name in each: a resumed segment keeps only the sections whose
+  `host=` is its own. Resuming needs `-e PEACOCK_BENCH_RESUME=1` on the `docker run`, which
+  passes none of the caller's environment through.
+- `/peacock/install` is a staged `cpp/install`, built in the build image of the same version:
+  `lib/libpeacock_gpu.so`, `bin/peacock_*_tests`, `rust-tests/` and, for `bench`,
+  `rust-benchmarks/`. Read-only.
+- `/peacock/testdata` is the repository's `testdata/` with its datasets. Read-write: a run writes
+  `benchmark-results/` and the calibration record.
+- The entrypoint is `/opt/run/run-tests.sh <list|filter|bench>`. `list` is the L40S list, by
+  `gpu-host-test.sh`'s rules. `filter` runs the list with every rust binary but
+  `peacockdb_core_gpu_lib` narrowed by `-e PCK_TEST_FILTER=<f>`; the C++ suites and the lib's
+  device rung run whole. Beyond the usual failures, it fails when the filter matches no test in the
+  narrowed binaries. `bench` runs the benchmark binary and refuses a
+  `calibration/records.tsv` that still has rows: pull it home, then remove it.
+- Exit 0 is green, 1 a binary failed, ran no test or crashed, 2 a bad argument or input.
+- **The driver.** The label `peacockdb.driver-minimum` is the oldest driver the image's CUDA
+  runtime runs on: 535.104.05 for 25.02, 575.57.08 for 26.02. Read it with
+  `docker image inspect --format '{{index .Config.Labels "peacockdb.driver-minimum"}}' <image>`
+  and compare it with `nvidia-smi --query-gpu=driver_version --format=csv,noheader`. A card newer
+  than compute capability 9.x JIT-compiles the PTX and needs 575.51.03 or later with either image.
+- **A binary run by hand** needs the library path: the shipped binaries carry no RUNPATH. Add
+  `--entrypoint /peacock/install/bin/<binary>`,
+  `-e LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib` and
+  `-e PEACOCK_TESTDATA_DIR=/peacock/testdata`.
+
+### Rebuilding and publishing
+
+- `scripts/env/image.sh build <build|run> <v>` builds from the working tree. `--dry-run` prints
+  the `docker build` line instead.
+- **The commit tag comes only from a clean tree**: `git status --porcelain` empty, untracked files
+  included. A dirty build gets `:cudf-<v>` alone and the revision `<commit>-dirty`.
+- `scripts/env/image.sh push <build|run> <v>` pushes both tags. It refuses unless HEAD's commit
+  tag exists locally and `:cudf-<v>` is the same image. So: commit, build, push.
+- **From a host**, docker must be logged in to ghcr.io with a token holding `write:packages`:
+  `gh auth refresh -s write:packages`, then
+  `gh auth token | docker login ghcr.io -u <github user> --password-stdin`. A package pushed for
+  the first time can be private: check its visibility in its settings and set it public.
+- **From GitHub**, `.github/workflows/images.yml`:
+  `gh workflow run images.yml -f kind=<build|run|all> -f cudf=<v|all>`. GitHub can dispatch it
+  only once master holds it. A dispatch runs the workflow and the commit of the ref it names
+  (`--ref`, master by default), and moves `:cudf-<v>`. One job per image, pushing with the job's
+  own token. If the job's push is denied, give this repository the Write role under the package's
+  "Manage Actions access".
+- **The runner's disk.** A standard runner has 14 GB. The largest build holds 12.2 GB at once:
+  the 26.02 run image holds its 6.09 GB prefix twice, in its stage and in the final copy. A build
+  image peaks at about 10.6 GB, its 7.5 GB conda layer beside micromamba's downloads. So a job
+  first removes the runner's preinstalled SDKs, and stops if less than 16 GB is left.
+- The tests are `scripts/env/tests/`, each run as `python3 <file>`, locally or in the build image.
+  No CI step runs them. `test_image_any_user.py`, `test_run_image.py` and `test_run_tests.py` need
+  the images built; `test_run_image.py` also a staged install per version, named by
+  `PEACOCK_STAGED_INSTALLS=<dir holding cudf-<v>/>`.
+
+## Containers
+
+A developer works on a CPU VM: builds run in the build image there, and so do the DuckDB runs that
+want its 128 cores. The developer readies it from their own machine, the laptop, with
+`scripts/env/provision-vm.sh`, which runs `scripts/env/bootstrap-vm.sh` on the VM. Each has
+`--help`.
+
+### Trust
+
+The VM holds only what every run there may use: the S3 read key, a fine-grained PAT scoped to the
+repository, and the developer's key to the GPU hosts. Never the S3 writer key, never another
+secret. The developer's user is in the docker group, which is root.
+
+The PAT's Contents and Actions write let work on the VM push its branch and dispatch
+`pipeline.yml` on it. That code then runs in CI with CI's secrets: the nebius service-account key,
+the GPU hosts' ssh key and `S3_*`. The `nebius-gpu` environment has no protection rule, so the
+ensemble runs device steps without a person. So CI's S3 secret stays a read-only key too.
+
+- **Developers on one VM** are separate Linux users. But every one of them is in the docker group,
+  which is root, and has sudo. So each can read the others' PAT and keys. Share a VM only among
+  people who trust each other.
+- **`peacock.env` holds only the storage keys** and may be passed between developers. The PAT and
+  the GPU key are personal: never forward them. `provision-vm.sh` refuses a `peacock.env` with any
+  other key, naming the key and never its value. Use the read key: nothing tells it from the
+  writer key.
+
+### A fresh VM
+
+Once per developer:
+
+1. Get `peacock.env` from whoever administers the storage: the four storage keys (below).
+2. Have someone create the VM, with a login user that has sudo and your ssh key.
+3. On the laptop, in a clone of the repository:
+   `scripts/env/provision-vm.sh <login>@<address> --env <the file you got> --gpu-key <your key>`.
+   The laptop needs bash 4.4 or later; on macOS, `brew install bash`.
+   It prints a GitHub token recipe: make the token on GitHub and paste it. It ends in Claude
+   Code's login: open the URL it prints and finish there.
+
+**What `provision-vm.sh` does.** Every argument is checked before anything is written. A rerun
+skips what is done.
+- On the laptop, in `~/.config/peacock/` (mode 700, each file 600): `peacock.env`, copied from
+  `--env`, which is needed only while it is missing, with every CR dropped and a final newline;
+  `github-pat`, the token, asked for when missing or with `--new-pat`. The token must be
+  `github_pat_…` and able to read the repository; gh checks it with the token in its environment,
+  never its argv.
+- The GPU key is taken, never made. `--gpu-key` names a private key the GPU hosts already accept,
+  with its `.pub` beside it; `~/.config/peacock/gpu_ed25519` by default. A missing key or `.pub`
+  is refused, naming `--gpu-key`. On dev the key is `~/.ssh/id_ed25519`.
+- As `<login>`, with sudo: groups `docker` and `peacock`; your Linux user (`--user`, your laptop
+  user name by default) in both, with `<login>`'s `authorized_keys` and passwordless sudo.
+- As your user, over ssh, on every run: `bootstrap-vm.sh`, `--ref <branch>` passed on, master by
+  default. It skips what is done, and refuses a `--ref` the VM's clone is not on.
+  Then the secrets, on ssh's stdin alone: `peacock.env`, and the GPU key pair as
+  `~/.config/peacock/gpu_ed25519` and `.pub`, the VM's `peacock.env` gaining `GPU_SSH_KEY_FILE`;
+  the PAT into `gh auth login --with-token --insecure-storage`, then `gh auth setup-git`. The PAT
+  is never in the VM's `peacock.env`. Then git's identity, your laptop's `user.name` and
+  `user.email`.
+- The VM goes into the laptop's `~/.config/peacock/vm` as `<name> <user>@<address>`; `--name` is
+  the address by default.
+- Last, `claude auth login` over `ssh -t`, unless Claude is logged in there already.
+- `provision-vm.sh --new-pat` replaces the PAT on the laptop and on every VM in `vm` it reaches.
+  It names each VM it cannot reach.
+
+**`bootstrap-vm.sh [--ref <branch>] [--cudf <v>]`** prepares the machine, as a user with sudo,
+never root. `provision-vm.sh` runs it; it is also one file you can fetch from the repository's raw
+view and run by hand. After one `apt-get update` it installs what is missing: git, curl and
+python3; Docker (`docker.io`); gh at `GH_VERSION` in `/usr/local/bin`, from the tarball the image
+takes; Claude Code at `CLAUDE_CODE_VERSION` with `superpowers@claude-plugins-official`. It makes
+the machine's data directory (below). It clones the repository into `~/peacockdb`, at `--ref` or
+master; a `--ref` other than the branch an existing clone is on is refused, naming both. It
+fetches the cuDF checkout the clone pins. It pulls the build image of cuDF `--cudf`, 25.02 by
+default, and refuses one whose `peacockdb.inputs` label differs from the clone's inputs, naming
+each (`scripts/lib/image-inputs.sh`). In that image it fills cargo's registry and generates sf1.
+A step already done is skipped.
+- The plugin cannot be installed at a commit: the marketplace pins it. The install is checked
+  afterwards: it must record `SUPERPOWERS_VERSION` at `SUPERPOWERS_SHA`. When the marketplace
+  moves on, the check fails, and the two pins must be bumped.
+- `~/.bashrc` gets `DISABLE_AUTOUPDATER=1`, so Claude Code stays at its pin.
+
+**By hand, without `provision-vm.sh`:** run `bootstrap-vm.sh`, log out and in again (for the
+docker group), then: `claude`, then `/login`; gh with a fine-grained PAT, below;
+`git config --global user.name` and `user.email`; the storage keys in
+`~/.config/peacock/peacock.env`.
+
+**gh's token** is a fine-grained PAT, never the OAuth token plain `gh auth login` makes, which
+reaches every repository the user can. On GitHub: resource owner `asymptote-tech`, only the
+`peacockdb` repository, an expiry; permissions Contents read-write, Pull requests read-write,
+Workflows read-write, Actions read-write, Commit statuses read, Metadata read. Then
+`gh auth login --with-token --insecure-storage`, paste the token, Enter, Ctrl-D: it is read from
+stdin, so it is in no argv and no shell history. `--insecure-storage` writes it to
+`~/.config/gh/hosts.yml` rather than a desktop keyring. Then `gh auth setup-git`.
+
+### The env file
+
+The storage keys, in a docker env file, `NAME=value` a line:
+
+    AWS_ACCESS_KEY_ID=…
+    AWS_SECRET_ACCESS_KEY=…
+    AWS_ENDPOINT_URL=https://storage.eu-north1.nebius.cloud:443
+    AWS_REGION=eu-north1
+
+That is the whole of the laptop's `peacock.env`; blank and `#` lines are skipped, as docker
+skips them, and any other key is refused by name. On a VM, `~/.config/peacock/peacock.env` is the
+same with one more line, which `provision-vm.sh` writes:
+
+    GPU_SSH_KEY_FILE=/home/<user>/.config/peacock/gpu_ed25519   # the key to GPU hosts
+
+### What a VM holds
+
+- **The data directory** is the machine's, shared by its developers: `/var/lib/peacock`, or
+  `$PEACOCK_DATA_DIR`. `bootstrap-vm.sh` makes it with sudo: group `peacock`, setgid, mode 2775,
+  owned by the user who ran it. `provision-vm.sh` puts every developer in `peacock`. What
+  `bootstrap-vm.sh` writes there is written under umask 002, the generator in the build image
+  too. So one developer reuses another's sf1 and cuDF checkouts, takes their locks, and clears a
+  crashed `.partial` they left. cargo's registry stays per user.
+- **third_party/cudf.** The FFI build's configure reads cuDF's cmake files. The machine keeps one
+  checkout a commit, `<data dir>/cudf/<commit>/`, with the paths the build image's prefetch takes
+  (`/cmake/ /cpp/cmake/ /VERSION /RAPIDS_BRANCH`). `bootstrap-vm.sh` fetches the one the clone's
+  gitlink names, under a lock, when the machine has none. The clone's own `third_party/cudf` is
+  never read. An old checkout is removed by hand.
+- **The registry** is `~/.cache/peacock/cargo-registry`. `bootstrap-vm.sh` runs
+  `cargo fetch --locked` for the clone in the build image, the clone mounted read-only, under a
+  lock, so two runs never write it at once.
+- **The data.** `<data dir>/<hash>/` holds `tpch.sf1` and `tpcds.sf1`. The hash is over the
+  clone's `generate_testdata.sh`, the `DUCKDB_VERSION` pin and the generator's arguments
+  (`scripts/lib/data-inputs.sh`). With none for the hash, `bootstrap-vm.sh` generates one in the
+  build image, with `--network none`, under a lock. Two runs at once generate it once. A set
+  appears only complete. An old set is removed by hand.
+
 ## Benchmarks
 
 ### Corpus benchmarks — `peacock_gpu_benchmarks` (scripted)
@@ -1880,20 +2205,82 @@ transcript on 2026-10-14. Reach the cloud through `nebius.sh`. Learn the CLI fro
 Its own case list, `peacockdb-core/tests/common/corpus_benchmark_cases.inc`, and deliberately not
 the correctness gate's: the two disagree about sf on purpose. Correctness runs at sf1, where a wrong
 answer is legible in six million rows; at sf1 a query is mostly the host prologue, so the rows worth
-timing are at sf40 and the rows worth checking are not. A (query, mode) timed here must still be
-enabled on a device in `corpus_cases.inc`, and a rust-only test in `test_corpus_goldens` reads both
-files and says so. The list is 26 cases, every device-enabled one when it was measured, before the
-join session turned on the rest: tpch q1, q6 and `shuffle_additive_avg` at all five modes; q17, q19,
-`aggregate_groupby`, `filter_project`, `shuffle_additive`, `shuffle_stddev` and `nested_loop_join`
-at `tp1_single`; tpcds q37, q82, q84 and q85 at `tp1_single`. `nested_loop_join` reads region and
-nation, which do not grow with sf, so its rows describe the host prologue. At the two rowgroup modes
-a scan is one call per row group, a thousand-odd per pass, so those six cases are most of the record
-— 254 thousand rows, 26 MB for tpch, too large for git; tpcds's is 1,060 rows. The records live in
-the `calibration` bucket under their sha256, and `testdata/calibration/records.sha256` names the
-ones that go with the committed tree. A full run on an empty H200 takes an hour (3,602 s), most of
-it q1 and `shuffle_additive_avg` at the rowgroup modes, ~90 s and ~44 s a pass, eleven passes each.
+timing are at sf40 and the rows worth checking are not. The list is written from the registry:
+every tpch and tpcds row's enabled device cells (`gpu_*`), timed at sf40. Today that is 650 cases
+over 130 queries, the two rowgroup modes among them. Nobody edits it by hand. A rust-only test
+holds it to the registry, mode by mode, and rewrites it from the registry under `UPDATE_CANONICAL`:
 
-It asserts nothing about an answer, so it can never gate a merge. Its eight harness assertions
+```
+UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens \
+    -- the_benchmark_cases_follow_the_registry
+```
+
+A second test there holds each timed (query, mode) to `corpus_cases.inc`'s device column.
+
+The committed `h200/` tree holds the 26 cases the list named when it was measured, before the list
+followed the registry: tpch q1, q6 and `shuffle_additive_avg` at all five modes; q17, q19,
+`aggregate_groupby`, `filter_project`, `shuffle_additive`, `shuffle_stddev` and `nested_loop_join`
+at `tp1_single`; tpcds q37, q82, q84 and q85 at `tp1_single`. Those are its cases as the
+hand-written list stood at a5c852e4 on master, fixed since: `h200/cases.csv`,
+and `h200/` is held to it. It goes with `PREDATES_PROVENANCE` once the H200 is run again (#226).
+
+Every per-device case list is `testdata/benchmark-results/<device>/cases.csv`. A device tree that
+holds one is held to it; a tree without is held to the whole main list. Its first line is
+`dataset,sf,query,modes,status,note`, and a row splits at its first five commas:
+- `dataset`, `sf`: as the main list writes them, `tpch` and `40`;
+- `query`: the main list's ident, `_` kept (`aggregate_groupby`);
+- `modes`: mode idents `|`-joined, no spaces (`tp1_single|tp4_sized`); empty when skipped;
+- `status`: `ok`, `skipped` or `wrong`;
+- `note`: the rest of the line, commas allowed. A skipped row's reason, a wrong row's `#NN`
+  ticket, empty for `ok`.
+
+A case appears once. `parse_device_cases` and `render_device_cases` in `test_support` are the one
+reader and writer; `every_device_list_parses` reads each committed list. The main list,
+`corpus_benchmark_cases.inc`, is in macro form.
+`nested_loop_join` reads region and nation, which do not grow with sf, so its rows describe the
+host prologue. At the two rowgroup modes a scan is one
+call per row group, a thousand-odd per pass, so those six cases are most of the H200's record — 254
+thousand rows, 26 MB for tpch, too large for git; tpcds's is 1,060 rows. The records live in the
+`calibration` bucket under their sha256, and `testdata/calibration/records.sha256` names the ones
+that go with the committed tree. The 26 on an empty H200 took an hour (3,602 s), most of it q1 and
+`shuffle_additive_avg` at the rowgroup modes, ~90 s and ~44 s a pass, eleven passes each.
+
+**A failed case, and a rerun.** A case that panics on the device writes its section as the record
+of the failure, and its test fails; the next case runs. The record is one status line, the panic
+message on one line, then the run's five provenance lines:
+
+```
+== q11
+status=failed reason=<the panic message>
+device=NVIDIA H100 80GB HBM3
+driver=580.95.05
+cuda=12.9
+cudf=25.02.02
+host=gpu-host
+```
+
+A measured case's rows are appended before its section is written, since the section is what a
+resumed run keeps: a crash between the two leaves no section, and the case is measured again. A
+case that fails appends no rows. If the record refuses a measured case's rows, the case is
+recorded as failed with the record's reason, and the record holds none of its rows: a write
+that stops partway is cut back to the length before it. A case that kills the process, a
+segfault or an abort, writes nothing.
+
+A run measures every case it is given, whatever its file holds. `PEACOCK_BENCH_RESUME=1` makes it
+resume instead: a section whose trailer ends with this run's five is kept, its case is not run,
+and the case prints a `kept` line. A failed case, a case never reached, and one measured on
+another device, driver, CUDA, cuDF or host are run again. Use it only to finish a run that was
+cut short — preempted, or stopped by the idle watcher — with the same binary: the five do not
+name the build, so a resumed run after a rebuild keeps the old binary's numbers. `0` or unset
+measures everything; any other value is refused. A captured run writes no section and keeps
+none. A resumed run's record holds only the cases it ran, and `split_record.py` refuses a record
+short of the list, so a resumed run's record is not published today.
+
+The run's own refusals fail before anything is recorded: a capture or resume variable naming no
+setting, no device to name, no rmm pool, a debug build, a dataset that is not there, and a record
+at `PEACOCK_RECORD_PATH` that another run wrote.
+
+It asserts nothing about an answer, so it can never gate a merge. Its nine harness assertions
 run on every `gpu-tests` job under `--skip bench_`; the timed cases run only here.
 
 The run is measured under event timing — a CUDA event pair around every call, no sync inside
@@ -1911,13 +2298,15 @@ Six steps, three scripts:
 # 2. ship and glibc-patch  3. time the corpus  4. bring the tree and the record home,
 #    publish the record and pin it in records.sha256 — commit that beside the tree
 ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks --pull-benchmarks
-# or, for a run that outlives your ssh session (the suite takes an hour):
+# or, for a run that outlives your ssh session (the suite takes hours):
 ./scripts/build-test-shadgpu.sh --push-binaries --patch --run-benchmarks-detached
 ./scripts/build-test-shadgpu.sh --benchmark-status     # going? finished? log tail
 ./scripts/build-test-shadgpu.sh --pull-benchmarks      # once it reports finished
 # 5. the derived records: both Nsight passes, calls.tsv and hbm.tsv, the counters a case at a
 #    time and joined onto the pinned records (fetch_record.sh <dataset>.sf<sf> for each
-#    first). No flag runs both passes; --trace or --metrics picks one.
+#    first). No flag runs both passes; --trace or --metrics picks one. Over the H200's
+#    records, from a5c852e4 on master, whose case lines are
+#    h200/cases.csv's rows.
 ./scripts/create_nsys_profile.sh
 # 6. every panel and index.html, from one call: a --record per dataset
 /usr/bin/python3 scripts/calibration/plot.py \
@@ -1939,8 +2328,8 @@ Check `nvidia-smi` for a neighbour before step 3: a process holding the card inf
 number here without failing anything.
 
 **The same six steps on a 26.02 host** (verda-gpu) go through `build-test.sh`, which builds
-against the local `rapids` env and needs no glibc patch. Its pull publishes nothing: the
-bucket's key names no host, so the records it holds are shad-gpu's. The three benchmark
+against the local `rapids` env and needs no glibc patch. Its pull publishes nothing; only
+shad-gpu's does. The three benchmark
 flags need `--gpu`; `--all` does not imply them, and `--run` with `--run-benchmarks` is
 refused — one exit code cannot mean both "gate green" and "measurement completed".
 
@@ -1953,56 +2342,59 @@ refused — one exit code cannot mean both "gate green" and "measurement complet
     --remote-cudf-root /home/dmitry/miniforge3/envs/rapids-26.02        # 5
 ```
 
-Two things the shad-gpu path handles that this one leaves to the host: `testdata/tpch.sf40`
-and `testdata/tpcds.sf40` must already be symlinks to the datasets (the script checks that
-tpch's resolves and creates nothing; a missing tpcds one fails the four tpcds cases, which run
-first), and the GPU's performance counters must be open to non-root for step 5's `--metrics`
-pass (`options nvidia NVreg_RestrictProfilingToAdminUsers=0` in `/etc/modprobe.d/`, then
-a module reload — verda-gpu has it; nsys says `ERR_NVGPUCTRPERM` when a host does not).
-The profile script's HBM defaults (`gh100`, 4.8e12 B/s) are an H200's; another card overrides
-`PCK_BENCH_HBM_SET` and `PCK_BENCH_HBM_PEAK_BW`. `--push-binaries` mirrors `cpp/install/` with
-`--delete`, so a push from a checkout that never ran `--build-benchmarks` removes the benchmark
-binary from the host, and a push from one that never ran `--build` removes the gate's. Both
-hosts write the same files and nothing in them says which host it was
-([#226](tickets/benchmarks.md#t226)).
+Two things the shad-gpu path handles that this one leaves to the host: `testdata/tpch.sf40` and
+`testdata/tpcds.sf40` must already be symlinks to the datasets (the script checks that tpch's
+resolves and creates nothing; a missing tpcds one is refused by the first tpcds case, before it
+records anything, and so by every tpcds case after it), and the GPU's performance counters must be
+open to non-root for step 5's `--metrics` pass (`options nvidia
+NVreg_RestrictProfilingToAdminUsers=0` in `/etc/modprobe.d/`, then a module reload — verda-gpu has
+it; nsys says `ERR_NVGPUCTRPERM` when a host does not). The profile script's HBM defaults (`gh100`,
+4.8e12 B/s) are an H200's; another card overrides `PCK_BENCH_HBM_SET` and `PCK_BENCH_HBM_PEAK_BW`.
+`--push-binaries` mirrors `cpp/install/` with `--delete`, so a push from a checkout that never ran
+`--build-benchmarks` removes the benchmark binary from the host, and a push from one that never ran
+`--build` removes the gate's. Two card models write two trees, and each file names its device,
+driver, CUDA, cuDF and host. Two cuDF versions on one card model write the same files, and only the
+trailers' `cudf=` tells them apart.
 
-**The tree**: one file per (dataset, mode) at
-`testdata/benchmark-results/<dataset>.sf<sf>/<mode>.benchmark.txt`, a `== <query>` section
-each. A section is the plan tree with one line under every node:
+**The tree**: one file per (device, dataset, mode) at
+`testdata/benchmark-results/<device>/<dataset>.sf<sf>/<mode>.benchmark.txt`, a `== <query>`
+section each. The committed H200 run is under `h200/`. A section is the plan tree with one
+line under every node:
 
     time_us=[[22,37,40],[55,1,30]] total_us=185
 
-Lanes outermost, one entry per call the lane made, each entry the call's device microseconds
-summed over its output partitions; `1` where the clock rounded a region to zero, since every
-call opens one; `0` where the call crossed no ABI — the backend answered from what it held,
-as an accumulator taking a batch or a join's `set_build` does. A lane the node was never
-driven on is `[]`. Then a `--- run ---` trailer:
-`run_us` (the chosen execution end to end, after planning), `device_us` (Σ of the tree's
-`total_us`; the gap to `run_us` is the host), `runs=[…]` (every measured execution, in order),
-`build=release`, `allocator=` (what `install_rmm_pool` reported: with rmm's default every cuDF
-intermediate is a `cudaMalloc`/`cudaFree` round trip billed to the node that allocated it,
-which moves the profile and not just the scale). The reported execution is the second-smallest
-by `run_us` of ten, after one discarded warm-up: the fastest run is the one most likely to
-have caught a scheduling accident, and a whole run is reported rather than a per-node minimum,
-which would be a tree belonging to no execution. Both counts are constants in
-`src/test_support/` (`MEASURED_RUNS` in `mod.rs`, the warm-up in `corpus_benchmark.rs`), so
-every file in the tree was taken at the same counts.
-`--pull-benchmarks` is additive and no push `--delete`s the directory.
+Lanes outermost, one entry per call the lane made, each entry the call's device microseconds summed
+over its output partitions; `1` where the clock rounded a region to zero, since every call opens
+one; `0` where the call crossed no ABI — the backend answered from what it held, as an accumulator
+taking a batch or a join's `set_build` does. A lane the node was never driven on is `[]`. Then a
+`--- run ---` trailer: `run_us` (the chosen execution end to end, after planning), `device_us` (Σ
+of the tree's `total_us`; the gap to `run_us` is the host), `runs=[…]` (every measured execution,
+in order), `build=release`, `allocator=` (what `install_rmm_pool` reported: with rmm's default
+every cuDF intermediate is a `cudaMalloc`/`cudaFree` round trip billed to the node that allocated
+it, which moves the profile and not just the scale), then the five provenance keys, `device=` to
+`host=`. A failed case's section is its record instead (above). The reported execution is the
+second-smallest by `run_us` of ten, after one discarded warm-up: the fastest run is the one most
+likely to have caught a scheduling accident, and a whole run is reported rather than a per-node
+minimum, which would be a tree belonging to no execution. Both counts are constants in
+`src/test_support/` (`MEASURED_RUNS` in `mod.rs`, the warm-up in `corpus_benchmark.rs`), so every
+file in the tree was taken at the same counts. `--pull-benchmarks` is additive and no push
+`--delete`s the directory.
 
 **The record**, `testdata/calibration/records.tsv` where a run's pull puts it, and
-`testdata/calibration/<dataset>.sf<sf>/records.tsv` where `fetch_record.sh` puts the published
-one (*Datasets* says how); neither is in git. One row per cuDF call — one (plan node,
-recipe step, call index), not one node and not one output partition — for every measured
+`testdata/calibration/<device>/<dataset>.sf<sf>/records.tsv` where `fetch_record.sh` puts the
+published one (the H200's one level up; *Datasets* says how); neither is in git. One row per
+cuDF call — one (plan node, recipe step, call index), not one node and not one output
+partition — for every measured
 execution, so the same call recurs once per `run_index` and the spread is data. Seventeen
 columns: `dataset sf query mode node_seq node_type lane recipe_seq recipe_kind call_index
 run_index in_rows in_bytes out_rows out_bytes host_us device_us`. `node_seq` is post-order,
 `lane` the driving lane, `call_index` what C++ counted to for that seq, `recipe_kind` the fb
 kind or the ABI symbol for a slice and an export. No cell is empty: `out_*` come from the
 call's own `NodeStats` priced by the schema the executor holds, and a middle call's `in_*` is
-the call before it. The `#` heading carries what is constant across a run — `timing_mode=events`,
-`build=release`, `allocator=`, `capture=` — and an append under a different heading is
-refused. The harness checks each execution's rows against the plan before it writes them;
-the rest of the format is in the heading itself and in `src/test_support/record.rs`.
+the call before it. The `#` heading carries what is constant across a run —
+`timing_mode=events`, `build=release`, `allocator=`, `capture=`, then `device=` to `host=` —
+and an append under a different heading is refused. The harness checks each execution's rows
+against the plan before it writes them; the rest of the format is in the heading itself and in `src/test_support/record.rs`.
 
 Two variables. `PEACOCK_RECORD_PATH` names the record; unset, none is written, so the tree
 and the record never depend on each other. `PEACOCK_BENCHMARK_CAPTURE=trace|metrics` turns

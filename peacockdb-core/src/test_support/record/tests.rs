@@ -2,13 +2,14 @@
 //! prints: the two are what a reader joins on `node_seq`, and nothing else compares them.
 
 use std::collections::BTreeSet;
+use std::io::Write;
 
 use crate::executor::nodes_as_recorded;
 use crate::planner;
 use crate::test_support::{data_dir_for, mode_named, queries_dir_for};
 use crate::wire::{Payloads, attach_recipes, join_scratch_bytes, render_plan_recipes};
 
-use super::declared_steps;
+use super::{append_whole, declared_steps};
 
 /// A row's `node_seq` names the steps its `--- recipes ---` line prints.
 ///
@@ -127,6 +128,7 @@ async fn each_cell_sits_under_the_column_named_for_it() {
         device_us: 66,
     };
     let measured = join_regions(&run.report, &[region]).expect("the one call has its region");
+    let provenance = a_provenance();
     let meta = RunMeta {
         dataset: "tpch",
         sf: "1",
@@ -134,6 +136,7 @@ async fn each_cell_sits_under_the_column_named_for_it() {
         mode: mode.name,
         allocator: "none",
         capture: Capture::None,
+        provenance: &provenance,
     };
 
     let rows = super::record_rows(&nodes, &run.report, &measured, &meta, 3);
@@ -159,4 +162,73 @@ async fn each_cell_sits_under_the_column_named_for_it() {
     assert_eq!(cell("out_bytes"), "44");
     assert_eq!(cell("host_us"), "77");
     assert_eq!(cell("device_us"), "66");
+}
+
+fn a_provenance() -> crate::test_support::Provenance {
+    crate::test_support::Provenance {
+        device: "NVIDIA H100 80GB HBM3".to_string(),
+        driver: "580.95.05".to_string(),
+        cuda: "12.9".to_string(),
+        cudf: "26.02.01".to_string(),
+        host: "gpu-host-1".to_string(),
+    }
+}
+
+/// The heading states the five after the conditions it already had, in the trailer's order —
+/// so an append from another card, driver, CUDA, cuDF or host is refused like one under
+/// another allocator.
+#[test]
+fn record_heading_names_its_provenance() {
+    use crate::test_support::{Capture, RunMeta};
+
+    let provenance = a_provenance();
+    let meta = RunMeta {
+        dataset: "tpch",
+        sf: "40",
+        query: "q6",
+        mode: "tp1-single",
+        allocator: "rmm-pool",
+        capture: Capture::None,
+        provenance: &provenance,
+    };
+    let run: Vec<String> = super::record_header(&meta)
+        .lines()
+        .filter_map(|line| line.strip_prefix("# run: "))
+        .map(str::to_string)
+        .collect();
+    assert_eq!(
+        run,
+        [
+            "timing_mode=events",
+            "build=release",
+            "allocator=rmm-pool",
+            "capture=none",
+            "device=NVIDIA H100 80GB HBM3",
+            "driver=580.95.05",
+            "cuda=12.9",
+            "cudf=26.02.01",
+            "host=gpu-host-1",
+        ]
+    );
+}
+
+/// A write that stops partway leaves the file as it was: the next append would otherwise
+/// continue the cut-off row, and two rows would read as one.
+#[test]
+fn an_append_that_stops_partway_leaves_the_file_as_it_was() {
+    let path = std::env::temp_dir().join(format!("peacock-append-{}", std::process::id()));
+    std::fs::write(&path, "# heading\nrow 1\n").unwrap();
+    let file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    let refused = append_whole(&file, b"row 2\nrow 3\n", |mut file, bytes| {
+        file.write_all(&bytes[..4])?;
+        Err(std::io::Error::other("the disk filled"))
+    });
+    let text = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let refused = refused.expect_err("a write that stopped partway was reported as whole");
+    assert!(refused.contains("the disk filled"), "{refused}");
+    assert_eq!(text, "# heading\nrow 1\n");
 }

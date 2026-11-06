@@ -1,10 +1,11 @@
 #!/bin/bash
 #
-# Fetch the calibration record this checkout pins for one dataset, from the `calibration`
-# bucket's key `<dataset>.sf<sf>/<sha256>.tsv` (testdata/calibration/records.sha256 names the
-# sha256), into testdata/calibration/<dataset>.sf<sf>/records.tsv, checked against that sha256.
+# Fetch the record this checkout pins for one device and dataset, the `calibration` bucket's
+# `<device>/<dataset>.sf<sf>/<sha256>.tsv` (records.sha256 names the sha256), into
+# testdata/calibration/<device>/<dataset>.sf<sf>/records.tsv, checked. <device> is the slug
+# benchmark-results/ uses; the H200's pins predate devices and are named without one.
 #   AWS=/home/info/bin/aws scripts/calibration/fetch_record.sh --ssh shad-gpu tpch.sf40
-#   scripts/calibration/fetch_record.sh tpch.sf40     # an aws CLI and credentials on this host
+#   scripts/calibration/fetch_record.sh h100-80gb-hbm3/tpch.sf40   # an aws CLI and credentials here
 # AWS is the CLI on whichever host makes the call, `aws` by default: a CI runner's, with
 # AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY. On shad-gpu it is /home/info/bin/aws, credentials in
 # ~/.aws, and not on a non-interactive ssh's PATH — hence the first form, from a dev box.
@@ -33,8 +34,9 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-[ -n "$DATASET" ] || { echo "name the dataset, e.g. tpch.sf40" >&2; usage 1; }
-[[ "$DATASET" =~ ^[a-z]+\.sf[0-9]+$ ]] || die "$DATASET is not <dataset>.sf<sf>, e.g. tpch.sf40"
+[ -n "$DATASET" ] || { echo "name the dataset, e.g. h100-80gb-hbm3/tpch.sf40" >&2; usage 1; }
+[[ "$DATASET" =~ ^([a-z0-9]+(-[a-z0-9]+)*/)?[a-z]+\.sf[0-9]+$ ]] \
+  || die "$DATASET is not [<device>/]<dataset>.sf<sf>, e.g. h100-80gb-hbm3/tpch.sf40"
 want=$(pinned_sha "$DATASET")
 [ -n "$want" ] || die "$CALIBRATION_PIN pins no record for $DATASET, so this checkout has none
      to fetch. build-test-shadgpu.sh --pull-benchmarks publishes and pins one."

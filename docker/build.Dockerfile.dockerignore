@@ -1,0 +1,12 @@
+# The build context is the repository; the image needs the conda specs, the venv lock, the cmake
+# wrapper and the sources the prefetch stage configures. Build outputs under cpp/ stay out.
+*
+!docker/conda/
+!docker/cmake-wrapper.sh
+!docker/venv.lock
+!cpp/
+cpp/build*/
+cpp/install/
+cpp/compile_commands.json
+!flatbuffers/
+!scripts/build.sh

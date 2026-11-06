@@ -32,18 +32,33 @@ const CUDF_VERSION_CONFIG: &str = include_str!(concat!(env!("OUT_DIR"), "/cudf-v
 /// and every path, gitignore line and spec sentence in the tree says `25.02`. `None` where the
 /// text declares neither field, which is what an absent cuDF header reads as.
 fn cudf_version_of_config(config: &str) -> Option<String> {
-    let field = |name: &str| -> Option<u32> {
-        let define = format!("#define CUDF_VERSION_{name} ");
-        let mut declared = config
-            .lines()
-            .filter_map(|line| line.trim().strip_prefix(&define))
-            .map(|value| value.trim().parse::<u32>().ok());
-        // Every match, and they have to agree: a field declared twice is a header this cannot
-        // read, which the write path reports rather than taking whichever line came first.
-        let first = declared.next()??;
-        declared.all(|value| value == Some(first)).then_some(first)
-    };
+    let field = |name| config_field(config, name);
     Some(format!("{}.{:02}", field("MAJOR")?, field("MINOR")?))
+}
+
+/// The release `version_config.hpp` declares, `<major>.<minor>.<patch>` with both padded to
+/// two digits as the packages name it: `25.02.02`. `None` where any of the three is missing.
+fn cudf_release_of_config(config: &str) -> Option<String> {
+    let field = |name| config_field(config, name);
+    Some(format!(
+        "{}.{:02}.{:02}",
+        field("MAJOR")?,
+        field("MINOR")?,
+        field("PATCH")?
+    ))
+}
+
+/// One `#define CUDF_VERSION_<name> <n>` of the header.
+fn config_field(config: &str, name: &str) -> Option<u32> {
+    let define = format!("#define CUDF_VERSION_{name} ");
+    let mut declared = config
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(&define))
+        .map(|value| value.trim().parse::<u32>().ok());
+    // Every match, and they have to agree: a field declared twice is a header this cannot
+    // read, which the write path reports rather than taking whichever line came first.
+    let first = declared.next()??;
+    declared.all(|value| value == Some(first)).then_some(first)
 }
 
 /// The cuDF this binary is linked against, for the provenance line a device recording carries.
@@ -60,6 +75,19 @@ pub(crate) fn cudf_version() -> String {
             "cannot tell which cuDF this binary is linked against: no cudf/version_config.hpp \
              was copied out of CUDF_ROOT at build time, so a recorded device answer would \
              carry no provenance. Build with CUDF_ROOT set (scripts/cargo-cudf.sh)."
+        )
+    })
+}
+
+/// The cuDF release this binary was built against, for a benchmark's `cudf=`: the same header
+/// as [`cudf_version`], with the patch level the stamp leaves out.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+pub(crate) fn cudf_release() -> String {
+    cudf_release_of_config(CUDF_VERSION_CONFIG).unwrap_or_else(|| {
+        panic!(
+            "cannot tell which cuDF release this binary is built against: no complete \
+             cudf/version_config.hpp was copied out of CUDF_ROOT at build time. Build with \
+             CUDF_ROOT set (scripts/cargo-cudf.sh)."
         )
     })
 }
