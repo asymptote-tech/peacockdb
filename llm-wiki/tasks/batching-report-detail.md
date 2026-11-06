@@ -155,6 +155,12 @@ Branch `ENS-batching-report`, forked from `ENS-query-fuser` at `413366c4` on 202
 - **I1.** The new `--check` step asserts on `llm-wiki/reports/query-batching.md`, which the pipeline still treats as docs-only (`pipeline.yml:3-6`, both `paths-ignore` lists, the `changes` job's grep). A page-only change never runs the check, and the next unrelated code PR goes red. **Decided:** take the page off the docs-only list in every place that keeps it, as the workflow header's own rule says; check that the trigger form really honours the exception; update the header and build-test.md.
 - **N1.** A `<batch>.loads.tsv` left from an earlier run now wins silently over a `failed.tsv` entry. Put the reason in the split table's footnote when both exist; test.
 
+## Completeness pass (2026-11-06)
+
+- Reviewer (what is wrong): 0 blocking, 1 important; Done-when 1-5 and 4a met, all cells recomputed. **Important:** the generator refuses when the H100 `cases.csv` prefix no longer matches a fused section's `queries=` (`batching_report.py:250-254, 346-348`). With the new CI `--check` step, a status change to any counted sf40 row (an engine fix that lets tpcds q17 run) turns the 25.02 leg red on every PR and on master until the fused batches and profiles are rerun on the H100. **Decided:** read each batch from its fused section's own `queries=`, checked against the unfused tree; a section whose queries are no longer today's prefix is named under its table as stale (rerun on the H100), not refused. Fix the step's comment and build-test.md to match.
+- Analyst (what is missing): 1 important. Nothing guards the new `--check` step in CI, unlike pbench's (`ci_coverage.rs:195-212, 749-768`). **Decided:** add the matching test and matcher; update build-test.md's "CI wiring guard" row and counts. Handoff to tp4-sized is clear (generator inserts tp4_sized columns when the file exists). The hand-written Reading is outside `--check`; tp4-sized must re-read it.
+- Falsified sentences in build-test.md, fixed by the coordinator: "Fused batches" (only the region between the markers is generated), `duckdb.tsv`'s reader (twice), `parse_benchmark_section` as the one reader (twice). architecture.md: none.
+
 ## Checkpoints
 
 | step | commit | note |
