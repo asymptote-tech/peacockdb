@@ -126,6 +126,13 @@ Branch `ENS-batching-report`, forked from `ENS-query-fuser` at `413366c4` on 202
 - **I5.** `query-batching.md:169` inverts the ratio ("fused is 1.60x-2.48x DuckDB's").
 - Nits N1-N7 for the developer: N1 no plateau within 22 tpch queries; N2 split parts exceed load by 1-4 % (overlap, separate medians); N3 name non-`yes` DuckDB `warm` rows; N4 the pipelining model has no memory term; N5 prefill `max` keeps the cold first of four ties; N6 tpcds "all" is the 82 tp1_single lines; N7 test name says host, asserts threads.
 
+## Review round 2 (2026-11-06)
+
+0 blocking, 1 important, 1 nit. Round 1 confirmed fixed; floors-out ratios and `loads (re-reads)` recomputed and right.
+
+- **I1.** The new `--check` step asserts on `llm-wiki/reports/query-batching.md`, which the pipeline still treats as docs-only (`pipeline.yml:3-6`, both `paths-ignore` lists, the `changes` job's grep). A page-only change never runs the check, and the next unrelated code PR goes red. **Decided:** take the page off the docs-only list in every place that keeps it, as the workflow header's own rule says; check that the trigger form really honours the exception; update the header and build-test.md.
+- **N1.** A `<batch>.loads.tsv` left from an earlier run now wins silently over a `failed.tsv` entry. Put the reason in the split table's footnote when both exist; test.
+
 ## Checkpoints
 
 | step | commit | note |
