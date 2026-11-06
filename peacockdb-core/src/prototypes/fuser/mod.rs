@@ -9,12 +9,14 @@
 //! `llm-wiki/tasks/query-fuser-detail.md` records the decisions.
 
 mod fuse;
+mod lists;
 #[cfg(test)]
 mod tests;
 
 use std::num::NonZeroUsize;
 
 use crate::plan::{Batching, GpuNode, PlanError};
+use crate::test_support::DeviceCase;
 
 /// One query of a batch: its name, and its own planned tree.
 pub(crate) struct Query<'a> {
@@ -141,4 +143,30 @@ pub(crate) fn resolve_cap_holds(
     choose: &mut Chooser<'_>,
 ) -> Result<Fused, PlanError> {
     fuse::resolve_cap_holds(fused, cap, choose)
+}
+
+/// The batch sizes, each a prefix of the ordered list; `None` is the whole list.
+pub(crate) const BATCH_SIZES: [(&str, Option<usize>); 4] = [
+    ("first3", Some(3)),
+    ("first10", Some(10)),
+    ("first20", Some(20)),
+    ("all", None),
+];
+
+/// `dataset`'s queries a batch may hold, in file order: its `ok` and `wrong` rows at
+/// tp1_single, and for tpch only q1-q22. Panics naming the dataset when none is left.
+pub(crate) fn batch_set(dataset: &str, cases: &[DeviceCase]) -> Vec<String> {
+    lists::batch_set(dataset, cases)
+}
+
+/// [`batch_set`] over the H100 tree's `cases.csv`, read now. Panics naming the file when it is
+/// missing. The one entry point: the lib's tests and the fused benchmark both call it.
+pub(crate) fn ordered_queries(dataset: &str) -> Vec<String> {
+    lists::ordered_queries(dataset)
+}
+
+/// Each of [`BATCH_SIZES`] over `list`: its prefix, or, for a size the list does not exceed
+/// (`first3` aside, which always runs), a marker saying it is the same set as `all`.
+pub(crate) fn batches(list: &[String]) -> Vec<(&'static str, Result<Vec<String>, String>)> {
+    lists::batches(list)
 }

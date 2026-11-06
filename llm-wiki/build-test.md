@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 8032 test cases — Rust 6199, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 8042 test cases — Rust 6209, C++ 286, Python 1547.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 250 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -24,7 +24,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3638 cases: `--lib` 1123, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3648 cases: `--lib` 1133, `test_cpu_corpus` 2451, `test_corpus_goldens` 61, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -514,12 +514,14 @@ question from whether a rule is right
 what every node declares about its columns: the arrow types, and the annotations a merging or
 finalizing node reads
 
-| Fused plans at sf1 | [tpch_q3_q5_q10_fused_answer_as_alone](../peacockdb-core/src/prototypes/fuser/tests/end_to_end.rs) | 1 |
+| Fused plans at sf1 | [tpch_q3_q5_q10_fused_answer_as_alone](../peacockdb-core/src/prototypes/fuser/tests/end_to_end.rs), [fused_batches_answer_the_corpus_goldens_on_the_cpu](../peacockdb-core/src/prototypes/fuser/tests/end_to_end.rs), [a_capped_first10_answers_the_corpus_goldens_on_the_cpu](../peacockdb-core/src/prototypes/fuser/tests/end_to_end.rs) | 3 |
 |---|---|--:|
 
-query-fuser's prototype over real plans: tpch q3, q5 and q10 planned at tp1_single, fused, and
-run on the CPU backend once with every held reader re-read and once with each buffered on its
-lowest edge; lineitem, orders and customer are shared, and each root answers as its query alone
+query-fuser's prototype over real plans, about 16 s for the three: tpch q3, q5 and q10 planned
+at tp1_single, fused, and run on the CPU backend once with every held reader re-read and once
+with each buffered on its lowest edge, each root answering as its query alone; and the `first10`
+batch of the H100 case list, tpch and tpcds at sf1, each answer meeting its `.result.txt`
+section in the CPU tier's row order, uncapped and again under a cap of one root at a time
 
 *module unit*
 
@@ -895,6 +897,13 @@ names, and the lanes deal the survivors as the mapping says
 
 an interval prints the parts that are not zero, a decimal as a value and a null one as `NULL`,
 every form readably
+
+| Fused batch lists | [prototypes::fuser::lists::tests](../peacockdb-core/src/prototypes/fuser/lists/tests.rs) | 8 |
+|---|---|--:|
+
+which queries a fused batch holds: a case list's `ok` and `wrong` rows at tp1_single in file
+order, tpch's q1-q22 only; a missing list or an empty set panics naming it; each batch size a
+prefix, `first3` always, a larger one marked as the same set as `all` once the list is no longer
 
 | The fuser | [prototypes::fuser::fuse::tests](../peacockdb-core/src/prototypes/fuser/fuse/tests.rs) | 14 |
 |---|---|--:|

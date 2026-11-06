@@ -1176,6 +1176,26 @@ pub fn authoritative_mode(dataset: &str, sf: &str, query: &str) -> Option<&'stat
     corpus::authoritative_mode(dataset, sf, query)
 }
 
+/// The row order a corpus line's result sections are written in, from its DuckDB and device
+/// oracles as the registry copies them. Kept for `prototypes/fuser/tests/end_to_end.rs`, which
+/// holds a fused batch's answers to the result goldens as the CPU corpus tier does.
+#[cfg(test)]
+pub(crate) fn line_row_order(duckdb_oracle: &str, gpu_oracle: &str) -> RowOrder {
+    corpus::line_row_order(duckdb_oracle, gpu_oracle)
+}
+
+/// An answer against a committed result section, under the mode that wrote it, in `order`.
+/// Kept for `prototypes/fuser/tests/end_to_end.rs`, for the same comparison.
+#[cfg(test)]
+pub(crate) fn result_matches(
+    section: &str,
+    mode: &Mode,
+    order: RowOrder,
+    batches: &[RecordBatch],
+) -> Result<(), String> {
+    corpus::result_matches(section, mode, order, batches)
+}
+
 /// `max(0, min(n, |unlimited| - m))` for `LIMIT n OFFSET m`.
 pub fn wanted_rows(available: u64, skip: u64, fetch: Option<u64>) -> u64 {
     corpus::wanted_rows(available, skip, fetch)

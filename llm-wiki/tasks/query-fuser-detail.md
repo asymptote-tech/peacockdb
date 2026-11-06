@@ -44,6 +44,31 @@ Branch `ENS-query-fuser`, forked from `ENS-dag-driver` at `5a1d4702` on 2026-11-
     `scan_mapping`), which the plan consumed without naming a delegate.
   - `plan/rebuild.rs` holds private copies of `schema_of` and `lanes_of`; `src/tests/rebuild.rs`
     keeps its `pub(crate)` ones, which other test files import.
+- 2026-11-06, Task 2 (developer). Checkpoint `fuser: the ordered lists and fused answers
+  against the corpus goldens` reported, not committed. `--lib` +10 (8 in
+  `prototypes::fuser::lists::tests`, 2 in `prototypes::fuser::tests::end_to_end`).
+  - **Wall time:** the three end-to-end tests take about 16 s together (18 s wall with the
+    build cached, peak RSS 4.4 GB), so none is `#[ignore]`d. tpch and tpcds `first10` are
+    q1-q10 of each; no first10 section at sf1 is a `skipped:` marker, so no query fell back to
+    its own unfused run. The test asserts that and names any query that does.
+  - **The missing-list test does not set `PEACOCK_TESTDATA_DIR`.** The lib's tests share one
+    process, and ~1100 of them read testdata in parallel, so setting it would race them. Instead
+    `ordered_queries(dataset)` is `ordered_queries_in(&device_cases_path("h100-80gb-hbm3"),
+    dataset)`, and the test hands the private reader a path under an empty temp dir; the panic
+    names `h100-80gb-hbm3/cases.csv`. The production path through `device_cases_path` is still
+    covered, by `ordered_queries_read_the_h100_list` over the committed file.
+  - **`line_row_order` and `result_matches` are reached through `#[cfg(test)]` entry points
+    in `test_support/mod.rs`**, registered in cost-report's `TEST_ONLY_ITEMS` with
+    `prototypes/fuser/tests/end_to_end.rs` as their caller: both are private to
+    `test_support::corpus`, and their only caller outside it is a test in another component.
+    The order comes from the sf1 registry row's `duckdb_oracle` and `gpu_oracle`; the author
+    mode from the section's `mode=` line.
+  - The capped test also holds the capped answers to the goldens, beyond the plan's
+    capped-equals-uncapped check. `resolve_cap_holds` under a cap of one validates for both
+    datasets: no `HoldCycle`.
+  - Extra tests beyond the plan's: `tpch_batches_only_its_twenty_two_queries`,
+    `an_empty_batch_set_panics_naming_the_dataset`, `ordered_queries_read_the_h100_list`,
+    `first3_runs_whatever_the_list`.
 
 ## Checkpoints
 
