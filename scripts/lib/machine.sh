@@ -20,6 +20,10 @@ MACHINE_CCACHE=$HOME/.cache/peacock/ccache
 MACHINE_INSTANCES=$HOME/peacock-instances
 # Where the build image's cargo keeps downloaded crates (CARGO_HOME=/opt/rust/cargo).
 IMAGE_REGISTRY=/opt/rust/cargo/registry
+# Where a step's container mounts a data set being made, and a tree: never at the host's path, which
+# may cross a directory of the image the caller's uid cannot enter, as the image's own /home/peacock.
+MACHINE_STAGE=/peacock/stage
+MACHINE_TREE=/peacock/tree
 
 # machine_git <arg>... — git on the machine. An instance writes the clone's .git, so a hook or an
 # fsmonitor it planted there would run as the machine user on the next call: none ever runs.
@@ -90,8 +94,8 @@ machine_cargo_fetch() {
   exec {lock}> "$MACHINE_REGISTRY.lock"
   flock "$lock"
   docker run --rm --user "$MACHINE_USER" \
-    --mount "type=bind,src=$2,dst=$2,readonly" --mount "type=bind,src=$MACHINE_REGISTRY,dst=$IMAGE_REGISTRY" \
-    -w "$2" "$1" cargo fetch --locked
+    --mount "type=bind,src=$2,dst=$MACHINE_TREE,readonly" --mount "type=bind,src=$MACHINE_REGISTRY,dst=$IMAGE_REGISTRY" \
+    -w "$MACHINE_TREE" "$1" cargo fetch --locked
   exec {lock}>&-
 }
 
@@ -114,8 +118,8 @@ machine_data_set() {
     for entry in "${DATA_SETS[@]}"; do
       read -r -a words <<< "$entry"
       docker run --rm --user "$MACHINE_USER" --network none -e PEACOCK_NO_FETCH=1 \
-        --mount "type=bind,src=$stage,dst=$stage" -w "$stage" "$ref" \
-        bash -c 'umask 002 && exec "$@"' bash "$stage/generate_testdata.sh" "${words[@]:1}"
+        --mount "type=bind,src=$stage,dst=$MACHINE_STAGE" -w "$MACHINE_STAGE" "$ref" \
+        bash -c 'umask 002 && exec "$@"' bash "$MACHINE_STAGE/generate_testdata.sh" "${words[@]:1}"
       if [ ! -d "$stage/${words[0]}" ]; then
         echo "${0##*/}: the generator made no ${words[0]} in $stage" >&2
         return 2

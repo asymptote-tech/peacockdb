@@ -4,9 +4,12 @@ The host is a directory reached through laptop.py's fake ssh and a fake rsync th
 `<user>@<address>:<path>` there and runs the real rsync. Its `bin/` fakes docker, nvidia-smi,
 hostname, id, sudo and curl, each answering only the exact query made. docker runs a device run as
 a sleeper held while `hold` exists, logged in `runs.log` and refused beside another, and the sf40
-fetch through a fake aws; `hold_gen` holds the generator, `hold_smi` the driver query. sudo runs
-only `install -d` and a usermod's grant; FAKE_RSYNC_GATE holds rsync. `nebius` is strict: start and
-stop need `--async`, get `--format json`, a start while STOPPING fails, a transition takes two gets.
+fetch through a fake aws; `hold_gen` holds the generator, `hold_smi` the driver query. A container
+reads a path through the mount that holds it, and refuses one in the host's homes, as the image
+refuses its own /home/peacock to another uid. `docker stop` ends a run as killed; `create_delay`
+slows a container's making, and `vanish_on_stop` ends one as its stop comes. sudo runs only
+`install -d` and a usermod's grant; FAKE_RSYNC_GATE holds rsync. `nebius` is strict: start and stop
+need `--async`, get `--format json`, a start while STOPPING fails, a transition takes two gets.
 """
 import fcntl
 import hashlib
@@ -137,8 +140,12 @@ else:
     sys.exit(f"fake nebius: no answer for {a}")
 '''
 
+LIBTEST_GREEN = ("running 1 test\ntest bench_tpch_sf40_q1_tp1_single ... ok\n\n"
+                 "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s")
+
 HOST_DOCKER = r'''#!/usr/bin/env python3
 import hashlib, json, os, pathlib, subprocess, sys, time
+LIBTEST_GREEN = %r
 host = pathlib.Path(os.environ["FAKE_VM"])
 a = sys.argv[1:]
 with open(host / "docker.log", "a") as f:
@@ -181,9 +188,31 @@ if a[:2] == ["container", "inspect"]:
     if len(a) != 3:
         sys.exit(f"fake docker: no answer for {a}")
     sys.exit(0 if (host / "containers" / a[2]).exists() else 1)
+def alive(box):  # a container file holds its run's pid; one no process runs is a killed runner's
+    try:
+        os.kill(int(box.read_text() or 0), 0)
+        return box.read_text() != ""
+    except (ProcessLookupError, ValueError):
+        return False
+if a[0] in ("stop", "rm"):  # `docker stop -t <seconds> <name>`, back once it has ended; `docker rm -f <name>`
+    if a[:-1] not in (["stop", "-t", "30"], ["rm", "-f"]):
+        sys.exit(f"fake docker: no answer for {a}")
+    box = host / "containers" / a[-1]
+    if a[0] == "stop" and (host / "vanish_on_stop").exists() and box.exists():  # it ended as stop was called
+        box.unlink()
+    if not box.exists():
+        sys.exit(f"Error response from daemon: No such container: {a[-1]}")
+    if alive(box):
+        (host / "containers" / f"{a[-1]}.stop").write_text("")
+        while box.exists():
+            time.sleep(0.05)
+    else:
+        box.unlink()
+    print(a[-1])
+    sys.exit(0)
 if a[0] != "run":
     sys.exit(f"fake docker: no answer for {a}")
-mounts, env, i = [], {}, 1
+mounts, env, i, workdir = [], {}, 1, None
 while a[i].startswith("-"):
     if a[i] in ("-d", "--rm", "--init", "-i"):
         i += 1; continue
@@ -195,10 +224,29 @@ while a[i].startswith("-"):
         mounts.append((kv["src"], kv["dst"], "readonly" in kv))
     elif flag == "-e":
         k, _, v = value.partition("="); env[k] = v
+    elif flag == "-w":
+        workdir = value
     i += 2
 image, cmd = a[i], a[i + 1:]
 if image not in pulled and image not in ids:
     sys.exit(f"Unable to find image '{image}' locally")
+def closed(path):
+    """The host's homes stand for the image's own /home/peacock, closed to every uid but its own: a
+    container path there is refused, as it is in the image."""
+    if path.startswith(str(host / "home") + "/"):
+        sys.exit(f"bash: {path}: Permission denied")
+for _, dst, _ in mounts:
+    closed(dst)
+if workdir:
+    closed(workdir)
+def outside(word):
+    """A container path as the host path its mount holds."""
+    closed(word)
+    for src, dst, _ in sorted(mounts, key=lambda m: -len(m[1])):
+        if word == dst or word.startswith(dst.rstrip("/") + "/"):
+            return src + word[len(dst):]
+    return word
+cmd = [outside(w) for w in cmd]
 gen = [c for c in cmd if c.endswith("/generate_testdata.sh")]
 if gen:
     while (host / "hold_gen").exists():
@@ -219,22 +267,38 @@ except FileExistsError:
     sys.exit("fake docker: another device run is on the card")
 start = time.time()
 name = a[a.index("--name") + 1] if "--name" in a else None
+if name and (host / "create_delay").exists():  # the client still making the container
+    time.sleep(float((host / "create_delay").read_text()))
 if name:  # a named container stays on the host while it runs, whatever its client does
     (host / "containers").mkdir(exist_ok=True)
-    (host / "containers" / name).write_text("")
+    (host / "containers" / name).write_text(str(os.getpid()))
 with open(host / "runs.log", "a") as f:
     f.write(json.dumps({"event": "start", "at": start, "argv": a}) + "\n")
 if cmd[:1] == ["bench"]:
     (pathlib.Path(testdata) / "calibration").mkdir(exist_ok=True)
     (pathlib.Path(testdata) / "calibration" / "records.tsv").write_text(f"# run: the host's record of {start}\n")
-time.sleep(float((host / "run_seconds").read_text()) if (host / "run_seconds").exists() else 0)
-held = time.time() + 60
-while (host / "hold").exists() and time.time() < held:  # a test releases the run when it has seen what it waits for
+def stopped():
+    return name is not None and (host / "containers" / f"{name}.stop").exists()
+ends = time.time() + (float((host / "run_seconds").read_text()) if (host / "run_seconds").exists() else 0)
+while time.time() < ends and not stopped():
     time.sleep(0.05)
+held = time.time() + 60
+while (host / "hold").exists() and time.time() < held and not stopped():  # a test releases the run when it has seen what it waits for
+    time.sleep(0.05)
+if stopped():  # docker stop's kill: the container ends where it was, its record as far as it got
+    with open(host / "runs.log", "a") as f:
+        f.write(json.dumps({"event": "stopped", "at": time.time(), "argv": a}) + "\n")
+    os.unlink(host / "device.busy")
+    os.unlink(host / "containers" / f"{name}.stop")
+    os.unlink(host / "containers" / name)
+    sys.exit(137)
 if cmd[:1] == ["bench"]:
     out = pathlib.Path(testdata) / "benchmark-results" / os.environ["FAKE_SLUG"] / "tpch.sf40"
     out.mkdir(parents=True, exist_ok=True)
     (out / "tp1-single.benchmark.txt").write_text("q1 measured on the host\n")
+if cmd[:1] == ["bench"]:  # the harness's libtest output, as a test writes it, or one passing case
+    out = host / "bench_out"
+    print(out.read_text() if out.exists() else LIBTEST_GREEN, flush=True)
 print(f"==> run-tests.sh {cmd[0]}: green", flush=True)
 with open(host / "runs.log", "a") as f:
     f.write(json.dumps({"event": "end", "at": time.time(), "argv": a}) + "\n")
@@ -242,7 +306,7 @@ os.unlink(host / "device.busy")
 if name:
     os.unlink(host / "containers" / name)
 sys.exit(int((host / "run_status").read_text()) if (host / "run_status").exists() else 0)
-'''
+''' % LIBTEST_GREEN
 
 HOST_SUDO = r'''#!/usr/bin/env python3
 import os, pathlib, shutil, sys

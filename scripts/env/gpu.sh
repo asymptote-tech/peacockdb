@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # The device run on a GPU host, from a built tree (llm-wiki/build-test.md, "GPU hosts").
 #
-#   gpu.sh <host> prepare | run <list|filter|bench> [--cudf <v> | --image <tag>] [--instance <name>]
-#   gpu.sh <host> ship | pull [--instance <name>]
+#   gpu.sh <host> prepare [--cudf <v> | --image <tag>] [--instance <name>] [--env <file>]
+#   gpu.sh <host> run <list|filter|bench> [--cudf <v> | --image <tag>] [--instance <name>]
+#   gpu.sh <host> ship | pull | cancel [--instance <name>]
 #   gpu.sh <host> start | stop [--force]
-# --instance, required outside an instance, names the tree's dir on the host, ~/peacock/<instance>/.
-# prepare: the driver, Docker, rsync and the toolkit, both images checked against the tree, sf1 and
-# sf40. ship: cpp/install and the fixtures there. run: run-tests.sh in the run image, detached on the
-# host, one device run there at a time, followed; a rerun follows it. pull: results, records and logs
-# home. A host its adapter powers is started by each, and soft-stopped when it exits.
+# --instance, outside an instance, names the tree's dir on the host, ~/peacock/<instance>/; --env the
+# storage keys' file there, peacock.env by default. prepare readies the host and its data; ship sends
+# the built tree; run runs it there, detached, followed; pull brings the results home; cancel stops
+# the instance's run. A host its adapter powers is started by each, and soft-stopped when it exits.
 [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; } || {
   echo "${0##*/}: this machine's bash is $BASH_VERSION, older than 4.4: install a current one (on macOS, brew install bash)" >&2; exit 2; }
 # Above, in bash 3.2's syntax and before any source: macOS ships 3.2, and what follows needs 4.4.
@@ -36,12 +36,12 @@ SHIPPED=(testdata/tpch-queries testdata/tpcds-queries testdata/tpch.minimal test
          testdata/tpch-vec-queries testdata/pbench-queries testdata/pbench.sf1 testdata/cost-registry.csv
          testdata/fixtures)
 
-name="" verb="" cudf="" image="" instance="" force="" words=()
+name="" verb="" cudf="" image="" instance="" env="" force="" words=()
 take() { [ -z "${!1}" ] || die "one $2 per call"; printf -v "$1" %s "$3"; }
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) peacock_usage "${BASH_SOURCE[0]}" ;;
-    --cudf|--image|--instance)
+    --cudf|--image|--instance|--env)
       [ -n "${2:-}" ] || die "$1 needs a value"
       take "${1#--}" "$1" "$2"
       shift 2 ;;
@@ -50,16 +50,16 @@ while [ $# -gt 0 ]; do
     *) if [ -z "$name" ]; then name=$1; elif [ -z "$verb" ]; then verb=$1; else words+=("$1"); fi; shift ;;
   esac
 done
-[ -n "$name" ] || die "name the host: gpu.sh <host> prepare|ship|run <mode>|pull|start|stop, see --help"
-[ -n "$verb" ] || die "say what to do on $name: prepare, ship, run, pull, start or stop"
+[ -n "$name" ] || die "name the host: gpu.sh <host> prepare|ship|run <mode>|pull|cancel|start|stop, see --help"
+[ -n "$verb" ] || die "say what to do on $name: prepare, ship, run, pull, cancel, start or stop"
 mode=""
 case "$verb" in
   run)
     [ ${#words[@]} = 1 ] || die "run takes one of list, filter or bench, got: ${words[*]:-nothing}"
     mode=${words[0]}
     case "$mode" in list|filter|bench) ;; *) die "run takes one of list, filter or bench, not $mode" ;; esac ;;
-  prepare|ship|pull|start|stop) [ ${#words[@]} = 0 ] || die "$verb takes no argument: ${words[*]}" ;;
-  *) die "unknown command $verb: prepare, ship, run, pull, start or stop" ;;
+  prepare|ship|pull|cancel|start|stop) [ ${#words[@]} = 0 ] || die "$verb takes no argument: ${words[*]}" ;;
+  *) die "unknown command $verb: prepare, ship, run, pull, cancel, start or stop" ;;
 esac
 [ -z "$force" ] || [ "$verb" = stop ] || die "--force is for stop, not $verb"
 case "$verb" in
@@ -78,8 +78,13 @@ case "$verb" in
     [ -f "$tree/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda has no cudf-$cudf.spec" ;;
   *) [ -z "$cudf$image" ] || die "--cudf and --image are for prepare and run, not $verb" ;;
 esac
+if [ -n "$env" ]; then
+  [ "$verb" = prepare ] || die "--env is for prepare, not $verb"
+  [ -z "${PEACOCK_INSTANCE:-}" ] || die "--env names the storage keys outside an instance; this instance has its own"
+  [ -f "$env" ] || die "no env file $env"
+fi
 case "$verb" in
-  start|stop) [ -z "$instance" ] || die "--instance is for prepare, ship, run and pull" ;;
+  start|stop) [ -z "$instance" ] || die "--instance is for prepare, ship, run, pull and cancel" ;;
   *)
     if [ -n "${PEACOCK_INSTANCE:-}" ]; then
       [ -z "$instance" ] || die "--instance names a tree outside an instance; this is instance $PEACOCK_INSTANCE"
@@ -103,15 +108,10 @@ BEAT=${PEACOCK_HOLD_BEAT:-60} HOLD_TIMEOUT=${PEACOCK_HOLD_TIMEOUT:-300}
   || die "PEACOCK_BENCH_RESUME=$resume is set, but resuming is run bench's: unset it for run $mode"
 host_read "$name"
 host_ssh_options
-case "$verb" in
-  prepare)
-    for key in "${PEACOCK_STORAGE_KEYS[@]}"; do
-      [ -n "${!key:-}" ] || die "prepare needs $key in the environment, for sf40: peacock.env holds it in an instance"
-    done ;;
-  ship)
-    [ -f "$tree/cpp/install/lib/libpeacock_gpu.so" ] \
-      || die "no $tree/cpp/install/lib/libpeacock_gpu.so: build and stage the binaries first" ;;
-esac
+if [ "$verb" = ship ]; then
+  [ -f "$tree/cpp/install/lib/libpeacock_gpu.so" ] \
+    || die "no $tree/cpp/install/lib/libpeacock_gpu.so: build and stage the binaries first"
+fi
 
 adapter=scripts/env/host/$HOST_PROVIDER.sh
 # Whether the adapter can start and stop this host; why not, when it cannot.
@@ -148,7 +148,9 @@ step() {
     *) fail "$what failed on $name (exit $rc)" ;;
   esac
 }
-synced() { local rc=0; rsync "$@" || rc=$?; [ "$rc" = 0 ] || fail "rsync with $name failed (exit $rc)"; }
+# Compressed: a ship or a pull waits on the laptop's uplink. -z, which every rsync takes; two of 3.2
+# or later negotiate zstd for it.
+synced() { local rc=0; rsync -z "$@" || rc=$?; [ "$rc" = 0 ] || fail "rsync with $name failed (exit $rc)"; }
 
 # held [<instance dir>] — the host's activity lock, held shared through an ssh session that the
 # script and then a heartbeat reach on stdin, until released: a soft stop, this instance's or another's,
@@ -289,6 +291,11 @@ case "$verb" in
 esac
 
 if [ -n "$powered" ]; then
+  # A stopped host runs nothing: cancel does not start one to find that out.
+  if [ "$verb" = cancel ]; then
+    state=$("$HOST_ADAPTER" "$name" status 2> /dev/null) || state=""
+    case "$state" in STOPPED|STOPPING) echo "$name is $state: no run of $instance is going"; exit 0 ;; esac
+  fi
   call_adapter start
   started=1
 fi
@@ -409,6 +416,13 @@ case "$verb" in
     step "generating sf1" sf1 "$build_id" < /dev/null
     missing=$(step "listing sf40" sf40-missing < /dev/null)
     if [ -n "$missing" ]; then
+      if [ -n "${PEACOCK_INSTANCE:-}" ]; then
+        for key in "${PEACOCK_STORAGE_KEYS[@]}"; do
+          [ -n "${!key:-}" ] || die "prepare needs $key in the environment, for sf40: peacock.env holds it in an instance"
+        done
+      else
+        peacock_env_storage_read "${env:-$PEACOCK_ENV}"
+      fi
       mapfile -t sets <<< "$missing"
       # The storage keys on ssh's stdin, for that one command: never argv, never a file on the host.
       for key in "${PEACOCK_STORAGE_KEYS[@]}"; do printf '%s=%s\n' "$key" "${!key}"; done \
@@ -463,4 +477,7 @@ case "$verb" in
     rm -rf "$stage"
     [ -z "$kept" ] || exit 1
     echo "pulled from $name: testdata/benchmark-results/, testdata/calibration/records-*.tsv, .gpu-test/$name/logs/" ;;
+  cancel)
+    held
+    step "cancelling the run" cancel < /dev/null ;;
 esac

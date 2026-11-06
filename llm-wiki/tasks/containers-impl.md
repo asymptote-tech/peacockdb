@@ -766,9 +766,10 @@ A developer who does not know the setup readies a VM, starts a chain on it and r
 - [ ] **Step 4:** results under `benchmark-results/<slug>/`, the record split, uploaded and pinned
   per device; the benchmark golden tests green on the new tree. Commit. Task 9 settled which trees
   the list holds: a new device's tree is held to the whole list, `h200/` to its own
-  `h200/cases.inc`. `every_declared_case_has_a_section_in_the_tree` is red if the run times fewer
-  cases than the list declares (the deferred rowgroup modes); committing such a tree needs a named
-  exception in that test (device, modes, reason) that the human approves.
+  `h200/cases.inc`. The list holds no rowgroup mode (Step 1).
+  `every_declared_case_has_a_section_in_the_tree` is red if the run times fewer cases than the list
+  declares; committing such a tree needs a named exception in that test (device, modes, reason)
+  that the human approves.
 
 
 ### Task 12: the ensemble end to end on a scratch chain

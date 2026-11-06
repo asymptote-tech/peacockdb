@@ -431,6 +431,196 @@ def test_the_s3_keys_never_rest_on_the_host():
                         assert v.encode() not in text, p
 
 
+def test_the_sf40_fetch_runs_its_scripts_from_a_container_path_of_its_own():
+    with GpuRig() as rig:
+        prepared(rig)
+        fetches = [c for c in rig.host_calls(rig.host, "docker") if c[0] == "run" and "fetch" in c]
+        assert len(fetches) == 2, fetches
+        for c in fetches:
+            script = next(w for w in command(c)[1] if w.endswith("/on-gpu-host.sh"))
+            [(src, dst, readonly)] = [m for m in mounts(c) if script.startswith(m[1] + "/")]
+            assert src == str(ship_dir(rig) / "scripts") and readonly, (src, dst, readonly)
+            # The host's path may cross a directory of the image its uid cannot enter.
+            assert not dst.startswith(str(rig.root)), dst
+
+
+def test_a_data_directory_in_the_host_user_s_home_is_reached_by_the_build_image():
+    with GpuRig() as rig:
+        data = rig.host_home() / "peacock-data"
+        data.mkdir(mode=0o2775)
+        rig.set_environment(rig.host, PEACOCK_DATA_DIR=data)
+        prepared(rig)
+        assert (data / rig.data_hash() / "tpch.sf1" / "generated").is_file(), sorted(data.iterdir())
+        assert (data / "sf40" / "tpch.sf40" / "SHA256SUMS").is_file(), sorted(data.iterdir())
+
+
+OUTSIDE = {"PEACOCK_INSTANCE": None, **{k: None for k in KEYS}}
+
+
+def env_file(rig, text, path=None):
+    path = path or rig.home / ".config" / "peacock" / "peacock.env"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+def outside(rig, *args, env=None):
+    return rig.gpu(*args, "--instance", INSTANCE, env={**OUTSIDE, **(env or {})})
+
+
+def fetched_with_the_keys(rig):
+    calls = rig.calls("aws")
+    return bool(calls) and all(c["keys"] for c in calls)
+
+
+def test_prepare_outside_an_instance_reads_the_keys_from_peacock_env_never_sourcing_it():
+    with GpuRig() as rig:
+        sourced = rig.root / "sourced"
+        lines = [f"{k}={v}" for k, v in KEYS.items()]
+        env_file(rig, "# the storage keys\n\n" + "\r\n".join(lines[:2]) + "\r\n" + "\n".join(lines[2:])
+                 + f"\nGPU_SSH_KEY_FILE={rig.key}\nNOT_A_KEY=$(touch {sourced})\n")
+        ok(outside(rig, NAME, "prepare"))
+        assert fetched_with_the_keys(rig), rig.calls("aws")
+        assert not sourced.exists(), "the env file was run"
+        for call in rig.calls("ssh"):
+            assert KEYS["AWS_SECRET_ACCESS_KEY"] not in " ".join(call["argv"]), call["argv"]
+
+
+def test_env_names_another_file_and_the_environment_wins_over_either():
+    with GpuRig() as rig:
+        other = env_file(rig, "".join(f"{k}={v}\n" for k, v in KEYS.items()), rig.root / "keys.env")
+        ok(outside(rig, NAME, "prepare", "--env", other))
+        assert fetched_with_the_keys(rig), rig.calls("aws")
+    with GpuRig() as rig:
+        env_file(rig, "".join(f"{k}=stale-{k}\n" for k in KEYS))
+        ok(outside(rig, NAME, "prepare", env=KEYS))
+        assert fetched_with_the_keys(rig), rig.calls("aws")
+
+
+def test_keys_missing_when_sf40_is_needed_are_refused_by_name_never_by_value():
+    with GpuRig() as rig:
+        default = rig.home / ".config" / "peacock" / "peacock.env"
+        r = outside(rig, NAME, "prepare")
+        refused(r, str(default), *KEYS)
+        env_file(rig, f"AWS_ACCESS_KEY_ID={KEYS['AWS_ACCESS_KEY_ID']}\nAWS_REGION=\n"
+                      f"AWS_ENDPOINT_URL={KEYS['AWS_ENDPOINT_URL']}\n")
+        r = outside(rig, NAME, "prepare")
+        refused(r, str(default), "AWS_SECRET_ACCESS_KEY", "AWS_REGION")
+        assert "AWS_ACCESS_KEY_ID" not in r.stderr and "AWS_ENDPOINT_URL" not in r.stderr, r.stderr
+        r = rig.gpu(NAME, "prepare", env={"AWS_SECRET_ACCESS_KEY": None})
+        refused(r, "AWS_SECRET_ACCESS_KEY")
+        for value in KEYS.values():
+            assert value not in r.stderr + r.stdout, r.stderr
+        assert rig.calls("aws") == [], rig.calls("aws")
+        assert not (rig.data_dir() / "sf40").exists(), sorted((rig.data_dir() / "sf40").iterdir())
+
+
+def storage_read(rig, text, exported):
+    """peacock_env_storage_read over <text> with <exported> exported empty, then a child's environment."""
+    path = env_file(rig, text, rig.root / "read.env")
+    script = f'. "{REPO}/scripts/lib/peacock-config.sh"; {exported}=; export {exported}; ' \
+             f'peacock_env_storage_read "{path}" && env'
+    env = {"PATH": os.environ["PATH"], "HOME": str(rig.home)}
+    return subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=30)
+
+
+def test_a_key_read_from_the_env_file_reaches_no_child():
+    with GpuRig() as rig:
+        r = storage_read(rig, "".join(f"{k}={v}\n" for k, v in KEYS.items()), "AWS_SECRET_ACCESS_KEY")
+        assert r.returncode == 0, r.stderr
+        for value in KEYS.values():
+            assert value not in r.stdout, "a key from the env file is in a child's environment"
+
+
+def test_a_key_the_env_file_names_twice_is_refused_by_name():
+    with GpuRig() as rig:
+        text = "".join(f"{k}={v}\n" for k, v in KEYS.items()) + "AWS_REGION=elsewhere-1\n"
+        r = storage_read(rig, text, "AWS_REGION")
+        assert r.returncode == 2 and "AWS_REGION more than once" in r.stderr, (r.returncode, r.stderr)
+        assert "elsewhere-1" not in r.stderr and KEYS["AWS_REGION"] not in r.stderr, r.stderr
+
+
+def test_a_host_holding_sf40_needs_no_keys():
+    with GpuRig() as rig:
+        prepared(rig)
+        ok(outside(rig, NAME, "prepare"))
+        ok(rig.gpu(NAME, "prepare", env={k: None for k in KEYS}))
+
+
+def test_ship_and_pull_compress_what_they_send():
+    with GpuRig() as rig:
+        shipped(rig)
+        ok(rig.gpu(NAME, "run", "bench"))
+        ok(rig.gpu(NAME, "pull"))
+        transfers = rig.calls("rsync")
+        assert len(transfers) == 5, transfers
+        for argv in transfers:
+            assert "-z" in argv, argv
+
+
+BENCH_FAILED = """running 4 tests
+test bench_tpch_sf40_q1_tp1_single ... tpch/q1 at tp1-single on a device: 9us
+ok
+test bench_tpch_sf40_q2_tp1_single ... the device refused it
+FAILED
+test bench_tpch_sf40_q3_tp1_single ... tpch/q3 at tp1-single on a device: kept, its file holds its section
+ok
+test bench_tpch_sf40_q4_tp1_single ... tpch/q4 at tp1-single on a device: 9\x00us
+ok
+
+failures:
+
+---- bench_tpch_sf40_q2_tp1_single stdout ----
+    bench_tpch_sf40_q1_tp1_single
+
+failures:
+    bench_tpch_sf40_q2_tp1_single
+
+test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 528 filtered out; finished in 9.00s
+
+run-tests.sh: peacock_gpu_benchmarks exited 101
+"""
+MEASURED = "; what it measured, failures included, is in testdata/benchmark-results/"
+
+
+def outcome(r):
+    return [ln for ln in r.stdout.splitlines() if ln.startswith("==> bench outcome:")]
+
+
+def bench_with(rig, out, status):
+    (rig.host / "bench_out").write_text(out)
+    (rig.host / "run_status").write_text(status)
+    return rig.gpu(NAME, "run", "bench")
+
+
+def test_a_bench_run_ends_with_its_cases_outcome():
+    with GpuRig() as rig:
+        shipped(rig)
+        r = ok(rig.gpu(NAME, "run", "bench"))
+        assert outcome(r) == ["==> bench outcome: 1 case ran: 1 passed, 0 failed"], r.stdout
+        r = bench_with(rig, BENCH_FAILED, "1")
+        assert r.returncode == 1, (r.returncode, r.stderr)
+        assert outcome(r) == ["==> bench outcome: 4 cases ran: 2 passed, 1 kept from an earlier run, 1 failed:"
+                              " bench_tpch_sf40_q2_tp1_single" + MEASURED], r.stdout
+        assert r.stdout.splitlines()[-1] == outcome(r)[0], r.stdout
+        log = sorted((ship_dir(rig) / "logs").glob("bench-*.log"))[-1]
+        assert outcome(r)[0] in log.read_text().splitlines(), "the outcome is in the log pull brings home"
+        r = bench_with(rig, "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured;"
+                            " 658 filtered out; finished in 0.00s\n", "1")
+        assert outcome(r) == ["==> bench outcome: no case ran (exit 1)"], r.stdout
+
+
+def test_a_bench_run_that_broke_says_so_rather_than_counting_cases():
+    with GpuRig() as rig:
+        shipped(rig)
+        r = bench_with(rig, "running 130 tests\ntest bench_tpch_sf40_q1_tp1_single ... ", "137")
+        failed(r, "exit 137")
+        assert outcome(r) == ["==> bench outcome: the run broke (exit 137) after 1 case began: the harness summed"
+                              " up none of them" + MEASURED], r.stdout
+        (rig.host / "run_status").write_text("0")
+        assert outcome(ok(rig.gpu(NAME, "run", "list"))) == [], "list has no bench outcome"
+
+
 def test_a_broken_sf40_set_is_fetched_again():
     with GpuRig() as rig:
         prepared(rig)
@@ -483,6 +673,114 @@ def test_a_killed_bench_s_record_comes_home():
         assert r.returncode == 0, (r.returncode, r.stderr)
         ok(rig.gpu(NAME, "pull"))
         assert len(list((rig.tree / "testdata" / "calibration").glob("records-*.tsv"))) == 2
+
+
+def container_of(instance=INSTANCE):
+    return f"peacock-run-{USER}-{instance}"
+
+
+def stops(rig):
+    return [c for c in rig.host_calls(rig.host, "docker") if c[0] in ("stop", "rm")]
+
+
+def test_cancel_stops_the_instance_s_run_and_keeps_its_record():
+    with GpuRig() as rig:
+        shipped(rig)
+        (rig.host / "hold").write_text("")
+        run = rig.gpu(NAME, "run", "bench", background=True)
+        until(lambda: (rig.host / "containers" / container_of()).exists(), "the run's container started")
+        _, _, log, stamp, *_ = (ship_dir(rig) / "run" / "state").read_text().split()
+        r = ok(rig.gpu(NAME, "cancel"))
+        assert ["stop", "-t", "30", container_of()] in stops(rig), stops(rig)
+        assert {c[-1] for c in stops(rig)} == {container_of()}, stops(rig)
+        assert "cancelled" in r.stdout and stamp in r.stdout and "pull" in r.stdout, r.stdout
+        out, err = run.communicate(timeout=60)
+        assert run.returncode == 1 and "exit 137" in err, (run.returncode, out, err)
+        assert [ln for ln in out.splitlines() if "outcome" in ln] == [
+            "==> bench outcome: cancelled (exit 137) after 0 cases began" + MEASURED], out
+        text = pathlib.Path(log).read_text()
+        assert "on-gpu-host.sh: cancelled" in text.splitlines(), text
+        assert pathlib.Path(log[:-len(".log")] + ".status").read_text() == "137\n"
+        on_host = ship_dir(rig) / "testdata" / "calibration"
+        assert sorted(p.name for p in on_host.iterdir()) == [f"records-{stamp}.tsv"], sorted(on_host.iterdir())
+        assert (on_host / f"records-{stamp}.tsv").read_text().startswith("# run: the host's record of")
+        device = [c for c in device_runs(rig)]
+        assert len(device) == 1 and "--init" in device[0], device
+        r = ok(rig.gpu(NAME, "cancel"))
+        assert "no run" in r.stdout and len(stops(rig)) == 2, (r.stdout, stops(rig))
+        ok(rig.gpu(NAME, "pull"))
+        assert (rig.tree / "testdata" / "calibration" / f"records-{stamp}.tsv").is_file()
+
+
+def test_cancel_stops_a_container_its_client_is_still_making():
+    with GpuRig() as rig:
+        shipped(rig)
+        (rig.host / "create_delay").write_text("1.5")
+        (rig.host / "hold").write_text("")
+        run = rig.gpu(NAME, "run", "list", background=True)
+        until(lambda: device_runs(rig), "the client started making the container")
+        ok(rig.gpu(NAME, "cancel"))
+        run.communicate(timeout=60)
+        assert [e["event"] for e in rig.host_calls(rig.host, "runs")] == ["start", "stopped"], \
+            rig.host_calls(rig.host, "runs")
+        assert not (rig.host / "containers" / container_of()).exists()
+        statuses = [p.read_text() for p in (ship_dir(rig) / "logs").glob("list-*.status")]
+        assert statuses == ["137\n"], statuses
+
+
+def test_cancel_removes_a_container_a_killed_runner_left():
+    with GpuRig() as rig:
+        shipped(rig)
+        (rig.host / "containers").mkdir()
+        (rig.host / "containers" / container_of()).write_text("")
+        r = ok(rig.gpu(NAME, "cancel"))
+        assert "removed" in r.stdout and not (rig.host / "containers" / container_of()).exists(), r.stdout
+        (rig.host / "containers" / container_of()).write_text("")
+        (rig.host / "vanish_on_stop").write_text("")  # gone between docker's inspect and its stop
+        r = ok(rig.gpu(NAME, "cancel"))
+        assert "removed" in r.stdout and not (rig.host / "containers" / container_of()).exists(), r.stdout
+
+
+def test_cancel_leaves_other_instances_and_users_alone():
+    with GpuRig() as rig:
+        shipped(rig)
+        ok(rig.gpu(NAME, "ship", env={"PEACOCK_INSTANCE": "dev2-B"}))
+        (rig.host / "hold").write_text("")
+        other = rig.gpu(NAME, "run", "list", env={"PEACOCK_INSTANCE": "dev2-B"}, background=True)
+        until(lambda: (rig.host / "containers" / container_of("dev2-B")).exists(), "the other run started")
+        (rig.host / "containers" / f"peacock-run-someone-{INSTANCE}").write_text("")  # another user's
+        r = ok(rig.gpu(NAME, "cancel"))
+        assert "no run" in r.stdout and stops(rig) == [], (r.stdout, stops(rig))
+        assert (rig.host / "containers" / container_of("dev2-B")).exists()
+        assert (rig.host / "containers" / f"peacock-run-someone-{INSTANCE}").exists()
+        assert other.poll() is None, "the other instance's run was stopped"
+        (rig.host / "hold").unlink()
+        assert other.wait(timeout=60) == 0, other.communicate()
+
+
+def test_cancel_ends_a_run_still_waiting_for_the_card():
+    with GpuRig() as rig:
+        shipped(rig)
+        ok(rig.gpu(NAME, "ship", env={"PEACOCK_INSTANCE": "dev2-B"}))
+        (rig.host / "hold").write_text("")
+        other = rig.gpu(NAME, "run", "list", env={"PEACOCK_INSTANCE": "dev2-B"}, background=True)
+        until(lambda: rig.host_calls(rig.host, "runs"), "the other run holds the card")
+        waiting = rig.gpu(NAME, "run", "list", background=True)
+        logs = ship_dir(rig) / "logs"
+        until(lambda: any("waiting" in f.read_text() for f in logs.glob("list-*.log")), "this run waits")
+        pid = int((ship_dir(rig) / "run" / "state").read_text().split()[0])
+        r = ok(rig.gpu(NAME, "cancel"))
+        assert "cancelled the list run" in r.stdout and stops(rig) == [], (r.stdout, stops(rig))
+        waiting.communicate(timeout=60)
+        assert waiting.returncode == 1, waiting.returncode
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, 0)
+            raise AssertionError("the runner outlived the cancel")
+        assert [p.read_text() for p in logs.glob("list-*.status")] == ["143\n"]
+        assert other.poll() is None, "the run on the card was stopped"
+        (rig.host / "hold").unlink()
+        assert other.wait(timeout=60) == 0, other.communicate()
+        assert len(device_runs(rig)) == 1, device_runs(rig)
 
 
 def test_pull_brings_the_results_home_and_keeps_a_newer_local_file():
@@ -561,7 +859,9 @@ def test_gpu_refuses_bad_arguments_before_any_call():
     with GpuRig() as rig:
         cases = [
             ((), {}, "name the host"),
-            ((NAME,), {}, "prepare, ship, run, pull, start or stop"),
+            ((NAME,), {}, "prepare, ship, run, pull, cancel, start or stop"),
+            ((NAME, "cancel", "now"), {}, "now"),
+            ((NAME, "cancel", "--cudf", "25.02"), {}, "--cudf"),
             ((NAME, "reboot"), {}, "reboot"),
             ((NAME, "run"), {}, "list, filter or bench"),
             ((NAME, "run", "list", "bench"), {}, "bench"),
@@ -582,7 +882,9 @@ def test_gpu_refuses_bad_arguments_before_any_call():
             ((NAME, "ship"), {"GPU_SSH_KEY_FILE": "relative/key"}, "GPU_SSH_KEY_FILE"),
             (("nowhere", "ship"), {}, "provision-vm.sh --gpu-host"),
             ((NAME, "ship", "--instance", "a/b"), {"PEACOCK_INSTANCE": None}, "a/b"),
-            ((NAME, "prepare"), {"AWS_SECRET_ACCESS_KEY": None}, "AWS_SECRET_ACCESS_KEY"),
+            ((NAME, "prepare", "--env", "keys.env"), {}, "--env"),
+            ((NAME, "prepare", "--env", "missing.env", "--instance", INSTANCE), OUTSIDE, "missing.env"),
+            ((NAME, "ship", "--env", "keys.env", "--instance", INSTANCE), OUTSIDE, "--env"),
             ((NAME, "run", "list"), {"PEACOCK_HOLD_BEAT": "6", "PEACOCK_HOLD_TIMEOUT": "1"}, "PEACOCK_HOLD_BEAT"),
             ((NAME, "run", "list"), {"PEACOCK_HOLD_BEAT": "60", "PEACOCK_HOLD_TIMEOUT": "60"}, "PEACOCK_HOLD_BEAT"),
             ((NAME, "run", "list"), {"PEACOCK_HOLD_TIMEOUT": "5m"}, "PEACOCK_HOLD_TIMEOUT"),
@@ -600,7 +902,7 @@ def test_gpu_has_help():
         r = ok(rig.gpu("--help"))
         assert "gpu.sh <host>" in r.stdout and not any(ln.startswith("#") for ln in r.stdout.splitlines()), r.stdout
         usage = [ln for ln in r.stdout.splitlines() if "gpu.sh <host>" in ln]
-        for verb in ("ship", "pull"):
+        for verb in ("ship", "pull", "cancel"):
             line = next(ln for ln in usage if verb in ln.split())
             assert "--instance" in line and "--cudf" not in line and "--image" not in line, line
         for verb in ("prepare", "run"):

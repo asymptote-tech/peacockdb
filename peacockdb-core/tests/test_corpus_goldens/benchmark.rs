@@ -9,8 +9,8 @@ use std::sync::PoisonError;
 
 use peacockdb_core::test_support::{
     BUILD, COLUMNS, Capture, FAILED, MEASURED_RUNS, MODES, Mode, Provenance, RECORD_PATH_ENV,
-    RunMeta, SKIPPED, append_records, device_slug, load_csv, ordered_sections, record_header,
-    rows_match_the_recipes, testdata_root,
+    RunMeta, SKIPPED, append_records, device_slug, load_csv, mode_named, ordered_sections,
+    record_header, rows_match_the_recipes, testdata_root,
 };
 
 /// One `corpus_query_benchmark!` line: the query and its timed modes as written.
@@ -417,6 +417,21 @@ fn every_timed_case_is_enabled_on_a_device() {
     }
 }
 
+/// Every mode the case list times is one `Mode::is_benchmarked` admits: the registry's row-group
+/// cells stay enabled for correctness and are not in the list.
+#[test]
+fn no_case_is_timed_at_a_mode_whose_timings_are_not_compared() {
+    for [dataset, _, query, timed] in case_list() {
+        for mode in modes(timed) {
+            assert!(
+                mode_named(&mode).is_benchmarked(),
+                "{dataset}/{query} is timed at {mode}, a mode that checks correctness and whose \
+                 timings are not compared"
+            );
+        }
+    }
+}
+
 /// The datasets the benchmark times. Their registry rows are sf1, where correctness runs; the
 /// list times the same cells at `BENCHMARK_SF`.
 const BENCHMARK_DATASETS: [&str; 2] = ["tpch", "tpcds"];
@@ -429,14 +444,15 @@ const CASE_LIST: &str = include_str!("../common/corpus_benchmark_cases.inc");
 /// only a checkout asks for one; a staged binary compares what it compiled in.
 const CASE_LIST_PATH: &str = "tests/common/corpus_benchmark_cases.inc";
 
-/// `(dataset, query, modes)` for every tpch and tpcds row with an enabled device cell, in the
-/// registry's row order, the modes in `MODES` order.
+/// `(dataset, query, modes)` for every tpch and tpcds row with an enabled device cell at a mode the
+/// benchmark times, in the registry's row order, the modes in `MODES` order.
 fn registry_cases() -> Vec<(String, String, Vec<String>)> {
     let mut cases = Vec::new();
     for dataset in BENCHMARK_DATASETS {
         for row in load_csv().into_iter().filter(|row| row.dataset == dataset) {
             let modes: Vec<String> = MODES
                 .iter()
+                .filter(|mode| mode.is_benchmarked())
                 .map(Mode::ident)
                 .filter(|mode| row.states[&format!("gpu_{mode}")] == "enabled")
                 .collect();
@@ -464,17 +480,16 @@ fn case_list_text(cases: &[(String, String, Vec<String>)]) -> String {
 }
 
 const CASE_LIST_HEADER: &str = "\
-// The benchmark corpus, one line per query, timed by `tests/peacock_gpu_benchmarks.rs` — a
-// statement about timing rather than about coverage. `test_corpus_goldens` compiles it in too,
-// to check it.
+// The benchmark corpus, one line per query, timed by `tests/peacock_gpu_benchmarks.rs` and
+// checked by `test_corpus_goldens`:
 //
 //   corpus_query_benchmark!(dataset, sf, query, modes)
 //
 // Written from testdata/cost-registry.csv, never by hand: every tpch and tpcds row's enabled
-// device cells (`gpu_*`), timed at sf40. `the_benchmark_cases_follow_the_registry` in
-// `test_corpus_goldens` holds it to the registry and rewrites it under UPDATE_CANONICAL=1.
-// sf40 and not sf1: at sf1 a query is mostly the host prologue, below the clock's resolution.
-// build-test.md's Corpus Benchmarks section carries the rest.
+// device cells (`gpu_*`) but the row-group modes', which check correctness and whose timings are
+// not compared, timed at sf40. `the_benchmark_cases_follow_the_registry` holds it to the registry
+// and rewrites it under UPDATE_CANONICAL=1. sf40, since at sf1 a query is mostly the host
+// prologue. build-test.md's Corpus Benchmarks section carries the rest.
 ";
 
 /// The case list is, byte for byte, what the registry's enabled device cells for tpch and tpcds
@@ -528,10 +543,11 @@ fn the_benchmark_cases_follow_the_registry() {
     let unlisted: Vec<_> = registry.difference(&listed).collect();
     let unregistered: Vec<_> = listed.difference(&registry).collect();
     panic!(
-        "the case list is not what the registry writes: {} cells enabled and not listed at \
-         sf{BENCHMARK_SF} {:?}, {} listed and not enabled {:?}, and the rest of the bytes as \
-         written. Rewrite it with UPDATE_CANONICAL=1 cargo test --features rust-only -p \
-         peacockdb-core --test test_corpus_goldens -- the_benchmark_cases_follow_the_registry",
+        "the case list is not what the registry writes: {} cells enabled at a timed mode and \
+         not listed at sf{BENCHMARK_SF} {:?}, {} listed and not so enabled {:?}, and the rest of \
+         the bytes as written. Rewrite it with UPDATE_CANONICAL=1 cargo test --features \
+         rust-only -p peacockdb-core --test test_corpus_goldens -- \
+         the_benchmark_cases_follow_the_registry",
         unlisted.len(),
         unlisted.iter().take(10).collect::<Vec<_>>(),
         unregistered.len(),

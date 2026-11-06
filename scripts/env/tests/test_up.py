@@ -110,8 +110,10 @@ def test_up_fetches_before_it_starts():
         assert runs.index(instance) > fetches[0], "the instance started before the fetch"
         assert mount_at(instance, CARGO_REGISTRY) == (registry[0], CARGO_REGISTRY, True), mounts(instance)
         worktree = flag_values(instance, "-w")[0]
-        assert flag_values(fetch, "-w") == [worktree], fetch
-        assert mount_at(fetch, worktree)[2] is True, "the fetch may write the worktree"
+        [inside] = flag_values(fetch, "-w")
+        # The worktree's path may cross a directory of the image the machine user cannot enter.
+        assert not inside.startswith(str(m.home)), fetch
+        assert mount_at(fetch, inside) == (worktree, inside, True), "the fetch may write the worktree"
 
 
 def test_up_commits_from_the_container():

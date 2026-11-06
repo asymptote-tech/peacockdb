@@ -79,6 +79,32 @@ peacock_env_is_storage_only() {
   done < "$1"
 }
 
+# peacock_env_storage_read <file> — each storage key the environment lacks, read from <file> as
+# docker reads an env file, NAME=value a line, never sourced; set in this shell, never exported.
+# Refuses a <file> missing, or a key it lacks, holds empty or names twice: by name, never by value.
+peacock_env_storage_read() {
+  local file=$1 key line lacking=() absent=()
+  local -A seen=()
+  for key in "${PEACOCK_STORAGE_KEYS[@]}"; do [ -n "${!key:-}" ] || lacking+=("$key"); done
+  [ ${#lacking[@]} -gt 0 ] || return 0
+  [ -f "$file" ] || {
+    peacock_refuse "no $file, to read ${lacking[*]} from: provision-vm.sh --env puts the storage keys there, or --env names a file"
+    return
+  }
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "${line%$'\r'}" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+    key=${BASH_REMATCH[1]}
+    [[ " ${lacking[*]} " == *" $key "* ]] || continue
+    [ -z "${seen[$key]:-}" ] || { peacock_refuse "$file names $key more than once"; return; }
+    seen[$key]=1
+    # Unset first: one exported empty would carry its value into every child.
+    unset "$key"
+    printf -v "$key" %s "${BASH_REMATCH[2]}"
+  done < "$file"
+  for key in "${lacking[@]}"; do [ -n "${!key:-}" ] || absent+=("$key"); done
+  [ ${#absent[@]} = 0 ] || peacock_refuse "$file has no value for ${absent[*]}"
+}
+
 # peacock_vm_target <name> — sets PEACOCK_VM_TARGET to <user>@<address> of VM <name> in the vm
 # file, of its last line when <name> is empty.
 peacock_vm_target() {

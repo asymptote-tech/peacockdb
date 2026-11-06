@@ -5,6 +5,7 @@
 #   on-gpu-host.sh install | pull <image> | label <image> | sf1 <image> | sf40-missing | settle | busy
 #   on-gpu-host.sh hold <seconds> [<instance dir>] | sf40 <image> <dataset>... (keys on stdin) | fetch …
 #   on-gpu-host.sh run <image id> <mode> [NAME=value]... | run-state | follow <mode> <stamp> [NAME=value]...
+#   on-gpu-host.sh cancel
 #
 # The data directory is /var/lib/peacock or $PEACOCK_DATA_DIR. Every step, and each gpu.sh command whole,
 # holds the activity lock shared, which busy tests. A failure that is not a refusal (2) is exit 1.
@@ -153,8 +154,8 @@ sf40() {
       rm -rf "$stage"
       mkdir "$stage"
       printf '%s\n' "${KEYS[@]}" | docker run --rm -i --user "$MACHINE_USER" \
-        --mount "type=bind,src=$scripts,dst=$scripts,readonly" --mount "type=bind,src=$stage,dst=$stage" \
-        "$ref" bash "$scripts/env/on-gpu-host.sh" fetch "${ds/./-}" "$stage"
+        --mount "type=bind,src=$scripts,dst=/peacock/scripts,readonly" --mount "type=bind,src=$stage,dst=$MACHINE_STAGE" \
+        "$ref" bash /peacock/scripts/env/on-gpu-host.sh fetch "${ds/./-}" "$MACHINE_STAGE"
       (cd "$stage" && sha256sum -- manifest.json *.parquet > SHA256SUMS)
       sf40_present "$stage" || die "$ds from s3://${ds/./-} does not match its manifest.json"
       rm -rf "$final"
@@ -349,11 +350,47 @@ run() {
   follow "$!" "$log"
 }
 
+# bench_outcome <log> <status> [cancelled] — one line: how many bench_ cases ran, were kept from an
+# earlier run, passed and failed, the failed ones named; or that the run was cancelled, or broke before
+# the harness summed up. NUL bytes dropped: grep and awk read a log holding one as binary.
+bench_outcome() {
+  local log=$1 status=$2 how=${3:-} ran kept failed summed names line
+  # libtest names the failed cases under the last `failures:` before its summary, one indented name
+  # a line; an earlier one holds their output.
+  read -r ran kept failed summed names < <(tr -d '\000' < "$log" | awk '
+    /^test bench_[^ ]+ \.\.\. / { ran++ }
+    / on a device: kept, / { kept++ }
+    /^failures:$/ { list = ""; n = 0; on = 1; next }
+    on && /^    bench_[^ ]+$/ { list = list " " $1; n++ }
+    /^test result: / { summed = 1; if (on) { all = all list; failed += n }; list = ""; on = 0 }
+    END { printf "%d %d %d %d%s\n", ran, kept, failed, summed, all }')
+  line="==> bench outcome:"
+  if [ -n "$how" ]; then
+    line+=" cancelled (exit $status) after $(cases "$ran") began"
+  elif [ "$summed" = 0 ]; then
+    line+=" the run broke (exit $status) after $(cases "$ran") began: the harness summed up none of them"
+  elif [ "$ran" = 0 ]; then
+    line+=" no case ran (exit $status)"
+  else
+    line+=" $(cases "$ran") ran: $((ran - kept - failed)) passed"
+    if [ "$kept" -gt 0 ]; then line+=", $kept kept from an earlier run"; fi
+    line+=", $failed failed"
+    if [ "$failed" -gt 0 ]; then line+=": $names"; fi
+    if [ "$failed" = 0 ] && [ "$status" != 0 ]; then line+=", and the run failed after them (exit $status)"; fi
+  fi
+  if [ -n "$how" ] || [ "$summed" = 0 ] || [ "$failed" -gt 0 ]; then
+    line+="; what it measured, failures included, is in testdata/benchmark-results/"
+  fi
+  echo "$line"
+}
+cases() { if [ "$1" = 1 ]; then echo "1 case"; else echo "$1 cases"; fi; }
+
 # runner <image id> <mode> <stamp> [NAME=value]... — the detached run: it waits for the host's device
 # lock, saying so, holds it for the whole docker run, keeps a bench's record as records-<stamp>.tsv,
 # and writes its status beside its log. Two chains' tiers on one card fail each other's memory pools.
 runner() {
   local id=$1 mode=$2 stamp=$3 entry ds mounts=() envs=() pair dev status=0 host record hash log
+  local container exits phase child
   shift 3
   log=$instance_dir/logs/$mode-$stamp.log
   exec >> "$log" 2>&1
@@ -372,19 +409,103 @@ runner() {
     mounts+=(--mount "type=bind,src=$DATA/sf40/$ds,dst=/peacock/testdata/$ds,readonly")
   done
   for pair in "$@"; do envs+=(-e "$pair"); done
-  host=$(hostname)
+  host=$(hostname) container=$(container_name) exits=$instance_dir/run/client-exit
   shared_file "$DATA/.device.lock"
   exec {dev}< "$DATA/.device.lock"
+  rm -f "$exits"
+  # cancel signals this process alone. Each wait is in the background, so the trap runs at once.
+  phase=waiting child=""
+  trap runner_cancelled TERM
   if ! flock -n "$dev"; then
     echo "waiting on $host: another chain's device run holds its GPU"
-    flock "$dev"
+    flock "$dev" &
+    child=$!
+    wait "$child"
   fi
-  docker run --rm --name "$(container_name)" --gpus all --user "$MACHINE_USER" --hostname "$host" \
-    "${mounts[@]}" "${envs[@]}" "$id" "$mode" || status=$?
-  # run-tests.sh writes the record at one path and refuses one with rows; each run's keeps its own name.
-  record=$instance_dir/testdata/calibration/records.tsv
-  if [ -f "$record" ]; then mv "$record" "${record%.tsv}-$stamp.tsv"; fi
-  echo "$status" > "${log%.log}.status"
+  phase=running
+  # --init: the run image's PID 1 is run-tests.sh, which as PID 1 would ignore docker stop's TERM.
+  # The client's status goes to a file, which a cancel reads too, whenever it comes.
+  ( rc=0
+    docker run --rm --init --name "$container" --gpus all --user "$MACHINE_USER" --hostname "$host" \
+      "${mounts[@]}" "${envs[@]}" "$id" "$mode" || rc=$?
+    echo "$rc" > "$exits" ) &
+  child=$!
+  wait "$child" || true
+  trap '' TERM
+  status=$(cat "$exits")
+  if [ "$mode" = bench ]; then bench_outcome "$log" "$status"; fi
+  run_ended "$log" "$stamp" "$status"
+}
+
+# runner_cancelled — cancel's TERM, at any point of the runner. A run still going is said to be
+# cancelled in its log, its wait for the card given up or its container stopped, until its client is
+# gone: the client may be making it still. One made and never started is removed. The status is the
+# client's when it ran, so a cancel that comes as the run ends keeps the run's own.
+runner_cancelled() {
+  local cancelled=1
+  trap '' TERM
+  if [ "$phase" = running ] && ! kill -0 "$child" 2> /dev/null; then cancelled=""; fi
+  if [ -n "$cancelled" ]; then echo "on-gpu-host.sh: cancelled"; fi
+  if [ "$phase" = waiting ] && [ -n "$child" ]; then kill "$child" 2> /dev/null || true; fi
+  if [ "$phase" = running ]; then
+    while kill -0 "$child" 2> /dev/null; do docker stop -t 30 "$container" > /dev/null 2>&1 || sleep 0.5; done
+    docker rm -f "$container" > /dev/null 2>&1 || true
+  fi
+  status=$(cat "$exits" 2> /dev/null) || status=143
+  if [ "$mode" = bench ]; then bench_outcome "$log" "$status" ${cancelled:+cancelled}; fi
+  run_ended "$log" "$stamp" "$status"
+  exit 0
+}
+
+# run_ended <log> <stamp> <status> — the run's record kept as its own, then its status beside its log.
+# run-tests.sh writes the record at one path and refuses one with rows.
+run_ended() {
+  local record=$instance_dir/testdata/calibration/records.tsv
+  if [ -f "$record" ]; then mv "$record" "${record%.tsv}-$2.tsv"; fi
+  echo "$3" > "${1%.log}.status"
+}
+
+# cancel — stops the instance's run: its runner gives up its wait for the card or stops its
+# container, and keeps what any run that ends keeps. A container a killed runner left is removed.
+# Nothing going is no failure.
+cancel() {
+  local container
+  container=$(container_name)
+  run_probe
+  case "$RUN" in
+    busy) busy_instance ;;
+    free)
+      if docker container inspect "$container" > /dev/null 2>&1; then
+        container_removed "$container"
+        echo "removed $container, which an earlier run of $instance left on $(hostname)"
+      else
+        echo "no run of $instance is going on $(hostname)"
+      fi
+      return ;;
+  esac
+  kill -TERM "$pid" 2> /dev/null || true
+  while kill -0 "$pid" 2> /dev/null; do sleep 0.2; done
+  if [ ! -f "${log%.log}.status" ]; then
+    echo "on-gpu-host.sh: the $running run of $instance started $stamp ended with no status; its log is $log" >&2
+    exit 1
+  fi
+  if tr -d '\000' < "$log" | grep -qx 'on-gpu-host.sh: cancelled'; then
+    echo "cancelled the $running run of $instance started $stamp (exit $(cat "${log%.log}.status")):" \
+         "gpu.sh <host> pull brings its log and record home"
+  else
+    echo "the $running run of $instance started $stamp ended by itself (exit $(cat "${log%.log}.status"))" \
+         "before the cancel: gpu.sh <host> pull brings its log and record home"
+  fi
+}
+
+# container_removed <name> — stopped and removed; one already gone is no failure, one still there is.
+container_removed() {
+  docker stop -t 30 "$1" > /dev/null 2>&1 || true
+  docker rm -f "$1" > /dev/null 2>&1 || true
+  if docker container inspect "$1" > /dev/null 2>&1; then
+    echo "on-gpu-host.sh: $1 is still on $(hostname): docker could not remove it" >&2
+    exit 1
+  fi
 }
 
 # follow_command <mode> <stamp> [NAME=value]... — follows the run run-state named; one that ended in
@@ -408,7 +529,7 @@ follow_command() {
   exit "$(cat "${log%.log}.status")"
 }
 
-[ $# -gt 0 ] || die "want a command: install, pull, label, sf1, sf40-missing, sf40, settle, hold, busy, run, run-state or follow; see --help"
+[ $# -gt 0 ] || die "want a command: install, pull, label, sf1, sf40-missing, sf40, settle, hold, busy, run, run-state, follow or cancel; see --help"
 command=$1
 shift
 case "$command" in
@@ -418,7 +539,7 @@ case "$command" in
   hold) [ $# -ge 1 ] && [ $# -le 2 ] || die "hold <seconds> [<instance dir>]"; hold "$@" ;;
   fetch) [ $# = 2 ] || die "fetch <bucket> <dir>"; fetch "$@" ;;
   runner) data_ready; runner "$@" ;;
-  pull|label|sf1|sf40-missing|sf40|settle|run|run-state|follow)
+  pull|label|sf1|sf40-missing|sf40|settle|run|run-state|follow|cancel)
     data_ready
     active
     case "$command" in
@@ -440,6 +561,7 @@ case "$command" in
         run_probe
         case "$RUN" in going) echo "running $running $stamp" ;; busy) busy_instance ;; *) echo idle ;; esac ;;
       follow) [ $# -ge 2 ] || die "follow <mode> <stamp> [NAME=value]..."; follow_command "$@" ;;
+      cancel) [ $# = 0 ] || die "cancel takes no argument"; cancel ;;
     esac ;;
   *) die "unknown command $command" ;;
 esac

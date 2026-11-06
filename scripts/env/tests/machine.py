@@ -128,6 +128,12 @@ if a[0] == "run":
             k, _, v = value.partition("="); labels[k] = v
         i += 2
     image, cmd = a[i], a[i + 1:]
+    # The machine's home stands for the image's own /home/peacock, closed to another uid: a step's
+    # container reaches nothing there. An instance mounts its home over it.
+    if "-d" not in a:
+        for path in [workdir, *(dst for _, dst, _ in mounts)]:
+            if path and path.startswith(os.environ["HOME"].rstrip("/") + "/"):
+                sys.exit(f"docker: {path}: Permission denied")
     if cmd[:2] == ["bash", "-c"] and cmd[2].startswith("umask 002 &&"):
         os.umask(0o002)
     if cmd[:1] == ["cat"]:
@@ -144,7 +150,9 @@ if a[0] == "run":
         sys.exit(0)
     gen = [c for c in cmd if c.endswith("/generate_testdata.sh")]
     if gen:
-        stage = pathlib.Path(gen[0]).parent
+        # The container's path, as the host path its mount holds.
+        src, dst = next((src, dst) for src, dst, _ in mounts if gen[0].startswith(dst.rstrip("/") + "/"))
+        stage = pathlib.Path(src + gen[0][len(dst):]).parent
         bench = cmd[cmd.index("--bench") + 1]
         time.sleep(w["gen_seconds"])
         (stage / f"{bench}.sf1").mkdir()

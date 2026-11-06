@@ -1,6 +1,5 @@
-//! Benchmark run over the corpus: every query
-//! [`corpus_benchmark_cases.inc`](common/corpus_benchmark_cases.inc) names, at the modes it
-//! names — the registry's enabled device cells for tpch and tpcds. Asserts nothing about an
+//! Benchmark run over every query [`corpus_benchmark_cases.inc`](common/corpus_benchmark_cases.inc)
+//! names, at the modes it names (build-test.md, "Corpus benchmarks"). Asserts nothing about an
 //! answer. A case that fails is recorded in its section and fails, and the next case runs;
 //! `PEACOCK_BENCH_RESUME=1` keeps what this run already measured.
 //!

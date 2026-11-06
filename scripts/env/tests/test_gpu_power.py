@@ -32,6 +32,18 @@ def test_a_powered_host_is_started_and_soft_stopped_by_every_command():
         assert len(device_runs(rig)) == 1
 
 
+def test_cancel_leaves_a_stopped_host_stopped_and_cancels_on_a_running_one():
+    with GpuRig() as rig:
+        rig.nebius_host()
+        shipped(rig, host=HOST)
+        before = starts_and_stops(rig)
+        r = ok(rig.gpu(HOST, "cancel"))
+        assert "no run" in r.stdout and starts_and_stops(rig) == before, (r.stdout, rig.nebius_verbs())
+        rig.nebius(state="RUNNING")
+        r = ok(rig.gpu(HOST, "cancel"))
+        assert "no run" in r.stdout and rig.nebius()["state"] == "STOPPED", (r.stdout, rig.nebius_verbs())
+
+
 def test_a_powered_host_is_stopped_on_every_exit():
     with GpuRig() as rig:
         rig.nebius_host()

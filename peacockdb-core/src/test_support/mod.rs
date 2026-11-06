@@ -169,6 +169,12 @@ impl Mode {
         self.name.replace('-', "_")
     }
 
+    /// Whether the corpus benchmark times this mode. A row-group mode checks correctness, and
+    /// its timings are not compared.
+    pub fn is_benchmarked(&self) -> bool {
+        !matches!(self.sizing, BatchSizing::OneBatchPerRowGroup)
+    }
+
     pub(crate) fn knobs(&self) -> PlanKnobs {
         PlanKnobs {
             target_partitions: self.target_partitions,
