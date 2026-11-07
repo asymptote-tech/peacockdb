@@ -334,6 +334,12 @@ nothing.
 
 0 blocking, 2 important, 2 nits, all markdown, fixed by the coordinator: #308 retitled "sf40 tp4_sized timeouts" (only q9 was seen spinning; q18 and q24 kept the card 32-41 % busy; q64 unobserved), its Priority line dropped; `tickets.md` next number 309 and 92 open; the Reading and #238 rewrapped; build-test.md's four cases "estimated not to fit".
 
+## Completeness pass (2026-11-07)
+
+- Reviewer (what is wrong): 0 blocking, 1 important; Done-when 1-4 met, Profiles met under the recorded decisions. Important: build-test.md step 6 joins only the new segments, which `split_record.py` refuses now that the list declares two modes.
+- Analyst (what is missing): 0 blocking, 1 important, the same gap and more of it: step 4 named only the tp1_single run; both modes must share one heading. Nothing containers-only needs is missing.
+- Fixed by the coordinator in build-test.md: step 4 gains the tp4_sized run with `--within`; step 6, the general record recipe and the data-flow diagram fetch the published records and join them first; the one-heading rule; the profile diagram line takes `--mode`; "Every derived file has exactly one producer" names the tp4-sized exception; "What `calls.tsv` does not cover" scoped to tp1-single; the test totals (8193, Rust 6303, Python 1604; `test_cpu_corpus` row back to 2450, its registry test counted under Registry). architecture.md: none.
+
 ## Checkpoints
 
 | step | commit | note |
