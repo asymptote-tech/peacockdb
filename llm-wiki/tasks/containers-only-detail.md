@@ -958,3 +958,13 @@ Not run on dev, by design: the run-image commands of "Images" (a pull, `docker r
 `docker image inspect` of a run image: no run image on dev, and none is pulled), `image.sh push`,
 `gh workflow run`, `docker login`, verda (no address; down). The VM half (nebius-gpu, the CPU-VM
 build, the H100) is next.
+
+## Task 9, the VM half (coordinator's dispatch notes)
+
+- Task 8's PR run 42412769493 green. Task 9 Step 1, Step 3 and Step 2's dev half committed as
+  `d55ad41b`. Open: Step 2's VM commands (nebius-gpu, the CPU-VM build, the H100), and the
+  multi-GPU build line on 26.02 (not run on dev: no room for the 26.02 build image; run it on
+  nebius-cpu128 during the CPU-VM session).
+- Watch: the CPU-VM recipe names `peacockdb-build:cudf-25.02`, the moving tag, whose inputs are
+  master's, not this tree's, until the branch lands; `check-build-image.sh` and the recipe must agree
+  with the inputs-tag rule (`image-ref.sh`).
