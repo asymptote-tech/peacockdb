@@ -250,6 +250,7 @@ nothing.
 - Final checks: full `cargo test --features rust-only -p peacockdb-core` exit 0, no warnings
   (1209 + 2 ignored, 2451, 66, 3, …); every `scripts/calibration/tests/test_*.py` passes (119);
   the page's `--check` exit 0.
+- 2026-11-07 (coordinator): Tasks 3 and 4 committed together (7b7bc64d, bb89cbc4); tpch profiles complete. **Decided: profile the remaining 66 tpcds cases** (about 7.5 H100 hours): the spec asks for a profile of every benchmarked case, and "failed capture" covers a capture that cannot be taken (q88, q80, q14, q61 by size), not one skipped for time. q1-q6 are captured and derived in `/tmp/tp4-sized/vm-derived/`. A fresh developer resumes at q7.
 
 ## Checkpoints
 
