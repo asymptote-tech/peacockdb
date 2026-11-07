@@ -820,3 +820,10 @@ test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
   50-minute limit). The job printed no `df -h /` (no step runs one); Step 5's reading stands. The
   cleanup soft-stopped the VM (19:11:01Z, `stopped`); `nebius.sh status` afterwards: STOPPED.
   Task 6 done; next: Task 7.
+
+## Task 7 Step 4 (live)
+
+- `884be32f` pushed. `exec-model-corpus.yml -f filter=q1` dispatched 2026-11-07T20:02:55Z: run
+  42409128248 green, three shards, each file ≥ 4 tests, 75 in all, as the developer's local run had
+  them; `call-cost` skipped under a filter, as designed (proven on dev only). PR run 42409132496
+  green, every job. Task 7 done; next: Task 8.

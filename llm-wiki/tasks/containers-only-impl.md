@@ -594,7 +594,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   - `call-cost` (not in the plan; exec-model-corpus.yml's second job) uses the action too:
     `fetch_record.sh tpch.sf40` and the check through build-test.sh, the keys by `--pass-env`.
 - [x] **Step 3: run** the guard → PASS.
-- [ ] **Step 4: live.**
+- [x] **Step 4: live.**
   - (coordinator) `gh workflow run exec-model-corpus.yml --ref ENS-containers-only -f filter=q1`.
     Pass means three shards green, each running ≥ 1 test; a red shard reaches the developer as a
     failing test.
@@ -603,7 +603,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     AWS_ACCESS_KEY_ID --pass-env AWS_SECRET_ACCESS_KEY -- python3 scripts/check_s3_datasets.py
     --endpoint https://storage.eu-north1.nebius.cloud:443` → exit 0. Record in the detail file
     that the ssh half was not run, and why. Done on dev, 2026-11-07: exit 0.
-- [ ] **Step 5: commit** `containers-only: the manual workflows run in the build image; every CI job is accounted for`.
+- [x] **Step 5: commit** `containers-only: the manual workflows run in the build image; every CI job is accounted for`.
 
 ### Task 8: delete the conda and machine-setup scripts
 
