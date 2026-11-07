@@ -154,7 +154,132 @@ Branch `ENS-containers-only`, forked from `ENS-tp4-sized` at `9058709c`; its PR 
 
 ## Counts before
 
-(Task 3 Step 1, coordinator.)
+The count baseline: `ENS-tp4-sized`'s run 42365843466 (workflow_dispatch at `b95d08a0`, every
+job green, GPU included). Its last PR run, 42367917405 at `9058709c`, was documentation-only and
+skipped every test job, so the dispatch, the parent's last full green run, stands in. Per job, the
+lines matching `test result:`, `[  PASSED  ]` and the Python summaries, in log order (timings cut).
+The cost-report job's two `1 runs …, 1 failed` lines are in the baseline as they are.
+
+```
+=== 0_GPU Tests (nebius-gpu).txt
+[  PASSED  ] 67 tests.
+[  PASSED  ] 5 tests.
+[  PASSED  ] 56 tests.
+[  PASSED  ] 136 tests.
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 650 filtered out
+test result: ok. 748 passed; 0 failed; 0 ignored; 0 measured; 1216 filtered out
+test result: ok. 1009 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+=== 2_CI Pipeline (cudf 25.02).txt
+100% tests passed, 0 tests failed out of 1
+4 passed, 0 failed
+3 passed, 0 failed
+2 passed, 0 failed
+2 runs, 0 failed
+1 runs, 0 failed
+1 passed, 0 failed
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 66 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+== SUMMARY == 29/29 passed; 0 failed. (12 exhaustive, 4 sampled)
+== SUMMARY == 31/31 passed; 0 failed. (21 exhaustive, 7 sampled)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1211 filtered out
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 1209 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out
+test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+=== 3_Cost report (coverage + ratio).txt
+Ran 41 tests in 0.002s
+Ran 29 tests in 0.122s
+Ran 11 tests in 0.062s
+18 passed, 0 failed
+5 passed, 0 failed
+4 passed, 0 failed
+23 passed, 0 failed
+28 passed, 0 failed
+18 passed, 0 failed
+5 passed, 0 failed
+15 passed, 0 failed
+9 passed, 0 failed
+14 passed, 0 failed
+4 passed, 0 failed
+17 passed, 0 failed
+72 passed, 0 failed
+7 passed, 0 failed
+2 passed, 0 failed
+12 passed, 0 failed
+2 passed, 0 failed
+9 passed, 0 failed
+3 passed, 0 failed
+12 passed, 0 failed
+2 passed, 0 failed
+4 passed, 0 failed
+26 passed, 0 failed
+8 passed, 0 failed
+6 passed, 0 failed
+8 passed, 0 failed
+4 passed, 0 failed
+15 passed, 0 failed
+9 passed, 0 failed
+5 passed, 0 failed
+3 passed, 0 failed
+7 passed, 0 failed
+5 passed, 0 failed
+11 passed, 0 failed
+10 passed, 0 failed
+7 passed, 0 failed
+10 passed, 0 failed
+5 passed, 0 failed
+8 passed, 0 failed
+1 passed, 0 failed
+7 passed, 0 failed
+21 passed, 0 failed
+19 passed, 0 failed
+9 passed, 0 failed
+3 passed, 0 failed
+1 passed, 0 failed
+18 passed, 0 failed
+1 runs, 1 failed
+1 runs, 1 failed
+12 passed, 0 failed
+41 passed, 0 failed
+10 passed, 0 failed
+6 passed, 0 failed
+3 passed, 0 failed
+17 passed, 0 failed
+9 passed, 0 failed
+12 passed, 0 failed
+7 passed, 0 failed
+4 passed, 0 failed
+12 passed, 0 failed
+19 passed, 0 failed
+7 passed, 0 failed
+5 passed, 0 failed
+8 passed, 0 failed
+30 passed, 0 failed
+14 passed, 0 failed
+11 passed, 0 failed
+1 passed, 0 failed
+29 passed, 0 failed
+11 passed, 0 failed
+11 passed, 0 failed
+15 passed, 0 failed
+10 passed, 0 failed
+test result: ok. 49 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+=== 4_CI Pipeline (build 25.02 for GPU).txt
+=== 5_CI Pipeline (cudf 26.02).txt
+100% tests passed, 0 tests failed out of 1
+== SUMMARY == 29/29 passed; 0 failed. (12 exhaustive, 4 sampled)
+== SUMMARY == 31/31 passed; 0 failed. (21 exhaustive, 7 sampled)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1211 filtered out
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 1209 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out
+test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+=== 7_Changed paths.txt
+```
 
 ## VM time
 
