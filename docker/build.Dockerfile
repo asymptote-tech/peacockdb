@@ -14,6 +14,11 @@ FROM ubuntu:24.04 AS cudf-25.02
 ARG GCC_25_02
 ENV GCC_VERSION=${GCC_25_02}
 
+# 25.10 has a build image and no run image: CI's second cuDF leg.
+FROM ubuntu:24.04 AS cudf-25.10
+ARG GCC_25_10
+ENV GCC_VERSION=${GCC_25_10}
+
 FROM ubuntu:24.04 AS cudf-26.02
 ARG GCC_26_02
 ENV GCC_VERSION=${GCC_26_02}
@@ -41,12 +46,13 @@ RUN apt-get update \
 # user's uid instead. ubuntu:24.04's own `ubuntu` holds uid 1000.
 RUN userdel -r ubuntu && useradd -m -u 1000 -s /bin/bash peacock
 
-# /opt/cudf is the cuDF environment the committed device answers came from, package for package.
-# Its Python (3.12, its own pandas) and its nvcc are never on PATH. /opt/nvcc is nvcc
-# NVCC_VERSION with the headers and runtime it compiles against, taken line by line from the
-# 26.02 spec: the nvcc both versions' device answers were built with. Its include directory is
-# the toolkit's for CMake, so it also holds the math libraries' headers raft and cuVS include
-# (the -dev packages); their libraries are linked from /opt/cudf, which CMAKE_PREFIX_PATH finds first.
+# /opt/cudf is the version's spec, package for package: for 25.02 and 26.02, the cuDF environment
+# the committed device answers came from. Its Python (3.12, its own pandas) and its nvcc are never
+# on PATH. /opt/nvcc is nvcc NVCC_VERSION with the headers and runtime it compiles against, taken
+# line by line from the 26.02 spec whatever the image's cuDF: the nvcc the device answers were
+# built with. Its include directory is the toolkit's for CMake, so it also holds the math
+# libraries' headers raft and cuVS include (the -dev packages); their libraries are linked from
+# /opt/cudf, which CMAKE_PREFIX_PATH finds first.
 COPY docker/conda/ /tmp/conda/
 RUN nvcc_names='cuda-version|cuda-nvcc-impl|cuda-nvcc-tools|cuda-nvcc-dev_linux-64|cuda-crt-dev_linux-64|cuda-crt-tools|cuda-nvvm-dev_linux-64|cuda-nvvm-impl|cuda-nvvm-tools|cuda-cudart|cuda-cudart_linux-64|cuda-cudart-dev|cuda-cudart-dev_linux-64|cuda-cudart-static|cuda-cudart-static_linux-64|cuda-cccl_linux-64|libcublas-dev|libcurand-dev|libcusparse-dev|libcusolver-dev|libcufile-dev' \
  && { sed -n '1,/^@EXPLICIT$/p' /tmp/conda/cudf-26.02.spec; \

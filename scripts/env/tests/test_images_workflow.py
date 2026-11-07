@@ -137,6 +137,12 @@ def committed_cudf_versions():
     return sorted(p.name[len("cudf-"):-len(".spec")] for p in (REPO / "docker" / "conda").glob("cudf-*.spec"))
 
 
+def build_only_versions():
+    """The versions with a spec and no DRIVER_MINIMUM_<v> pin: a build image and no run image."""
+    pins = (REPO / "docker" / "pins.env").read_text()
+    return [v for v in committed_cudf_versions() if f"\nDRIVER_MINIMUM_{v.replace('.', '_')}=" not in pins]
+
+
 def test_the_reader_reads_what_it_is_given():
     with tempfile.TemporaryDirectory() as tmp:
         path = pathlib.Path(tmp) / "w.yml"
@@ -169,10 +175,17 @@ def test_the_choices_are_the_kinds_and_the_committed_cudf_versions():
 
 def test_all_runs_every_other_choice_and_one_choice_runs_itself():
     inputs = read_workflow()["on"]["workflow_dispatch"]["inputs"]
-    for name, expression in job()["strategy"]["matrix"].items():
+    axes = {name: value for name, value in job()["strategy"]["matrix"].items() if name != "exclude"}
+    assert set(axes) == {"kind", "cudf"}, axes
+    for name, expression in axes.items():
         everything = json.dumps(inputs[name]["options"][:-1], separators=(",", ":"))
         assert expression == (f"${{{{ fromJSON(inputs.{name} == 'all' && '{everything}' "
                               f"|| format('[\"{{0}}\"]', inputs.{name})) }}}}"), expression
+
+
+def test_a_build_only_version_has_no_run_job():
+    assert build_only_versions() == ["25.10"], build_only_versions()
+    assert job()["strategy"]["matrix"]["exclude"] == [{"kind": "run", "cudf": v} for v in build_only_versions()]
 
 
 def test_the_token_writes_packages_and_only_reads_the_repository():
@@ -183,7 +196,11 @@ def test_the_token_writes_packages_and_only_reads_the_repository():
 
 PUSH = """set -euo pipefail
 docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
-scripts/env/image.sh push "$KIND" "$CUDF"
+# :cudf-<v> moves only from the default branch, so another branch's images never replace what
+# master's checks pull by it.
+moving=()
+if [ "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH" ]; then moving=(--moving); fi
+scripts/env/image.sh push "$KIND" "$CUDF" "${moving[@]}"
 """
 
 
@@ -200,7 +217,8 @@ def test_the_job_runs_its_four_steps_unconditionally():
 def test_the_image_is_built_and_pushed_through_image_sh_and_nothing_else():
     assert job()["env"] == {"KIND": "${{ matrix.kind }}", "CUDF": "${{ matrix.cudf }}"}
     assert step("Build")["run"] == 'scripts/env/image.sh build "$KIND" "$CUDF"'
-    assert step("Push")["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert step("Push")["env"] == {"GH_TOKEN": "${{ github.token }}",
+                                   "DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}"}
     assert step("Push")["run"] == PUSH
     for s in job()["steps"]:
         assert not re.search(r"\bdocker\s+(image\s+)?(build|push)\b|\bbuildx\b", s.get("run", "")), s
@@ -265,6 +283,32 @@ def test_the_disk_is_freed_before_it_is_measured():
     for freeing in ["sudo rm -rf /usr/local/lib/android ", "docker image prune --all"]:
         freed = [i for i, c in enumerate(calls) if c.startswith(freeing)]
         assert freed and freed[-1] < measured[-1], (freeing, calls)
+
+
+def push_args(github_ref, default_branch="master"):
+    """The arguments the Push step gives image.sh, run with fakes for docker and image.sh."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        log = root / "log"
+        fakes = {root / "bin" / "docker": "cat > /dev/null\n",
+                 root / "scripts" / "env" / "image.sh": 'printf "%s\\n" "$@" > "$FAKE_LOG"\n'}
+        for path, body in fakes.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("#!/bin/bash\n" + body)
+            path.chmod(0o755)
+        env = dict(os.environ, PATH=f"{root / 'bin'}:{os.environ['PATH']}", FAKE_LOG=str(log), GH_TOKEN="t",
+                   GITHUB_ACTOR="a", KIND="build", CUDF="25.02", GITHUB_REF=github_ref, DEFAULT_BRANCH=default_branch)
+        proc = subprocess.run(["bash", "-c", step("Push")["run"]], cwd=root, env=env,
+                              capture_output=True, text=True, timeout=30)
+        assert proc.returncode == 0, proc
+        return log.read_text().splitlines()
+
+
+def test_only_the_default_branch_moves_the_tag():
+    assert push_args("refs/heads/master") == ["push", "build", "25.02", "--moving"]
+    assert push_args("refs/heads/main", default_branch="main") == ["push", "build", "25.02", "--moving"]
+    for ref in ("refs/heads/ENS-containers-only", "refs/tags/master", "refs/heads/master-x"):
+        assert push_args(ref) == ["push", "build", "25.02"], ref
 
 
 def test_every_run_block_parses_in_bash():

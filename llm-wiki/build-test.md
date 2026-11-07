@@ -2605,29 +2605,33 @@ hand. A new region repeats these steps.
 
 ## Images
 
-Two images per cuDF version, built from `docker/` and published on `ghcr.io/asymptote-tech/`.
-`<v>` is a version with a committed spec in `docker/conda/`: 25.02 or 26.02. Sizes are docker's,
-in GB of 10^9 bytes.
+A build image and a run image per cuDF version, built from `docker/` and published on
+`ghcr.io/asymptote-tech/`. `<v>` is a version with a committed spec in `docker/conda/`: 25.02,
+25.10 or 26.02. 25.10 is for CI only: a build image and no run image. A version is build-only
+when `docker/pins.env` has no `DRIVER_MINIMUM_<v>`. Sizes are docker's, in GB of 10^9 bytes.
 
-| image | holds | size (25.02, 26.02) |
+| image | holds | size (25.02, 25.10, 26.02) |
 |---|---|---|
-| `peacockdb-build:cudf-<v>` | every build mode: rust-only, the FFI build, `--features gpu`, the staged binaries | 10.0 GB, 9.74 GB |
-| `peacockdb-run:cudf-<v>` | the runtime of the same cuDF and `run-tests.sh`; nothing to build with | 5.09 GB, 6.17 GB |
+| `peacockdb-build:cudf-<v>` | every build mode: rust-only, the FFI build, `--features gpu`, the staged binaries | 10.0 GB, 10.8 GB, 9.74 GB |
+| `peacockdb-run:cudf-<v>` | the runtime of the same cuDF and `run-tests.sh`; nothing to build with | 5.09 GB, none, 6.17 GB |
 
-Each image carries two tags. `:cudf-<v>` is the latest published. `:cudf-<v>-<commit>` names the
-commit it was built from, 12 hex digits; the label `org.opencontainers.image.revision` holds the
-same commit. Pulling needs no login: `docker pull ghcr.io/asymptote-tech/peacockdb-run:cudf-25.02`.
+Each image carries three tags. `:cudf-<v>` is the latest published from master.
+`:cudf-<v>-in-<h>`, the inputs tag, names what it was built from: `<h>` is the first 12 hex digits
+of the sha256 of its `peacockdb.inputs` lines (`image_inputs_tag` in `scripts/lib/image-inputs.sh`).
+A tree finds the image of its own inputs by it. `:cudf-<v>-<commit>` names the commit it was built
+from, 12 hex digits; the label `org.opencontainers.image.revision` holds the same commit.
+Pulling needs no login: `docker pull ghcr.io/asymptote-tech/peacockdb-run:cudf-25.02`.
 No image holds a secret, a host or Claude Code. Both run as any uid: pass
 `--user "$(id -u):$(id -g)"`. The default user is `peacock`, uid 1000, never root.
 
 ### The build image
 
-- `/opt/cudf` is the cuDF prefix (`CUDF_ROOT`), package for package the nebius-gpu environment the
-  committed device answers came from. Its `bin/` is not on PATH, and its `lib/` is not on the
-  loader path: an FFI test binary run in the image needs `-e LD_LIBRARY_PATH=/opt/cudf/lib`, or
-  it exits 127 on `libcudf.so`.
-- nvcc 12.9.86 in `/opt/nvcc`, gcc 12 (25.02) or 14 (26.02) as `CC`/`CXX`, cmake, ninja, rust,
-  ccache, patchelf. `scripts/build.sh` needs `--cudf_ROOT /opt/cudf --gcc-version "$GCC_VERSION"`.
+- `/opt/cudf` is the cuDF prefix (`CUDF_ROOT`), package for package the version's spec. For 25.02
+  and 26.02 that is the nebius-gpu environment the committed device answers came from. Its `bin/`
+  is not on PATH, and its `lib/` is not on the loader path: an FFI test binary run in the image
+  needs `-e LD_LIBRARY_PATH=/opt/cudf/lib`, or it exits 127 on `libcudf.so`.
+- nvcc 12.9.86 in `/opt/nvcc`, gcc 12 (25.02) or 14 (25.10, 26.02) as `CC`/`CXX`, cmake, ninja,
+  rust, ccache, patchelf. `scripts/build.sh` needs `--cudf_ROOT /opt/cudf --gcc-version "$GCC_VERSION"`.
 - DuckDB 1.5.4 with its tpch and tpcds extensions in `/opt/duckdb-ext`. The image sets
   `PEACOCK_DUCKDB_EXTENSION_DIR`, so `generate_testdata.sh` installs them offline.
 - Python 3.13 in `/opt/venv`, exactly `docker/venv.lock`: the versions the committed costs ran on.
@@ -2679,9 +2683,11 @@ The binaries and data are mounted, never in the image:
 - `scripts/env/image.sh build <build|run> <v>` builds from the working tree. `--dry-run` prints
   the `docker build` line instead.
 - **The commit tag comes only from a clean tree**: `git status --porcelain` empty, untracked files
-  included. A dirty build gets `:cudf-<v>` alone and the revision `<commit>-dirty`.
-- `scripts/env/image.sh push <build|run> <v>` pushes both tags. It refuses unless HEAD's commit
-  tag exists locally and `:cudf-<v>` is the same image. So: commit, build, push.
+  included. A dirty build gets `:cudf-<v>` and the inputs tag, and the revision `<commit>-dirty`.
+- `scripts/env/image.sh push <build|run> <v>` pushes the inputs tag and the commit tag.
+  `--moving` pushes `:cudf-<v>` too. It refuses unless HEAD's commit tag, the inputs tag and
+  `:cudf-<v>` all exist locally and are one image. So: commit, build, push.
+- `image.sh build run <v>` and `push run <v>` refuse a build-only version, exit 2.
 - **From a host**, docker must be logged in to ghcr.io with a token holding `write:packages`:
   `gh auth refresh -s write:packages`, then
   `gh auth token | docker login ghcr.io -u <github user> --password-stdin`. A package pushed for
@@ -2689,9 +2695,11 @@ The binaries and data are mounted, never in the image:
 - **From GitHub**, `.github/workflows/images.yml`:
   `gh workflow run images.yml -f kind=<build|run|all> -f cudf=<v|all>`. GitHub can dispatch it
   only once master holds it. A dispatch runs the workflow and the commit of the ref it names
-  (`--ref`, master by default), and moves `:cudf-<v>`. One job per image, pushing with the job's
-  own token. If the job's push is denied, give this repository the Write role under the package's
-  "Manage Actions access".
+  (`--ref`, master by default). Only a dispatch on master moves `:cudf-<v>`; one on another
+  branch pushes the inputs and commit tags alone, so the chain's earlier trees keep their image.
+  One job per image, pushing with the job's own token. A build-only version gets no run job. If
+  the job's push is denied, give this repository the Write role under the package's "Manage
+  Actions access".
 - **The runner's disk.** A standard runner has 14 GB. The largest build holds 12.2 GB at once:
   the 26.02 run image holds its 6.09 GB prefix twice, in its stage and in the final copy. A build
   image peaks at about 10.6 GB, its 7.5 GB conda layer beside micromamba's downloads. So a job
