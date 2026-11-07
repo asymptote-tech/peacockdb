@@ -3273,6 +3273,12 @@ q33, q56, q60, q61, q71, q81, q83, q85, q91 and q92. The H100's tpcds `calls.tsv
 65, from a trace pass over those alone. Its `loads.tsv` and `hbm.tsv` cover all 79, since neither
 reads a plan. tpch's three files cover all 47. No sf40 plan goldens are kept.
 
+At `tp4-sized` the files hold tpch's 45 timed queries, but `calls.tsv` holds 42: the recipe check
+refuses `global_stddev`, q15 and q22 at sf40. A tp4_sized capture is far larger than a tp1_single
+one, since sized batches make a call per batch: tpch's 45 cases made 32 GB of raw nsys data and a
+5.9 GB export. So tp4-sized captures are read on the VM, one case at a time for tpcds, and only
+the derived files come home.
+
 **DuckDB's side, again**, on nebius-cpu128 (`$C`, "Nebius host"):
 
 1. `$C start`; `D=$(scripts/nebius-sync.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 --no-data)`.
