@@ -15,7 +15,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import nsys_hbm  # noqa: E402
 import record  # noqa: E402
 from capture import Capture  # noqa: E402
-from harness import main  # noqa: E402
+from harness import main, raises  # noqa: E402
 
 CASE = "tpch.sf40 q6 tp1-single"
 PEAK_BW = 1e12
@@ -273,6 +273,56 @@ def test_cases_captured_apart_merge_into_one_file_that_covers_the_record():
             assert "overlap" in str(refused), refused
         else:
             raise AssertionError("a part given twice was merged")
+
+
+def test_a_merge_scoped_to_a_mode_covers_that_mode_s_calls_alone():
+    """A device's record holds every mode its list times, and a counters pass runs one mode.
+
+    `--mode` holds the parts to that mode's calls alone, both ways: a call of the mode with no
+    part is still refused, and so is a part of another mode. Without it, the other mode's
+    calls are calls with no part.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        path = tmp / "tpch.tsv"
+        record.write_tsv(path, HEADING, COLUMNS.split(), [
+            ["tpch", "40", query, mode, 0, "CudfScan", "0", 0, "CudfScan", "0", run,
+             "100", "800", "100", "800", "7", "5"]
+            for query, mode in (("q6", "tp1-single"), ("q6", "tp4-sized"), ("q1", "tp4-sized"))
+            for run in range(2)])
+        parts = []
+        for case in ("tpch.sf40 q6 tp4-sized", "tpch.sf40 q1 tp4-sized"):
+            capture = scan_capture(tmp, case, [30.0, 30.0])
+            parts.append(tmp / f"part-{case.split()[1]}.tsv")
+            sys.argv = ["nsys_hbm.py", "--capture", str(capture), "--record", str(path),
+                        "--case", case, "--peak-bw", str(PEAK_BW), "--out", str(parts[-1])]
+            nsys_hbm.main()
+        merged = tmp / "hbm.tsv"
+        both = ["--parts", str(parts[0]), "--parts", str(parts[1])]
+
+        sys.argv = ["nsys_hbm.py", *both, "--record", str(path), "--mode", "tp4-sized",
+                    "--out", str(merged)]
+        nsys_hbm.main()
+        rows = record.read_tsv(merged)
+        assert [(r["query"], r["mode"]) for r in rows] == [("q6", "tp4-sized"),
+                                                         ("q1", "tp4-sized")], rows
+
+        merged.unlink()
+        for args, said in (([], "tp1-single"),
+                           (["--mode", "tp4-sized"], "q1"),
+                           (["--mode", "tp1-single"], "tp4-sized"),
+                           (["--mode", "tp4-rowgroup"], "tp4-rowgroup")):
+            given = both if said != "q1" else both[:2]
+            sys.argv = ["nsys_hbm.py", *given, "--record", str(path), *args, "--out", str(merged)]
+            with raises(SystemExit, match=said):
+                nsys_hbm.main()
+            assert not merged.exists(), args
+
+        sys.argv = ["nsys_hbm.py", "--capture", str(capture), "--record", str(path),
+                    "--case", "tpch.sf40 q1 tp4-sized", "--peak-bw", str(PEAK_BW),
+                    "--mode", "tp4-sized", "--out", str(merged)]
+        with raises(SystemExit, match="--mode"):
+            nsys_hbm.main()
 
 
 def test_a_capture_of_another_case_than_named_is_refused():

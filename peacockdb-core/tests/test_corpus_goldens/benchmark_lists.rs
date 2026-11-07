@@ -330,10 +330,10 @@ fn device_list_problem(device: &str, own: &Files, list: &Files) -> Result<(), St
 /// Other engines' result trees under `benchmark-results/`, read by their own tests: no device.
 const OTHER_ENGINES: &[&str] = &["duckdb-cpu128"];
 
-/// The H100's tree, and the modes its `cases.csv` is written at, in row order: sf40-baseline
-/// (tp1_single). tp4-sized adds `"tp4_sized"`.
+/// The H100's tree, and the modes its `cases.csv` is written at, in row order: tp1_single and
+/// tp4_sized only, the batching chain's two modes (sf40-baseline, tp4-sized).
 const H100: &str = "h100-80gb-hbm3";
-const H100_MODES: &[&str] = &["tp1_single"];
+const H100_MODES: &[&str] = &["tp1_single", "tp4_sized"];
 
 /// The H100's `cases.csv` is what its tree measured of the main list's `tp1_single` lines, in the
 /// list's order: `ok` where a section is timed, `skipped` with the reason where every one failed,
@@ -414,6 +414,47 @@ fn the_h100_list_is_the_lists_measured() {
             line_difference(&have, &want)
         );
     }
+}
+
+/// A query timed in both of the H100's files is one `ok` row carrying both modes, in
+/// `H100_MODES`' order.
+#[test]
+fn the_h100_list_is_written_at_tp1_single_and_tp4_sized() {
+    let candidates = [(
+        "tpch".to_string(),
+        "q1".to_string(),
+        vec!["tp1_single".to_string(), "tp4_sized".to_string()],
+    )];
+    let files = |_: &str, _: &str| Some(BTreeMap::from([("q1".to_string(), Measured::Timed)]));
+    let rows = device_lines(&candidates, H100_MODES, &files, &BTreeMap::new()).unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].status, CaseStatus::Ok);
+    assert_eq!(rows[0].modes, ["tp1_single", "tp4_sized"]);
+}
+
+/// A row listed at both modes owes a section in both files: the tree without its tp4_sized
+/// file is refused naming it, and with it passes, owing no file at another mode.
+#[test]
+fn the_h100_tree_is_held_to_both_modes_of_its_list() {
+    let tree = synthesized_tree("h100-two-modes", H100, Some("NVIDIA H100 80GB HBM3"));
+    let device = tree.join(H100);
+    std::fs::write(
+        device.join(DEVICE_LIST),
+        format!("{DEVICE_CASES_HEADER}\ntpch,40,q1,tp1_single|tp4_sized,ok,\n"),
+    )
+    .unwrap();
+    let main = declared_files(&listed_cases());
+    let without = missing_case_problem(&tree, &main);
+    std::fs::copy(
+        device.join("tpch.sf40/tp1_single.benchmark.txt"),
+        device.join("tpch.sf40/tp4_sized.benchmark.txt"),
+    )
+    .unwrap();
+    let with = missing_case_problem(&tree, &main);
+    let _ = std::fs::remove_dir_all(&tree);
+    let problem = without.expect_err("q1 is listed at tp4_sized and its file is absent");
+    assert!(problem.contains("tp4_sized.benchmark.txt"), "{problem}");
+    assert_eq!(with, Ok(()));
 }
 
 /// Every directory directly under `root` but `OTHER_ENGINES`, each one device's tree.

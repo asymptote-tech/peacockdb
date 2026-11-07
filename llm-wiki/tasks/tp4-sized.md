@@ -42,3 +42,11 @@ commit. A case whose capture fails is listed with the reason, as a failed benchm
 | `llm-wiki/reports/query-batching.md` | the column |
 
 Component-level API: none.
+
+## Signoff (2026-11-07)
+
+Solved under its constraints. Done-when 1-4 are met: 126 cases at sf40 tp4_sized on the H100, 5 recorded as failed (tpch q8 at the step cap, #238; four 1800 s timeouts, #308). The list is written at both modes, and the report and page carry the sums. Two review rounds and a completeness pass. Shortcuts, all recorded in `tp4-sized-detail.md`:
+- The binary shipped was sf40-baseline's (`b415d375`, before dag-driver), so tp4_sized and tp1_single come from one engine, not from this branch's.
+- Profiles: tpch all 45, tpcds 72 of 76. q14, q61, q80 and q88 were left out on an estimated capture size, never attempted. `calls.tsv` misses 3 tpch and 14 tpcds cases the sf1 recipe check refuses.
+- The tpcds passes ran a case at a time on the VM by drivers that are not committed. build-test.md step 7 describes them in prose. The merge and the profile script now take `--mode`.
+- The H100 ran 16.4 h for this task.
