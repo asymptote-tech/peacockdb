@@ -2476,7 +2476,7 @@ nebius-gpu's boot disk is 96 GB in all, and two chains and CI share it.
 
 - Run `df -h /` on the VM before every build.
 - Below 20 GB free, clean what can be rebuilt: stale build and target dirs of your own tree,
-  and `~/peacockdb-ci/`, the old CI runner's cache and run dirs, which nothing reads now.
+  and `~/peacockdb-ci/`, the old CI runner's cache and run dirs, once master's `gpu-tests` no longer ships there.
   `du -xh -d2 ~ | sort -rh | head` shows what is using it. `~/peacock/peacockdb/`, CI's shipped
   install and testdata, may go too, but the next CI run then sends it all again, which takes
   most of its 50 minutes.

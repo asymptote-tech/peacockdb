@@ -374,6 +374,9 @@ def test_refuses_nothing_to_do_and_a_command_beside_an_action():
         for args in ([], ["--rust-only"], ["--build", "--", "true"], ["--gpu", "--", "true"], ["--"]):
             r = t.run(*args)
             assert r.returncode == 2 and r.stderr, (args, r.returncode, r.stderr)
+        for flag in ("--build", "--run", "--gpu", "--rust-only", "--no-release-bench"):
+            r = t.run(flag, "--", "true")
+            assert r.returncode == 2 and "a command runs alone" in r.stderr, (flag, r.returncode, r.stderr)
         r = t.run("--gpu", "--rust-only", "--build")
         assert r.returncode == 2 and "--gpu" in r.stderr and "--rust-only" in r.stderr, r.stderr
         assert t.docker() == []

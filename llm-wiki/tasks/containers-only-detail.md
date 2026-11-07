@@ -496,6 +496,36 @@ Branch `ENS-containers-only`, forked from `ENS-tp4-sized` at `9058709c`; its PR 
   - cpp-build-2502's cold build: the C++ (ccache restored from the 25.02 leg's key) and a
     `--features gpu` cargo build at `CARGO_BUILD_JOBS=3` (build-test.sh's throttle on a 16 GB
     runner).
+- **Step 5, `prepare --no-sf40` on nebius-gpu by hand (2026-11-07, developer): exit 0, first try.**
+  `PEACOCK_BUILD_IMAGE=…peacockdb-build:cudf-25.02-in-50a0c1d7779e` and
+  `PEACOCK_RUN_IMAGE=…peacockdb-run@sha256:3a69a03c7b69…`, from `image-ref.sh` as the CI step
+  sets them; `timeout 2400 scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt
+  prepare --no-sf40`. Wall time 569 s (17:32:35 → 17:42:04 UTC), almost all of it the two pulls
+  and sf1's generation. No code change.
+  - What the VM already had: Docker, `nvidia-ctk` and the `nvidia` runtime, so `vm_system`
+    installed nothing and restarted nothing. Driver 580.173.02 on the L40S, above
+    `DRIVER_MINIMUM_25_02=535.104.05`: no exit 3. No exit 4 (`--no-sf40` skips `vm_nsight`).
+  - `df -h /`: 22 GB free of 96 GB at start, 35 GB after the cleanup below, 20 GB after
+    prepare. The images took 15 GB (`/var/lib/docker`): the build image 10.0 GB
+    (`sha256:1727527707dd…`, repo digest `b8da5a94553c…`), the run image 5.1 GB
+    (`sha256:a88a44cefed4…`). They share one base layer. sf1 took 774 MB under
+    `/var/lib/peacock/d608b4d0ede659a7` (tpch.sf1 367 MB, tpcds.sf1 408 MB). The kit went
+    to `~/peacock/peacockdb-beta/` (88 KB). CI's prepare uses `~/peacock/peacockdb/` and finds the
+    same sf1 dir already there.
+  - **Removed:** `~/peacockdb-peacockdb-beta/target-cudf-rapids-cuda-12.2` (14 GB). It was the old
+    conda build's target dir in this chain's own synced tree, last written 2026-11-04. 22 GB was
+    above the 20 GB line, but prepare needed about 16 GB, which would have left about 6 GB free.
+  - **Kept, on purpose:** `~/peacockdb-ci/` (755 MB, modified 2026-11-07). Master's `gpu-tests`
+    still ships into `~/peacockdb-ci/cache` through `ci-ship.sh` (master's pipeline.yml line 533).
+    Deleting it would make master's next device run resend everything. build-test.md "Disk" says
+    "nothing reads now". That is true only once this branch is on master. Until then, do not
+    remove it.
+  - **Disk left for Step 6:** 20 GB free. CI's ship adds the install and testdata under
+    `~/peacock/peacockdb/`: about 1–2 GB, going by the old runner's cache of the same install and
+    testdata, 755 MB, and all committed testdata, 0.85 GB. That leaves about 18–19 GB. Other large users if room is needed later:
+    `~/miniforge3` 17 GB (the conda envs and a 13 GB `pkgs` cache; removing it is the human's
+    call), and this tree's own stale `~/peacockdb-peacockdb-beta/cpp/install` (4.9 GB, the old
+    conda install, now unread). `~/peacockdb/` (991 MB) is a tree of unknown owner and was left alone.
 
 ## Notes for a restart
 
@@ -643,6 +673,7 @@ test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 | VM | start (local) | stop (local) | hours |
 |---|---|---|---|
+| nebius-gpu | 2026-11-07 17:30:37 UTC | 2026-11-07 17:42:58 UTC | 0.21 (Task 6 Step 5, prepare) |
 
 ## Task 1 Step 8 (publish)
 
@@ -676,3 +707,23 @@ test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
   --check` step passed. Task 4 done; next: Task 5.
 - Dangling links to `testinfra.md#t129` left by #129's archiving: the frozen spec, and
   `verify-26.02.md:6`; the board's line is the coordinator's at the next state change.
+
+## Task 6 Step 4 (PR run)
+
+- `7548f425` pushed; PR run 42396552689: every job green but cost-report, whose "Nebius script
+  tests" step failed in `shellcheck -x`: the runner's shellcheck reports SC2015 (info) at
+  `scripts/build-test.sh:84` and `scripts/env/run-gpu.sh:172`, which 0.11.0 on dev did not. Handed to
+  the developer. `cpp-install-25.02` (168.9 MB) holds `lib/libpeacock_gpu.so`, the C++
+  `bin/peacock_*_tests` and the four `rust-tests/` files.
+- SC2015 fixed: both `A && B || die` become `if <not A> || <not B>; then die; fi`. Neither had
+  the bug SC2015 names (`die` exits, so it ran exactly when A or B was false): a rewrite, same
+  behaviour. Pinned first: `test_refuses_nothing_to_do_and_a_command_beside_an_action` names
+  "a command runs alone" for each of `--build --run --gpu --rust-only --no-release-bench` beside
+  `--`; new `test_prepare_refuses_a_run_image_without_a_driver_minimum` (label absent, label
+  empty). Each failed with its guard's B dropped. ubuntu-latest (24.04 noble) ships shellcheck
+  0.9.0-1. The CI step's eight files, `shellcheck -x`: 0.9.0 reproduced the two findings, exit 1;
+  after the fix exit 0 under `koalaman/shellcheck:v0.9.0`, apt's 0.9.0 in `ubuntu:24.04` and
+  `koalaman/shellcheck:v0.11.0`. `test_build_test.py` 18 passed, `test_run_gpu.py` 69 passed.
+- dev's disk filled during that work (0 bytes free): an image test pulled both run images. Removed
+  this worktree's `target-img-25.02` and `target-img-25.10`, the two run images, the shellcheck
+  and ubuntu images, then `docker image prune`: 29 GB free. dev holds only the 25.02 build image.

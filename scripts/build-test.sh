@@ -81,8 +81,9 @@ known=""
 for spec in "$root"/docker/conda/cudf-*.spec; do spec=${spec##*/cudf-}; known+="${spec%.spec} "; done
 [ -f "$root/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda holds specs for ${known% }"
 if [ ${#command[@]} -gt 0 ]; then
-  [ "$build$run$no_release_bench" = 000 ] && [ -z "$mode_flag" ] \
-    || die "a command runs alone: drop --build, --run, --gpu, --rust-only and --no-release-bench beside --"
+  if [ "$build$run$no_release_bench" != 000 ] || [ -n "$mode_flag" ]; then
+    die "a command runs alone: drop --build, --run, --gpu, --rust-only and --no-release-bench beside --"
+  fi
 elif [ "$build" = 0 ] && [ "$run" = 0 ]; then
   die "nothing to do: pass --build, --run, or -- <command>"
 fi

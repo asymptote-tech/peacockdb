@@ -253,6 +253,20 @@ def test_prepare_refuses_old_driver():
         assert h.fetches() == []
 
 
+def test_prepare_refuses_a_run_image_without_a_driver_minimum():
+    # Absent, docker prints "<no value>"; present and empty, it prints nothing. Both are no minimum.
+    for minimum in (None, ""):
+        with Host() as h:
+            images = h.world()["images"]
+            if minimum is None:
+                del images[RUN_REF]["labels"]["peacockdb.driver-minimum"]
+            else:
+                images[RUN_REF]["labels"]["peacockdb.driver-minimum"] = minimum
+            h.world(images=images)
+            refused(h.gpu("prepare"), 2, "no peacockdb.driver-minimum label", RUN_REF)
+            assert h.fetches() == []
+
+
 # --- ship --------------------------------------------------------------------------------------
 
 def test_ship_dir_is_named_by_dir():

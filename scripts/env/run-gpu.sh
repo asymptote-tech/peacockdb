@@ -169,7 +169,7 @@ driver_checked() {
   need=$(docker image inspect --format '{{index .Config.Labels "peacockdb.driver-minimum"}}' "$RUN_REF") || rc=$?
   [ "$rc" -ne 1 ] || die "no $RUN_REF on the VM: run prepare first"
   [ "$rc" -eq 0 ] || exit "$rc"
-  [ -n "$need" ] && [ "$need" != "<no value>" ] || die "$RUN_REF has no peacockdb.driver-minimum label"
+  if [ -z "$need" ] || [ "$need" = "<no value>" ]; then die "$RUN_REF has no peacockdb.driver-minimum label"; fi
   have=$(vm "nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1")
   if [ -z "$have" ] || [ "$(printf '%s\n' "$need" "$have" | sort -V | head -1)" != "$need" ]; then
     echo "run-gpu.sh: the VM's driver ${have:-(none: nvidia-smi answered nothing)} is older than $need, the oldest $RUN_REF runs on" >&2

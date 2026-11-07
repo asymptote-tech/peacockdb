@@ -542,7 +542,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 - [ ] **Step 4: commit; (coordinator) push; the PR is green.** `cpp-build-2502` uploads an
   artifact that holds `lib/libpeacock_gpu.so`, `bin/peacock_*_tests` and the four `rust-tests/`
   files.
-- [ ] **Step 5: `prepare` on nebius-gpu by hand, once, before any CI dispatch.** With the sandbox
+- [x] **Step 5: `prepare` on nebius-gpu by hand, once, before any CI dispatch.** With the sandbox
   off: `scripts/nebius.sh start`; `scripts/nebius.sh ssh 'df -h /'` (below 10 GB free: stop, an
   obstacle in the detail file, build-test.md "Disk"); `timeout 2400 scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt prepare
   --no-sf40` → exit 0 (Docker, the toolkit, sf1 and the run image in place). An exit 4 is handled
