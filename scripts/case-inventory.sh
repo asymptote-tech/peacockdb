@@ -2,12 +2,12 @@
 # Case inventory for one feature shape: every `--list` case of `--lib` and of each
 # `peacockdb-core/tests/test_*.rs` target, grouped by target. A refactor that moves no test
 # brings every line back byte-identical, which is what makes it a baseline.
-#   scripts/case-inventory.sh rust-only  > /tmp/inv.txt
-#   CUDF_ROOT=~/data/miniforge3/envs/rapids-cuda-12.2 \
-#     scripts/case-inventory.sh cudf     > /tmp/inv-cudf.txt
-#     scripts/case-inventory.sh gpu      > /tmp/inv-gpu.txt   # --lib only
+#   scripts/build-test.sh -- scripts/case-inventory.sh rust-only > /tmp/inv.txt
+#   scripts/build-test.sh -- scripts/case-inventory.sh cudf      > /tmp/inv-cudf.txt
+#   scripts/build-test.sh -- scripts/case-inventory.sh gpu       > /tmp/inv-gpu.txt   # --lib only
+# The cudf and gpu shapes build against the build image's cuDF, in build-test.sh's target dir.
 # A cudf-shape binary run without LD_LIBRARY_PATH lists zero cases instead of failing
-# (build-test.md), so the cudf shape prepends the FFI OUT_DIR and the cuDF lib dir.
+# (build-test.md), so those shapes prepend the FFI OUT_DIR and the cuDF lib dir.
 set -euo pipefail
 shape="${1:?usage: case-inventory.sh rust-only|cudf|gpu}"
 root="$(git rev-parse --show-toplevel)"
@@ -22,20 +22,15 @@ case "$shape" in
   rust-only)
     cargo="cargo"; feat=(--features rust-only)
     ;;
-  cudf)
-    : "${CUDF_ROOT:?set CUDF_ROOT for the cudf shape}"
-    cargo="$root/scripts/cargo-cudf.sh"; feat=()
-    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$root/target-cudf-$(basename "$CUDF_ROOT")}"
-    ffi_out="$(echo "$CARGO_TARGET_DIR"/debug/build/peacockdb-ffi-*/out/lib | tr ' ' ':')"
-    export LD_LIBRARY_PATH="$ffi_out:$CUDF_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    ;;
-  gpu)
+  cudf|gpu)
+    if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
+      echo "the $shape shape runs in the build image: scripts/build-test.sh -- scripts/case-inventory.sh $shape" >&2
+      exit 2
+    fi
+    cargo=cargo; feat=()
     # Top rung of the ladder. `--lib` only: no `--test` target reads the `gpu` feature, so
     # the binaries list under `cudf` exactly what they would list here.
-    : "${CUDF_ROOT:?set CUDF_ROOT for the gpu shape}"
-    cargo="$root/scripts/cargo-cudf.sh"; feat=(--features gpu)
-    targets=(--lib)
-    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$root/target-cudf-$(basename "$CUDF_ROOT")}"
+    if [ "$shape" = gpu ]; then feat=(--features gpu); targets=(--lib); fi
     ffi_out="$(echo "$CARGO_TARGET_DIR"/debug/build/peacockdb-ffi-*/out/lib | tr ' ' ':')"
     export LD_LIBRARY_PATH="$ffi_out:$CUDF_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     ;;

@@ -3,6 +3,7 @@
 The docker CLI is a fake on PATH that records its argv and answers `image inspect` from a map,
 so nothing here builds, pulls or pushes.
 """
+import hashlib
 import json
 import os
 import pathlib
@@ -123,11 +124,26 @@ def test_build_args():
 
 
 def test_build_refuses_an_unknown_cudf():
-    r = run("build", "build", "25.10", "--dry-run")
+    r = run("build", "build", "25.06", "--dry-run")
     assert r.returncode == 2, (r.returncode, r.stderr)
-    assert len(r.stderr.strip().splitlines()) == 1 and "25.10" in r.stderr, r.stderr
-    assert "25.02" in r.stderr and "26.02" in r.stderr, r.stderr
+    assert len(r.stderr.strip().splitlines()) == 1 and "25.06" in r.stderr, r.stderr
+    assert "25.02" in r.stderr and "25.10" in r.stderr and "26.02" in r.stderr, r.stderr
     assert r.stdout == "" and r.calls == []
+
+
+def test_build_25_10():
+    line = build_line(run("build", "build", "25.10", "--dry-run"))
+    assert "CUDF=25.10" in flag_values(line, "--build-arg")
+    assert f"{REGISTRY}/peacockdb-build:cudf-25.10" in flag_values(line, "-t")
+
+
+def test_run_refuses_a_build_only_cudf():
+    """25.10 has a spec and no driver minimum: a build image for CI, and no run image."""
+    for verb in ("build", "push"):
+        r = run(verb, "run", "25.10", "--dry-run")
+        assert r.returncode == 2, (verb, r.returncode, r.stderr)
+        assert len(r.stderr.strip().splitlines()) == 1 and "DRIVER_MINIMUM_25_10" in r.stderr, (verb, r.stderr)
+        assert r.stdout == "" and r.calls == [], (verb, r.stdout, r.calls)
 
 
 def test_build_26_02():
@@ -136,20 +152,48 @@ def test_build_26_02():
     assert f"{REGISTRY}/peacockdb-build:cudf-26.02" in flag_values(line, "-t")
 
 
+def inputs_tag(tree, kind, cudf):
+    return subprocess.run(["bash", "-c", f'. "{tree}/scripts/lib/image-inputs.sh"; image_inputs_tag "{tree}" {kind} {cudf}'],
+                          check=True, capture_output=True, text=True).stdout.strip()
+
+
+def test_the_inputs_tag_is_the_hash_of_the_inputs():
+    out = subprocess.run(["bash", "-c", f'. "{REPO}/scripts/lib/image-inputs.sh"; image_inputs "{REPO}" build 25.02'],
+                         check=True, capture_output=True, text=True).stdout
+    assert out.endswith("\n") and not out.endswith("\n\n"), out
+    assert inputs_tag(REPO, "build", "25.02") == f"cudf-25.02-in-{hashlib.sha256(out.encode()).hexdigest()[:12]}"
+    assert inputs_tag(REPO, "run", "26.02").startswith("cudf-26.02-in-")
+
+
+def test_build_adds_the_inputs_tag():
+    with Repo() as repo:
+        name = f"{REGISTRY}/peacockdb-build"
+        tag = inputs_tag(repo.root, "build", "25.02")
+        assert re.fullmatch(r"cudf-25\.02-in-[0-9a-f]{12}", tag), tag
+        clean = build_line(run("build", "build", "25.02", "--dry-run", script=repo.script))
+        assert f"{name}:{tag}" in flag_values(clean, "-t"), clean
+        (repo.root / "untracked.txt").write_text("x")
+        dirty = build_line(run("build", "build", "25.02", "--dry-run", script=repo.script))
+        assert f"{name}:{tag}" in flag_values(dirty, "-t"), dirty
+
+
 def test_a_clean_tree_adds_the_commit_tag():
     with Repo() as repo:
         line = build_line(run("build", "build", "25.02", "--dry-run", script=repo.script))
+        name = f"{REGISTRY}/peacockdb-build"
         assert flag_values(line, "-t") == [
-            f"{REGISTRY}/peacockdb-build:cudf-25.02", f"{REGISTRY}/peacockdb-build:cudf-25.02-{repo.sha}"
+            f"{name}:cudf-25.02", f"{name}:{inputs_tag(repo.root, 'build', '25.02')}", f"{name}:cudf-25.02-{repo.sha}"
         ], line
         assert f"org.opencontainers.image.revision={repo.sha}" in flag_values(line, "--label"), line
 
 
 def test_a_dirty_tree_gets_no_commit_tag():
     with Repo() as repo:
+        tag = inputs_tag(repo.root, "build", "25.02")
         (repo.root / "untracked.txt").write_text("x")
         line = build_line(run("build", "build", "25.02", "--dry-run", script=repo.script))
-        assert flag_values(line, "-t") == [f"{REGISTRY}/peacockdb-build:cudf-25.02"], line
+        name = f"{REGISTRY}/peacockdb-build"
+        assert flag_values(line, "-t") == [f"{name}:cudf-25.02", f"{name}:{tag}"], line
         assert f"org.opencontainers.image.revision={repo.sha}-dirty" in flag_values(line, "--label"), line
 
 
@@ -158,7 +202,7 @@ def test_an_untracked_file_is_dirty_whatever_the_git_config_hides():
         git(repo.root, "config", "status.showUntrackedFiles", "no")
         (repo.root / "untracked.txt").write_text("x")
         line = build_line(run("build", "build", "25.02", "--dry-run", script=repo.script))
-        assert flag_values(line, "-t") == [f"{REGISTRY}/peacockdb-build:cudf-25.02"], line
+        assert not [t for t in flag_values(line, "-t") if t.endswith(repo.sha)], line
 
 
 def test_build_runs_the_line_it_prints():
@@ -175,6 +219,19 @@ def test_a_tree_without_the_cudf_submodule_is_refused_by_name():
         r = run("build", "build", "25.02", "--dry-run", script=repo.script)
         assert r.returncode == 2 and len(r.stderr.strip().splitlines()) == 1, (r.returncode, r.stderr)
         assert "third_party/cudf" in r.stderr and r.stdout == "", r
+
+
+def built(repo, kind="build", cudf="25.02", **ids):
+    """The local images a clean build of <repo> leaves: version, inputs and commit tags, one image unless
+    `ids` says otherwise (keys: version, inputs, commit)."""
+    name = f"{REGISTRY}/peacockdb-{kind}"
+    tags = {"version": f"{name}:cudf-{cudf}", "inputs": f"{name}:{inputs_tag(repo.root, kind, cudf)}",
+            "commit": f"{name}:cudf-{cudf}-{repo.sha}"}
+    return tags, {tags[k]: ids.get(k, "sha256:aaa") for k in tags if ids.get(k, "sha256:aaa")}
+
+
+def pushes(result):
+    return [c[1:] for c in result.calls if c[0] == "push"]
 
 
 def test_push_refuses_without_the_commit_tag():
@@ -195,23 +252,42 @@ def test_push_refuses_when_the_version_tag_moved():
         assert not [c for c in r.calls if c[0] == "push"], r.calls
 
 
-def test_push_pushes_both_tags():
+def test_push_refuses_when_the_inputs_tag_is_missing_or_another_image():
     with Repo() as repo:
-        name = f"{REGISTRY}/peacockdb-build:cudf-25.02"
-        images = {name: "sha256:aaa", f"{name}-{repo.sha}": "sha256:aaa"}
+        for inputs_id in (None, "sha256:bbb"):
+            tags, images = built(repo, inputs=inputs_id)
+            r = run("push", "build", "25.02", script=repo.script, images=images)
+            assert r.returncode == 2, (inputs_id, r.returncode, r.stderr)
+            assert tags["inputs"] in r.stderr and len(r.stderr.strip().splitlines()) == 1, (inputs_id, r.stderr)
+            assert pushes(r) == [], r.calls
+
+
+def test_push_pushes_the_inputs_tag():
+    with Repo() as repo:
+        tags, images = built(repo)
         r = run("push", "build", "25.02", script=repo.script, images=images)
         assert r.returncode == 0, r.stderr
-        assert [c for c in r.calls if c[0] == "push"] == [["push", f"{name}-{repo.sha}"], ["push", name]], r.calls
+        assert [tags["inputs"]] in pushes(r), r.calls
+
+
+def test_push_leaves_the_moving_tag_without_moving():
+    with Repo() as repo:
+        tags, images = built(repo)
+        r = run("push", "build", "25.02", script=repo.script, images=images)
+        assert r.returncode == 0, r.stderr
+        assert pushes(r) == [[tags["inputs"]], [tags["commit"]]], r.calls
+        r = run("push", "build", "25.02", "--moving", script=repo.script, images=images)
+        assert r.returncode == 0, r.stderr
+        assert pushes(r) == [[tags["inputs"]], [tags["commit"]], [tags["version"]]], r.calls
 
 
 def test_push_dry_run_pushes_nothing():
     with Repo() as repo:
-        name = f"{REGISTRY}/peacockdb-build:cudf-25.02"
-        images = {name: "sha256:aaa", f"{name}-{repo.sha}": "sha256:aaa"}
-        r = run("push", "build", "25.02", "--dry-run", script=repo.script, images=images)
+        tags, images = built(repo)
+        r = run("push", "build", "25.02", "--dry-run", "--moving", script=repo.script, images=images)
         assert r.returncode == 0, r.stderr
-        assert r.commands() == [["docker", "push", f"{name}-{repo.sha}"], ["docker", "push", name]], r.stdout
-        assert not [c for c in r.calls if c[0] == "push"], r.calls
+        assert r.commands() == [["docker", "push", tags[k]] for k in ("inputs", "commit", "version")], r.stdout
+        assert pushes(r) == [], r.calls
 
 
 def test_run_build_args():
@@ -230,18 +306,18 @@ def test_run_build_args():
         assert r.calls == [], f"a dry run called docker: {r.calls}"
 
 
-def test_run_push_pushes_both_run_tags():
+def test_run_push_pushes_the_run_tags():
     with Repo() as repo:
-        name = f"{REGISTRY}/peacockdb-run:cudf-26.02"
-        images = {name: "sha256:aaa", f"{name}-{repo.sha}": "sha256:aaa"}
-        r = run("push", "run", "26.02", script=repo.script, images=images)
+        tags, images = built(repo, kind="run", cudf="26.02")
+        r = run("push", "run", "26.02", "--moving", script=repo.script, images=images)
         assert r.returncode == 0, r.stderr
-        assert [c for c in r.calls if c[0] == "push"] == [["push", f"{name}-{repo.sha}"], ["push", name]], r.calls
+        assert pushes(r) == [[tags["inputs"]], [tags["commit"]], [tags["version"]]], r.calls
 
 
 def test_bad_arguments_fail_in_one_line():
     for args in [(), ("build",), ("build", "build"), ("deploy", "build", "25.02"), ("build", "kit", "25.02"),
-                 ("build", "build", "25.02", "--push"), ("build", "build", "25.02", "extra")]:
+                 ("build", "build", "25.02", "--push"), ("build", "build", "25.02", "extra"),
+                 ("build", "build", "25.02", "--moving")]:
         r = run(*args)
         assert r.returncode == 2, (args, r.returncode, r.stderr)
         assert len(r.stderr.strip().splitlines()) == 1 and r.stderr.startswith("image.sh: "), (args, r.stderr)
@@ -322,13 +398,21 @@ def files_read(kind, cudf):
 
 
 def test_the_label_holds_every_docker_file_its_dockerfile_reads():
-    for kind in ("build", "run"):
-        for cudf in ("25.02", "26.02"):
-            read = files_read(kind, cudf)
-            assert f"docker/conda/cudf-{cudf}.spec" in read, (kind, cudf, read)
-            missing = sorted(read - set(image_inputs(REPO, kind, cudf)))
-            assert not missing, f"the {kind} image's {cudf} label misses {missing}"
-    assert "docker/conda/cudf-26.02.spec" in files_read("build", "25.02"), "the nvcc spec is no longer read"
+    for kind, cudf in IMAGES:
+        read = files_read(kind, cudf)
+        assert f"docker/conda/cudf-{cudf}.spec" in read, (kind, cudf, read)
+        missing = sorted(read - set(image_inputs(REPO, kind, cudf)))
+        assert not missing, f"the {kind} image's {cudf} label misses {missing}"
+    for cudf in ("25.02", "25.10"):
+        assert "docker/conda/cudf-26.02.spec" in files_read("build", cudf), f"{cudf}: the nvcc spec is no longer read"
+
+
+# Every image there is: 25.10 is build-only.
+IMAGES = [("build", "25.02"), ("build", "25.10"), ("build", "26.02"), ("run", "25.02"), ("run", "26.02")]
+
+
+def every_label(repo):
+    return {image: label(build_line(run("build", *image, "--dry-run", script=repo.script))) for image in IMAGES}
 
 
 def bump(repo, name):
@@ -389,15 +473,13 @@ def test_the_inputs_are_the_same_in_every_locale():
 
 
 def test_a_version_s_pin_changes_only_that_version_s_labels():
-    with Repo() as repo:
-        def all_labels():
-            return {(kind, cudf): label(build_line(run("build", kind, cudf, "--dry-run", script=repo.script)))
-                    for kind in ("build", "run") for cudf in ("25.02", "26.02")}
-        before = all_labels()
-        bump(repo, "GCC_26_02")
-        after = all_labels()
-        moved = sorted(k for k in before if before[k] != after[k])
-        assert moved == [("build", "26.02")], moved
+    for pin, image in (("GCC_26_02", ("build", "26.02")), ("GCC_25_10", ("build", "25.10"))):
+        with Repo() as repo:
+            before = every_label(repo)
+            bump(repo, pin)
+            after = every_label(repo)
+            moved = sorted(k for k in before if before[k] != after[k])
+            assert moved == [image], (pin, moved)
 
 
 def declare(repo, kind, after, arg, value="1"):
@@ -411,9 +493,6 @@ def declare(repo, kind, after, arg, value="1"):
         pins.write_text(pins.read_text() + f"{arg}={value}\n")
 
 
-def every_label(repo):
-    return {(kind, cudf): label(build_line(run("build", kind, cudf, "--dry-run", script=repo.script)))
-            for kind in ("build", "run") for cudf in ("25.02", "26.02")}
 
 
 def test_a_suffix_that_is_no_cudf_version_stays_in_every_label():
@@ -434,7 +513,7 @@ def test_a_version_s_pin_read_by_another_version_s_stage_stays_in_its_label():
         bump(repo, "GCC_26_02")
         after = every_label(repo)
         moved = sorted(k for k in before if before[k] != after[k])
-        assert moved == [("build", "25.02"), ("build", "26.02")], moved
+        assert moved == [image for image in IMAGES if image[0] == "build"], moved
 
 
 def test_the_inputs_refuse_a_flatbuffers_tag_named_twice():

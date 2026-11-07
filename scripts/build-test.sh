@@ -1,285 +1,145 @@
-#!/bin/bash
-
-# pipefail is load-bearing here, not boilerplate: the staging step pipes
-# `cargo test --no-run … | python3`, and without it the pipeline takes python's
-# status, so a cargo failure is invisible until the emptiness check downstream.
+#!/usr/bin/env bash
+# The one build command: every build shape, in the build image, over this checkout
+# (llm-wiki/build-test.md, "Local build workflows and caches").
+#
+#   build-test.sh [--cudf <v>] [--rust-only|--gpu] [--build] [--run] [--no-release-bench]
+#                 [--pass-env NAME]... [-- <command...>]
+#
+# <v> is $PEACOCK_CUDF, else 25.02. Outside the image the script runs itself again in
+# $PEACOCK_BUILD_IMAGE, else in the image `scripts/env/image-ref.sh build <v>` finds: docker run as
+# the caller's uid, the tree at its own path, cargo's target in <tree>/target-img-<v>, HOME in
+# <tree>/.home-img, the cargo registry and ccache under ~/.cache/peacock. Inside it:
+#
+#   -- <command...>  runs the command; its exit is the script's
+#   (cpu, default)   --build: the C++ library and its tests into cpp/build, then every Rust target
+#                    that builds with cmake, and the CLI; --run: those targets and ctest -L cpu
+#   --rust-only      every Rust target that builds without cmake, and the CLI; no C++
+#   --gpu            --build: scripts/env/stage-install.sh, the install a device run ships;
+#                    --no-release-bench skips its release benchmarks. The device run is
+#                    scripts/env/run-gpu.sh's, so --gpu --run is refused
+#
+# The cpu and gpu builds own cpp/build and stamp it with <v> in cpp/build/.peacock-cudf. A
+# cpp/build of another version, or one with no stamp (a host configure), is refused, not
+# reconfigured. --run runs every target even after one fails.
+# These reach the container by name when set, never by value: RUSTFLAGS CMAKE_GENERATOR LDFLAGS
+# LD_LIBRARY_PATH PCK_TEST_FILTER PCK_SHARD UPDATE_CANONICAL PEACOCK_NO_FETCH RUST_TEST_THREADS
+# CARGO_BUILD_JOBS, and each --pass-env NAME. RUNNER_TEMP is mounted at its own path when set.
+#
+# Exit 0; 1 a build or a test failed; 2 bad input, or a refused image, target dir or cpp/build.
 set -euo pipefail
 
-# Build the test suite locally and run it on a remote host. Mirrors
-# build-test-shadgpu.sh (build here, ship binaries, run there). Three suites,
-# selected by the mode flags below (cpu is the default):
-#
-#   cpu (default)  C++ peacock_cpu_tests + every Rust target that builds with cmake
-#                (a SUPERSET of --rust-only, plus test_ffi). No flag selects it —
-#                see usage(): a flag whose only effect is the default is noise.
-#   --rust-only   every Rust target that builds WITHOUT cmake — see build-test.md's
-#                "What rust-only means". Golden regen + cpu/plan verify.
-#   --gpu        C++ peacock_plan_tests + the GPU-runtime Rust targets, run
-#                one-at-a-time on the GPU.
-# The three sets are DERIVED from the sources, not listed here — see the suite
-# selection below. A mode that builds more must not run less.
-#
-# The remote host is NOT hardcoded — pass it with --host. We build locally
-# against a cuDF that matches the remote's ABI (default: a local cudf-26.02
-# env), ship cpp/install (the lib + C++ test binaries + staged Rust binaries),
-# and run them against the remote's cuDF runtime. There is no --patch step
-# (the remote is a modern-glibc host, unlike the shad-gpu path).
-#
-# NOTE: every Rust test binary honors PEACOCK_TESTDATA_DIR now, unit tests included,
-# and falls back to the compile-time path (CARGO_MANIFEST_DIR, symlinks canonicalized)
-# only where it is unset. --gpu and --rust-only set it below; the plain cpu mode does
-# not, so that one still looks for testdata at this box's absolute repo path and the
-# remote must expose the same — e.g. a symlink /media/data/peacockdb -> <remote repo>.
+usage() { sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
+die() { echo "build-test.sh: $*" >&2; exit 2; }
+removed() { die "$1 is gone: $2"; }
 
-# ---- defaults (override via flags) -----------------------------------------
-HOST=""                                                       # ssh destination, e.g. dmitry@86.38.182.185 (required)
-REMOTE_DIR="/home/dmitry/peacockdb"                           # repo dir on the remote (holds testdata + receives cpp/install)
-LOCAL_CUDF_ROOT="/home/dmitry/data/miniforge3/envs/rapids"    # local cuDF (26.02) to build against
-REMOTE_CUDF_ROOT="/home/dmitry/miniforge3/envs/rapids-26.02"  # cuDF runtime libs on the remote
-GCC_VERSION=14                                                # gcc-N for the C++/cmake build (cuDF 26.02 / CUDA 12.x accepts 14)
-MODE=cpu                                                      # cpu | gpu (set via --gpu); cpu is the default
-RUST_ONLY=0                                                   # --rust-only: build cpu/plan test bins with --features rust-only (NO C++/FFI); for golden regen + cpu/plan verify on verda
-MODE_FLAG=""                                                  # which mode flag was actually passed, for the conflict message
+FORWARDED=(RUSTFLAGS CMAKE_GENERATOR LDFLAGS LD_LIBRARY_PATH PCK_TEST_FILTER PCK_SHARD UPDATE_CANONICAL
+           PEACOCK_NO_FETCH RUST_TEST_THREADS CARGO_BUILD_JOBS)
+DEVICE_RUN="scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt"
 
-# Dedicated 26.02 C++ build dir, separate from the default cpp/build (which is
-# kept at 25.02 on purpose). Using a distinct dir also avoids the find_package
-# stale-cache trap: cmake caches the resolved cudf_DIR, so reconfiguring a dir
-# that first found a 25.02 env would keep using it even with a new cudf_ROOT.
-BUILD_DIR=cpp/build26
-INSTALL_DIR="$BUILD_DIR/install"
-CUDA_ARCHITECTURES="80;90"
-RUST_TESTS_STAGING="$INSTALL_DIR/rust-tests"
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+original=("$@")
+cudf=${PEACOCK_CUDF:-25.02}
+mode=cpu mode_flag="" build=0 run=0 no_release_bench=0
+pass_env=() command=()
 
-# The measurement target and where its release build is staged. It is also in the gate
-# set (gpu_runtime_targets): the debug copy in rust-tests/ runs the harness's own
-# assertions under --skip bench_; the release copy in rust-benchmarks/ is what
-# --run-benchmarks times. Same two-copy scheme as build-test-shadgpu.sh, minus the
-# glibc patch and the detached run — this host has a modern glibc, and a measurement
-# here is attached: keep the ssh session (or wrap the call in tmux/nohup yourself).
-BENCH_TARGET=peacock_gpu_benchmarks
-BENCH_STAGING="$INSTALL_DIR/rust-benchmarks"
-# The calibration record, beside the results. Pulled home and kept there, never published:
-# the bucket's key names no host, and the record it holds is shad-gpu's
-# (build-test-shadgpu.sh --pull-benchmarks).
-BENCH_RECORD_REL=calibration/records.tsv
-
-BUILD=0
-BUILD_BENCH=0    # --build-benchmarks: release build of BENCH_TARGET into rust-benchmarks/
-PUSH_BINARIES=0  # --push-binaries: ship cpp/install (lib + C++ bins + staged rust bins) + goldens
-RUN=0
-RUN_BENCH=0      # --run-benchmarks: the attached measurement run (needs --gpu)
-PULL_BENCH=0     # --pull-benchmarks: fetch testdata/benchmark-results/ + the record
-UPDATE_CANON=0   # --update-canonical: regen goldens during the remote run (UPDATE_CANONICAL=1)
-
-# Per-kind testdata sync, one flag per kind in each direction. The parser IS the
-# validator: an unknown kind is an unknown flag, caught by the `*) usage` arm before
-# any side effect. The old --push-testdata KIND[,KIND] form validated inside a $(…),
-# where `exit 1` ends only the subshell — the error printed and the script carried on.
-PUSH_KINDS=()
-PULL_KINDS=()
-
-usage() {
-  cat >&2 <<'USAGE'
-Usage: build-test.sh --host <ssh-dest> [mode] <action...> [options]
-
-  mode      (default cpu)
-    --rust-only    every Rust target that builds WITHOUT cmake. Golden regen + verify.
-    --gpu          the GPU-runtime targets; needs a GPU on the remote.
-    (no --cpu flag: cpu IS the default, and a flag whose only effect is the default
-     is noise. --gpu and --rust-only are mutually exclusive and rejected, not ordered.)
-
-  MODE LADDER: rust-only ⊂ cpu ⊂ gpu-capable. A mode that BUILDS more never RUNS less —
-  the three suites are derived from the sources, not listed, so they cannot drift apart.
-
-  actions (at least one required)
-    --build              build C++ (unless --rust-only) + stage the Rust test binaries
-    --push-binaries      ship cpp/install + the goldens the binaries assert against
-    --run                run the suite on the remote
-    --all                --build --push-binaries --run
-    --push-<kind>        parquet | queries | goldens | duckdb-profiles | duckdb-dynfilters
-    --pull-<kind>        parquet | goldens | duckdb-profiles | duckdb-dynfilters
-                         (no --pull-queries: a --pull-<kind> exists only where the
-                          remote can PRODUCE that kind. Queries are AUTHORED — nothing
-                          on a remote generates a .sql — so pulling would overwrite
-                          committed source with whatever a scratch host holds. The
-                          other four are generated artifacts: parquet on verda,
-                          goldens by --update-canonical, both duckdb sets by their
-                          extractors.)
-    --update-canonical   regen goldens during --run instead of asserting
-
-  benchmark actions (all need --gpu; --all does NOT imply them)
-    --build-benchmarks   C++ build+install, then the RELEASE build of the measurement
-                         target into rust-benchmarks/ (shipped by --push-binaries)
-    --run-benchmarks     attached measurement run; PCK_TEST_FILTER selects cases.
-                         Rejected together with --run: one exit code cannot mean both
-                         "gate green" and "measurement completed".
-    --pull-benchmarks    fetch testdata/benchmark-results/ and the calibration record
-    (--push-binaries mirrors cpp/install with --delete, so a push from a checkout that
-     never ran --build-benchmarks removes the benchmark binary from the host.)
-    (--push-binaries always ships goldens: binaries without the fixtures they assert
-     against is what produced 110/110 "canonical file not found". --push-goldens is the
-     subset operation — refresh fixtures without rebuilding or reshipping binaries.)
-
-  options
-    --remote-dir <path> --local-cudf-root <path> --remote-cudf-root <path>
-    --gcc-version <n>
-
-  DELIBERATELY ABSENT, so these do not get filed as gaps:
-    no --pull-binaries      binaries flow one way: built locally, shipped to the remote.
-    no embeddings-cache     a per-host INTERMEDIATE for the tpch vector datasets
-                            (fetch_embeddings.sh, ~1.8 GB, gitignored). Regenerate it
-                            where you need it; syncing it would ship a derived artifact.
-USAGE
-  exit 1
-}
-
-# The ONE goldens push. It existed twice — the --push-binaries block used
-# `rsync -r --delete`, --push-goldens used `rsync -a --delete` — same intent, different
-# metadata handling, no shared code.
-#
-# PUSH MIRRORS (--delete); PULL IS ADDITIVE. The asymmetry is deliberate and must not be
-# "fixed": the remote is a PARTIAL mirror. testdata/goldens/ contains tpch.sf40/ (16
-# CSVs) and sf40 lives on shad-gpu, so mirroring downward from verda would DELETE
-# fixtures that host never had — out of a git working tree.
-#
-# Accepted consequence: a regen that deletes a .result.txt (result over 256 KB, see
-# maybe_write_result_golden) cannot propagate that deletion back through an additive
-# pull. The deletion is announced on stderr and reaches the operator through the ssh
-# heredoc; that is the handling, not a --delete armed for one rare case.
-# #113: ship every COMMITTED testdata fixture, swept from git rather than named by hand.
-#
-# The hand list is the defect, not the missing file. build-test.sh shipped goldens and
-# nothing else, so widening the rust-only suite surfaced two absent fixtures at once
-# (cost-registry.csv, cost_model.conf) — and load_csv's own panic text had already
-# predicted exactly this, naming the two OTHER provisioning paths that had been fixed
-# one at a time. Three paths, three lists, each patched only when something broke.
-#
-# `--cached --others --exclude-standard` is #113's prescription and both halves matter:
-#   --others         picks up a NEW fixture that is not committed yet; plain ls-files
-#                    would miss it and reintroduce the same class.
-#   --exclude-standard honours .gitignore, which is what keeps the ~1.7 GB of GENERATED
-#                    parquet (tpch.sf1, tpcds.sf1) out — those are produced on the
-#                    remote, not shipped to it.
-# Do NOT add --exclude=*.parquet: tpch.minimal commits 5 parquet files the tests need.
-#
-# goldens are excluded here and pushed by sync_goldens instead — they are the one kind
-# that must MIRROR (--delete) so a regen's baseline is the committed set exactly.
-sync_fixtures() {
-  local list
-  list=$(mktemp)
-  git ls-files --cached --others --exclude-standard testdata \
-    | grep -v '^testdata/goldens/' > "$list"
-  local n
-  n=$(wc -l < "$list")
-  [ "$n" -gt 0 ] || { echo "error: no tracked testdata fixtures found — git sweep is wrong" >&2; rm -f "$list"; exit 1; }
-  echo "==> push $n committed testdata fixtures -> $HOST:$REMOTE_DIR/"
-  rsync -a --files-from="$list" ./ "$HOST:$REMOTE_DIR/"
-  rm -f "$list"
-}
-
-sync_goldens() {
-  case "$1" in
-    push)
-      echo "==> push goldens -> $HOST:$REMOTE_DIR/testdata/goldens"
-      ssh "$HOST" "mkdir -p '$REMOTE_DIR/testdata/goldens'"
-      rsync -a --delete testdata/goldens/ "$HOST:$REMOTE_DIR/testdata/goldens/"
-      ;;
-    pull)
-      echo "==> pull $HOST:$REMOTE_DIR/testdata/goldens -> testdata/goldens (additive)"
-      mkdir -p testdata/goldens
-      rsync -a "$HOST:$REMOTE_DIR/testdata/goldens/" testdata/goldens/
-      ;;
-    *) echo "sync_goldens: bad direction '$1'" >&2; exit 1 ;;
-  esac
-}
-
-# Map a testdata KIND to its repo-relative dir(s) under testdata/.
-testdata_dirs_for_kind() {
-  case "$1" in
-    parquet)          echo "tpch.sf1 tpcds.sf1 tpch.minimal pbench.sf1" ;;
-    goldens)          echo "goldens" ;;
-    duckdb-profiles)  echo "duckdb-profiles" ;;
-    duckdb-dynfilters) echo "duckdb-dynfilters" ;;
-    queries)          echo "tpch-queries tpcds-queries tpch-vec-queries pbench-queries" ;;
-    *) echo "error: unknown testdata kind '$1' (parquet|goldens|duckdb-profiles|duckdb-dynfilters|queries)" >&2; exit 1 ;;
-  esac
-}
-
-if [ $# -eq 0 ]; then usage; fi
-
-# A value-taking flag must be given a value: `--host` at the end of the line would
-# otherwise consume nothing and leave HOST empty, which reads downstream as "no --host".
-need_value() {
-  [ -n "${2:-}" ] || { echo "error: $1 requires a value" >&2; exit 1; }
-}
-
-# --gpu and --rust-only are mutually exclusive, and REJECTED rather than resolved by
-# order. Resolving by order made the same two flags mean different things depending on
-# how they were typed, and one order was half-applied: MODE=gpu with RUST_ONLY still
-# live left LD_LIBRARY_PATH unset for the GPU binaries, so they could not resolve
-# libpeacock_gpu and failed as if the product were broken.
+# --gpu and --rust-only select different builds, so the two together are refused, not ordered.
 set_mode() {
-  if [ -n "$MODE_FLAG" ] && [ "$MODE_FLAG" != "$1" ]; then
-    echo "error: $MODE_FLAG and $1 are mutually exclusive — they select different" >&2
-    echo "       build configurations (rust-only builds without cmake; gpu needs the" >&2
-    echo "       linked executor and a GPU at runtime). Pass one." >&2
-    exit 1
-  fi
-  MODE_FLAG="$1"
+  [ -z "$mode_flag" ] || [ "$mode_flag" = "$1" ] \
+    || die "$mode_flag and $1 select different builds (rust-only builds without cmake, gpu for a device): pass one"
+  mode_flag=$1 mode=${1#--}
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --host)             need_value "$1" "${2:-}"; HOST="$2"; shift ;;
-    --remote-dir)       need_value "$1" "${2:-}"; REMOTE_DIR="$2"; shift ;;
-    --local-cudf-root)  need_value "$1" "${2:-}"; LOCAL_CUDF_ROOT="$2"; shift ;;
-    --remote-cudf-root) need_value "$1" "${2:-}"; REMOTE_CUDF_ROOT="$2"; shift ;;
-    --gcc-version)      need_value "$1" "${2:-}"; GCC_VERSION="$2"; shift ;;
-    --gpu)              set_mode "$1"; MODE=gpu ;;
-    --rust-only)        set_mode "$1"; MODE=cpu; RUST_ONLY=1 ;;
-    --build)            BUILD=1 ;;
-    --push-binaries)    PUSH_BINARIES=1 ;;
-    --run)              RUN=1 ;;
-    --all)              BUILD=1; PUSH_BINARIES=1; RUN=1 ;;
-    --build-benchmarks) BUILD_BENCH=1 ;;
-    --run-benchmarks)   RUN_BENCH=1 ;;
-    --pull-benchmarks)  PULL_BENCH=1 ;;
-    --update-canonical) UPDATE_CANON=1 ;;
-    --push-parquet)           PUSH_KINDS+=(parquet) ;;
-    --push-queries)           PUSH_KINDS+=(queries) ;;
-    --push-goldens)           PUSH_KINDS+=(goldens) ;;
-    --push-duckdb-profiles)   PUSH_KINDS+=(duckdb-profiles) ;;
-    --push-duckdb-dynfilters) PUSH_KINDS+=(duckdb-dynfilters) ;;
-    --pull-parquet)           PULL_KINDS+=(parquet) ;;
-    --pull-goldens)           PULL_KINDS+=(goldens) ;;
-    --pull-duckdb-profiles)   PULL_KINDS+=(duckdb-profiles) ;;
-    --pull-duckdb-dynfilters) PULL_KINDS+=(duckdb-dynfilters) ;;
-    *) echo "Unknown flag: $1" >&2; usage ;;
+    -h|--help) usage ;;
+    --cudf) [ -n "${2:-}" ] || die "--cudf needs a version such as 25.02"; cudf=$2; shift ;;
+    --rust-only|--gpu) set_mode "$1" ;;
+    --build) build=1 ;;
+    --run) run=1 ;;
+    --no-release-bench) no_release_bench=1 ;;
+    --pass-env)
+      [[ "${2:-}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "--pass-env takes a variable's name, never its value: ${2:-nothing}"
+      pass_env+=("$2"); shift ;;
+    --) shift; command=("$@"); [ ${#command[@]} -gt 0 ] || die "-- needs a command"; break ;;
+    --host|--remote-dir|--remote-cudf-root|--push-binaries)
+      removed "$1" "builds run here, in the build image. A device run ships the install with $DEVICE_RUN ship, then run" ;;
+    --push-*) removed "$1" "$DEVICE_RUN ship sends the committed testdata with the install" ;;
+    --pull-benchmarks|--pull-*) removed "$1" "$DEVICE_RUN pull brings a run's results home" ;;
+    --local-cudf-root) removed "$1" "the image's cuDF is /opt/cudf: pick its version with --cudf <v>" ;;
+    --gcc-version) removed "$1" "the image's gcc is its cuDF's, GCC_<v> in docker/pins.env: pick it with --cudf <v>" ;;
+    --all) removed "$1" "pass --build --run" ;;
+    --build-benchmarks) removed "$1" "--gpu --build stages cpp/install/rust-benchmarks/ (scripts/env/stage-install.sh)" ;;
+    --run-benchmarks) removed "$1" "$DEVICE_RUN run bench" ;;
+    --update-canonical) removed "$1" "UPDATE_CANONICAL=1 scripts/build-test.sh --rust-only --run" ;;
+    *) die "unknown flag $1" ;;
   esac
   shift
 done
 
-# Suite selection, DERIVED — each entry is <package>:<test-name>; each binary is staged
-# under <install>/rust-tests/<name> so the rsync step ships it.
-#
-# Targets are classified ONCE, by what they REQUIRE, and each mode takes everything it
-# can support. Three hand-written lists is what this replaces: they drifted apart, and
-# the drift was always in the direction of running less than the mode could (--gpu
-# silently skipped the murmur3 conformance gate; the default branch omitted four
-# targets that build fine with the full feature set).
-#
-# A mode that BUILDS more must not RUN less. So:
+# ---- validation: all of it before the first side effect -------------------------------------
+known=$(cd "$root/docker/conda" && ls cudf-*.spec | sed 's/^cudf-//; s/\.spec$//' | tr '\n' ' ')
+[ -f "$root/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda holds specs for ${known% }"
+if [ ${#command[@]} -gt 0 ]; then
+  [ "$build$run$no_release_bench" = 000 ] && [ -z "$mode_flag" ] \
+    || die "a command runs alone: drop --build, --run, --gpu, --rust-only and --no-release-bench beside --"
+elif [ "$build" = 0 ] && [ "$run" = 0 ]; then
+  die "nothing to do: pass --build, --run, or -- <command>"
+fi
+[ "$no_release_bench" = 0 ] || { [ "$mode" = gpu ] && [ "$build" = 1 ]; } \
+  || die "--no-release-bench is a --gpu --build flag"
+[ "$mode" != gpu ] || [ "$run" = 0 ] \
+  || die "a device run is not this script's: build with --gpu --build, then $DEVICE_RUN ship and $DEVICE_RUN run list"
+
+# ---- outside the image: run this script again inside it --------------------------------------
+if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
+  # Per worktree, because a build script bakes CARGO_MANIFEST_DIR into what it builds.
+  target=${CARGO_TARGET_DIR:-$root/target-img-$cudf}
+  case "$target/" in
+    "$root"/*) ;;
+    *) die "CARGO_TARGET_DIR=$target is outside this tree, $root: each worktree keeps its own target dir. Unset it or name a dir inside the tree" ;;
+  esac
+  if [ -n "${PEACOCK_BUILD_IMAGE:-}" ]; then
+    image=$PEACOCK_BUILD_IMAGE
+  else
+    image=$("$root/scripts/env/image-ref.sh" build "$cudf") || exit 2
+  fi
+  cache=${XDG_CACHE_HOME:-$HOME/.cache}/peacock
+  registry=${PEACOCK_CARGO_REGISTRY:-$cache/cargo-registry}
+  ccache=${PEACOCK_CCACHE_DIR:-$cache/ccache-$cudf}
+  mkdir -p "$registry" "$ccache" "$root/.home-img"
+  args=(run --rm --user "$(id -u):$(id -g)" -v "$root:$root")
+  # A worktree's git dir lies in its main clone's.
+  common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)
+  case "$common/" in "$root"/*) ;; *) args+=(-v "$common:$common") ;; esac
+  args+=(-w "$root" -e PEACOCK_IN_IMAGE=1 -e "PEACOCK_CUDF=$cudf" -e "HOME=$root/.home-img"
+         -e "CARGO_TARGET_DIR=$target" -v "$registry:/opt/rust/cargo/registry" -v "$ccache:/tmp/ccache")
+  # A CI step's report files; GITHUB_OUTPUT and the like stay the runner's, written by redirecting.
+  if [ -n "${RUNNER_TEMP:-}" ]; then args+=(-v "$RUNNER_TEMP:$RUNNER_TEMP" -e RUNNER_TEMP); fi
+  for name in "${FORWARDED[@]}"; do
+    if [ -n "${!name+set}" ]; then args+=(-e "$name"); fi
+  done
+  for name in "${pass_env[@]}"; do args+=(-e "$name"); done
+  exec docker "${args[@]}" "$image" scripts/build-test.sh "${original[@]}"
+fi
+
+# ---- inside the image -------------------------------------------------------------------------
+if [ ${#command[@]} -gt 0 ]; then exec "${command[@]}"; fi
+cd "$root"
+export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$root/target-img-$cudf}
+STAMP=cpp/build/.peacock-cudf
+
+# Suite selection, DERIVED from the sources, each entry <package>:<test-name>. Targets are
+# classified once, by what they REQUIRE, and each mode takes everything it can support: three
+# hand-written lists drifted apart, always toward running less than the mode could.
 #   needs_cmake   file-gated on not(rust-only): cannot compile without libpeacock_gpu.
-#   rust_only     everything else — no cmake, no CUDA, CPU by construction.
-#   default       rust_only + needs_cmake, minus GPU-runtime-only targets.
-#   gpu           the GPU-runtime set.
-# Every mode also runs the crate's own unit tests, the `--lib` entry below, which no
-# `--test` derivation can see: it is not a file under tests/.
+#   rust_only     everything else that compiles without the gpu feature: no cmake, no CUDA.
+#   cpu           rust_only + needs_cmake, minus the GPU-runtime set.
+# Every mode also builds and runs the crate's own unit tests, `--lib`, which no `--test`
+# derivation sees. A mode that BUILDS more must not RUN less: rust-only ⊂ cpu ⊂ gpu-capable.
 #
-# The rust-only membership test is the FEATURE'S OWN DEFINITION (see build-test.md's
-# "What rust-only means"): a file-level `#![cfg(not(feature = "rust-only"))]` is exactly
-# the marker that says "this cannot exist without the FFI". Derived from the sources, so
-# adding a test file classifies itself.
+# The rust-only membership test is the feature's own definition (build-test.md, "What rust-only
+# means"): a file-level `#![cfg(not(feature = "rust-only"))]` is exactly the marker that says
+# "this cannot exist without the FFI". Derived from the sources, so a new test file classifies itself.
 rust_only_targets() {
   local pkg dir f base
   for pkg in peacockdb-core peacockdb-ffi; do
@@ -290,10 +150,13 @@ rust_only_targets() {
       base=$(basename "$f" .rs)
       # File-level gate => needs cmake; excluded from the rust-only set.
       grep -qF '#![cfg(not(feature = "rust-only"))]' "$f" && continue
+      # Gated on the gpu feature, which its Cargo.toml entry requires: cargo refuses to build it
+      # without, and stage-install.sh builds it.
+      grep -qF '#![cfg(feature = "gpu")]' "$f" && continue
       # Excluded for measured reasons: test_ffi compiles under rust-only to ZERO tests (one
-      # cfg covers the file), so staging it ships a run of nothing that reads as coverage;
-      # test_crate_privacy invokes rustc against the crate's rlib, which a staged binary's
-      # host does not have.
+      # cfg covers the file), so running it is a run of nothing that reads as coverage;
+      # test_crate_privacy compiles probes against the crate's rlib, and the cost-report job
+      # runs it on its own.
       case "$base" in
         test_ffi | test_crate_privacy) continue ;;
       esac
@@ -307,34 +170,10 @@ rust_only_targets() {
   done
 }
 
-# The crate's own unit-test binary, as a suite entry. `--lib` is not a `--test` target, so
-# nothing derives it and every mode names it. The three build shapes nest — a `--features
-# gpu` lib holds the rust-only and FFI test modules too — and the argument the gpu mode
-# hands the binary at run time (LIB_RUNG, see the run loop) is what keeps the runs
-# disjoint: `gpu_tests::` selects the device rung and nothing beneath it. The entry is
-# `<package>:<staged name>` like every other, and the staging loop is what knows the name
-# means `--lib`. Named for its shape: a `--run` after another mode's `--build` then finds
-# no binary rather than the wrong one, and a bare `peacockdb_core` beside the targets
-# reads as one of them.
-if [ "$MODE" = "gpu" ]; then
-  LIB_STAGED=peacockdb_core_gpu_lib
-  LIB_RUNG=gpu_tests::
-elif [ "$RUST_ONLY" -eq 1 ]; then
-  LIB_STAGED=peacockdb_core_rust_only_lib
-  LIB_RUNG=""
-else
-  LIB_STAGED=peacockdb_core_lib
-  LIB_RUNG=""
-fi
-lib_target() {
-  printf 'peacockdb-core:%s\n' "$LIB_STAGED"
-}
-
 # The GPU-RUNTIME set: targets that need a GPU when they RUN, whatever they need to
 # compile. Declared once here and subtracted wherever a mode cannot satisfy it, rather
-# than filtered by name — `grep -v ':test_gpu_'` was the last name-convention dependency
-# in this file. The lib is not in it: every mode runs its own shape of the lib, and the
-# gpu mode's device rung is selected at run time, not by membership here.
+# than filtered by name. Kept in step with build-test-shadgpu.sh's RUST_TESTS and pipeline.yml's
+# gpu-tests staging array (cost-report's test_source_formatting, runners.rs, reads all three).
 gpu_runtime_targets() {
   cat <<'GPUSET'
 peacockdb-core:test_gpu_corpus
@@ -360,488 +199,128 @@ needs_cmake_targets() {
   printf '%s\n' "peacockdb-ffi:test_ffi"
 }
 
-# The derived `--test` targets alone, so the emptiness guard below reads the derivation
-# and not the lib entry every mode appends after it.
-if [ "$MODE" = "gpu" ]; then
-  # GPU-runtime set. Kept in step with build-test-shadgpu.sh:RUST_TESTS and
-  # pipeline.yml's gpu-tests staging array — three runners had three lists and they
-  # drifted. The lib binary is built --features gpu and run on `gpu_tests::` alone.
-  mapfile -t DERIVED < <(gpu_runtime_targets)
-  CPP_TEST_BIN=peacock_plan_tests
-elif [ "$RUST_ONLY" -eq 1 ]; then
-  # Golden regen / cpu+plan verify: no C++, no FFI. The lib here is the rust-only
-  # shape, run whole: the plan goldens and the end-to-end tier ride in it.
-  mapfile -t DERIVED < <(rust_only_targets)
-  CPP_TEST_BIN=""
-else
-  # Superset: everything rust-only can run, plus what only cmake makes buildable.
-  # test_gpu_* are excluded — they compile here but need a GPU at RUNTIME, which is
-  # what --gpu is for. The lib at default features holds the cpu and ffi rungs, run whole.
-  mapfile -t DERIVED < <(
-    rust_only_targets
-    needs_cmake_targets | grep -vxF -f <(gpu_runtime_targets)
-  )
-  CPP_TEST_BIN=peacock_cpu_tests
-fi
-
-# ---- validation: EVERYTHING below runs before the first side effect ----------
-# A typo must fail before anything is built, shipped or deleted — not halfway through.
-
-# An invocation that does nothing and exits 0 is indistinguishable from a successful
-# one. `--host x` alone used to be exactly that.
-if [ "$BUILD" -eq 0 ] && [ "$PUSH_BINARIES" -eq 0 ] && [ "$RUN" -eq 0 ] \
-   && [ "$BUILD_BENCH" -eq 0 ] && [ "$RUN_BENCH" -eq 0 ] && [ "$PULL_BENCH" -eq 0 ] \
-   && [ ${#PUSH_KINDS[@]} -eq 0 ] && [ ${#PULL_KINDS[@]} -eq 0 ]; then
-  echo "error: no action requested — nothing would happen and the script would exit 0." >&2
-  echo "       Pass at least one of --build / --push-binaries / --run / --all /" >&2
-  echo "       --build-benchmarks / --run-benchmarks / --pull-benchmarks /" >&2
-  echo "       --push-<kind> / --pull-<kind>." >&2
-  usage
-fi
-
-if { [ "$PUSH_BINARIES" -eq 1 ] || [ "$RUN" -eq 1 ] || [ "$RUN_BENCH" -eq 1 ] \
-     || [ "$PULL_BENCH" -eq 1 ] || [ ${#PUSH_KINDS[@]} -gt 0 ] \
-     || [ ${#PULL_KINDS[@]} -gt 0 ]; } && [ -z "$HOST" ]; then
-  echo "error: --host is required for --push-binaries/--run/--run-benchmarks/" >&2
-  echo "       --pull-benchmarks/--push-<kind>/--pull-<kind> (e.g. --host dmitry@86.38.182.185)" >&2
+DERIVED=() features=()
+case "$mode" in
+  rust-only)
+    mapfile -t DERIVED < <(rust_only_targets)
+    features=(--features rust-only) ;;
+  cpu)
+    # test_gpu_* compile here but need a GPU at run time, which a device run is for.
+    mapfile -t DERIVED < <(
+      rust_only_targets
+      needs_cmake_targets | grep -vxF -f <(gpu_runtime_targets)
+    ) ;;
+esac
+# A derived suite that comes back EMPTY is a bug in the derivation, not a configuration: every
+# loop over it would vanish and the script exit 0 having verified nothing.
+if [ "$mode" != gpu ] && [ ${#DERIVED[@]} -eq 0 ]; then
+  echo "build-test.sh: the derived Rust suite is EMPTY for mode $mode: see rust_only_targets and needs_cmake_targets" >&2
   exit 1
 fi
 
-# The measurement binary links libpeacock_gpu and times cases on a device, so every
-# benchmark phase is a --gpu phase. Under the default mode the C++ half is built the same
-# way, but the run would ship a GPU binary to a host the mode promises nothing about.
-if { [ "$BUILD_BENCH" -eq 1 ] || [ "$RUN_BENCH" -eq 1 ] || [ "$PULL_BENCH" -eq 1 ]; } \
-   && [ "$MODE" != "gpu" ]; then
-  echo "error: --build-benchmarks/--run-benchmarks/--pull-benchmarks need --gpu." >&2
-  exit 1
-fi
-
-if [ "$RUN" -eq 1 ] && [ "$RUN_BENCH" -eq 1 ]; then
-  echo "error: --run with --run-benchmarks: one exit code cannot mean both 'gate green'" >&2
-  echo "       and 'measurement completed'. Run them as two invocations." >&2
-  exit 1
-fi
-
-# A derived suite that comes back EMPTY must be an error. `mapfile` from a helper that
-# prints nothing yields a zero-length array, every `for` body over it vanishes, and the
-# script exits 0 having run no tests — a derivation typo would report success. Checked
-# before the lib is appended: that entry is named, not derived, and would hide an empty one.
-if [ ${#DERIVED[@]} -eq 0 ]; then
-  # Print the MODE, not a flag string: there is no --cpu flag, and naming one in an
-  # error message sends a reader who is already stuck to "Unknown flag: --cpu".
-  echo "error: the derived Rust suite is EMPTY for mode '${MODE_FLAG:-default (cpu)}'." >&2
-  echo "       This is a bug in the derivation (see rust_only_targets/needs_cmake_targets)," >&2
-  echo "       not a valid configuration: a run with no targets would exit 0 having" >&2
-  echo "       verified nothing." >&2
-  exit 1
-fi
-RUST_TESTS=("${DERIVED[@]}" "$(lib_target)")
-
-# Push named testdata kinds local -> remote (before any --run that consumes them).
-# --delete keeps the remote subtree exact (drops files removed locally).
-if [ ${#PUSH_KINDS[@]} -gt 0 ]; then
-  for kind in "${PUSH_KINDS[@]}"; do
-    for d in $(testdata_dirs_for_kind "$kind"); do
-      [ -d "testdata/$d" ] || { echo "--push-$kind: skip missing testdata/$d"; continue; }
-      if [ "$kind" = "goldens" ]; then
-        sync_goldens push
-      else
-        echo "==> push testdata/$d -> $HOST:$REMOTE_DIR/testdata/$d"
-        ssh "$HOST" "mkdir -p '$REMOTE_DIR/testdata/$d'"
-        rsync -a --delete "testdata/$d/" "$HOST:$REMOTE_DIR/testdata/$d/"
-      fi
-    done
-  done
-fi
-
-# Build one test target and copy its binary to <dest>/<name>. Extra arguments go to
-# cargo (the measurement build passes --release). cargo test --no-run prints a json
-# artifact line per built target; the one we want has a non-null .executable and the
-# target's name and kind. The lib's test binary is named for the crate, with kind
-# ["lib"] — the same line shape as the lib itself, which is why the executable check
-# is what tells them apart.
-stage_cargo_test_binary() {
-  local pkg=$1 t=$2 dest=$3; shift 3
-  local sel name kind exec_path
-  if [ "$t" = "$LIB_STAGED" ]; then
-    sel=(--lib); name="${pkg//-/_}"; kind=lib
-  else
-    sel=(--test "$t"); name="$t"; kind=test
+# cpp/build is this version's, or empty, or refused: never reconfigured over another's.
+cpp_build_is_ours() {
+  local had
+  if [ -f "$STAMP" ]; then
+    had=$(cat "$STAMP")
+    [ "$had" = "$cudf" ] || die "cpp/build is configured for cuDF $had, and this build is cuDF $cudf. Build with --cudf $had, or remove cpp/build and cpp/install first"
+  elif [ -n "$(ls -A cpp/build 2>/dev/null)" ]; then
+    die "cpp/build holds a configure no build here made: it has no $STAMP stamp (a host build, before the build image?). It is left alone; remove it and cpp/install to build here: rm -rf cpp/build cpp/install"
   fi
-  exec_path=$(cargo test --no-run $CARGO_FEATURES "$@" -p "$pkg" "${sel[@]}" \
-      --message-format=json \
-    | python3 -c '
-import json, sys
-name, kind = sys.argv[1], sys.argv[2]
-for line in sys.stdin:
-    try: m = json.loads(line)
-    except ValueError: continue
-    target = m.get("target") or {}
-    if m.get("executable") and target.get("name") == name and kind in target.get("kind", []):
-        print(m["executable"]); break
-' "$name" "$kind")
-  if [ -z "$exec_path" ] || [ ! -f "$exec_path" ]; then
-    echo "ERROR: failed to locate built binary for $pkg:$t"; exit 1
-  fi
-  mkdir -p "$dest"
-  cp -f "$exec_path" "$dest/$t"
-  echo "--- Staged rust test: $dest/$t"
 }
 
-# The C++ half serves both builds: the measurement binary resolves libpeacock_gpu.so
-# from cpp/install/lib like the gate binaries do, and a fresh binary against a stale
-# .so either fails to link on the host or reports zeros for every node.
-if [ "$BUILD" -eq 1 ] || [ "$BUILD_BENCH" -eq 1 ]; then
-  CARGO_FEATURES=""
-  [ "$MODE" = "gpu" ] && CARGO_FEATURES="--features gpu"
-  if [ "$RUST_ONLY" -eq 1 ]; then
-    # No C++/FFI — build the test binaries with --features rust-only (the part that
-    # compiles locally without the cuDF toolchain). Goldens are rust-only artifacts.
-    # Uses the default ./target so it stays warm alongside plain `cargo test`.
-    echo "==> build rust-only test binaries (no C++/FFI)"
-    CARGO_FEATURES="--features rust-only"
-  else
-    # cudf (default-feature) build: isolate it in its OWN target dir so it doesn't
-    # recompile the arrow/DataFusion subgraph every time it alternates with a
-    # rust-only build sharing ./target (rust-only toggles arrow's `ffi` feature →
-    # different fingerprint). PLUS key the dir off the cuDF root: a different cudf_ROOT
-    # (this script's local rapids-26.02 vs build-test-shadgpu.sh's rapids-cuda-12.2)
-    # busts the FFI/arrow fingerprints, so sharing one target-cudf across versions
-    # recompiles the whole DataFusion stack on every switch. See build-test-shadgpu.sh.
-    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target-cudf-$(basename "$LOCAL_CUDF_ROOT")}"
-    # Low-memory throttle (same rationale as build-test-shadgpu.sh): a cold opt-3
-    # cudf build OOMs a 15GiB host at full parallelism. Override with CARGO_BUILD_JOBS.
-    if [ -z "${CARGO_BUILD_JOBS:-}" ]; then
-      _mem_gib=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 32)
-      if [ "${_mem_gib:-32}" -lt 20 ]; then
-        export CARGO_BUILD_JOBS=3
-        echo "==> low-memory host (${_mem_gib}GiB RAM): throttling CARGO_BUILD_JOBS=3"
-      fi
-    fi
-    echo "==> build C++ in $BUILD_DIR against cuDF at $LOCAL_CUDF_ROOT (gcc-$GCC_VERSION)"
-    # cuDF env first on PATH so nvcc/cmake/ninja resolve from the rapids env.
-    export PATH="$LOCAL_CUDF_ROOT/bin:$PATH"
-    export CC=/usr/bin/gcc-${GCC_VERSION}
-    export CXX=/usr/bin/g++-${GCC_VERSION}
-    export CUDACXX="$LOCAL_CUDF_ROOT/bin/nvcc"
-    export LDFLAGS="-Wl,-rpath-link,$LOCAL_CUDF_ROOT/lib"
-    # Drive cmake directly (build.sh hardcodes cpp/build) so we land in cpp/build26
-    # and leave the 25.02 cpp/build untouched.
-    # ccache when available (host compilers only — ccache+nvcc is unreliable).
-    ccache_flags=""
-    if command -v ccache >/dev/null 2>&1; then
-      ccache_flags="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
-      echo "==> ccache found; using it as the C/C++ compiler launcher"
-    fi
-    cmake -S cpp -B "$BUILD_DIR" -G Ninja \
-      $ccache_flags \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" \
-      -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-      -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-      "-DCMAKE_JOB_POOLS=link_pool=1" \
-      -DCMAKE_JOB_POOL_LINK=link_pool \
-      -Dcudf_ROOT="$LOCAL_CUDF_ROOT"
-    # link_pool=1 above serializes links (Ninja): at most 1 binary links at a time —
-    # parallel links OOM this host class; compiles still run at full parallelism.
-    cmake --build "$BUILD_DIR" --parallel "$(nproc)"
-    cmake --install "$BUILD_DIR"
+stamp_cpp_build() {
+  mkdir -p cpp/build
+  printf '%s\n' "$cudf" > "$STAMP"
+}
 
-    export CUDF_ROOT="$LOCAL_CUDF_ROOT"
-    # The FFI crate builds its own libpeacock_gpu via the cmake crate in cargo's
-    # OUT_DIR, which caches the resolved cudf_DIR. Clean ONLY when the cuDF root
-    # actually changed (stamp under CARGO_TARGET_DIR, same scheme as
-    # build-test-shadgpu.sh) — an unconditional clean rebuilds flatbuffers+gtest+
-    # libpeacock_gpu on every --build. PEACOCK_FFI_CLEAN=1 forces it.
-    ffi_root_stamp="$CARGO_TARGET_DIR/.peacock-ffi-cudf-root"
-    if [ "${PEACOCK_FFI_CLEAN:-0}" = "1" ] \
-       || [ ! -f "$ffi_root_stamp" ] \
-       || [ "$(cat "$ffi_root_stamp" 2>/dev/null)" != "$CUDF_ROOT" ]; then
-      echo "--- peacockdb-ffi: cuDF root changed or clean forced; cleaning to reconfigure cmake"
-      cargo clean -p peacockdb-ffi
-      mkdir -p "$CARGO_TARGET_DIR"
-      printf '%s\n' "$CUDF_ROOT" > "$ffi_root_stamp"
-    else
-      echo "--- peacockdb-ffi: cuDF root unchanged ($CUDF_ROOT); skipping clean"
-    fi
+# A cold cuDF build OOMs a 15 GiB host at full parallelism; CARGO_BUILD_JOBS overrides.
+throttle_cargo() {
+  local mem_gib
+  [ -z "${CARGO_BUILD_JOBS:-}" ] || return 0
+  mem_gib=$(awk '/MemTotal/ { printf "%d", $2 / 1024 / 1024 }' /proc/meminfo 2>/dev/null || echo 32)
+  if [ "${mem_gib:-32}" -lt 20 ]; then
+    export CARGO_BUILD_JOBS=3
+    echo "==> low-memory host (${mem_gib} GiB): CARGO_BUILD_JOBS=3"
   fi
-  if [ "$BUILD" -eq 1 ]; then
-    echo "==> stage Rust $MODE test binaries"
-    # Stage from empty, as build-test-shadgpu.sh does: a binary left by a previous
-    # mode is otherwise shipped alongside this mode's, and only the run-by-explicit-name
-    # loop keeps it from executing. Renaming a target makes the orphan permanent.
-    rm -rf "$RUST_TESTS_STAGING"
-    for spec in "${RUST_TESTS[@]}"; do
-      stage_cargo_test_binary "${spec%%:*}" "${spec##*:}" "$RUST_TESTS_STAGING"
-    done
-  fi
-  if [ "$BUILD_BENCH" -eq 1 ]; then
-    # --release, not a profile of its own: the harness refuses to measure under debug
-    # assertions and writes `build=release` into every file it produces, so the profile
-    # is named once, here. The first release build is a cold compile of the DataFusion
-    # stack plus a second libpeacock_gpu.so; the gate's caches are untouched.
-    echo "==> stage the release $BENCH_TARGET into $BENCH_STAGING"
-    rm -rf "$BENCH_STAGING"
-    stage_cargo_test_binary peacockdb-core "$BENCH_TARGET" "$BENCH_STAGING" --release
-  fi
-fi
+}
 
-if [ "$PUSH_BINARIES" -eq 1 ]; then
-  # Strip the rust test binaries before shipping: unstripped debug builds link
-  # the whole DataFusion/Arrow stack and are huge. --strip-debug drops only the
-  # debug sections, keeping the dynamic symbol table intact.
-  for spec in "${RUST_TESTS[@]}"; do
-    t="${spec##*:}"
-    [ -f "$RUST_TESTS_STAGING/$t" ] && strip --strip-debug "$RUST_TESTS_STAGING/$t"
+# One target per cargo invocation, so at most one test binary links at a time.
+build_rust() {
+  local spec
+  for spec in "${DERIVED[@]}"; do
+    echo "==> build ${spec%%:*} --test ${spec##*:}"
+    cargo test --no-run "${features[@]}" -p "${spec%%:*}" --test "${spec##*:}" || exit 1
   done
-  [ -f "$BENCH_STAGING/$BENCH_TARGET" ] && strip --strip-debug "$BENCH_STAGING/$BENCH_TARGET"
-  echo "==> rsync $INSTALL_DIR to $HOST:$REMOTE_DIR/cpp/install"
-  ssh "$HOST" "mkdir -p '$REMOTE_DIR/cpp/install'"
-  # --delete, and the source is "$INSTALL_DIR/" NOT "$INSTALL_DIR"/*: with a glob rsync
-  # receives several sources and --delete does not mean what it looks like.
-  # Without it remote orphans are permanent — verda was carrying test_cpu_executor and
-  # test_cpu_h200 (this branch's PRE-RENAME binaries) plus three targets deleted in
-  # June. Clearing the local staging dir stops shipping NEW orphans; only --delete
-  # removes the ones already there. It matters most where the runner GLOBS
-  # rust-tests/* (build-test-shadgpu.sh, pipeline.yml) — there an orphan RUNS.
-  rsync -r -P --delete "$INSTALL_DIR/" "$HOST:$REMOTE_DIR/cpp/install/"
+  echo "==> build peacockdb-core --lib"
+  cargo test --no-run "${features[@]}" -p peacockdb-core --lib || exit 1
+  # The CLI, which has no test target: the one caller of the planner from outside the crate.
+  echo "==> build the CLI"
+  cargo build --features rust-only -p peacockdb || exit 1
+}
 
-  if [ -d testdata/goldens ]; then
-    # Ship the committed goldens (testdata/goldens/<dataset>.sf<N>/) so they match
-    # the just-built binaries — version-controlled fixtures, run-independent of the
-    # remote's checked-out commit. Heavy parquet datasets are generated on the
-    # remote, untouched.
-    # TWO reasons, and the regen one is not a footnote:
-    #   VERIFY  the binaries assert against exactly these files.
-    #   REGEN   the push establishes the BASELINE. --delete makes the remote tree equal
-    #           the local committed set, so what comes back is
-    #           (local-committed ∪ regenerated) rather than (remote-leftovers ∪
-    #           regenerated). Without it a regen inherits whatever a previous run left.
-    #
-    # EVERY mode ships them; there is no exclusion here, and both exclusions this
-    # line used to carry were bugs of the same shape:
-    #   --rust-only IS the golden/plan verify mode, so it needs them most.
-    #   --gpu was skipped on the claim that "the GPU suite uses no goldens". False:
-    #     assert_gpu_query verifies the per-node cost tree against the .cpu.txt on
-    #     EVERY run, and the final result against the .result.txt in the three
-    #     golden_* modes.
-    # In both cases the run verified the new binaries against whatever stale goldens
-    # the remote happened to have — a device-label skew alone produced 110/110
-    # "canonical file not found".
-    sync_goldens push
-  fi
-  # Fixtures the binaries READ but which are not goldens (cost-registry.csv,
-  # cost_model.conf, the query .sql sets, tpch.minimal). Swept from git — see
-  # sync_fixtures.
-  sync_fixtures
+if [ "$build" = 1 ]; then
+  case "$mode" in
+    gpu)
+      cpp_build_is_ours
+      stamp_cpp_build
+      throttle_cargo
+      stage=(scripts/env/stage-install.sh --cudf "$cudf")
+      if [ "$no_release_bench" = 1 ]; then stage+=(--no-release-bench); fi
+      "${stage[@]}" || exit 1 ;;
+    cpu)
+      : "${GCC_VERSION:?no GCC_VERSION: run inside the build image}"
+      cpp_build_is_ours
+      stamp_cpp_build
+      throttle_cargo
+      echo "==> build C++ into cpp/build against /opt/cudf (gcc-$GCC_VERSION)"
+      scripts/build.sh --configure --build --install --cudf_ROOT /opt/cudf --gcc-version "$GCC_VERSION" \
+        --compiler-launcher ccache || exit 1
+      build_rust ;;
+    rust-only)
+      build_rust ;;
+  esac
 fi
 
-if [ "$RUN" -eq 1 ]; then
-  # PCK_TEST_FILTER=<sub>  name filter forwarded to each test binary.
-  : "${PCK_TEST_FILTER:=}"
+[ "$run" = 1 ] || exit 0
 
-  # GPU tests share one process-wide cuDF/RMM pool, so they must run
-  # sequentially (--test-threads=1). CPU tests have neither constraint. Every mode
-  # could point PEACOCK_TESTDATA_DIR at the remote tree now; the plain cpu one does
-  # not yet, and its remote still needs the build box's path (see the note up top).
-  if [ "$MODE" = "gpu" ]; then
-    THREADS_ARG="--test-threads=1"
-    TESTDATA_ENV="export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata"
-  elif [ "$RUST_ONLY" -eq 1 ]; then
-    THREADS_ARG=""
-    # -> the remote testdata rather than the build box's path.
-    TESTDATA_ENV="export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata"
-  else
-    THREADS_ARG=""
-    TESTDATA_ENV=":"
+filter=${PCK_TEST_FILTER:-}
+rc=0
+# Sets rc=1 when the target fails, or ran no test with no filter to excuse it.
+run_target() {  # <package> <name> <cargo selector...>
+  local pkg=$1 name=$2 log status
+  shift 2
+  local args=(test "${features[@]}" -p "$pkg" "$@")
+  if [ -n "$filter" ]; then args+=(-- "$filter"); fi
+  log=$(mktemp)
+  echo "==> $pkg $name"
+  set +e
+  cargo "${args[@]}" 2>&1 | tee "$log"
+  status=${PIPESTATUS[0]}
+  set -e
+  if [ "$status" -ne 0 ]; then
+    echo "!!! $name failed (exit $status)"
+    rc=1
+  elif [ -z "$filter" ] && grep -q '^running 0 tests' "$log"; then
+    echo "!!! $name ran 0 tests: nothing was verified"
+    rc=1
   fi
+  rm -f "$log"
+}
 
-  # rust-only binaries link neither libpeacock_gpu nor cuDF, so skip LD_LIBRARY_PATH.
-  if [ "$RUST_ONLY" -eq 1 ]; then
-    LD_ENV=":"
-  else
-    LD_ENV="export LD_LIBRARY_PATH=$REMOTE_DIR/cpp/install/lib:$REMOTE_CUDF_ROOT/lib:\$LD_LIBRARY_PATH"
-  fi
-
-  # --update-canonical: the test binaries regenerate their goldens in-place
-  # (UPDATE_CANONICAL=1) on the remote instead of asserting against them. The
-  # regenerated goldens are pulled back to the local repo after the run.
-  if [ "$UPDATE_CANON" -eq 1 ]; then
-    UPDATE_CANON_ENV="export UPDATE_CANONICAL=1"
-  else
-    UPDATE_CANON_ENV=":"
-  fi
-
-  # Run only this mode's binaries by explicit name — globbing rust-tests/* would
-  # also pick up stale binaries left by a previous run of the other mode (the
-  # rsync doesn't --delete), e.g. a renamed target lingering during a --gpu run.
-  RUST_TEST_NAMES=""
-  for spec in "${RUST_TESTS[@]}"; do RUST_TEST_NAMES="$RUST_TEST_NAMES ${spec##*:}"; done
-
-  # rung_args, the one rule for what each binary is run with — shared with
-  # build-test-shadgpu.sh's gate. The gpu mode's lib takes its rung on top of the
-  # developer's filter; the cpu modes run their lib whole, so LIB_RUNG is empty there.
-  RUNG_ARGS_FN=$(cat "$(dirname "${BASH_SOURCE[0]}")/lib/rung-args.sh")
-  filter_q=$(printf '%q' "$PCK_TEST_FILTER")
-
-  echo "==> $MODE tests on $HOST"
-  # Unquoted heredoc: $VARS expand locally; escape with \$ for remote expansion.
-  ssh "$HOST" bash <<EOF
-    # Deliberately no 'set -e': run every test binary even when an earlier one
-    # fails (so e.g. a failing C++ test doesn't skip the Rust tests), then fail
-    # at the end if anything failed. Each result is OR'd into rc.
-    # cpp/install/lib first so libpeacock_gpu.so resolves for the test binaries
-    # (their baked rpath points at this build host); then the remote's cuDF libs.
-    $LD_ENV
-    $TESTDATA_ENV
-    $UPDATE_CANON_ENV
-$RUNG_ARGS_FN
-
-    rc=0
-
-    if [ -n "$CPP_TEST_BIN" ]; then
-      echo "==> $CPP_TEST_BIN (C++)"
-      "$REMOTE_DIR/cpp/install/bin/$CPP_TEST_BIN" || rc=1
-    fi
-
-    echo "==> Rust $MODE integration tests (filter='$PCK_TEST_FILTER')"
-    for name in $RUST_TEST_NAMES; do
-      t="$REMOTE_DIR/cpp/install/rust-tests/\$name"
-      # The suite is this mode's by name, so a binary the host lacks is a --run after
-      # another mode's --build, not a case to skip.
-      [ -x "\$t" ] || { echo "!!! \$name is not staged on the host — nothing was verified"; rc=1; continue; }
-      echo "--- \$name"
-      # A checked assignment, so a listing that fails is the binary not running rather
-      # than an empty intersection — which with a filter set the guard below excuses.
-      if ! args_text=\$(rung_args "\$t" '$LIB_STAGED' '$LIB_RUNG' $filter_q); then
-        echo "!!! \$name could not list its cases — it was not run"
-        rc=1
-        continue
-      fi
-      mapfile -t args <<< "\$args_text"
-      # The gate copy of the measurement binary is a debug build, and the harness
-      # refuses to time a case under debug assertions: skip the bench_ cases and run
-      # only its own checks. --run-benchmarks owns the timing.
-      skip=""
-      case "\$name" in $BENCH_TARGET) skip="--skip bench_" ;; esac
-      rlog=/tmp/\$name.rustlog
-      "\$t" --nocapture $THREADS_ARG \$skip "\${args[@]}" 2>&1 | tee "\$rlog"
-      [ "\${PIPESTATUS[0]}" -eq 0 ] || rc=1
-      # Zero tests is a fault only when nothing was filtered out: with a filter set,
-      # every other binary legitimately matches nothing. The lib's rung is not the
-      # filter, so an unfiltered run that selects nothing is the rung gone stale.
-      if [ -z $filter_q ] && grep -q '^running 0 tests' "\$rlog"; then
-        echo "!!! \$name ran 0 tests (its arguments \${args[*]} matched nothing?) — nothing was verified"
-        rc=1
-      fi
-    done
-
-    exit \$rc
-EOF
-fi
-
-# --- run: the benchmark measurement -------------------------------------------
-# Attached: the ssh session is the run. The harness reads PEACOCK_TESTDATA_DIR (the
-# sf40 dataset under it, the results tree under it) and PEACOCK_RECORD_PATH; the sf40
-# link is the host's to keep (shadgpu.sh creates it; here it is only checked, since the
-# dataset's location on this host is not this script's to know).
-if [ "$RUN_BENCH" -eq 1 ]; then
-  : "${PCK_TEST_FILTER:=}"
-  echo "==> benchmark measurement on $HOST (filter='$PCK_TEST_FILTER')"
-  ssh "$HOST" bash <<EOF
-    set -o pipefail
-    export LD_LIBRARY_PATH=$REMOTE_DIR/cpp/install/lib:$REMOTE_CUDF_ROOT/lib:\$LD_LIBRARY_PATH
-    export PEACOCK_TESTDATA_DIR=$REMOTE_DIR/testdata
-    export PEACOCK_RECORD_PATH=\$PEACOCK_TESTDATA_DIR/$BENCH_RECORD_REL
-
-    sf40=\$PEACOCK_TESTDATA_DIR/tpch.sf40
-    if [ ! -d "\$sf40/" ]; then
-      echo "!!! no sf40 dataset at \$sf40 (expected a directory or a symlink to one)"
-      exit 1
-    fi
-    bin=$REMOTE_DIR/cpp/install/rust-benchmarks/$BENCH_TARGET
-    if [ ! -x "\$bin" ]; then
-      echo "!!! benchmark binary not found at \$bin"
-      echo "    Build it with --gpu --build-benchmarks and ship it with --push-binaries."
-      echo "    (A --push-binaries from a checkout that never built it mirrors it away.)"
-      exit 1
-    fi
-    results=\$PEACOCK_TESTDATA_DIR/benchmark-results
-    mkdir -p "\$results" "\$(dirname "\$PEACOCK_RECORD_PATH")"
-    rm -f "\$PEACOCK_RECORD_PATH"
-    stamp=\$(mktemp)
-    blog=/tmp/$BENCH_TARGET.log
-
-    echo "==> $BENCH_TARGET (filter='$PCK_TEST_FILTER')"
-    "\$bin" --nocapture --test-threads=1 '$PCK_TEST_FILTER' 2>&1 | tee "\$blog"
-    status=\${PIPESTATUS[0]}
-    if [ "\$status" -ne 0 ]; then
-      echo "!!! $BENCH_TARGET FAILED (exit \$status)"
-      exit "\$status"
-    fi
-    # Zero tests is a fault here: with one binary there is nothing else the filter
-    # could legitimately have been aimed at.
-    ran=\$(sed -n 's/^test result:.* \([0-9][0-9]*\) passed.*/\1/p' "\$blog" \
-          | awk '{n += \$1} END {print n + 0}')
-    if [ "\$ran" -eq 0 ]; then
-      echo "!!! the run passed no tests (filter '$PCK_TEST_FILTER' matched nothing?)"
-      exit 1
-    fi
-    echo "==> ran \$ran tests"
-    written=\$(find "\$results" -name '*.benchmark.txt' -newer "\$stamp" | wc -l)
-    total=\$(find "\$results" -name '*.benchmark.txt' | wc -l)
-    rm -f "\$stamp"
-    echo "==> benchmark records written by this run: \$written (on host: \$total)"
-    echo "==> calibration rows: \$(grep -vc '^#' "\$PEACOCK_RECORD_PATH" 2>/dev/null || echo 0)"
-    if [ "\$written" -eq 0 ]; then
-      echo "==> no .benchmark.txt written: none of the tests that ran times a case"
-    fi
-EOF
-fi
-
-# --- pull: benchmark results ---------------------------------------------------
-# Additive into the same tree shadgpu.sh fills: a record's heading names its host and
-# build, and git diff is the comparison.
-if [ "$PULL_BENCH" -eq 1 ]; then
-  trees=$(ssh "$HOST" \
-    "find $REMOTE_DIR/testdata/benchmark-results -name '*.benchmark.txt' 2>/dev/null | wc -l")
-  mkdir -p testdata/benchmark-results
-  echo "==> pull $HOST:$REMOTE_DIR/testdata/benchmark-results -> testdata/benchmark-results (additive)"
-  rsync -a "$HOST:$REMOTE_DIR/testdata/benchmark-results/" testdata/benchmark-results/
-  echo "==> fetched $trees benchmark records"
-  mkdir -p "testdata/$(dirname "$BENCH_RECORD_REL")"
-  got_record=0
-  if rsync -a "$HOST:$REMOTE_DIR/testdata/$BENCH_RECORD_REL" "testdata/$BENCH_RECORD_REL" 2>/dev/null; then
-    got_record=1
-    echo "==> fetched testdata/$BENCH_RECORD_REL"
-  fi
-  if [ "$trees" -eq 0 ] && [ "$got_record" -eq 0 ]; then
-    echo "error: nothing came home: no .benchmark.txt on $HOST and no $BENCH_RECORD_REL." >&2
-    echo "       Did the run measure anything? Its log is /tmp/$BENCH_TARGET.log on the host." >&2
-    exit 1
+if [ "$mode" = cpu ]; then
+  [ "$(cat "$STAMP" 2>/dev/null)" = "$cudf" ] || die "cpp/build is not a cuDF $cudf build: run --build first"
+  # The FFI binaries load libcudf from the image's prefix.
+  export LD_LIBRARY_PATH=/opt/cudf/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+  echo "==> ctest -L cpu"
+  if ! ctest --test-dir cpp/build -L cpu --output-on-failure; then
+    echo "!!! ctest -L cpu failed"
+    rc=1
   fi
 fi
-
-# Pull named testdata kinds remote -> local. Runs last, so an --update-canonical
-# --run --fetch-goldens pulls the regenerated goldens only after the run succeeded
-# (set -e). For goldens we pull only *.txt (the cost/plan goldens); other kinds
-# (e.g. parquet generated once on verda) sync in full. Opt-in so a plain run never
-# overwrites local data.
-if [ ${#PULL_KINDS[@]} -gt 0 ]; then
-  for kind in "${PULL_KINDS[@]}"; do
-    for d in $(testdata_dirs_for_kind "$kind"); do
-      if [ "$kind" = "goldens" ]; then
-        # No *.txt filter. Its real job was keeping a byte-level golden out of the round
-        # trip, and that is the TEST's job — the payload digest refuses to regenerate
-        # without PEACOCK_REWRITE_RECIPE_BYTES. Two mechanisms for one invariant, with the
-        # weaker one in the wrong layer, is how they drift; the filter also silently
-        # dropped the 16 sf40 CSVs.
-        sync_goldens pull
-      else
-        echo "==> pull $HOST:$REMOTE_DIR/testdata/$d -> testdata/$d (additive)"
-        mkdir -p "testdata/$d"
-        rsync -a "$HOST:$REMOTE_DIR/testdata/$d/" "testdata/$d/"
-      fi
-    done
-  done
-fi
+for spec in "${DERIVED[@]}"; do
+  run_target "${spec%%:*}" "${spec##*:}" --test "${spec##*:}"
+done
+run_target peacockdb-core --lib --lib
+if [ "$rc" -eq 0 ]; then echo "==> build-test.sh $mode --run: green"; else echo "==> build-test.sh $mode --run: FAILED" >&2; fi
+exit "$rc"

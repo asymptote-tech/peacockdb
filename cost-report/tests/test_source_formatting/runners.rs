@@ -1,7 +1,8 @@
-//! The three GPU runners — pipeline.yml's gpu job, `build-test-shadgpu.sh` and `build-test.sh`
-//! — read for the staged targets, the lib and its rung, and the single-tenant flag. The gpu
-//! job stages its binaries in pipeline.yml and runs them through `scripts/nebius-test.sh` on
-//! the GPU host, so its run loop is read out of that script.
+//! The three GPU runners — pipeline.yml's gpu job, `build-test-shadgpu.sh` and the image path
+//! (`scripts/env/stage-install.sh` staging, `docker/run-tests.sh` running) — read for the staged
+//! targets, the lib and its rung, and the single-tenant flag. The gpu job stages its binaries in
+//! pipeline.yml and runs them through `scripts/nebius-test.sh` on the GPU host, so its run loop
+//! is read out of that script. `build-test.sh` holds the GPU-runtime set the CPU modes subtract.
 
 use std::collections::BTreeSet;
 
@@ -17,6 +18,12 @@ const SHADGPU: &str = "scripts/build-test-shadgpu.sh";
 pub(crate) const NEBIUS_TEST: &str = "scripts/nebius-test.sh";
 
 const BUILD_TEST: &str = "scripts/build-test.sh";
+
+/// Stages the install a device run ships, the lib among it, in the build image.
+const STAGE_INSTALL: &str = "scripts/env/stage-install.sh";
+
+/// The run image's runner, which hands the staged lib its rung.
+const RUN_TESTS: &str = "docker/run-tests.sh";
 
 pub(crate) const GPU_STAGING_STEP: &str = "Build and stage rust GPU test binaries";
 
@@ -136,13 +143,19 @@ pub(crate) fn shadgpu_staged_targets() -> BTreeSet<String> {
 /// target, so neither script lists it beside the targets — each names it in a pair of
 /// variables that the run loop hands to `rung_args`.
 fn script_lib(text: &str, staged: &str, rung: &str) -> Option<(String, String)> {
-    let assigned = |name: &str| {
-        text.lines().find_map(|l| {
-            let v = l.trim().strip_prefix(name)?.strip_prefix('=')?;
-            Some(v.trim_matches(['"', '\'']).to_string())
-        })
-    };
-    Some((assigned(staged)?, assigned(rung)?))
+    Some((assigned(text, staged)?, assigned(text, rung)?))
+}
+
+/// The value of the first `<name>=` assignment in `text`, quotes stripped.
+fn assigned(text: &str, name: &str) -> Option<String> {
+    text.lines().find_map(|l| {
+        let v = l.trim().strip_prefix(name)?.strip_prefix('=')?;
+        Some(v.trim_matches(['"', '\'']).to_string())
+    })
+}
+
+fn read(rel: &str) -> String {
+    std::fs::read_to_string(repo_root().join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"))
 }
 
 /// `build-test-shadgpu.sh`'s lib: `RUST_LIB_STAGED` and `RUST_LIB_RUNG`.
@@ -152,21 +165,64 @@ fn shadgpu_staged_lib() -> Option<(String, String)> {
     script_lib(&text, "RUST_LIB_STAGED", "RUST_LIB_RUNG")
 }
 
-/// `build-test.sh`'s lib in `--gpu` mode: `LIB_STAGED` and `LIB_RUNG` inside the
-/// `[ "$MODE" = "gpu" ]` branch that sets them, since the cpu modes set the same two
-/// names to their own shapes.
-fn build_test_gpu_lib() -> Option<(String, String)> {
-    let text = std::fs::read_to_string(repo_root().join(BUILD_TEST)).expect("read build-test.sh");
-    let branch: String = text
+/// The image path's lib, as `(staged name, rung)`: the name `stage-install.sh` stages the
+/// crate's own test binary under, off its `stage_cargo_lib_binary` line (a literal, or a `$VAR`
+/// the script assigns), and the `LIB_RUNG` `run-tests.sh` hands it. Whether run-tests.sh hands
+/// the rung to that name is [`run_tests_rung_reaches_the_binary`]'s.
+fn container_gpu_lib() -> Option<(String, String)> {
+    let stage = read(STAGE_INSTALL);
+    let name = stage
         .lines()
-        .skip_while(|l| !(l.contains("\"$MODE\" = \"gpu\"") && l.contains("then")))
+        .find_map(|l| l.trim().strip_prefix("stage_cargo_lib_binary "))?
+        .split_whitespace()
+        .next()?
+        .trim_matches('"');
+    let name = match name.strip_prefix('$') {
+        Some(var) => assigned(&stage, var.trim_matches(['{', '}']))?,
+        None => name.to_string(),
+    };
+    Some((name, assigned(&read(RUN_TESTS), "LIB_RUNG")?))
+}
+
+/// Does run-tests.sh's rung reach the lib `stage-install.sh` stages as `staged`? In its
+/// `for t in "${rust[@]}"` loop the rung is appended to `args` under `[ "$name" = "$LIB_STAGED" ]`,
+/// so the script's `LIB_STAGED` must be that name, and every `run_binary` line in the loop must
+/// pass `"${args[@]}"`. Returns what is missing.
+fn run_tests_rung_reaches_the_binary(text: &str, staged: &str) -> Result<(), String> {
+    match assigned(text, "LIB_STAGED") {
+        Some(name) if name == staged => {}
+        other => {
+            return Err(format!(
+                "its LIB_STAGED is {other:?}, and {STAGE_INSTALL} stages the lib as {staged:?}: \
+                 the rung goes to a name no binary has"
+            ));
+        }
+    }
+    let body: Vec<&str> = text
+        .lines()
+        .skip_while(|l| !l.contains("for t in \"${rust[@]}\""))
         .skip(1)
-        .take_while(
-            |l| !matches!(l.trim(), s if s.starts_with("elif ") || s == "else" || s == "fi"),
-        )
-        .collect::<Vec<_>>()
-        .join("\n");
-    script_lib(&branch, "LIB_STAGED", "LIB_RUNG")
+        .take_while(|l| !l.trim_start().starts_with("done"))
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect();
+    if body.is_empty() {
+        return Err("no `for t in \"${rust[@]}\"` loop with a body".to_string());
+    }
+    if !body.iter().any(|l| {
+        l.contains("[ \"$name\" = \"$LIB_STAGED\" ]") && l.contains("args+=(\"$LIB_RUNG\")")
+    }) {
+        return Err(
+            "no line appends $LIB_RUNG to args under [ \"$name\" = \"$LIB_STAGED\" ]".to_string(),
+        );
+    }
+    let runs: Vec<&&str> = body.iter().filter(|l| l.contains("run_binary ")).collect();
+    if runs.is_empty() {
+        return Err("the loop runs no binary through run_binary".to_string());
+    }
+    match runs.iter().find(|l| !l.contains("\"${args[@]}\"")) {
+        Some(l) => Err(format!("a binary runs without its args: {}", l.trim())),
+        None => Ok(()),
+    }
 }
 
 /// Does the lib's rung reach the binary in this script's run loop? The rung sits in a
@@ -309,30 +365,61 @@ fn the_three_gpu_target_lists_agree() {
         .map(|(n, _)| n)
         .zip(gpu_job_lib_rung().map(|(_, r)| r));
     let dev_lib = shadgpu_staged_lib();
-    let runtime_lib = build_test_gpu_lib();
+    let container_lib = container_gpu_lib();
     assert!(
-        ci_lib.is_some() && dev_lib.is_some() && runtime_lib.is_some(),
+        ci_lib.is_some() && dev_lib.is_some() && container_lib.is_some(),
         "a runner no longer names the lib binary and its rung — pipeline.yml + \
-         nebius-test.sh {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu \
-         {runtime_lib:?}"
+         nebius-test.sh {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, stage-install.sh + \
+         run-tests.sh {container_lib:?}"
     );
     assert!(
-        ci_lib == dev_lib && dev_lib == runtime_lib,
+        ci_lib == dev_lib && dev_lib == container_lib,
         "the three runners disagree about the lib binary or its rung — pipeline.yml + \
-         nebius-test.sh {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu \
-         {runtime_lib:?}"
+         nebius-test.sh {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, stage-install.sh + \
+         run-tests.sh {container_lib:?}"
     );
-    let runners = [
-        (SHADGPU, "RUST_LIB_STAGED", "RUST_LIB_RUNG"),
-        (BUILD_TEST, "LIB_STAGED", "LIB_RUNG"),
-    ];
-    for (rel, staged, rung) in runners {
-        let text = std::fs::read_to_string(repo_root().join(rel))
-            .unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        if let Err(why) = rung_reaches_the_binary(&text, staged, rung) {
-            panic!("{rel}: the lib's rung does not reach the binary — {why}");
-        }
+    if let Err(why) = rung_reaches_the_binary(&read(SHADGPU), "RUST_LIB_STAGED", "RUST_LIB_RUNG") {
+        panic!("{SHADGPU}: the lib's rung does not reach the binary — {why}");
     }
+    let staged = container_lib.map(|(n, _)| n).unwrap_or_default();
+    if let Err(why) = run_tests_rung_reaches_the_binary(&read(RUN_TESTS), &staged) {
+        panic!("{RUN_TESTS}: the lib's rung does not reach the binary — {why}");
+    }
+}
+
+/// The run-tests.sh reader's own guard: it accepts the loop as written and refuses each way the
+/// rung can stop reaching the lib — a commented-out rung, a run without the arguments, and a
+/// `LIB_STAGED` naming another binary than the one staged.
+#[test]
+fn the_run_tests_reader_refuses_a_rung_that_cannot_reach_the_lib() {
+    let script = |staged: &str, rung_line: &str, run_line: &str| {
+        format!(
+            "LIB_STAGED={staged}\nLIB_RUNG=gpu_tests::\n\
+             for t in \"${{rust[@]}}\"; do\n\
+             \x20 args=(--nocapture --test-threads=1)\n\
+             \x20 {rung_line}\n\
+             \x20 {run_line}\n\
+             done\n"
+        )
+    };
+    let rung = "if [ \"$name\" = \"$LIB_STAGED\" ]; then args+=(\"$LIB_RUNG\"); fi";
+    let run = "run_binary \"$logs/$name.log\" \"$t\" \"${args[@]}\"";
+    let lib = "peacockdb_core_gpu_lib";
+    assert_eq!(
+        run_tests_rung_reaches_the_binary(&script(lib, rung, run), lib),
+        Ok(())
+    );
+    assert!(
+        run_tests_rung_reaches_the_binary(&script(lib, &format!("# {rung}"), run), lib).is_err()
+    );
+    assert!(
+        run_tests_rung_reaches_the_binary(
+            &script(lib, rung, "run_binary \"$logs/$name.log\" \"$t\""),
+            lib
+        )
+        .is_err()
+    );
+    assert!(run_tests_rung_reaches_the_binary(&script("other_lib", rung, run), lib).is_err());
 }
 
 /// The GPU step reports a failure, and has no way to report success over one.

@@ -121,7 +121,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `DRIVER_MINIMUM_25_10`.
 - Produces: `ghcr.io/asymptote-tech/peacockdb-build:cudf-25.10` (+ the inputs tag); no run image.
 
-- [ ] **Step 1: export the spec on dev.** `docker run --rm -v "$PWD/docker/conda:/out"
+- [x] **Step 1: export the spec on dev.** `docker run --rm -v "$PWD/docker/conda:/out"
   mambaorg/micromamba:<MICROMAMBA_VERSION without -0> bash -c 'micromamba create -y -p /tmp/e
   -c rapidsai -c conda-forge -c nvidia cudf=25.10 cuvs=25.10 python=3.12 cuda-version=12.9 &&
   micromamba env export -p /tmp/e --explicit --md5 > /out/cudf-25.10.spec'`. Match the header
@@ -129,7 +129,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   rapids-library package name in the 26.02 spec (`libcudf libcuvs libraft* librmm libkvikio
   rapids-logger`, and others), check it is present in the 25.10 spec. Record in the detail file
   the `libcudf`, `libarrow` and `cuda-version` lines, plus any name missing with its reason.
-- [ ] **Step 2: failing tests.**
+- [x] **Step 2: failing tests.**
   - `test_pins.py`: `PINS["GCC_25_10"] = "14"`; `IDENTITY["25.10"]` = the libcudf `25.10.*`,
     libarrow and `cuda-version 12.9` lines from Step 1;
     `test_a_build_only_version_has_no_driver_minimum`: `DRIVER_MINIMUM_25_10` not in pins.
@@ -147,20 +147,20 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     `v`. Update `test_all_runs_every_other_choice…` so `exclude` is not read as a matrix axis.
     `test_only_the_default_branch_moves_the_tag`: the push step passes `--moving` only under a
     condition on `github.ref` equal to the default branch's ref.
-- [ ] **Step 3: run** `for f in scripts/env/tests/test_{pins,image,images_workflow}.py; do python3 $f; done`
+- [x] **Step 3: run** `for f in scripts/env/tests/test_{pins,image,images_workflow}.py; do python3 $f; done`
   → FAIL on the new tests only.
-- [ ] **Step 4: implement.** Write the spec, pin, Dockerfile stage, `image_inputs_tag`, and the
+- [x] **Step 4: implement.** Write the spec, pin, Dockerfile stage, `image_inputs_tag`, and the
   `image.sh` tags and refusal. images.yml: `options: ['25.02', '25.10', '26.02', all]` and
   `exclude: [{kind: run, cudf: '25.10'}]` in block form, which the test's reader accepts.
-- [ ] **Step 5: run** Step 3's loop, then every `scripts/env/tests/test_*.py` that needs no image
+- [x] **Step 5: run** Step 3's loop, then every `scripts/env/tests/test_*.py` that needs no image
   → `0 failed`.
-- [ ] **Step 6: build and prove 25.10 on dev.** Run `scripts/env/image.sh build build 25.10`.
+- [x] **Step 6: build and prove 25.10 on dev.** Run `scripts/env/image.sh build build 25.10`.
   Then, in `docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/h -v "$PWD:$PWD" -w "$PWD"
   -e CARGO_TARGET_DIR="$PWD/target-img-25.10" <image>`, run `scripts/build.sh --configure
   --build --install --cudf_ROOT /opt/cudf --gcc-version 14`, then `cargo test --no-run -p
   peacockdb-core --lib` → both succeed. Record the image size in the detail file.
-- [ ] **Step 7: commit** `containers-only: a CI-only cuDF 25.10 build image; images carry an inputs tag`.
-- [ ] **Step 8: publish (coordinator).** `images.yml` must be on master, because GitHub dispatches
+- [x] **Step 7: commit** `containers-only: a CI-only cuDF 25.10 build image; images carry an inputs tag`.
+- [x] **Step 8: publish (coordinator).** `images.yml` must be on master, because GitHub dispatches
   only the default branch's workflows. If `gh workflow list --all | grep -w images.yml` finds
   nothing, stop, `blocked(building)`, and ask the human to land this branch's
   `.github/workflows/images.yml` alone on master, as a separate commit (approved in advance). Never
@@ -241,7 +241,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     --remote-cudf-root --gcc-version --push-* --pull-* --all --build-benchmarks --run-benchmarks
     --pull-benchmarks --update-canonical`.
 
-- [ ] **Step 1: failing tests**, with fake `docker`, `cargo`, `ctest` and `stage-install.sh` on
+- [x] **Step 1: failing tests**, with fake `docker`, `cargo`, `ctest` and `stage-install.sh` on
   PATH recording argv, in a fake tree as `test_image.py`'s `Repo()` does.
   - `test_image_ref.py`:
     - `test_prefers_the_local_inputs_tag`;
@@ -270,8 +270,8 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     - `test_command_form_passes_the_exit_code` (`-- false` → 1);
     - `test_runner_temp_is_mounted_when_set` (`RUNNER_TEMP=<tmp>` → `-v <tmp>:<tmp>` and `-e
       RUNNER_TEMP` in argv; unset → neither).
-- [ ] **Step 2: run** both files → FAIL (no script).
-- [ ] **Step 3: implement** `image-ref.sh` and the new `build-test.sh`. Delete `cargo-cudf.sh`. In
+- [x] **Step 2: run** both files → FAIL (no script).
+- [x] **Step 3: implement** `image-ref.sh` and the new `build-test.sh`. Delete `cargo-cudf.sh`. In
   runners.rs, replace `build_test_gpu_lib()` with `container_gpu_lib()`. It returns the staged
   name from `scripts/env/stage-install.sh`'s `stage <name> …--lib…` line, and `LIB_RUNG=` from
   `docker/run-tests.sh` (`script_lib`). Add `run_tests_rung_reaches_the_binary()`: in run-tests.sh's
@@ -279,7 +279,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   and every `run_binary` line passes `"${args[@]}"`. The `runners` loop at line 334 keeps
   SHADGPU only; run-tests.sh is checked by the new function. Update the failure messages that
   name `build-test.sh --gpu`.
-- [ ] **Step 4: run** both Python files → `0 failed`. Then run
+- [x] **Step 4: run** both Python files → `0 failed`. Then run
   `scripts/build-test.sh -- cargo test -p cost-report --test test_source_formatting` → all pass.
   Then `scripts/build-test.sh --rust-only --build --run` on dev → green, with the cpu counts of
   build-test.md's table (`--lib` 780, `test_cpu_corpus` 2009, …). Record them in the detail file.
@@ -313,7 +313,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   as the runner shell's redirect after the wrapped command. This task lists `pipeline.yml`
   `cost-report` and `s3-datasets`.
 
-- [ ] **Step 1: counts before (coordinator).** The count baseline (Global Constraints): `id=$(gh
+- [x] **Step 1: counts before (coordinator).** The count baseline (Global Constraints): `id=$(gh
   run list --workflow pipeline.yml --branch ENS-tp4-sized --event pull_request --status success -L1
   --json databaseId -q '.[0].databaseId'); gh run view $id --log > <scratch>/before.log` (this
   branch's own first PR run, before Step 3, if the parent has none). Save, per job, the lines
@@ -410,7 +410,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   counts per step equal the count baseline's 25.02 leg, and the 25.10 leg's equal the baseline's
   "26.02" leg; `Generate SF-1` logs `generate_pbench.sh --check` passing. A moved count or a red
   step reaches the developer as a failing test; the developer explains it in the detail file.
-- [ ] **Step 7: commit** `containers-only: dataset-matrix in the build image, an honest 25.10 leg (closes #129)`.
+- [x] **Step 7: commit** `containers-only: dataset-matrix in the build image, an honest 25.10 leg (closes #129)`.
 
 ### Task 5: what `run-gpu.sh` needs for CI and for agents
 
@@ -549,7 +549,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   times for prepare, ship and run, and the job log's `df -h /`, and hands any failure or moved
   count to the developer as a failing test. Pass also means the job stopped the VM, or the
   watcher did.
-- [ ] **Step 7: commit** any fix with its failing test first:
+- [x] **Step 7: commit** any fix with its failing test first:
   `containers-only: gpu-tests ships and runs on nebius-gpu through run-gpu.sh; the old runner goes`.
 
 ### Task 7: `exec-model-corpus.yml` and `validate-large.yml` in the image; the guard covers every job

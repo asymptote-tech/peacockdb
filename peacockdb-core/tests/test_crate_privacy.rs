@@ -3,8 +3,8 @@
 //! Its own binary rather than part of cost-report's `test_source_formatting`, where the
 //! module layout rules live: it reads no source, but it compiles snippets against the
 //! `peacockdb_core` rlib beside this binary, and cost-report depends on nothing. It is kept
-//! off remote staging by name (`scripts/build-test.sh`), since a staged binary's host has no
-//! rlib to compile against.
+//! out of `scripts/build-test.sh`'s suites by name: the cost-report job runs it on its own, and
+//! a staged binary's host has no rlib to compile against.
 
 use std::path::PathBuf;
 
