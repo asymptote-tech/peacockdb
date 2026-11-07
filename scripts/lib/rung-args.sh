@@ -1,9 +1,8 @@
 # shellcheck shell=bash
 #
 # The filter arguments a staged rust test binary takes on a GPU host. Inlined verbatim
-# into the remote gate script of build-test-shadgpu.sh and build-test.sh — both runners
-# hand every binary the developer's PCK_TEST_FILTER, and the crate's own unit-test binary
-# alone also takes its rung: built with --features gpu it holds every rung, and unfiltered
+# into the remote gate script of build-test-shadgpu.sh, which hands every binary the
+# developer's PCK_TEST_FILTER; the crate's own unit-test binary alone also takes its rung: built with --features gpu it holds every rung, and unfiltered
 # it would put the CPU unit cases through --test-threads=1 on the one serial host.
 #
 # The rung is part of what that binary is, never the developer's filter, so the runner's
