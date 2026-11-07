@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 8190 test cases — Rust 6301, C++ 286, Python 1603.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 262 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 8193 test cases — Rust 6303, C++ 286, Python 1604.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes three sets run by hand: the external-embeddings sidecar recount, the 262 image and VM tests under `scripts/env/tests/`, and the 9 tests of `duckdb_minimal.sh`, which need `duckdb` and sf1. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -29,7 +29,7 @@ unit (`foo.rs` beside `foo/tests.rs`).
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2451 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2450 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
@@ -1625,7 +1625,8 @@ tpch.sf40, tpcds.sf40 (on the GPU host, outside the repo; each symlinked in as t
   │                             └──► calibration/<device>/<dataset>.sf<sf>/records.tsv   (gitignored)
   │
   ├── bench-each.sh over run-gpu.sh (the H100), one process per query: the same files, and
-  │     each process's record set aside as a segment; join_records.py joins the segments,
+  │     each process's record set aside as a segment; join_records.py joins the segments (after
+  │     the device's published records, so a run of one mode keeps the other's rows),
   │     split_record.py --cases <the device's cases.csv> cuts the result, and publish_record.sh
   │     uploads and pins it from dev, as above. PCK_WRITE_GPU_RESULT=1 on every run:
   │     └──► goldens/<dataset>.sf40/gpu-result.txt   the H100's answers, held to DuckDB's below
@@ -1651,8 +1652,8 @@ calibration/<dataset>.sf<sf>/records.tsv (one --record each) + calibration/hbm.t
   └── plot.py ──► calibration/plots/{load,compute,spread,query,icicle,hbm}/*.png
                   calibration/plots/index.html      one call, every panel
 
-create_nsys_profile.sh --cases <ds>.csv --device <device>   (a device's own run, by hand after it)
-  └──► calls.tsv, loads.tsv, hbm.tsv moved to calibration/<device>/<dataset>.sf<sf>/   (committed)
+create_nsys_profile.sh --cases <ds>.csv --mode <mode> --device <device>   (by hand, a pass per mode)
+  └──► calls.tsv, loads.tsv, hbm.tsv: the mode's rows into calibration/<device>/<dataset>.sf<sf>/   (committed)
 
 prototype_fused_benchmarks over run-gpu.sh (the H100), one process per batch (Fused batches, below)
   ├──► benchmark-results/<device>/fused/<dataset>.sf40/tp1_single.fused.txt
@@ -1740,7 +1741,9 @@ What the arrows are there to make checkable:
 - **Every derived file has exactly one producer, and the scripts above run it.** A file that
   only a human regenerates goes stale in silence: nothing checks it against the capture it
   claims to describe, and a panel drawn from a stale one looks exactly like a fresh one.
-  `plot.py` is the only thing that draws, for the same reason.
+  `plot.py` is the only thing that draws, for the same reason. One exception: the H100's
+  tp4-sized rows, whose tpcds passes ran a case at a time on the VM by uncommitted drivers
+  ("sf40 baseline", step 7, says how).
 - **The derived text is committed; the record and the captures are not.** The
   `.benchmark.txt` tree, `calls.tsv`, `hbm.tsv` and every panel are in git, rewritten in place
   by each collection, so `git diff` shows how the numbers moved. The top-level `loads.tsv` is
@@ -2280,13 +2283,17 @@ The device tree is the one the first measured case's pull changed; its slug is k
 record:
 
 ```
-python3 scripts/calibration/join_records.py --record <dir>/*.tsv --out <joined>
+scripts/calibration/fetch_record.sh <device>/tpch.sf40; scripts/calibration/fetch_record.sh <device>/tpcds.sf40
+python3 scripts/calibration/join_records.py --record testdata/calibration/<device>/*.sf40/records.tsv <dir>/*.tsv --out <joined>
 python3 scripts/calibration/split_record.py --record <joined> --cases <the device's cases.csv> --out-dir <split>
 scripts/calibration/publish_record.sh --from <split> <device>/tpch.sf40 <device>/tpcds.sf40
 ```
 
-`join_records.py` takes a case's rows from its highest attempt, a name without one counting as
-0, and refuses segments whose headings differ but for the pool's free memory, which it writes as
+The published records go first: the split refuses a record that lacks any (query, mode) the list
+declares, so a run of one mode of a two-mode list needs the other mode's rows. Both modes must then
+share one heading (driver, CUDA, cuDF, host); re-measuring one after any of those changes means
+re-measuring both. `join_records.py` takes a case's rows from its highest attempt, a name without
+one counting as 0, and refuses segments whose headings differ but for the pool's free memory, which it writes as
 `<min>-<max>`. `split_record.py --cases` reads a device list's `ok` and `wrong` rows as the cases.
 `publish_record.sh` uploads each file under its sha256, reads it back, rewrites its line in
 `records.sha256` and moves it to where `fetch_record.sh` puts it.
@@ -3240,9 +3247,13 @@ A timed section with `pinned_cache` other than `on`, or with `prefill_files=0`, 
    the H100's `~/peacock/<i>/testdata/benchmark-results/h100-80gb-hbm3/`, so nothing stale comes home.
 3. `$H start`; `$G prepare`; `$G ship --install /home/dmitry/build/peacock/sf40-baseline/install`.
 4. `scripts/env/bench-each.sh $VM --cases peacockdb-core/tests/common/corpus_benchmark_cases.inc --mode tp1_single --timeout 1800 --records <scratch>/records`,
-   then `$H stop`. On 2026-11-05 it ran the 130 cases in 65 min, without a break.
+   then, for the list's second mode, the same with `--mode tp4_sized --within
+   testdata/benchmark-results/h100-80gb-hbm3/cases.csv` (without `--within` it also times
+   anti_join, q17, q25 and q29, and the list's writer then changes their rows); then `$H stop`.
+   On 2026-11-05 the tp1_single run took 65 min for 130 cases, without a break.
 5. The list and the page, as above and under "The page".
-6. The record: `join_records.py --record <scratch>/records/*.tsv --out <joined>`;
+6. The record: `fetch_record.sh h100-80gb-hbm3/<ds>.sf40` for both datasets, then
+   `join_records.py --record testdata/calibration/h100-80gb-hbm3/*.sf40/records.tsv <scratch>/records/*.tsv --out <joined>`;
    `split_record.py --record <joined> --cases testdata/benchmark-results/h100-80gb-hbm3/cases.csv --out-dir <split>`;
    `publish_record.sh --from <split> h100-80gb-hbm3/tpch.sf40 h100-80gb-hbm3/tpcds.sf40`, with dev's
    `peacock.env` exported.
@@ -3289,11 +3300,11 @@ a sample read 101 % of peak. `nsys_hbm.py` counts only sampling gaps over the ca
 H100 process ends with a gap of about 1.5 s, which is likely the pinned cache being freed.
 
 **What `calls.tsv` does not cover.** `nsys_calls.py` checks each case's capture against
-`goldens/<ds>.sf1`'s recipes, since plan goldens exist at sf1 only. At sf40 the planner orders the
-joins of 14 tpcds queries differently, so their captures cannot be checked: q18, q30, q31, q32,
+`goldens/<ds>.sf1`'s recipes, since plan goldens exist at sf1 only. At tp1-single, sf40's planner
+orders the joins of 14 tpcds queries differently, so their captures cannot be checked: q18, q30, q31, q32,
 q33, q56, q60, q61, q71, q81, q83, q85, q91 and q92. The H100's tpcds `calls.tsv` covers the other
-65, from a trace pass over those alone. Its `loads.tsv` and `hbm.tsv` cover all 79, since neither
-reads a plan. tpch's three files cover all 47. No sf40 plan goldens are kept.
+65, from a trace pass over those alone. Its tp1-single `loads.tsv` and `hbm.tsv` rows cover all 79,
+since neither reads a plan. tpch's three files cover all 47 at tp1-single. No sf40 plan goldens are kept.
 
 At `tp4-sized` the files hold tpch's 45 timed queries, but `calls.tsv` holds 42: the recipe check
 refuses `global_stddev`, q15 and q22 at sf40. tpcds's `loads.tsv` and `hbm.tsv` hold 72 of its 76
