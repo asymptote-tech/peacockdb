@@ -606,6 +606,51 @@ Branch `ENS-containers-only`, forked from `ENS-tp4-sized` at `9058709c`; its PR 
   - The uid: proven as 1001:118 locally. The runner's checkout is owned by its own uid, as the
     clone was.
 
+## Task 8
+
+- Dispatched 2026-11-07 at Steps 1-2 (developer, dev, no VM). Checkpoint reported, not committed:
+  `containers-only: the conda installers and machine-setup scripts go`.
+- **Nothing executed them.** Before the `rm`, nothing outside the five named them: no workflow, no
+  action, no other script, no test, nothing in `.claude/` (the ignored ensemble scratch included).
+  `init.sh` and `init_fedora43.sh` called `conda-install-cudf.sh`; nothing called
+  `conda-install-cudf-2506.sh` or `create_verda_instance.sh`. No guard enumerates `scripts/`.
+  The parent branch had the same picture.
+- **What init.sh set up, and what covers it now.** A `build` user with passwordless sudo and
+  root's `authorized_keys`: `provision-vm.sh` (the developer's user, sudo, `<login>`'s keys). The
+  toolchain (gcc-14, CUDA 12.6, cmake 4.2.3, ninja, boost, openssl, zlib, patchelf) and the conda
+  cuDF: the build image. Docker: `bootstrap-vm.sh` on a CPU VM, `run-gpu.sh prepare` (with the
+  NVIDIA Container Toolkit) on a Nebius GPU VM. A developer's own machine: Docker by hand, one
+  line added under build-test.md's build-command table. No script was kept as a Docker installer.
+  `create_verda_instance.sh` booted a verda instance from an existing disk; verda keeps its disk,
+  and `list_verda_instances.sh` stays.
+- **Edits beyond the deletion**, so Step 2's second grep holds only what it should:
+  - `testdata/generate_testdata.sh`: the DuckDB version-mismatch hint named `conda install
+    duckdb-cli`; it now names the build image (`scripts/build-test.sh -- testdata/generate_testdata.sh
+    ...`). Checked with a fake `duckdb` printing `v0.0.0`: old text before, new text after, exit 1.
+  - `scripts/create_nsys_profile.sh`: the header's "another host" example was verda-gpu with a
+    miniforge env "provisioned by build-test.sh" (untrue since Task 2). It now says a Nebius GPU
+    VM's cuDF root is `~/peacock/cudf-<v>/`, which `run-gpu.sh prepare` lays down; the die
+    message's example likewise. `test_run_gpu.py` (which runs this script) 69 passed.
+  - `.gitignore`: the `target-cudf*/` comment named `scripts/build-test*.sh`; it now names
+    shad-gpu's `lib/shadgpu-env.sh`, and the old host builds' leftover dirs.
+- **Step 2's second grep, what stays and why** (tracked files; the literal `grep -r .` also
+  walks ignored build output: `target-cudf-rapids-cuda-12.2/`, `cpp/build/`, `target/`,
+  `.claude/ensemble/`, 358415 lines, none tracked):
+  - shad-gpu: `scripts/lib/shadgpu-env.sh:13,72`; `.gitignore:4` (its target dir's name).
+  - The guard's own pattern: `ci_images.rs:76,564,594,944` and its row, `build-test.md:1233`.
+  - **Task 9's:** `build-test.md:3102-3114`, "The same six steps on a 26.02 host" (verda-gpu
+    through `build-test.sh --host`, gone since Task 2, and a miniforge `--remote-cudf-root`).
+    Task 9 Step 1's grep (`build-test\.sh --host`) catches it.
+  - Records, not instructions, left as written: `llm-wiki/reports/` (18 lines, header paths cited
+    by past reviews) and `llm-wiki/tickets/system-hardening.md` (#244, #260: the envs where
+    things were measured).
+  - `build-test-shadgpu.sh` and `setup-glibc.sh` never matched; the plan's list was wider than
+    the grep.
+- **Checks.** `scripts/build-test.sh -- cargo test -p cost-report --test test_source_formatting`:
+  57 passed. `scripts/build-test.sh -- python3 scripts/env/tests/test_run_gpu.py`: 69 passed.
+  `bash -n` on both edited scripts. Neither is in CI's shellcheck list; dev has no shellcheck.
+  Scratch in `/tmp/co-t8/`.
+
 ## Notes for a restart
 
 - PR #203, a draft against `ENS-tp4-sized`, opened after Task 2 so Task 3 on has PR runs. The board

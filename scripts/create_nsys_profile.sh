@@ -21,10 +21,9 @@
 # pinned record, so a filter narrows the trace pass only and is refused with --metrics.
 #
 # The host defaults to shad-gpu (lib/shadgpu-env.sh: its repo, its patched glibc, its
-# 25.02 cuDF). Another host — one with a modern glibc and its own cuDF, provisioned by
-# build-test.sh — names all three, since the patched loader path is shad-gpu's alone:
-#   ./scripts/create_nsys_profile.sh --host verda-gpu --remote-dir /home/dmitry/peacockdb \
-#       --remote-cudf-root /home/dmitry/miniforge3/envs/rapids-26.02
+# 25.02 cuDF). Another host names all three, since the patched loader path is shad-gpu's
+# alone. On a Nebius GPU VM the cuDF root is ~/peacock/cudf-<v>/, the run image's /opt/cudf,
+# which `scripts/env/run-gpu.sh prepare` lays down (the H100 below).
 # --ssh <command> reaches the host through <command> instead of ssh, every call and every
 # rsync, as `<command> <host> <cmd…>`; a Nebius VM through scripts/nebius.sh (H100 shown):
 #   ./scripts/create_nsys_profile.sh --trace --host nebius-h100 \
@@ -134,7 +133,7 @@ if [ -n "$REMOTE_CUDF_ROOT" ]; then
   BENCH_LD="$REMOTE_REPO/cpp/install/lib:$REMOTE_CUDF_ROOT/lib:\${LD_LIBRARY_PATH:-}"
 elif [ "$HOST_OVERRIDDEN" -eq 1 ]; then
   die "--host/--remote-dir without --remote-cudf-root: the default loader path is shad-gpu's
-     patched glibc and 25.02 env. Name the host's cuDF root (e.g. .../envs/rapids-26.02)."
+     patched glibc and 25.02 env. Name the host's cuDF root (e.g. ~/peacock/cudf-25.02 on a Nebius GPU VM)."
 else
   BENCH_LD="$PATCHED_LD"
 fi

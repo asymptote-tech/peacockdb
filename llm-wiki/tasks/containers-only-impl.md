@@ -619,8 +619,8 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   machine installs Docker by hand; the wiki says so in one line. No script is reduced to a
   Docker installer, since both installs already exist.
 
-- [ ] **Step 1:** delete the five files (`rm`; the coordinator stages the deletions).
-- [ ] **Step 2:** run the grep → empty outside `llm-wiki/archive/` and `llm-wiki/tasks/`. Run
+- [x] **Step 1:** delete the five files (`rm`; the coordinator stages the deletions).
+- [x] **Step 2:** run the grep → empty outside `llm-wiki/archive/` and `llm-wiki/tasks/`. Run
   `grep -rn 'conda install\|miniforge\|rapids-cuda-12.2\|envs/rapids' --exclude-dir=archive
   --exclude-dir=tasks . | grep -v 'third_party/'` → only shad-gpu's files (`build-test-shadgpu.sh`,
   `lib/shadgpu-env.sh`, `setup-glibc.sh`) and the shad-gpu wiki section.

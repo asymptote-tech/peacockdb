@@ -2014,6 +2014,10 @@ stack on every switch):
 | the install a device run ships | `scripts/build-test.sh --gpu --build` (`scripts/env/stage-install.sh`) | `cpp/build` | `target-img-<v>` |
 | one command in the build image | `scripts/build-test.sh -- <command>`, e.g. `-- cargo test -p cost-report` | — | `target-img-<v>` |
 
+A host needs only Docker. A CPU VM gets it from `bootstrap-vm.sh` (*Containers*), a Nebius GPU
+VM gets it and the NVIDIA Container Toolkit from `run-gpu.sh prepare`, and a developer's own
+machine installs Docker by hand.
+
 ## Inspecting the tree
 
 Four scripts answer questions about the shape of the tree rather than about a build. They take
