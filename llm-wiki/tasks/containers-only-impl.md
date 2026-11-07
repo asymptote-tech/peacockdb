@@ -121,7 +121,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `DRIVER_MINIMUM_25_10`.
 - Produces: `ghcr.io/asymptote-tech/peacockdb-build:cudf-25.10` (+ the inputs tag); no run image.
 
-- [ ] **Step 1: export the spec on dev.** `docker run --rm -v "$PWD/docker/conda:/out"
+- [x] **Step 1: export the spec on dev.** `docker run --rm -v "$PWD/docker/conda:/out"
   mambaorg/micromamba:<MICROMAMBA_VERSION without -0> bash -c 'micromamba create -y -p /tmp/e
   -c rapidsai -c conda-forge -c nvidia cudf=25.10 cuvs=25.10 python=3.12 cuda-version=12.9 &&
   micromamba env export -p /tmp/e --explicit --md5 > /out/cudf-25.10.spec'`. Match the header
@@ -129,7 +129,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   rapids-library package name in the 26.02 spec (`libcudf libcuvs libraft* librmm libkvikio
   rapids-logger`, and others), check it is present in the 25.10 spec. Record in the detail file
   the `libcudf`, `libarrow` and `cuda-version` lines, plus any name missing with its reason.
-- [ ] **Step 2: failing tests.**
+- [x] **Step 2: failing tests.**
   - `test_pins.py`: `PINS["GCC_25_10"] = "14"`; `IDENTITY["25.10"]` = the libcudf `25.10.*`,
     libarrow and `cuda-version 12.9` lines from Step 1;
     `test_a_build_only_version_has_no_driver_minimum`: `DRIVER_MINIMUM_25_10` not in pins.
@@ -147,14 +147,14 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     `v`. Update `test_all_runs_every_other_choice…` so `exclude` is not read as a matrix axis.
     `test_only_the_default_branch_moves_the_tag`: the push step passes `--moving` only under a
     condition on `github.ref` equal to the default branch's ref.
-- [ ] **Step 3: run** `for f in scripts/env/tests/test_{pins,image,images_workflow}.py; do python3 $f; done`
+- [x] **Step 3: run** `for f in scripts/env/tests/test_{pins,image,images_workflow}.py; do python3 $f; done`
   → FAIL on the new tests only.
-- [ ] **Step 4: implement.** Write the spec, pin, Dockerfile stage, `image_inputs_tag`, and the
+- [x] **Step 4: implement.** Write the spec, pin, Dockerfile stage, `image_inputs_tag`, and the
   `image.sh` tags and refusal. images.yml: `options: ['25.02', '25.10', '26.02', all]` and
   `exclude: [{kind: run, cudf: '25.10'}]` in block form, which the test's reader accepts.
-- [ ] **Step 5: run** Step 3's loop, then every `scripts/env/tests/test_*.py` that needs no image
+- [x] **Step 5: run** Step 3's loop, then every `scripts/env/tests/test_*.py` that needs no image
   → `0 failed`.
-- [ ] **Step 6: build and prove 25.10 on dev.** Run `scripts/env/image.sh build build 25.10`.
+- [x] **Step 6: build and prove 25.10 on dev.** Run `scripts/env/image.sh build build 25.10`.
   Then, in `docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/h -v "$PWD:$PWD" -w "$PWD"
   -e CARGO_TARGET_DIR="$PWD/target-img-25.10" <image>`, run `scripts/build.sh --configure
   --build --install --cudf_ROOT /opt/cudf --gcc-version 14`, then `cargo test --no-run -p

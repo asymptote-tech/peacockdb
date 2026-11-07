@@ -51,6 +51,16 @@ image_inputs() {
   echo "cpp/CMakeLists.txt:flatbuffers=$tags"
 }
 
+# image_inputs_tag <tree> <build|run> <cudf> — the tag naming an image by its inputs,
+# cudf-<cudf>-in-<h>: <h> is the first 12 hex digits of the sha256 of image_inputs' lines. A tree
+# finds the image built from its own inputs by it, whatever :cudf-<cudf> points at.
+image_inputs_tag() {
+  local inputs sum
+  inputs=$(image_inputs "$@") || return 2
+  sum=$(printf '%s\n' "$inputs" | sha256sum)
+  echo "cudf-$3-in-${sum:0:12}"
+}
+
 # image_inputs_differ <label> <tree> <kind> <cudf> — the inputs whose values differ between an
 # image's label and the tree, one a line, sorted; an input on one side only differs too.
 image_inputs_differ() {

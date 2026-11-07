@@ -17,6 +17,7 @@ SHA256 = r"[0-9a-f]{64}"
 # spec's pins; the committed costs and device answers depend on those bytes.
 PINS = {
     "GCC_25_02": "12",
+    "GCC_25_10": "14",
     "GCC_26_02": "14",
     "NVCC_VERSION": r"12\.9\.86",
     "DRIVER_MINIMUM_25_02": r"535\.104\.05",
@@ -55,6 +56,11 @@ IDENTITY = {
         ("libcudf", "25.02.02", "cuda12_250303_g8139f3c84f_0"),
         ("libarrow", "19.0.1", None),
         ("cuda-version", "12.2", None),
+    ],
+    "25.10": [
+        ("libcudf", "25.10.00", "cuda12_251008_f4e35ca0"),
+        ("libarrow", "21.0.0", None),
+        ("cuda-version", "12.9", None),
     ],
     "26.02": [
         ("libcudf", "26.02.01", "cuda12_260205_5b9658c4"),
@@ -106,6 +112,20 @@ def test_specs_hash_every_package():
         packages = spec_hashes.packages(read_spec(version))
         unhashed = [p.url for p in packages if not re.fullmatch(r"[0-9a-f]{32}", p.md5)]
         assert not unhashed, f"cudf-{version}.spec: {len(unhashed)} lines without an md5, first {unhashed[:3]}"
+
+
+# A build-only version: a build image for CI and no run image (build-test.md, "Images"). It has a
+# spec, and no driver minimum, which only a run image reads.
+BUILD_ONLY = ["25.10"]
+
+
+def test_a_build_only_version_has_no_driver_minimum():
+    pins = read_pins()
+    for version in BUILD_ONLY:
+        read_spec(version)
+        assert f"DRIVER_MINIMUM_{version.replace('.', '_')}" not in pins, version
+    for version in set(IDENTITY) - set(BUILD_ONLY):
+        assert f"DRIVER_MINIMUM_{version.replace('.', '_')}" in pins, version
 
 
 if __name__ == "__main__":
