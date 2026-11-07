@@ -651,6 +651,58 @@ Branch `ENS-containers-only`, forked from `ENS-tp4-sized` at `9058709c`; its PR 
   `bash -n` on both edited scripts. Neither is in CI's shellcheck list; dev has no shellcheck.
   Scratch in `/tmp/co-t8/`.
 
+## Task 9
+
+- Dispatched 2026-11-07 at Steps 1, 2 (dev half) and 3 (developer, dev, no VM). Not committed.
+- **Step 1, what the rewrite changed.** build-test.md is 28 lines shorter.
+  - "Build and run" replaces "Containers": a short intro (one path; shad-gpu the exception), then
+    "Images" and "CPU VMs" (the old Containers text) under it. Code comments that cited "Containers"
+    now cite "CPU VMs": `bootstrap-vm.sh`, `lib/machine.sh`, `lib/peacock-config.sh`. None is an
+    image input (`image_inputs` reads only `docker/` files, pins and two sources).
+  - "Local build workflows and caches": one row per shape, all `build-test.sh`, the target-dir
+    column gone (always `target-img-<v>`). The day-to-day loop and the one-off cudf command go
+    through the image. Its prose had drifted under "Inspecting the tree"; it is back in place.
+  - "CI structure": one paragraph on jobs in the image and the inputs tag; dataset-matrix's bullet
+    no longer repeats it. 25.10 as CI-only is said once, in "Images".
+  - "Nebius host": no conda sentence; the CPU-VM build says why it is a plain `docker run` (no
+    `.git` on the VM); `--no-data` dropped from the commands (nebius-sync.sh ignores it).
+  - "Remote hosts": verda and verda-gpu build with `build-test.sh` on themselves; golden regen is
+    `UPDATE_CANONICAL=1 scripts/build-test.sh --rust-only --run`; the `--host`/`--push-*`/`--pull-*`
+    text, the `/media/data` symlink notes and "Remote CPU runs ship binaries" are gone. A new
+    "shad-gpu" subsection says it is the one exception (no Docker) and holds its own bullets (glibc
+    patch, `--pull-results`, `--run-detached`, `PEACOCK_REMOTE_REPO`).
+  - "Datasets": sf1 is generated in the build image (the command). Golden flow and gpu-result: the
+    device tier is the L40S's, `run-gpu.sh … pull` brings its answers. Benchmarks: "The same six
+    steps on a 26.02 host" is replaced by the H100 path; the multi-GPU build is `--cudf 26.02` in
+    the image. "Memory constraints": `RUST_TEST_THREADS=2`, since `-- --test-threads` now means a
+    command.
+  - prompts.md: the verda dispatch rule (line 192), and "in the build image" on the dev-build line.
+    The L40S bracket was already Task 6's. `.claude/agents/*.md` and `architecture.md` name no
+    removed path: unchanged.
+  - `scripts/env/check-build-image.sh`'s header said nebius-gpu "builds with its own scripts"; now
+    "builds nothing". Comment only.
+- **A failure that was the clone's, not the wiki's.** `scripts/build-test.sh -- cargo test -p
+  cost-report` failed once, `both_base_arms_read_the_same_section_of_a_multi_section_file`:
+  `git show HEAD:…` inside the image found no object. The `--shared` clone's alternates point at
+  `/home/dmitry/workspace/peacockdb/.git/objects`, which the container does not mount
+  (`unable to normalize alternate object path`). A worktree is fine: build-test.sh mounts its
+  common git dir. `git repack -a -d` and dropping the alternates file (Task 4's recipe) fixed it;
+  the rerun was green. No script change: a `--shared` clone is a test artifact, not a checkout the
+  wiki describes.
+- **A failure the wiki caused, fixed in the wiki.** The multi-GPU line first read
+  `scripts/build-test.sh -- cmake --build cpp/build --target peacock_multi_gpu_tpch_tests`, on the
+  default 25.02. It fails, exit 1: `multi_gpu.hpp:32` includes `rmm/mr/cuda_memory_resource.hpp`,
+  and 25.02's rmm has it under `rmm/mr/device/` (`cpp/include/peacock/rmm_pool.hpp:13` says rmm
+  flattened them after 25.02). That is why the old line said `cpp/build26`. The line now says
+  `--cudf 26.02`. Not rerun: dev has only the 25.02 build image. The 26.02 one (about 15 GB in
+  `docker images`) and a cold cpu build (about 15 GB of target) would not fit in dev's 29 GB free.
+- **Two gcc warnings**, both builds: `-Wstringop-overflow` in flatbuffers' own
+  `_deps/flatbuffers-src/src/reflection.cpp:650` (a fetched dependency). Not ours, not new.
+- **Disk.** The clone, `/tmp/co-t9/clone`, peaked at 16 GB. Removed between shapes: its
+  `target-img-25.02` after rust-only (14 GB) and, with `cpp/build` and `cpp/install`, after the cpu
+  shape (15 GB). The whole clone was removed at the end; `/` back to 29 GB free. No image was pulled
+  or removed. Logs stay in `/tmp/co-t9/logs/` (no data).
+
 ## Notes for a restart
 
 - PR #203, a draft against `ENS-tp4-sized`, opened after Task 2 so Task 3 on has PR runs. The board
@@ -872,3 +924,37 @@ test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
   42409128248 green, three shards, each file ≥ 4 tests, 75 in all, as the developer's local run had
   them; `call-cost` skipped under a filter, as designed (proven on dev only). PR run 42409132496
   green, every job. Task 7 done; next: Task 8.
+
+## Wiki commands run
+
+Task 9 Step 2. Dev half: 2026-11-07, host dev, in `/tmp/co-t9/clone`, a `git clone --shared` of
+`27cf22e5` with `third_party/cudf` cloned from the local module, image
+`peacockdb-build:cudf-25.02-in-50a0c1d7779e`. Full runs with `RUST_TEST_THREADS=2`, as "Memory
+constraints" says. Counts are the wiki's rows ("Test categories").
+
+| command | host | exit | result |
+|---|---|---|---|
+| `scripts/env/image-ref.sh build 25.02` | dev | 0 | the local `:cudf-25.02-in-50a0c1d7779e` |
+| `scripts/build-test.sh -- testdata/generate_testdata.sh --bench tpch`, then `--bench tpcds` | dev | 0, 0 | 13 s, 23 s; 8 + 24 files, aggregate `0e41c31d…a492`, Task 4's |
+| `scripts/build-test.sh --rust-only --build --run` | dev | 0 | 17 min 48 s cold, no warning. `--lib` 1209 + 2 ignored (#182) = 1211, `test_cpu_corpus` 2451, `test_corpus_goldens` 66, `test_cost_model` 3: the cpu row's 3731; `test_golden_format` 41 |
+| `scripts/build-test.sh -- cargo test --features rust-only -p peacockdb-core --test test_cost_model` | dev | 0 | 3 passed |
+| `scripts/build-test.sh -- cargo test --features rust-only -p peacockdb-core --lib -- planner::tests::plan_goldens` | dev | 0 | 25 passed |
+| `scripts/build-test.sh -- scripts/case-inventory.sh rust-only` | dev | 0 | 3795 lines |
+| `UPDATE_CANONICAL=1 scripts/build-test.sh --rust-only --run` | dev | 0 | 9 min; same counts; `git status` empty after |
+| `scripts/build-test.sh -- cargo test -p cost-report` | dev | 101, then 0 | first run: the clone's alternates (`## Task 9`); after the repack 49 + 57 passed |
+| `scripts/build-test.sh -- scripts/cost-report-preview.sh` | dev | 0 | 301 kB HTML |
+| `python3 scripts/ticket_widget.py` | dev | 0 | `testdata/report.html` unchanged |
+| `scripts/build-test.sh --help` | dev | 0 | 27 lines |
+| `scripts/build-test.sh --build --run` | dev | 0 | 37 min 25 s cold. ctest `-L cpu` 1/1; ffi row: `--lib -- ffi_tests::` 5 (lib 1214 = 1209 + 5), `peacockdb-ffi --test test_ffi` 4; the cpu targets as above |
+| `scripts/build-test.sh -- scripts/case-inventory.sh cudf` | dev | 0 | 4812 lines |
+| `scripts/build-test.sh -- cargo test -p peacockdb-core --lib --features gpu --no-run` | dev | 0 | 5 min 28 s |
+| `scripts/build-test.sh -- scripts/case-inventory.sh gpu` | dev | 0 | 1967 lines; `gpu_tests::` 748, the gpu row |
+| `scripts/build-test.sh -- cmake --build cpp/build --target peacock_multi_gpu_tpch_tests` | dev | 1 | rmm headers of 25.02; the wiki now says `--cudf 26.02` (`## Task 9`); not rerun |
+| `scripts/build-test.sh --gpu --build` | dev | 0 | 25 min cold; six binaries staged. Listed in the image: `gpu_tests::` 748, `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 659, `test_node_timing` 1, `prototype_fused_benchmarks` 8: the gpu row's 2425 |
+| `scripts/env/image-ref.sh build 25.10` | dev | 0 | `peacockdb-build@sha256:9d862501b165…`, the published digest; no pull |
+| `scripts/env/image.sh build build 25.02 --dry-run` | dev | 0 | one `docker build` line |
+
+Not run on dev, by design: the run-image commands of "Images" (a pull, `docker run --gpus`,
+`docker image inspect` of a run image: no run image on dev, and none is pulled), `image.sh push`,
+`gh workflow run`, `docker login`, verda (no address; down). The VM half (nebius-gpu, the CPU-VM
+build, the H100) is next.

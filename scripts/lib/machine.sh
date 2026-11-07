@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 #
 # A CPU VM's layout, and the steps bootstrap-vm.sh takes in the build image (llm-wiki/build-test.md,
-# "Containers"). Every path but the data directory comes from $HOME, and every container runs as
+# "CPU VMs"). Every path but the data directory comes from $HOME, and every container runs as
 # the caller's uid:gid. Sourced after image-inputs.sh and data-inputs.sh.
 # A step function (machine_image_checked, machine_image_label_checked, machine_cargo_fetch,
 # machine_data_set, machine_cudf_source) is called as a statement of its own, never in `$(…)` or

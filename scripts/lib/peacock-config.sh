@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 #
 # ~/.config/peacock/, on a person's own machine (the laptop) and on a VM (llm-wiki/build-test.md,
-# "Containers"): the storage keys, the person's PAT and GPU key, and the VMs this laptop
+# "CPU VMs"): the storage keys, the person's PAT and GPU key, and the VMs this laptop
 # provisioned. A function that refuses prints one line to stderr and returns 2; it is called as a
 # statement, so set -e stops the caller.
 

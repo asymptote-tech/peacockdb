@@ -188,8 +188,8 @@ state, and a watchdog restarts you.
   - **Then the analyst, then the board.** Spend an analyst on the obstacle; if that does not
     resolve it, write `blocked(building)` with what you learned from all three steps.
 - **Check whether verda is up before each dispatch** — one `ssh` with a short timeout. When
-  it answers, tell the developer to run that task's CPU tests there through
-  `scripts/build-test.sh --host <user@ip>`; when it does not, say so, and a local run is fine.
+  it answers, tell the developer to run that task's CPU tests there: `scripts/build-test.sh`
+  in a checkout on verda, as locally; when it does not, say so, and a local run is fine.
   The human starts verda by hand, so this is per dispatch rather than per chain. `verda` is a
   name for the host and not an address of it: it is an ephemeral instance with a new IP per
   reprovision and no `~/.ssh/config` stanza, so `ssh verda` fails to resolve whether it is up or
@@ -397,7 +397,7 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
     → `scripts/env/run-gpu.sh … ship | run | pull` → `… stop`. `prepare` comes first on a fresh
     VM, and again whenever `run` refuses its image, exit 2: the run image no longer matches the tree.
   - The 128-core CPU VM (nebius-cpu128) runs DuckDB and stages the H100's install: binaries for
-    H100 runs are built there. Local and verda builds stay for development.
+    H100 runs are built there. Local and verda builds, in the build image, stay for development.
 
   If a host is lost mid-step: `status`, `start` (on 75, report to the coordinator, which owns
   the retry), sync, rerun the step. A soft stop's exit 2 is someone else's run on the card:

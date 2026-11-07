@@ -7,7 +7,7 @@
 # docker runs on the VM, through scripts/nebius.sh ssh ($NEBIUS_SH); the comparison runs here.
 # The VM's copy of the tree comes from nebius-sync.sh without .git, and the build image's inputs
 # include the third_party/cudf commit this tree's git index pins. --instance-id is required:
-# without it nebius.sh means nebius-gpu, which builds with its own scripts. <v> is 25.02 by default.
+# without it nebius.sh means nebius-gpu, which builds nothing. <v> is 25.02 by default.
 #
 # Exit 0 the VM's image is this tree's; 2 bad input (nebius.sh's 64 too), or an image without a
 # label or built from other inputs; else nebius.sh's (75, 69, 1).

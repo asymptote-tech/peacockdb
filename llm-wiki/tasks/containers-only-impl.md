@@ -653,7 +653,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 - Produces: the detail file's `## Wiki commands run`: every command in the edited sections,
   with the host it ran on and its exit code.
 
-- [ ] **Step 1:** `grep -rn 'build-test\.sh --host\|--local-cudf-root\|cargo-cudf\|CUDF_ROOT=\|conda\|nebius-test\|gpu-host-test\|gpu-host-sync\|rapidsai/base'
+- [x] **Step 1:** `grep -rn 'build-test\.sh --host\|--local-cudf-root\|cargo-cudf\|CUDF_ROOT=\|conda\|nebius-test\|gpu-host-test\|gpu-host-sync\|rapidsai/base'
   llm-wiki/*.md .claude/agents/` → the list to rewrite. Rewrite it in short sentences
   (prompts.md "Shared rules"). Name the CI-only 25.10 image once in "Images", with "no run image".
 - [ ] **Step 2: run every command once on dev** in a fresh worktree:
@@ -679,7 +679,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu`, as
   new-hosts' section words them. Record each in `## Wiki commands run`. A command that fails is
   fixed in the wiki or the script, test first, before the commit.
-- [ ] **Step 3:** `grep` from Step 1 → only shad-gpu lines and archive/tasks.
+- [x] **Step 3:** `grep` from Step 1 → only shad-gpu lines and archive/tasks.
 - [ ] **Step 4: commit** `containers-only: one build-and-run path in the wiki; shad-gpu the one exception`.
 
 ---

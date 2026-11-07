@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prepare a CPU VM for a developer (llm-wiki/build-test.md, "Containers").
+# Prepare a CPU VM for a developer (llm-wiki/build-test.md, "CPU VMs").
 #
 #   bootstrap-vm.sh [--ref <branch>] [--cudf <v>]
 #
