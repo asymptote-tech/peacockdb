@@ -409,12 +409,12 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   total (line 22, one fewer). Update `build-test.md`'s CI
   section and every other line that names a 26.02 CI leg to 25.10. The 26.02 images stay for
   developer and device use.
-- [ ] **Step 6: run** `scripts/build-test.sh -- cargo test -p cost-report --test
+- [x] **Step 6: run** `scripts/build-test.sh -- cargo test -p cost-report --test
   test_source_formatting` → PASS. Then (coordinator) push; both legs are green on the PR, their
   counts per step equal the count baseline's 25.02 leg, and the 25.10 leg's equal the baseline's
   "26.02" leg; `Generate SF-1` logs `generate_pbench.sh --check` passing. A moved count or a red
   step reaches the developer as a failing test; the developer explains it in the detail file.
-- [ ] **Step 7: commit** `containers-only: dataset-matrix in the build image, an honest 25.10 leg (closes #129)`.
+- [x] **Step 7: commit** `containers-only: dataset-matrix in the build image, an honest 25.10 leg (closes #129)`.
 
 ### Task 5: what `run-gpu.sh` needs for CI and for agents
 

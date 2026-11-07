@@ -488,3 +488,13 @@ test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
   cost-report's `test_source_formatting` 41 → 47 (Task 2 +1, `ci_images.rs` +5) and the new
   "Image and run script tests" step's 20 files (17 in the image, 3 on the runner), as the developer's
   local run had them. Task 3 done; next: Task 4.
+
+## Task 4 Step 6 (PR run)
+
+- `ffa2674d` pushed; PR run 42385300988 green, every job. The 25.02 leg's counts equal the
+  baseline's 25.02 leg, plus the new `test_duckdb_minimal.py` line (`9 passed`); the 25.10 leg's
+  equal the baseline's "26.02" leg line for line (ctest 1/1, validate 29/29 and 31/31, ffi 5, test_ffi
+  4, `--lib` 1209 + 2 ignored, `test_cpu_corpus` 2451). `Generate SF-1`'s `generate_pbench.sh
+  --check` step passed. Task 4 done; next: Task 5.
+- Dangling links to `testinfra.md#t129` left by #129's archiving: the frozen spec, and
+  `verify-26.02.md:6`; the board's line is the coordinator's at the next state change.
