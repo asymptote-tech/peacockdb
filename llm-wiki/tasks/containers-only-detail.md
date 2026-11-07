@@ -374,3 +374,11 @@ test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
   `sha256:5117c1abcce9…`. Every `:cudf-<v>` digest is the one before the dispatch; `:cudf-25.10`
   does not exist (only master moves it). The 25.10 build package pulls anonymously (HTTP 200).
   Task 1 done; next: Task 2.
+
+## Task 3 Step 4 (PR run)
+
+- `4cf4749f` pushed; PR run 42379249690 green: cost-report, s3-datasets (in the image), both legs,
+  the GPU build. Counts against `## Counts before`: every line equal (timings aside), except
+  cost-report's `test_source_formatting` 41 → 47 (Task 2 +1, `ci_images.rs` +5) and the new
+  "Image and run script tests" step's 20 files (17 in the image, 3 on the runner), as the developer's
+  local run had them. Task 3 done; next: Task 4.

@@ -353,7 +353,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `benchmarks/tests` suites now run. The coordinator hands any red job or moved count to the
   developer as a failing test, with the venv pins (`pandas 3.0.6`, `matplotlib`) as the first
   suspect for a count; the developer explains it in the detail file.
-- [ ] **Step 5: commit** `containers-only: cost-report and s3-datasets run in the build image`.
+- [x] **Step 5: commit** `containers-only: cost-report and s3-datasets run in the build image`.
 
 ### Task 4: `dataset-matrix` in the image, legs 25.02 and 25.10 (#129 a)
 
