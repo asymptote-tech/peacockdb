@@ -338,6 +338,7 @@ nothing.
 | Task 2 (part) | `de71ced0` | tp4-sized: nsys_calls reads a region's own calls, not the rest of its thread; interim: benchmark done (126 cases, 5 failed), files held until the page regenerates; calibration tests 119 |
 | tpcds profiles | reported | tp4-sized: tpcds tp4_sized profiled on the H100 (72 of 76; calls.tsv 58); calibration tests 119, test_corpus_goldens 66, page --check 0 |
 | review round 1 (I2, N3) | reported | tp4-sized: the hbm merge and the profile script take one mode of a two-mode list; step 7 rewritten; the region walk guarded at main(); calibration tests 121, test_run_gpu 50, test_corpus_goldens 66, page --check 0 |
+| Review round 1 fixes | `f4f3fd27` | tp4-sized: the hbm merge and the profile script take one mode of a two-mode list; step 7 rewritten for two modes; I2, N3; calibration 121, test_run_gpu 50, goldens 66, --check 0 |
 
 ## VM time
 
