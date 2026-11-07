@@ -11,8 +11,8 @@ report). It contains only public TPC-H text + public-domain GloVe words + relati
 keys — NO raw DEEP1B content (image vectors are not invertible). Self-contained (inline
 CSS, no external assets) and DETERMINISTIC (fixed samples) so it doesn't churn.
 
-These reports are for humans reading the repo; they are deliberately NOT in any
-build-test.sh sync KIND, so they never ship to the test hosts.
+These reports are for humans reading the repo; they are not testdata a test reads, so
+nothing ships them to a test host.
 
   python3 testdata/gen_reconstruction_report.py [--sf 1]
 """

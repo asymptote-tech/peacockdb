@@ -241,7 +241,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     --remote-cudf-root --gcc-version --push-* --pull-* --all --build-benchmarks --run-benchmarks
     --pull-benchmarks --update-canonical`.
 
-- [ ] **Step 1: failing tests**, with fake `docker`, `cargo`, `ctest` and `stage-install.sh` on
+- [x] **Step 1: failing tests**, with fake `docker`, `cargo`, `ctest` and `stage-install.sh` on
   PATH recording argv, in a fake tree as `test_image.py`'s `Repo()` does.
   - `test_image_ref.py`:
     - `test_prefers_the_local_inputs_tag`;
@@ -270,8 +270,8 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     - `test_command_form_passes_the_exit_code` (`-- false` → 1);
     - `test_runner_temp_is_mounted_when_set` (`RUNNER_TEMP=<tmp>` → `-v <tmp>:<tmp>` and `-e
       RUNNER_TEMP` in argv; unset → neither).
-- [ ] **Step 2: run** both files → FAIL (no script).
-- [ ] **Step 3: implement** `image-ref.sh` and the new `build-test.sh`. Delete `cargo-cudf.sh`. In
+- [x] **Step 2: run** both files → FAIL (no script).
+- [x] **Step 3: implement** `image-ref.sh` and the new `build-test.sh`. Delete `cargo-cudf.sh`. In
   runners.rs, replace `build_test_gpu_lib()` with `container_gpu_lib()`. It returns the staged
   name from `scripts/env/stage-install.sh`'s `stage <name> …--lib…` line, and `LIB_RUNG=` from
   `docker/run-tests.sh` (`script_lib`). Add `run_tests_rung_reaches_the_binary()`: in run-tests.sh's
@@ -279,7 +279,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   and every `run_binary` line passes `"${args[@]}"`. The `runners` loop at line 334 keeps
   SHADGPU only; run-tests.sh is checked by the new function. Update the failure messages that
   name `build-test.sh --gpu`.
-- [ ] **Step 4: run** both Python files → `0 failed`. Then run
+- [x] **Step 4: run** both Python files → `0 failed`. Then run
   `scripts/build-test.sh -- cargo test -p cost-report --test test_source_formatting` → all pass.
   Then `scripts/build-test.sh --rust-only --build --run` on dev → green, with the cpu counts of
   build-test.md's table (`--lib` 780, `test_cpu_corpus` 2009, …). Record them in the detail file.

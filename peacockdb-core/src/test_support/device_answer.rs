@@ -74,7 +74,8 @@ pub(crate) fn cudf_version() -> String {
         panic!(
             "cannot tell which cuDF this binary is linked against: no cudf/version_config.hpp \
              was copied out of CUDF_ROOT at build time, so a recorded device answer would \
-             carry no provenance. Build with CUDF_ROOT set (scripts/cargo-cudf.sh)."
+             carry no provenance. Build in the build image, which sets CUDF_ROOT \
+             (scripts/build-test.sh)."
         )
     })
 }
@@ -86,8 +87,8 @@ pub(crate) fn cudf_release() -> String {
     cudf_release_of_config(CUDF_VERSION_CONFIG).unwrap_or_else(|| {
         panic!(
             "cannot tell which cuDF release this binary is built against: no complete \
-             cudf/version_config.hpp was copied out of CUDF_ROOT at build time. Build with \
-             CUDF_ROOT set (scripts/cargo-cudf.sh)."
+             cudf/version_config.hpp was copied out of CUDF_ROOT at build time. Build in the \
+             build image, which sets CUDF_ROOT (scripts/build-test.sh)."
         )
     })
 }
