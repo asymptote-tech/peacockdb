@@ -324,7 +324,7 @@ def test_ship_keeps_what_a_run_wrote():
         assert result.is_file() and not stale.exists()
 
 
-# --- ship's transport, ci-ship.sh's ----------------------------------------------------------------
+# --- ship's transport, once the old CI runner's ----------------------------------------------------
 
 # rsync on dev: records each call; with FAKE_RSYNC_FAIL=<text>:<n>, the first <n> calls naming <text>
 # fail as a dropped connection does; with FAKE_RSYNC_BARRIER=<dir>, a call waits for 4 at once.

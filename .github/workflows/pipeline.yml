@@ -319,107 +319,48 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    container:
-      image: rapidsai/base:25.02-cuda12.0-py3.12
-    # Inside a container the runner does NOT default `run:` to bash: it resolved to `sh -e {0}` in
-    # this rapids image, and a step opening with `set -euo pipefail` died on "Illegal option -o
-    # pipefail". The job moves to the build image in containers-only Task 6.
     defaults:
       run:
         shell: bash
+    # As dataset-matrix's, and for its reasons: build-test.sh hands both to the image, cargo's
+    # fingerprint holds RUSTFLAGS, and without debug info the GPU test binaries link within the
+    # runner's disk.
+    env:
+      CMAKE_GENERATOR: Ninja
+      RUSTFLAGS: "-C debuginfo=0"
 
     steps:
-      - name: Install git
-        run: conda install -y -n base -c conda-forge git curl
-
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - uses: ./.github/actions/cpp-build-conda
+      # The 25.02 build image of this tree's inputs, and the C++ ccache. The key is the 25.02
+      # leg's, ccache-img-25.02-<sha>: whichever job saves second in a run is refused with a
+      # warning, not an error.
+      - uses: ./.github/actions/build-image
         with:
           cudf: "25.02"
+          ccache: 'true'
 
-      - name: Bundle Arrow/Parquet runtime libraries
-        run: |
-          mkdir -p cpp/install/lib
-          cp -P /opt/conda/lib/libarrow.so* cpp/install/lib/
-          cp -P /opt/conda/lib/libparquet.so* cpp/install/lib/
-          cp -P /opt/conda/lib/libarrow_acero.so* cpp/install/lib/ 2>/dev/null || true
-          cp -P /opt/conda/lib/libarrow_dataset.so* cpp/install/lib/ 2>/dev/null || true
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      # Cache the Rust dep tree for the GPU test-binary build. Own shared-key: this
-      # job builds a different feature shape (--features gpu) than dataset-matrix and
-      # runs in PARALLEL with it, so a shared key would only invite
-      # same-run save contention for no same-run gain. It uses the same
-      # RUSTFLAGS=-C debuginfo=0, so it warm-restores its own opt-3 deps.
+      # The target dir is build-test.sh's target-img-25.02, as the 25.02 leg's is, but the
+      # cache is this job's own: it builds --features gpu, a different shape, and runs beside
+      # that leg, so a shared key would only contend for the save.
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rust-gpu-build
+          shared-key: rust-gpu-build-image
+          workspaces: ". -> target-img-25.02"
 
+      # scripts/env/stage-install.sh in the build image: the C++ built and installed into
+      # cpp/install, and the device rung, built --features gpu, staged from empty into
+      # cpp/install/rust-tests/ (build-test.md, "CI structure"). No release benchmark: CI runs
+      # none. The run image's /opt/cudf holds cuDF, Arrow and Parquet, so the install carries
+      # only the project's own libraries.
       - name: Build and stage rust GPU test binaries
-        run: |
-          mkdir -p cpp/install/rust-tests
-          # The device rung, built with --features gpu; build-test.md's test table is the
-          # detail. The built path carries a metadata hash, so it is read out of cargo's
-          # json artifact lines: the line whose target has this name and kind.
-          resolve() {
-            python3 -c '
-          import json, sys
-          name, kind = sys.argv[1], sys.argv[2]
-          for line in sys.stdin:
-              try: m = json.loads(line)
-              except ValueError: continue
-              target = m.get("target") or {}
-              if m.get("executable") and target.get("name") == name and kind in target.get("kind", []):
-                  print(m["executable"]); break
-          ' "$1" "$2"
-          }
-          stage() {
-            if [ -z "$2" ] || [ ! -f "$2" ]; then
-              echo "ERROR: failed to locate built binary for $1"; exit 1
-            fi
-            cp -f "$2" "cpp/install/rust-tests/$1"
-            echo "--- Staged: $(ls -lh cpp/install/rust-tests/$1)"
-          }
-          # test_gpu_corpus = the corpus on a device, against the sections the cpu tier
-          #   authored. A binary still: `inventory` collects per linked binary.
-          # test_node_timing = the per-node timing method itself: regions match the calls
-          #   the driver journalled, and the device time they bracket is inside the wall.
-          #   Every number under testdata/benchmark-results/ assumes both.
-          # peacock_gpu_benchmarks = the measurement harness, run below with --skip bench_:
-          #   its own assertions about where a section goes and what a record row must hold.
-          #   The timed cases are about an hour of device time and are not a merge gate;
-          #   scripts/build-test-shadgpu.sh --run-benchmarks is what runs those.
-          # One line on purpose: the coverage guard reads the array below with a single
-          # `lines().find`, so a continuation hides every target after the backslash.
-          for t in test_gpu_corpus test_node_timing peacock_gpu_benchmarks; do
-            stage "$t" "$(cargo test --no-run -p peacockdb-core --test "$t" --features gpu \
-                --message-format=json | resolve "$t" test)"
-          done
-          # The crate's own unit tests, whose `gpu_tests` modules exist only under the gpu
-          # feature. The lib holds every rung, so the run loop hands this one file
-          # `gpu_tests::`. Staged under an explicit name: the loop globs the directory, and
-          # a bare `peacockdb_core` beside the target binary would read as one.
-          stage peacockdb_core_gpu_lib "$(cargo test --no-run -p peacockdb-core --lib --features gpu \
-              --message-format=json | resolve peacockdb_core lib)"
-        env:
-          CMAKE_GENERATOR: Ninja
-          LD_LIBRARY_PATH: /opt/conda/lib
-          CUDF_ROOT: /opt/conda
-          # Same as the dataset-matrix job: without this, linking the GPU test binaries
-          # (full DataFusion/Arrow + libpeacock_gpu, now larger with the TPC-DS
-          # suite merged in) overflows the container tmpfs while lld writes its
-          # mmap'd output and crashes with SIGBUS. The failure is at *link* time,
-          # so a post-build strip can't help — debug info must not be emitted.
-          RUSTFLAGS: "-C debuginfo=0"
+        run: scripts/build-test.sh --gpu --build --no-release-bench
 
       # A tarball, not the directory: upload-artifact stores each symlink as a full copy of its
-      # target (lib/'s soname chains shipped libarrow three times) and drops the exec bits.
+      # target and drops the exec bits.
       - name: Pack GPU test binaries
         run: tar -C cpp -cf cpp-install.tar install
 
@@ -435,7 +376,8 @@ jobs:
   # on a pull_request: a PR's branch gets it when someone with write access, listed in
   # GPU_ALLOWED_ACTORS, dispatches the pipeline on that branch. A fork PR gets no secrets and
   # no GPU job. The secrets live in the nebius-gpu Environment, which only this job and
-  # nebius-watch.yml reference.
+  # nebius-watch.yml reference. The tests run in the run image on the VM, through
+  # scripts/env/run-gpu.sh; the runner holds no image.
   gpu-tests:
     name: GPU Tests (nebius-gpu)
     needs: cpp-build-2502
@@ -448,22 +390,19 @@ jobs:
     permissions:
       contents: read
     # A wedged remote must cost minutes, not GitHub's six-hour default. The budget is the start
-    # (capacity can take half an hour), the transfer, sf1 generation and the suite; if the suite
-    # ever outgrows it, raise it deliberately rather than removing it.
+    # (capacity can take half an hour), prepare, the transfer and the suite; if the suite ever
+    # outgrows it, raise it deliberately rather than removing it.
     timeout-minutes: 150
     # One physical device, so one of these at a time across every ref. Two jobs on the same
     # GPU contend for its memory, and --test-threads=1 keeps one test at a time inside a
-    # process but cannot reach across two. Queued rather than cancel-in-progress: a
-    # cancelled run can leave both its REMOTE_DIR and the device's state behind.
+    # process but cannot reach across two. Queued rather than cancel-in-progress: a cancelled
+    # run can leave its container and the device's state behind.
     concurrency:
       group: nebius-gpu
       cancel-in-progress: false
     defaults:
       run:
         shell: bash
-    env:
-      # Relative to the VM login's home, so one string serves ssh (as ~/$REMOTE_DIR) and rsync.
-      REMOTE_DIR: peacockdb-ci/run-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       # checkout runs no project code, so nothing from the branch runs before the check below.
       - uses: actions/checkout@v4
@@ -500,6 +439,22 @@ jobs:
           private-key: ${{ secrets.NEBIUS_PRIVATE_KEY }}
           ssh-key: ${{ secrets.NEBIUS_GPU_SSH_KEY }}
 
+      # The images of this tree's inputs, as digests, found before the VM is paid for: by
+      # inputs, never by a moving tag, so a branch's publication never changes what another
+      # tree runs. prepare pulls both and checks their labels against the tree; run checks the
+      # run image's again. The build image is prepare's, for sf1.
+      - name: Find the run and build images
+        run: |
+          set -euo pipefail
+          run=$(scripts/env/image-ref.sh run 25.02)
+          build=$(scripts/env/image-ref.sh build 25.02)
+          echo "run image: $run"
+          echo "build image: $build"
+          {
+            echo "PEACOCK_RUN_IMAGE=$run"
+            echo "PEACOCK_BUILD_IMAGE=$build"
+          } >> "$GITHUB_ENV"
+
       - name: Start nebius-gpu (up to 30 minutes for capacity)
         id: start
         # One attempt can itself wait out STOPPING, RUNNING and ssh (nebius.sh's own bounds),
@@ -518,30 +473,25 @@ jobs:
           echo "::error::nebius-gpu did not start within 30 minutes: no capacity"
           exit 75
 
-      - name: Ship binaries, scripts and testdata
-        # Into ~/peacockdb-ci/cache, which persists between runs, in four zstd rsync streams with
-        # retries; then a copy of it becomes this run's REMOTE_DIR. The runner-to-VM path is slow
-        # and lossy (0.24 MB/s for one stream, 2026-10-15), so a first run, or one after the
-        # cache is cleared, can take most of the limit; later runs send only what changed.
-        timeout-minutes: 50
-        run: scripts/nebius/ci-ship.sh "$REMOTE_DIR"
+      # Docker and the NVIDIA Container Toolkit if missing, the two images, and sf1, generated
+      # in the build image once per generator inputs. All of it is kept on the VM, so a run
+      # whose images and data the VM already holds only checks them. --no-sf40: the L40S list
+      # reads no sf40 and needs none of Nsight's setup.
+      - name: Prepare nebius-gpu
+        timeout-minutes: 40
+        run: scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt prepare --no-sf40
 
-      - name: Generate SF-1 testdata
-        run: |
-          # Into this run's own directory, which the last step removes, so every run generates.
-          # A non-interactive ssh does not source ~/peacock-env.sh, which is what puts duckdb on
-          # PATH, and generate_testdata.sh looks duckdb up first: source it, as nebius-sync.sh does.
-          # PEACOCK_NO_FETCH=1 is set EXPLICITLY because ssh does not inherit the runner's
-          # CI/GITHUB_ACTIONS vars — fetch_embeddings.sh's automation guard keys on the
-          # environment, and over ssh that environment is the GPU host's, not the runner's.
-          # Nothing here invokes fetch today; this keeps the guard honest if that changes.
-          scripts/nebius.sh ssh "[ -f ~/peacock-env.sh ] && . ~/peacock-env.sh; cd ~/$REMOTE_DIR \
-            && PEACOCK_NO_FETCH=1 testdata/generate_testdata.sh --bench tpch \
-            && PEACOCK_NO_FETCH=1 testdata/generate_testdata.sh --bench tpcds"
+      - name: Ship the staged install
+        # The install and the committed testdata into ~/peacock/peacockdb/ on the VM, which
+        # persists between runs, so later runs send only what changed. Four zstd rsync streams
+        # with retries: the runner-to-VM path is slow and lossy (0.24 MB/s for one stream,
+        # 2026-10-15), so a first run can take most of the limit.
+        timeout-minutes: 50
+        run: scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt ship --install cpp/install
 
       - name: Run the L40S list
-        # scripts/nebius-test.sh is the one list, shared with the developer. What it keeps
-        # from this job's history:
+        # The run image's run-tests.sh list, as container peacock-peacockdb, its log followed;
+        # the step exits as the run did. What the list keeps from this job's history:
         # - Every shipped peacock_*_tests binary, by glob rather than a hand-written list: a
         #   named list once let peacock_tpchv_tests be built, shipped and never run, green.
         # - Zero-test guards. A binary whose tests all skip exits 0 and renders GREEN having
@@ -551,9 +501,9 @@ jobs:
         # - Every binary runs even after an earlier one fails; the run fails at the end.
         # - --test-threads=1 for the rust binaries: cuDF/RMM share one process-wide pool, and
         #   concurrent GPU tests OOM the device and poison the CUDA context for every later test.
-        # - A segfault anywhere in the logs fails the run.
+        # - A segfault, or a death by a signal, fails the run.
         # Out of it on an L40S: the sf40 pair and every bench_ case.
-        run: scripts/nebius.sh ssh "\$HOME/$REMOTE_DIR/scripts/nebius-test.sh run --foreground \$HOME/$REMOTE_DIR"
+        run: scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt run list
 
       - name: Clean up and soft-stop
         # Whenever the start step ran at all: a start that failed or was cancelled half way can
@@ -561,12 +511,10 @@ jobs:
         # is shared, with no lock); the idle watcher and the hourly checker take it down later.
         if: always() && contains(fromJSON('["success", "failure", "cancelled"]'), steps.start.outcome)
         run: |
-          # A cancelled run leaves its tests running on the VM, and a test process keeps the
-          # idle watcher from stopping it. Kill this run's processes first. The pattern is
-          # bracketed ([p]eacockdb-ci/...) so it does not match the remote shell running pkill.
-          pattern="[${REMOTE_DIR:0:1}]${REMOTE_DIR:1}"
-          scripts/nebius.sh ssh "pkill -f '$pattern'" || true
-          scripts/nebius.sh ssh "rm -rf ~/${REMOTE_DIR:?}" || true
+          # A cancelled run leaves its container running on the VM, and a process on the card
+          # keeps the idle watcher from stopping it; the next run's `run` would refuse the busy
+          # name. Remove it first.
+          scripts/nebius.sh ssh 'docker rm -f peacock-peacockdb' || true
           scripts/nebius.sh stop || echo "soft stop declined (rc=$?); the watchers will take it down"
 
   # GPU coverage + cost-ratio report (Task 6). Pure CPU/dry: reads only the
@@ -714,7 +662,8 @@ jobs:
 
       # The Nebius VM scripts, against fake nebius/ssh and synthetic clocks: no VM, no secret.
       # The tests run in the image. shellcheck stays on the runner, which has it: a linter over
-      # the scripts, running none of the project's code, and the image has none.
+      # the scripts, running none of the project's code, and the image has none. Over the Nebius
+      # scripts and the image path CI's GPU job runs; -x follows what each one sources.
       - name: Nebius script tests
         run: |
           set -euo pipefail
@@ -727,8 +676,9 @@ jobs:
             echo "== $f"
             scripts/build-test.sh -- python3 "$f" || status=1
           done
-          shellcheck scripts/nebius.sh scripts/nebius-sync.sh scripts/nebius-test.sh \
-            scripts/nebius/check-actor.sh scripts/nebius/ci-ship.sh scripts/nebius/watch.sh || status=1
+          shellcheck -x scripts/nebius.sh scripts/nebius-sync.sh scripts/nebius/check-actor.sh \
+            scripts/nebius/watch.sh scripts/build-test.sh scripts/env/run-gpu.sh \
+            scripts/env/image-ref.sh scripts/env/stage-install.sh || status=1
           exit "$status"
 
       # The image, image-ref, build-test and run-gpu scripts, against fake docker, ssh and aws.

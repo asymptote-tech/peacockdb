@@ -136,11 +136,6 @@ def test_sync_passes_the_instance_through():
     assert rc == 0, err
     assert out == "d\n", out
     assert rsync_transport(w) == f"{SCRIPT} --instance-id {H100} --profile editor-eu rsh"
-    # The sf1 generation goes through nebius.sh too, to the same VM.
-    calls = nebius_calls(w)
-    assert calls
-    for c in calls:
-        assert holds_pair(c, "--id", H100) and holds_pair(c, "--profile", "editor-eu"), c
 
 
 def test_sync_without_options_is_todays_transport():
@@ -150,19 +145,29 @@ def test_sync_without_options_is_todays_transport():
     assert rsync_transport(w) == f"{SCRIPT} rsh"
 
 
-def test_sync_no_data_skips_generation():
-    def generated(w):
-        return [c for c in w.read()["calls"] if c[0] == "ssh" and "generate_testdata.sh" in " ".join(c)]
+def generated(w):
+    return [c for c in w.read()["calls"] if c[0] == "ssh" and "generate_testdata" in " ".join(c)]
 
+
+def test_sync_no_data_skips_generation():
     w = World(state="RUNNING")
     rc, out, err = run(w, "--instance-id", CPU, "--profile", "eu-west1", "--dest", "d", "--no-data", script=SYNC)
     assert rc == 0, err
     assert out == "d\n", out
     assert not generated(w), generated(w)
     assert rsync_transport(w) == f"{SCRIPT} --instance-id {CPU} --profile eu-west1 rsh"
-    w = World(state="RUNNING")
-    run(w, "--dest", "d", script=SYNC)
-    assert generated(w), "without --no-data the sf1 generation runs"
+
+
+def test_sync_never_generates_data():
+    # sf1 on a VM is run-gpu.sh prepare's or bootstrap-vm.sh's, in the build image. The sync is
+    # the tree alone, and --no-data stays accepted so every caller keeps working.
+    for args in ([], ["--no-data"]):
+        w = World(state="RUNNING")
+        rc, out, err = run(w, "--dest", "d", *args, script=SYNC)
+        assert rc == 0 and out == "d\n", (args, rc, out, err)
+        assert not generated(w), (args, generated(w))
+        assert not [c for c in w.read()["calls"] if c[0] == "ssh"], (args, w.read()["calls"])
+        assert rsync_transport(w) == f"{SCRIPT} rsh", args
 
 
 def test_sync_unknown_option_is_64():

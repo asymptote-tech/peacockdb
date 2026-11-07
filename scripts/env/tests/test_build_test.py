@@ -214,6 +214,7 @@ def test_target_dir_is_per_worktree_and_version():
 
         r = t.run("--cudf", "24.12", "--rust-only", "--build")
         assert r.returncode == 2 and "24.12" in r.stderr, (r.returncode, r.stderr)
+        assert "docker/conda holds specs for 25.02 25.10 26.02\n" in r.stderr, r.stderr
 
 
 def test_worktree_mounts_its_git_dir():

@@ -11,6 +11,7 @@ const IN_IMAGE_JOBS: &[(&str, &str)] = &[
     (".github/workflows/pipeline.yml", "cost-report"),
     (".github/workflows/pipeline.yml", "s3-datasets"),
     (".github/workflows/pipeline.yml", "dataset-matrix"),
+    (".github/workflows/pipeline.yml", "cpp-build-2502"),
 ];
 
 /// (job, line prefix, reason): a line of a listed job that runs on the runner on purpose.
@@ -644,4 +645,93 @@ fn a_leg_off_its_build_image_is_refused() {
     );
     assert!(problems(&matrix(honest, "\"25.02\"")).contains("matrix.cudf"));
     assert!(problems(&matrix("", "${{ matrix.cudf }}")).contains("no `- cudf:` legs"));
+}
+
+/// The steps of a job, each its lines from its `- ` to the next step's, comments included.
+fn job_steps<'a>(lines: &[&'a str]) -> Vec<Vec<&'a str>> {
+    let Some(at) = lines.iter().position(|l| l.trim() == "steps:") else {
+        return Vec::new();
+    };
+    let body = &lines[at + 1..];
+    let Some(indent) = body
+        .iter()
+        .find(|l| l.trim_start().starts_with("- "))
+        .map(|l| l.len() - l.trim_start().len())
+    else {
+        return Vec::new();
+    };
+    let mut steps: Vec<Vec<&str>> = Vec::new();
+    for line in body {
+        let at_step = line.len() - line.trim_start().len() == indent && line.trim_start().starts_with("- ");
+        if at_step {
+            steps.push(Vec::new());
+        }
+        if let Some(step) = steps.last_mut() {
+            step.push(line);
+        }
+    }
+    steps
+}
+
+/// The gpu-tests step that removes the run's container, and its `if:`, or what is wrong.
+fn gpu_cleanup_problems(workflow: &str) -> Vec<String> {
+    let Some(lines) = job_lines(workflow, "gpu-tests") else {
+        return vec!["gpu-tests: no such job".to_string()];
+    };
+    let removes = |step: &Vec<&str>| {
+        step.iter()
+            .any(|l| !l.trim_start().starts_with('#') && l.contains("docker rm -f peacock-peacockdb"))
+    };
+    let steps = job_steps(&lines);
+    let Some(step) = steps.iter().find(|s| removes(s)) else {
+        return vec![
+            "gpu-tests: no step runs `docker rm -f peacock-peacockdb`, so a cancelled run's \
+             container keeps the card, and the next run's `run` refuses the busy name"
+                .to_string(),
+        ];
+    };
+    let condition = step
+        .iter()
+        .find_map(|l| l.trim_start().trim_start_matches("- ").strip_prefix("if:"))
+        .map(str::trim);
+    if !condition.is_some_and(|c| c.starts_with("always()")) {
+        return vec![format!(
+            "gpu-tests: the step removing the run container runs on {condition:?}, not on \
+             `always() && …`: a failed or cancelled run would leave its container on the VM"
+        )];
+    }
+    Vec::new()
+}
+
+/// A cancelled or failed `gpu-tests` run leaves `peacock-peacockdb` running on nebius-gpu,
+/// which keeps the card busy and the idle watcher off. The cleanup removes it on every outcome:
+/// the step runs `docker rm -f peacock-peacockdb`, under an `if:` that starts `always()`.
+#[test]
+fn the_gpu_cleanup_removes_the_run_container() {
+    let text = std::fs::read_to_string(repo_root().join(".github/workflows/pipeline.yml"))
+        .expect("read pipeline.yml");
+    let problems = gpu_cleanup_problems(&text);
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+
+    let job = |cleanup: &str| {
+        format!(
+            "jobs:\n  gpu-tests:\n    runs-on: ubuntu-latest\n    steps:\n      \
+             - uses: actions/checkout@v4\n      - name: Run\n        run: x\n{cleanup}  \
+             next-job:\n    runs-on: ubuntu-latest\n"
+        )
+    };
+    let step = |condition: &str, run: &str| {
+        format!("      - name: Clean up\n{condition}        run: |\n          {run}\n")
+    };
+    let always = "        if: always() && steps.start.outcome == 'success'\n";
+    let rm = "scripts/nebius.sh ssh 'docker rm -f peacock-peacockdb' || true";
+    assert_eq!(gpu_cleanup_problems(&job(&step(always, rm))), Vec::<String>::new());
+    for (what, text) in [
+        ("no if", job(&step("", rm))),
+        ("not always()", job(&step("        if: success()\n", rm))),
+        ("commented out", job(&step(always, &format!("# {rm}")))),
+        ("no cleanup", job("")),
+    ] {
+        assert!(!gpu_cleanup_problems(&text).is_empty(), "{what}: accepted\n{text}");
+    }
 }

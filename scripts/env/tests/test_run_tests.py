@@ -273,23 +273,6 @@ def test_only_the_binaries_command_line_sets_the_library_path():
     assert not re.search(r"^\s*export\b", text, re.M), "run-tests.sh exports a variable"
 
 
-def shell_value(text, name):
-    (value,) = re.findall(rf"^{name}=(.*)$", text, re.M)
-    return value.strip('"')
-
-
-def test_the_list_rules_are_nebius_test_s():
-    """scripts/nebius-test.sh is the old path's one list; the run image must run the same one."""
-    old = (REPO / "scripts" / "nebius-test.sh").read_text()
-    new = SCRIPT.read_text()
-    assert shell_value(old, "SF40").split() == shell_value(new, "SF40").split()
-    ((lib, rung),) = re.findall(r'\[ "\$name" = (\w+) \] && rung=(\S+)', old)
-    assert (lib, rung) == (shell_value(new, "LIB_STAGED"), shell_value(new, "LIB_RUNG")), (lib, rung)
-    (bench,) = re.findall(r'case \$name in (\w+)\) skip="--skip bench_"', old)
-    assert bench == shell_value(new, "BENCH_TARGET") and "--skip bench_" in new, bench
-    assert "--test-threads=1" in old and "args=(--nocapture --test-threads=1)" in new
-
-
 def test_both_images_carry_the_committed_script():
     want = (REPO / "docker" / "run-tests.sh").read_text()
     for cudf in ["25.02", "26.02"]:

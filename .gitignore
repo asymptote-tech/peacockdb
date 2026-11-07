@@ -63,7 +63,5 @@ cpp/build26/
 /*.html
 /*.sh
 
-# nebius-test.sh run state on the VM
-.gpu-test/
 # query-fuser: the fused batches' record, which the metrics pass reads.
 testdata/calibration/fused/

@@ -512,7 +512,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 
   "Bundle Arrow/Parquet runtime libraries" goes: the run image's `/opt/cudf` holds them.
 
-- [ ] **Step 1: failing guard tests.**
+- [x] **Step 1: failing guard tests.**
   - runners.rs: `gpu_job_staged_targets()` reads `scripts/env/stage-install.sh`.
     `the_pipeline_stages_through_stage_install`: the step `GPU_STAGING_STEP` contains
     `build-test.sh --gpu --build`.
@@ -532,11 +532,11 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     `IN_IMAGE_JOBS`.
 
   Run → FAIL.
-- [ ] **Step 2: implement** the pipeline, the `stage-install.sh` flag, the guard readers and
+- [x] **Step 2: implement** the pipeline, the `stage-install.sh` flag, the guard readers and
   the deletions. Then `grep -rn 'nebius-test\.sh\|ci-ship\.sh\|peacock-env\.sh\|miniforge'
   --exclude-dir=archive --exclude-dir=tasks .` → only shad-gpu's files and their docs; `grep -n
   'generate_testdata\|peacock-env' scripts/nebius-sync.sh` → nothing.
-- [ ] **Step 3: run** `scripts/build-test.sh -- cargo test -p cost-report --test
+- [x] **Step 3: run** `scripts/build-test.sh -- cargo test -p cost-report --test
   test_source_formatting` → PASS. Run `python3` on each `scripts/nebius/tests/test_*.py` →
   `0 failed`.
 - [ ] **Step 4: commit; (coordinator) push; the PR is green.** `cpp-build-2502` uploads an
@@ -557,7 +557,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   times for prepare, ship and run, and the job log's `df -h /`, and hands any failure or moved
   count to the developer as a failing test. Pass also means the job stopped the VM, or the
   watcher did.
-- [x] **Step 7: commit** any fix with its failing test first:
+- [ ] **Step 7: commit** any fix with its failing test first:
   `containers-only: gpu-tests ships and runs on nebius-gpu through run-gpu.sh; the old runner goes`.
 
 ### Task 7: `exec-model-corpus.yml` and `validate-large.yml` in the image; the guard covers every job

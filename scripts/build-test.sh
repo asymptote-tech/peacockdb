@@ -77,7 +77,8 @@ while [ $# -gt 0 ]; do
 done
 
 # ---- validation: all of it before the first side effect -------------------------------------
-known=$(cd "$root/docker/conda" && ls cudf-*.spec | sed 's/^cudf-//; s/\.spec$//' | tr '\n' ' ')
+known=""
+for spec in "$root"/docker/conda/cudf-*.spec; do spec=${spec##*/cudf-}; known+="${spec%.spec} "; done
 [ -f "$root/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda holds specs for ${known% }"
 if [ ${#command[@]} -gt 0 ]; then
   [ "$build$run$no_release_bench" = 000 ] && [ -z "$mode_flag" ] \

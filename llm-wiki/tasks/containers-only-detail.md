@@ -393,6 +393,110 @@ Branch `ENS-containers-only`, forked from `ENS-tp4-sized` at `9058709c`; its PR 
   Images (Python) row: the new cases, 296 → 314; Python 1638 → 1656, grand 8237 → 8255. "The
   scripts" still names `nebius-test.sh`, which Task 6 deletes.
 
+## Task 6
+
+- Dispatched 2026-11-07 at Steps 1-3 (developer, dev, no VM). Checkpoint reported, not committed:
+  `containers-only: gpu-tests ships and runs on nebius-gpu through run-gpu.sh; the old runner goes`.
+  The plan's Step 7 box was pre-ticked by mistake: unticked. Steps 4-6 are next (push and PR run,
+  the by-hand `prepare --no-sf40` on nebius-gpu, the CI device run).
+- **Red first.** The guard, with the new readers and tests over the old pipeline: 51 passed, 4
+  failed, each for its reason: `every_listed_job_runs_in_the_build_image` (cpp-build-2502's
+  `container:`, `rapidsai/`, `conda install`, no build-image step),
+  `the_gpu_cleanup_removes_the_run_container`, `the_gpu_step_cannot_report_success_over_a_failure`
+  (the step ran `nebius-test.sh`), `the_pipeline_stages_through_stage_install`. Python:
+  `test_sync_never_generates_data` red on the ssh carrying `generate_testdata.sh`;
+  `test_stage_install_no_release_bench_builds_no_release_benchmark` red on "unknown argument".
+- **Green.** Guard 55 passed, 0 failed (HEAD 51: runners.rs 6 → 9, ci_images.rs 8 → 9). Nebius
+  tests, in the image as CI runs them: 11 files, 153 passed (HEAD 171: `test_ci_ship.py` 8 and
+  `test_nebius_test.py` 11 deleted, +1 `test_sync_never_generates_data`). `scripts/env/tests`, as
+  CI's step lays them out: 17 files in the image and 3 on the host, 280 passed (Images row 314 =
+  280 + 34 by hand). `test_run_tests.py` (needs the run image, not on dev) was not run: one case
+  deleted, the file parses.
+- **Counts that move in cost-report's job** (for Step 4's comparison against `## Counts before`):
+  `test_source_formatting` 51 at HEAD → 55 (the baseline's 41 is before Tasks 2-5); the Nebius step loses the
+  `test_ci_ship.py` and `test_nebius_test.py` lines (8 and 11) and `test_nebius_instances.py` goes
+  11 → 12; `test_stage_install.py` 6 → 7. The wiki: CI wiring row 24 → 28, Nebius row 171 → 153,
+  Images 314 (one case out of `test_run_tests.py`, one into `test_stage_install.py`), by hand 35 →
+  34; grand 8255 → 8241 (Rust 6317, Python 1638).
+- **Guard readers, as built (where they differ from the plan's words).**
+  - `gpu_job_staged_targets()` reads stage-install.sh's one-line `GPU_TESTS=( … )` array, not a
+    `for t in …` line: the plan's "shape the guards read" was pipeline.yml's, and stage-install.sh
+    (new-hosts') already had the array. shad-gpu's `RUST_TESTS` goes through the same reader.
+  - CI's lib is `stage_cargo_lib_binary <name> … --features gpu` in stage-install.sh (name literal
+    or `$VAR`), and its rung run-tests.sh's `LIB_STAGED`/`LIB_RUNG`. The old pipeline readers
+    (`staged_by_name_of`, `lib_rung_of`, `gpu_job_lib_rung`) and their fixtures went. Two runners
+    now, not three: CI is the image path. `the_staged_lib_is_the_crates_own_test_binary` holds
+    stage-cargo.sh's `stage_cargo_lib_binary` to `peacockdb_core lib … --lib` and `-p
+    peacockdb-core` (the old `line.contains("-p peacockdb-core")` check, moved).
+  - `the_pipeline_stages_through_stage_install` also asserts build-test.sh runs stage-install.sh,
+    so the chain pipeline → build-test.sh → stage-install.sh is held at both links.
+  - Beyond the plan: `the_run_tests_failure_reader_refuses_each_way_to_hide_a_failure` breaks
+    the committed run-tests.sh in a copy five ways (`exit 0`, a judge dropped, the bench unjudged,
+    no segfault grep, an exported library path), each refused.
+- **Pipeline.** cpp-build-2502: checkout (submodules), build-image `cudf: "25.02"`, `ccache:
+  'true'`, Swatinem `rust-gpu-build-image` over `target-img-25.02`, `scripts/build-test.sh --gpu
+  --build --no-release-bench`, pack, upload; job env `CMAKE_GENERATOR` and `RUSTFLAGS` as
+  dataset-matrix's. build.sh turns ccache on by itself when the image has it (it does), so the
+  ccache restore is used. No `LDFLAGS` rpath-link: new-hosts' CPU-VM build ran stage-install.sh in
+  the same image without it and its `bin/peacock_*_tests` linked and ran on the H100.
+  gpu-tests: the plan's ten steps, plus `PEACOCK_BUILD_IMAGE` (Task 5) in the same step as
+  `PEACOCK_RUN_IMAGE`. Each ref is assigned before the `>> $GITHUB_ENV`, so a refusal of
+  image-ref.sh fails the step (inside `echo "X=$(…)"` it would not). `REMOTE_DIR` went.
+  actionlint: one finding, the `changes` job's pre-existing SC2001; HEAD also had an SC2086 in the
+  old staging step, gone. YAML parsed; `bash -n` of every `run:` of both jobs and the Nebius step.
+- **shellcheck.** The plan's new list (`build-test.sh`, `run-gpu.sh`, `image-ref.sh`,
+  `stage-install.sh`) failed under plain `shellcheck`, rc 1, on infos only: SC1091 (sourced files
+  not followed) and SC2012 (`ls cudf-*.spec`) in build-test.sh and image-ref.sh. CI's line is now
+  `shellcheck -x` (clears SC1091), and the two `ls` lines became a glob loop, the known-version
+  message pinned first by an assertion in `test_build_test.py` and `test_image_ref.py` (a mutant
+  with the space on the wrong side went red). Lowering the severity was rejected: it would weaken
+  the check on the four scripts already listed. shellcheck 0.11.0 (actionlint image), rc 0.
+- **nebius-sync.sh** keeps the rsync, its retry, the options and `--no-data` (a no-op). Gone: the
+  sf1 generation and its `peacock-env.sh`, and the `P /.gpu-test/` filter, which protected
+  nebius-test.sh's run state; `.gitignore`'s `.gpu-test/` went with it.
+  `test_sync_passes_the_instance_through` lost its "sf1 generation goes through nebius.sh too"
+  half; `test_sync_no_data_skips_generation` lost its "without --no-data the generation runs" half.
+- **Deleted:** `scripts/nebius-test.sh`, `scripts/nebius/ci-ship.sh`,
+  `scripts/nebius/tests/test_ci_ship.py`, `scripts/nebius/tests/test_nebius_test.py`,
+  `.github/actions/cpp-build-conda/action.yml`, and `test_run_tests.py`'s
+  `test_the_list_rules_are_nebius_test_s` (its comparison partner is gone; the behaviour it held is
+  `test_list_runs_the_l40s_list_with_each_binary_s_arguments` and runners.rs).
+- **run-tests.sh list against nebius-test.sh: they agree** on what CI runs. Same sf40 pair
+  skipped; every executable `bin/peacock_*_tests` with no arguments; every executable
+  `rust-tests/*` with `--nocapture --test-threads=1`, then `gpu_tests::` for
+  `peacockdb_core_gpu_lib`, then `--skip bench_` for `peacock_gpu_benchmarks`, in that order; the
+  same 0-test regexes; the same `Segmentation fault|core dumped`; every binary runs after a
+  failure; the library path per command, never exported (`install/lib` then the cuDF lib). Where
+  they differ, none touching CI's list: an empty glob is exit 2 before anything runs (was rc 1 at
+  the end); a death by a signal is named as one (both fail on its non-zero exit); `PCK_TEST_FILTER` is `filter`
+  mode's, and `list` refuses it set (nebius-test.sh applied it in `run`); `filter` fails a filter
+  that matches nothing. No run-image input changed: `image-ref.sh run 25.02` →
+  `peacockdb-run@sha256:3a69a03c7b69…` (tag `cudf-25.02-in-4f971122ddad`, Task 1's); `build 25.02`
+  → `cudf-25.02-in-50a0c1d7779e`. C++ counts from the sources: cpu 30+34+3 = 67, gpu 5 (+1
+  `DISABLED_` probe), join 56, plan 136, the baseline's four.
+- **What could differ on the VM or the runner (Steps 5-6).**
+  - The L40S's driver against `DRIVER_MINIMUM_25_02=535.104.05`, Docker and the toolkit on it,
+    its disk: unknown until Step 5. nebius-gpu's 96 GB now gets the run image (~8 GB), the build
+    image (~15 GB), sf1 under `/var/lib/peacock` and `~/peacock/peacockdb/`. Nothing prunes an
+    image of older inputs: each publication of new inputs adds a pull. `~/peacockdb-ci/` (the
+    old cache) can go.
+  - sf1 is now generated by the build image's pinned DuckDB 1.5.4; the old per-run sf1 used the
+    VM conda env's DuckDB, of a version not recorded. Correct now; a count could move if a device
+    test skipped on the old data.
+  - The rust binaries' log order follows the glob's collation: the run image's locale may order
+    `peacock_gpu_benchmarks`/`peacockdb_core_gpu_lib` otherwise than the VM did. Compare counts
+    per binary name, not by position.
+  - testdata on the VM is all committed testdata, not ci-ship's named subset, and not mirrored:
+    a file deleted from the tree stays on the VM (Task 5's dropped case).
+  - The container and dir are `peacock-peacockdb` and `~/peacock/peacockdb/`, from the checkout's
+    basename. A developer running `run-gpu.sh` on nebius-gpu from a checkout named `peacockdb`
+    shares both with CI, and CI's cleanup would remove that run's container.
+  - The runner's shellcheck (apt's, older than 0.11.0) on `-x` and the two glob loops; the
+    runner's rsync for `--compress-choice=zstd` (ci-ship used the same flags).
+  - cpp-build-2502's cold build: the C++ (ccache restored from the 25.02 leg's key) and a
+    `--features gpu` cargo build at `CARGO_BUILD_JOBS=3` (build-test.sh's throttle on a 16 GB
+    runner).
+
 ## Notes for a restart
 
 - PR #203, a draft against `ENS-tp4-sized`, opened after Task 2 so Task 3 on has PR runs. The board

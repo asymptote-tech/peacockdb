@@ -29,7 +29,8 @@ kind=${positional[0]} cudf=${positional[1]}
 case "$kind" in build|run) ;; *) die "unknown image kind $kind: build or run" ;; esac
 
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
-known=$(cd "$root/docker/conda" && ls cudf-*.spec | sed 's/^cudf-//; s/\.spec$//' | tr '\n' ' ')
+known=""
+for spec in "$root"/docker/conda/cudf-*.spec; do spec=${spec##*/cudf-}; known+="${spec%.spec} "; done
 [ -f "$root/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda holds specs for ${known% }"
 [ "$kind" = build ] || grep -q "^DRIVER_MINIMUM_${cudf//./_}=" "$root/docker/pins.env" \
   || die "cuDF $cudf has a build image only: docker/pins.env has no DRIVER_MINIMUM_${cudf//./_}"

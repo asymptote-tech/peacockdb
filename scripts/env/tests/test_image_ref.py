@@ -171,7 +171,8 @@ def test_refuses_bad_arguments_before_docker():
         for args in (["build"], ["image", "25.02"], ["build", "24.12"], ["build", "25.02", "x"]):
             p = r.run(*args)
             assert p.returncode == 2 and p.stderr, (args, p.returncode, p.stderr)
-        assert "25.02" in r.run("build", "24.12").stderr
+        # Every version docker/conda holds a spec for, in order, one space apart.
+        assert "docker/conda holds specs for 25.02 25.10 26.02\n" in r.run("build", "24.12").stderr
         assert r.run("build").calls == []
 
 

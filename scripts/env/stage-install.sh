@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The install a device run ships (scripts/env/run-gpu.sh), built in the build image.
 #
-#   stage-install.sh [--cudf <v>]
+#   stage-install.sh [--cudf <v>] [--no-release-bench]
 #
 # Run at the tree root inside ghcr.io/asymptote-tech/peacockdb-build:cudf-<v>, 25.02 by default
 # (llm-wiki/build-test.md, "The CPU-VM build"). The C++ build and install into cpp/install; then,
@@ -10,6 +10,7 @@
 # the release build of peacock_gpu_benchmarks into cpp/install/rust-benchmarks/, as
 # build-test-shadgpu.sh --build and --build-benchmarks stage them, and beside it the release build of
 # prototype_fused_benchmarks (query-fuser), which run-gpu.sh runs by name; each stripped of debug info.
+# --no-release-bench stages no rust-benchmarks/, for an install that runs the list alone (CI's).
 # cargo builds into target-img-<v> in the tree, unless CARGO_TARGET_DIR is set.
 #
 # Exit 0; 2 bad input, or not the build image of <v>; 1 a build failed.
@@ -18,11 +19,12 @@ set -euo pipefail
 usage() { sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
 die() { echo "stage-install.sh: $*" >&2; exit 2; }
 
-cudf=25.02
+cudf=25.02 release_bench=1
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) usage ;;
     --cudf) [ -n "${2:-}" ] || die "--cudf needs a version such as 25.02"; cudf=$2; shift 2 ;;
+    --no-release-bench) release_bench=0; shift ;;
     *) die "unknown argument $1" ;;
   esac
 done
@@ -53,13 +55,15 @@ for t in "${GPU_TESTS[@]}"; do
 done
 stage_cargo_lib_binary "$LIB_STAGED" "$TESTS" --features gpu
 staged+=("$TESTS/$LIB_STAGED")
-# --release, and without --features gpu, as --build-benchmarks builds it: the harness refuses to
-# measure a debug build.
-stage_cargo_test_binary peacock_gpu_benchmarks "$BENCH" --release
-staged+=("$BENCH/peacock_gpu_benchmarks")
-# Its Cargo.toml entry requires both features; no CI step builds it.
-stage_cargo_test_binary prototype_fused_benchmarks "$BENCH" --release --features gpu,test-support
-staged+=("$BENCH/prototype_fused_benchmarks")
+if [ "$release_bench" = 1 ]; then
+  # --release, and without --features gpu, as --build-benchmarks builds it: the harness refuses to
+  # measure a debug build.
+  stage_cargo_test_binary peacock_gpu_benchmarks "$BENCH" --release
+  staged+=("$BENCH/peacock_gpu_benchmarks")
+  # Its Cargo.toml entry requires both features; no CI step builds it.
+  stage_cargo_test_binary prototype_fused_benchmarks "$BENCH" --release --features gpu,test-support
+  staged+=("$BENCH/prototype_fused_benchmarks")
+fi
 
 # --strip-debug keeps the dynamic symbol table; the debug info is most of each binary's size.
 for f in "${staged[@]}"; do strip --strip-debug "$f"; done

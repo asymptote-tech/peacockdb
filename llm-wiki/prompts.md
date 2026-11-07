@@ -385,11 +385,12 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
 - **A GPU step is bracketed, on the VM its work belongs to** (`build-test.md`, "Nebius host",
   host roles). The VM-time rule: a VM starts right before its first remote command and stops
   right after its last pull, never up across a local build, CI, a review or the human.
-  - The L40S (nebius-gpu), for correctness: `scripts/nebius.sh start` → `scripts/nebius-sync.sh`
-    → `scripts/nebius.sh ssh 'cd ~/<dest> && . ~/peacock-env.sh && ./scripts/build-test-shadgpu.sh --build'`
-    → `scripts/nebius.sh ssh '~/<dest>/scripts/nebius-test.sh run ~/<dest>'`, polled with
-    `… status`, → `scripts/nebius.sh stop`. Only the L40S list runs there: no sf40, no
-    benchmarks.
+  - The L40S (nebius-gpu), for correctness: `scripts/build-test.sh --gpu --build` (local, in
+    the build image, the L40S stopped) → `scripts/nebius.sh start` →
+    `scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt ship` → `… run
+    --detach list`, polled with `… status`, → `scripts/nebius.sh stop`. `… prepare --no-sf40`
+    comes first on a fresh VM, and again whenever `run` refuses its image, exit 2. Only the L40S
+    list runs there: no sf40, no benchmarks.
   - The H100 (nebius-h100), for sf40, benchmarks and Nsight, there and only there: the CPU-VM
     build (`build-test.md`, "Nebius host", "The CPU-VM build"), then
     `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu start`
