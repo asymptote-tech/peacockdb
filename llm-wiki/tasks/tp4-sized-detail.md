@@ -291,6 +291,7 @@ nothing.
     `every_batched_query_has_its_baseline_and_its_loads` passes (it reads `loads.tsv` at tp1 only);
     `batching_report.py --check` exit 0. The page's load split reads `LOADS_MODE = "tp1-single"`
     rows only, so the tpcds tp4 rows leave it unchanged, and it was not regenerated.
+- 2026-11-07: tpcds profiles committed. Plan complete. PR #202 against `ENS-batching-report`; board `reviewing`; reviewer round 1 dispatched.
 
 ## Checkpoints
 
