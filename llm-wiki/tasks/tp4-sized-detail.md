@@ -293,6 +293,7 @@ nothing.
     `batching_report.py --check` exit 0. The page's load split reads `LOADS_MODE = "tp1-single"`
     rows only, so the tpcds tp4 rows leave it unchanged, and it was not regenerated.
 - 2026-11-07: tpcds profiles committed. Plan complete. PR #202 against `ENS-batching-report`; board `reviewing`; reviewer round 1 dispatched.
+- 2026-11-07: review round 2 findings (markdown only) fixed by the coordinator; nothing outstanding. Board `completing`; completeness pass dispatched.
 
 ## Review round 1 (2026-11-07)
 
@@ -328,6 +329,10 @@ nothing.
     1600 → 1603). shellcheck is not installed on dev, so the script was checked with `bash -n` and
     its 50 tests.
 - **N4-N6, coordinator:** report text (3.7 s; the 93.0 of 97.6 s set named; "every GPU side"; "exceeds"), build-test.md's sf40 answer check names tp1_single, tpcds unattributed share added here.
+
+## Review round 2 (2026-11-07)
+
+0 blocking, 2 important, 2 nits, all markdown, fixed by the coordinator: #308 retitled "sf40 tp4_sized timeouts" (only q9 was seen spinning; q18 and q24 kept the card 32-41 % busy; q64 unobserved), its Priority line dropped; `tickets.md` next number 309 and 92 open; the Reading and #238 rewrapped; build-test.md's four cases "estimated not to fit".
 
 ## Checkpoints
 

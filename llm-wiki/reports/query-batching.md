@@ -188,9 +188,10 @@ ms, from one profiled run per query process (per fused batch) under Nsight: each
   fused. Even first3 is 9.3 s against 1.0 s on TPC-H and 3.7 s against 0.7 s on TPC-DS. Five
   queries do not finish at tp4_sized at all (the lines under the tables): TPC-H q8 exceeds the
   driver's step cap ([#238](../tickets/system-hardening.md#t238)), and four time out at 1800 s
-  with the host spinning ([#308](../tickets/system-hardening.md#t308)); at tp1_single those four take under 5 s.
+  ([#308](../tickets/system-hardening.md#t308)); at tp1_single those four take under 5 s.
   These are summed node times, and at tp4_sized they track the runs' wall time as at tp1_single
-  (over every timed TPC-H section, micro queries included: 93.0 of 97.6 s, against 21.7 of 25.0 s), so the four lanes are not counted twice.
+  (over every timed TPC-H section, micro queries included: 93.0 of 97.6 s, against 21.7 of
+  25.0 s), so the four lanes are not counted twice.
 - **Against DuckDB** (different clocks, see above). On TPC-H fused is faster: DuckDB's warm sum
   is 1.60× to 2.48× fused's, 1.50× to 2.36× with DuckDB's `SELECT 1` floor taken off each
   query. On TPC-DS DuckDB is faster with the floors out in every batch: its time is 0.67× to
