@@ -313,7 +313,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   as the runner shell's redirect after the wrapped command. This task lists `pipeline.yml`
   `cost-report` and `s3-datasets`.
 
-- [ ] **Step 1: counts before (coordinator).** The count baseline (Global Constraints): `id=$(gh
+- [x] **Step 1: counts before (coordinator).** The count baseline (Global Constraints): `id=$(gh
   run list --workflow pipeline.yml --branch ENS-tp4-sized --event pull_request --status success -L1
   --json databaseId -q '.[0].databaseId'); gh run view $id --log > <scratch>/before.log` (this
   branch's own first PR run, before Step 3, if the parent has none). Save, per job, the lines
