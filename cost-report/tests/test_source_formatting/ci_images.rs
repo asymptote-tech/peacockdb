@@ -12,7 +12,43 @@ const IN_IMAGE_JOBS: &[(&str, &str)] = &[
     (".github/workflows/pipeline.yml", "s3-datasets"),
     (".github/workflows/pipeline.yml", "dataset-matrix"),
     (".github/workflows/pipeline.yml", "cpp-build-2502"),
+    (".github/workflows/exec-model-corpus.yml", "corpus"),
+    (".github/workflows/exec-model-corpus.yml", "call-cost"),
+    (".github/workflows/validate-large.yml", "validate-large"),
 ];
+
+/// (workflow, job, reason): the jobs that run on the runner, each with why it needs no image.
+/// Every job of every workflow is here or in IN_IMAGE_JOBS, so a new one cannot slip past both.
+const HOST_JOBS: &[(&str, &str, &str)] = &[
+    (
+        ".github/workflows/pipeline.yml",
+        "changes",
+        "gh api only: it reads the pushed files' names, never the tree",
+    ),
+    (
+        ".github/workflows/pipeline.yml",
+        "deploy-pages",
+        "publishes the Pages artifact cost-report made; checks out nothing",
+    ),
+    (
+        ".github/workflows/pipeline.yml",
+        "gpu-tests",
+        "runs only scripts/nebius.sh and run-gpu.sh on the runner, and the code in the run image \
+         on the VM",
+    ),
+    (
+        ".github/workflows/images.yml",
+        "image",
+        "builds and pushes the images themselves, with docker",
+    ),
+    (
+        ".github/workflows/nebius-watch.yml",
+        "watch",
+        "the idle checker: scripts/nebius/watch.sh, the nebius CLI and ssh, no project code",
+    ),
+];
+
+const WORKFLOWS: &str = ".github/workflows";
 
 /// (job, line prefix, reason): a line of a listed job that runs on the runner on purpose.
 const RUNNER_SIDE: &[(&str, &str, &str)] = &[
@@ -124,6 +160,13 @@ fn action_problems(path: &str, text: &str) -> Vec<String> {
 /// The problems of a job's or an action's lines: anything only a job outside the image needs,
 /// and each `run:` line but the exempt ones.
 fn step_problems(owner: &str, lines: &[&str], exempt: &[&str]) -> Vec<String> {
+    let mut problems = off_image_problems(owner, lines);
+    problems.extend(run_line_problems(owner, lines, exempt));
+    problems
+}
+
+/// Each line, comments aside, that installs what only a job outside the image needs.
+fn off_image_problems(owner: &str, lines: &[&str]) -> Vec<String> {
     let mut problems = Vec::new();
     let code = lines
         .iter()
@@ -137,6 +180,13 @@ fn step_problems(owner: &str, lines: &[&str], exempt: &[&str]) -> Vec<String> {
             ));
         }
     }
+    problems
+}
+
+/// The problems of each `run:` line but the exempt ones: a project command on the runner, or a
+/// wrapped one naming a runner path.
+fn run_line_problems(owner: &str, lines: &[&str], exempt: &[&str]) -> Vec<String> {
+    let mut problems = Vec::new();
     let scripts: Vec<String> = run_scripts(lines)
         .iter()
         .flat_map(|s| fold_continuations(s))
@@ -662,7 +712,8 @@ fn job_steps<'a>(lines: &[&'a str]) -> Vec<Vec<&'a str>> {
     };
     let mut steps: Vec<Vec<&str>> = Vec::new();
     for line in body {
-        let at_step = line.len() - line.trim_start().len() == indent && line.trim_start().starts_with("- ");
+        let at_step =
+            line.len() - line.trim_start().len() == indent && line.trim_start().starts_with("- ");
         if at_step {
             steps.push(Vec::new());
         }
@@ -679,8 +730,9 @@ fn gpu_cleanup_problems(workflow: &str) -> Vec<String> {
         return vec!["gpu-tests: no such job".to_string()];
     };
     let removes = |step: &Vec<&str>| {
-        step.iter()
-            .any(|l| !l.trim_start().starts_with('#') && l.contains("docker rm -f peacock-peacockdb"))
+        step.iter().any(|l| {
+            !l.trim_start().starts_with('#') && l.contains("docker rm -f peacock-peacockdb")
+        })
     };
     let steps = job_steps(&lines);
     let Some(step) = steps.iter().find(|s| removes(s)) else {
@@ -725,13 +777,190 @@ fn the_gpu_cleanup_removes_the_run_container() {
     };
     let always = "        if: always() && steps.start.outcome == 'success'\n";
     let rm = "scripts/nebius.sh ssh 'docker rm -f peacock-peacockdb' || true";
-    assert_eq!(gpu_cleanup_problems(&job(&step(always, rm))), Vec::<String>::new());
+    assert_eq!(
+        gpu_cleanup_problems(&job(&step(always, rm))),
+        Vec::<String>::new()
+    );
     for (what, text) in [
         ("no if", job(&step("", rm))),
         ("not always()", job(&step("        if: success()\n", rm))),
         ("commented out", job(&step(always, &format!("# {rm}")))),
         ("no cleanup", job("")),
     ] {
-        assert!(!gpu_cleanup_problems(&text).is_empty(), "{what}: accepted\n{text}");
+        assert!(
+            !gpu_cleanup_problems(&text).is_empty(),
+            "{what}: accepted\n{text}"
+        );
     }
+}
+
+/// The jobs of a workflow: the keys under its top-level `jobs:`.
+fn workflow_jobs(workflow: &str) -> Vec<&str> {
+    workflow
+        .lines()
+        .skip_while(|l| l.trim_end() != "jobs:")
+        .skip(1)
+        .take_while(|l| l.is_empty() || l.starts_with([' ', '#']))
+        .filter_map(|l| l.strip_prefix("  "))
+        .filter(|l| !l.starts_with([' ', '#']))
+        .filter_map(|l| l.trim_end().strip_suffix(':'))
+        .collect()
+}
+
+/// Every problem with one workflow's jobs: a job in neither list or in both, a listed job it
+/// does not have, a `container:` key or an off-image install anywhere, and a host job running a
+/// project command on the runner.
+fn accounting_problems(
+    path: &str,
+    workflow: &str,
+    in_image: &[(&str, &str)],
+    host: &[(&str, &str, &str)],
+) -> Vec<String> {
+    let jobs = workflow_jobs(workflow);
+    let in_image: Vec<&str> = in_image
+        .iter()
+        .filter(|(w, _)| *w == path)
+        .map(|(_, j)| *j)
+        .collect();
+    let host: Vec<&str> = host
+        .iter()
+        .filter(|(w, ..)| *w == path)
+        .map(|(_, j, _)| *j)
+        .collect();
+    let mut problems = Vec::new();
+    for job in &jobs {
+        match (in_image.contains(job), host.contains(job)) {
+            (false, false) => problems.push(format!(
+                "{path}: job {job} is in neither IN_IMAGE_JOBS nor HOST_JOBS: run it in the build \
+                 image, or list it in HOST_JOBS with why it needs none"
+            )),
+            (true, true) => problems.push(format!(
+                "{path}: job {job} is in both IN_IMAGE_JOBS and HOST_JOBS"
+            )),
+            _ => {}
+        }
+    }
+    for job in in_image.iter().chain(&host).filter(|j| !jobs.contains(j)) {
+        problems.push(format!(
+            "{path}: listed job {job} does not exist: remove it"
+        ));
+    }
+    let lines: Vec<&str> = workflow.lines().collect();
+    for line in lines
+        .iter()
+        .filter(|l| l.trim_start().starts_with("container:"))
+    {
+        problems.push(format!(
+            "{path}: `{}`: a job runs on the runner, and its project commands in the image",
+            line.trim()
+        ));
+    }
+    problems.extend(off_image_problems(path, &lines));
+    for job in host.iter().filter(|j| jobs.contains(j)) {
+        let lines = job_lines(workflow, job).unwrap_or_default();
+        problems.extend(run_line_problems(job, &lines, &[]));
+    }
+    problems
+}
+
+#[test]
+fn every_job_runs_in_the_image_or_says_why() {
+    let mut problems = Vec::new();
+    let dir = repo_root().join(WORKFLOWS);
+    let mut paths: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("read {WORKFLOWS}: {e}"))
+        .map(|e| {
+            e.expect("a workflow entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|name| name.ends_with(".yml"))
+        .map(|name| format!("{WORKFLOWS}/{name}"))
+        .collect();
+    paths.sort();
+    for path in &paths {
+        let text = std::fs::read_to_string(repo_root().join(path))
+            .unwrap_or_else(|e| panic!("read {path}: {e}"));
+        problems.extend(accounting_problems(path, &text, IN_IMAGE_JOBS, HOST_JOBS));
+    }
+    for (workflow, job, reason) in HOST_JOBS {
+        assert!(!reason.is_empty(), "HOST_JOBS' {job} has no reason");
+        if !paths.iter().any(|p| p == workflow) {
+            problems.push(format!("HOST_JOBS names {workflow}, which does not exist"));
+        }
+    }
+    for entry in std::fs::read_dir(repo_root().join(LOCAL_ACTIONS)).expect("read the actions") {
+        let file = entry.expect("an action entry").path().join("action.yml");
+        let text = std::fs::read_to_string(&file)
+            .unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
+        let lines: Vec<&str> = text.lines().collect();
+        problems.extend(off_image_problems(&file.display().to_string(), &lines));
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[test]
+fn a_job_neither_in_the_image_nor_said_why_is_refused() {
+    const WF: &str = "w.yml";
+    let workflow = |b_steps: &str| {
+        format!(
+            "on:\n  workflow_dispatch:\n    inputs:\n      x:\n        default: ''\n  push:\n\n\
+             jobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: scripts/build-test.sh -- true\n\n  \
+             # a comment between jobs\n  b:\n    runs-on: ubuntu-latest\n    steps:\n{b_steps}"
+        )
+    };
+    let quiet = workflow("      - run: scripts/nebius.sh start\n");
+    assert_eq!(workflow_jobs(&quiet), ["a", "b"]);
+    let problems =
+        |text: &str, host: &[(&str, &str, &str)]| accounting_problems(WF, text, &[(WF, "a")], host);
+    assert_eq!(problems(&quiet, &[(WF, "b", "why")]), Vec::<String>::new());
+
+    let unlisted = problems(&quiet, &[]).join("\n");
+    assert!(unlisted.contains("job b is in neither"), "{unlisted}");
+    assert!(
+        !unlisted.contains("workflow_dispatch") && !unlisted.contains("push"),
+        "{unlisted}"
+    );
+    let both = accounting_problems(WF, &quiet, &[(WF, "a"), (WF, "b")], &[(WF, "b", "why")]);
+    assert!(both.join("\n").contains("job b is in both"), "{both:?}");
+    let stale = problems(&quiet, &[(WF, "b", "why"), (WF, "gone", "why")]);
+    assert!(
+        stale.join("\n").contains("listed job gone does not exist"),
+        "{stale:?}"
+    );
+    // Another workflow's entries are not this one's.
+    assert_eq!(
+        problems(&quiet, &[(WF, "b", "why"), ("x.yml", "c", "why")]),
+        Vec::<String>::new()
+    );
+
+    for (steps, naming) in [
+        (
+            "    container: ubuntu:24.04\n      - run: true\n",
+            "`container: ubuntu:24.04`: a job runs",
+        ),
+        ("      - run: pip install --quiet pandas\n", "pip install"),
+        ("      - run: conda install -y gcc\n", "conda install"),
+        (
+            "      - run: python3 scripts/x.py\n",
+            "python3 runs on the runner",
+        ),
+        (
+            "      - run: |\n          for f in a; do cargo test; done\n",
+            "cargo runs on the runner",
+        ),
+    ] {
+        let found = problems(&workflow(steps), &[(WF, "b", "why")]).join("\n");
+        assert!(
+            found.contains(naming),
+            "`{steps}` not refused for {naming}: {found}"
+        );
+    }
+    let commented =
+        workflow("      # the pip install went: pandas is in the image\n      - run: true\n");
+    assert_eq!(
+        problems(&commented, &[(WF, "b", "why")]),
+        Vec::<String>::new()
+    );
 }

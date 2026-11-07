@@ -578,8 +578,11 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   No job of the three has a `container:` key, and no line in them or in `.github/actions/` contains
   `conda install`, `pip install` or `rapidsai/`.
 
-- [ ] **Step 1: failing test** (as above) → FAIL (`corpus` and `validate-large` are unlisted).
-- [ ] **Step 2: move.**
+- [x] **Step 1: failing test** (as above) → FAIL (`corpus` and `validate-large` are unlisted).
+  As built (detail file, `## Task 7`): every workflow under `.github/workflows/` is read, not three,
+  so `HOST_JOBS` also names images.yml's `image` and nebius-watch.yml's `watch`; a host job is held
+  to no project command on the runner. It also found `call-cost`, unlisted.
+- [x] **Step 2: move.**
   - `corpus` uses the action with `cudf: "25.02"`. `scripts/build-test.sh --
     testdata/generate_testdata.sh --bench tpch` and the same for tpcds; the `pip install` and the
     curl go. The run step becomes `scripts/build-test.sh -- python3 "$f" ${FILTER:+"$FILTER"}`, with
@@ -588,7 +591,9 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     then `scripts/build-test.sh --pass-env AWS_ACCESS_KEY_ID --pass-env AWS_SECRET_ACCESS_KEY --
     python3 scripts/check_s3_datasets.py --endpoint …`; `pip install awscli` goes (aws is in the
     image).
-- [ ] **Step 3: run** the guard → PASS.
+  - `call-cost` (not in the plan; exec-model-corpus.yml's second job) uses the action too:
+    `fetch_record.sh tpch.sf40` and the check through build-test.sh, the keys by `--pass-env`.
+- [x] **Step 3: run** the guard → PASS.
 - [ ] **Step 4: live.**
   - (coordinator) `gh workflow run exec-model-corpus.yml --ref ENS-containers-only -f filter=q1`.
     Pass means three shards green, each running ≥ 1 test; a red shard reaches the developer as a
@@ -597,7 +602,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     instead: `set -a; . ~/.config/peacock/peacock.env; set +a; scripts/build-test.sh --pass-env
     AWS_ACCESS_KEY_ID --pass-env AWS_SECRET_ACCESS_KEY -- python3 scripts/check_s3_datasets.py
     --endpoint https://storage.eu-north1.nebius.cloud:443` → exit 0. Record in the detail file
-    that the ssh half was not run, and why.
+    that the ssh half was not run, and why. Done on dev, 2026-11-07: exit 0.
 - [ ] **Step 5: commit** `containers-only: the manual workflows run in the build image; every CI job is accounted for`.
 
 ### Task 8: delete the conda and machine-setup scripts

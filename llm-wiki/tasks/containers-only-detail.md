@@ -527,6 +527,85 @@ Branch `ENS-containers-only`, forked from `ENS-tp4-sized` at `9058709c`; its PR 
     call), and this tree's own stale `~/peacockdb-peacockdb-beta/cpp/install` (4.9 GB, the old
     conda install, now unread). `~/peacockdb/` (991 MB) is a tree of unknown owner and was left alone.
 
+## Task 7
+
+- Dispatched 2026-11-07 at Steps 1-3 and Step 4's dev half (developer, dev, no VM). Checkpoint
+  reported, not committed: `containers-only: the manual workflows run in the build image; every CI
+  job is accounted for`. Next: the coordinator's `gh workflow run exec-model-corpus.yml --ref
+  ENS-containers-only -f filter=q1`.
+- **Red first.** `every_job_runs_in_the_image_or_says_why` on the unchanged workflows: 56 passed,
+  1 failed, naming `corpus`, `call-cost` and `validate-large` as unlisted, the three `pip install`
+  lines and `dtolnay/rust-toolchain`. Green after the move: `test_source_formatting` 57 passed
+  (HEAD 55, +2); `--bin cost-report` 49 passed.
+- **The guard, as built, beyond the plan.**
+  - It reads every `.github/workflows/*.yml`, not only the three, so a new workflow cannot slip
+    past it. `HOST_JOBS` therefore also names images.yml's `image` and nebius-watch.yml's `watch`.
+  - A host job's `run:` lines are held to the image rule too: a bare `cargo`, `python3`, `ctest`,
+    `cmake`, `scripts/build.sh` or `testdata/` command in one is refused. Without that, `HOST_JOBS`
+    would be a way out of the rule rather than a list of reasons. All five host jobs pass it.
+  - `off_image_problems` (no `conda install`, `pip install`, `rapidsai/` or
+    `dtolnay/rust-toolchain` outside a comment) runs over every workflow line and every
+    `.github/actions/*/action.yml`. `container:` is refused anywhere.
+  - Each rule was checked by a mutation (`/tmp/co-t7/mutate.py`): `on:` keys read as jobs, the
+    host-job check dropped, the container check dropped, the stale-entry check dropped, the
+    both-lists check dropped, and a `pip install` line in nebius-setup's action. All six went red.
+    The container mutation first stayed green: the doctored case used `rapidsai/base`, and the
+    off-image rule named that line instead. The case now uses `ubuntu:24.04`.
+  - `ci_images.rs` was not rustfmt-clean at HEAD (Task 6's lines). The whole file is now formatted.
+- **`call-cost` moved too.** The plan's Step 2 names only `corpus`, but `call-cost` is
+  exec-model-corpus.yml's second job and had `pip install pandas`. It now uses the action, then
+  `scripts/build-test.sh --pass-env AWS_ACCESS_KEY_ID --pass-env AWS_SECRET_ACCESS_KEY --
+  scripts/calibration/fetch_record.sh tpch.sf40` (the image's aws) and the check through
+  build-test.sh. `fetch_record.sh` needs no endpoint variable: with `AWS_ENDPOINT_URL` unset,
+  `calibration-bucket.sh` uses the fixed Nebius endpoint and region. A `-f filter=q1` dispatch
+  skips this job (`if: inputs.filter == ''`), so only a no-filter dispatch runs it in CI.
+- **corpus.** The action with `cudf: "25.02"`. Steps: `build-test.sh -- cargo build --release -p
+  peacockdb-dphyp`, then `duckdb --version` and both `generate_testdata.sh` benches through
+  build-test.sh, then the four files through `build-test.sh --pass-env PEACOCK_DPHYP_LIB`, with
+  `PEACOCK_DPHYP_LIB=$PWD/target-img-$PEACOCK_CUDF/release/libpeacockdb_dphyp.so`, as the pipeline
+  has it. `PCK_SHARD` needs no `--pass-env`: it is in build-test.sh's `FORWARDED` list. `DUCKDB`
+  is dropped: `corpus.py`'s `duckdb_binary()` finds the image's `duckdb` on PATH. Its error text
+  named the curl download that went, and now names build-test.sh. `defaults.run.shell: bash` on
+  both jobs. No Swatinem cache: DPhyp has no dependencies and builds in 7 s.
+- **validate-large.** The ssh steps are unchanged. The action comes right before the S3 step,
+  after the shad-gpu half, so a failed ssh half pays no disk freeing and no pull. The S3 step is
+  s3-datasets' line. `pip install awscli` and the pyarrow/numpy self-heal are gone.
+- **Env for the S3 checks.** `check_s3_datasets.py` passes `--endpoint-url` and `--region` to
+  every aws call and to pyarrow, so it needs only the two keys, as s3-datasets passes them.
+  `peacock.env` also sets `AWS_ENDPOINT_URL` and `AWS_REGION`. build-test.sh does not pass them,
+  so the container saw what CI's sees.
+- **Step 4, dev half (2026-11-07):** the plan's command, as written, exit 0: tpch-sf40 PASS (8
+  tables), tpch-sf200 SKIP (no manifest, 0 objects), tpcds-sf40 PASS (24), tpcds-sf200 PASS (24).
+  **The ssh half was not run**: validate-large dispatches only against shad-gpu, which is down.
+- **Runner-shaped local runs** (dev, 2026-11-07). A `git clone --depth 1 --no-hardlinks` of HEAD
+  with the edits laid over it, owned by 1001:118, an empty cargo registry and ccache of 1001's, the
+  build-image action's exports and a fake `id` answering 1001/118 (`/tmp/co-t7/tools/`). Each
+  step's `run:` executed as rendered by `step.py` (Task 4's, extended for `matrix.shard` and
+  `inputs.filter`, and leaving `${{ secrets.* }}` to the caller's environment).
+  - corpus: DPhyp 7 s; sf1 237 s, 32 files, aggregate `0e41c31d…a492` (Task 4's); then all three
+    shards with `filter=q1`, each exit 0: shard 0 737 s, shard 1 510 s, shard 2 686 s. Per file,
+    shards 0/1/2: answers 7/7/7, dynamic filters 5/5/4, reassembled 7/7/6, optimized 7/7/6, so 75
+    tests and none failed. Every shard of every file selects at least 4 tests under q1.
+  - call-cost, with only the two keys from `peacock.env`: the record fetched, 254160 rows, sha256
+    `1013141a…def2` as pinned, written by uid 1001; the check 1 passed.
+  - The clone, its registry and ccache were removed. Logs stay in `/tmp/co-t7/`.
+- **Checks on the edited files.** YAML parses (both). `bash -n` of all 9 `run:` blocks. actionlint:
+  4 findings (SC2029 ×3, SC2086), the same 4 HEAD has, all in the shad-gpu ssh steps this task
+  leaves alone. No shell script changed, so no shellcheck run.
+- **Wiki.** build-test.md: the validate-large.yml bullet says where its S3 step runs, a new
+  exec-model-corpus.yml bullet, and the CI wiring guard row (+2, 30, two new links). Totals:
+  Rust 6319, grand 8243.
+- **What could differ on the runner.**
+  - Disk: each of the three shards and call-cost now frees the disk and pulls the 10 GB image, a
+    few minutes each, before work the old jobs began at once. The gate is `need_gb=25`; sf1 is
+    0.8 GB beside the image.
+  - Time: dev's shards took 8-12 min each on a larger CPU. A runner shard will be slower. The
+    runs have no job timeout beyond GitHub's 6 h.
+  - The cargo registry is the runner's `~/.cargo/registry`, empty. With an empty registry the local
+    run updated the crates.io index and downloaded no crate (DPhyp has no dependencies): 7 s.
+  - The uid: proven as 1001:118 locally. The runner's checkout is owned by its own uid, as the
+    clone was.
+
 ## Notes for a restart
 
 - PR #203, a draft against `ENS-tp4-sized`, opened after Task 2 so Task 3 on has PR runs. The board
