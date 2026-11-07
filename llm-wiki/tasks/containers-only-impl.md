@@ -348,7 +348,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   - `s3-datasets`: use the action, then `scripts/build-test.sh --pass-env AWS_ACCESS_KEY_ID
     --pass-env AWS_SECRET_ACCESS_KEY -- python3 scripts/check_s3_datasets.py --endpoint …`. Its
     fork guard and `exit 0` on missing keys stay on the runner.
-- [ ] **Step 4: run** the guard locally → PASS (done, 47 passed; the detail file). Then (coordinator) push; on the branch's PR run,
+- [x] **Step 4: run** the guard locally → PASS (done, 47 passed; the detail file). Then (coordinator) push; on the branch's PR run,
   `cost-report` and `s3-datasets` are green, and the counts equal Step 1's baseline, plus the
   `benchmarks/tests` suites now run. The coordinator hands any red job or moved count to the
   developer as a failing test, with the venv pins (`pandas 3.0.6`, `matplotlib`) as the first
