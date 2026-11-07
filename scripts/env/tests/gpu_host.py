@@ -29,6 +29,7 @@ CUDF = "25.02"
 RUN_REF = f"ghcr.io/asymptote-tech/peacockdb-run:cudf-{CUDF}"
 BUILD_REF = f"ghcr.io/asymptote-tech/peacockdb-build:cudf-{CUDF}"
 H100 = ["--instance-id", "computeinstance-e00e6yena4nzjgaym0", "--profile", "editor-eu"]
+L40S = ["--instance-id", "computeinstance-e00tnrse7ayntnzcyt"]
 CPU_VM = ["--instance-id", "computeinstance-e01t2mm4265y8x88ey", "--profile", "eu-west1"]
 HOSTNAME = "h100-test-node"
 DRIVER_MINIMUM = "535.104.05"
@@ -112,9 +113,15 @@ if a[0] == "run" and "-d" in a:
         print(f"docker: Error response from daemon: Conflict. The container name /{name} is already in use",
               file=sys.stderr)
         sys.exit(125)
-    w["containers"][name] = {"state": "exited", "code": w["run_code"]}
+    labels = dict(a[i + 1].split("=", 1) for i, x in enumerate(a) if x == "--label")
+    w["containers"][name] = {"state": w.get("run_state", "exited"), "code": w["run_code"], "labels": labels}
     save()
     print("f00dfeed" * 8)
+    sys.exit(0)
+if a[0] == "inspect":
+    c = w["containers"][a[-1]]
+    fmt = flag("--format")
+    print(c["code"] if "ExitCode" in fmt else c.get("labels", {}).get(fmt.split('"')[1], "<no value>"))
     sys.exit(0)
 if a[0] == "run":
     gen = [c for c in a if c.endswith("/generate_testdata.sh")]
@@ -124,7 +131,8 @@ if a[0] == "run":
     (stage / f"{bench}.sf1" / "generated").write_text(bench)
     sys.exit(0)
 if a[0] == "logs":
-    print(w["run_output"], end="")
+    lines = w["run_output"].splitlines(keepends=True)
+    print("".join(lines[-int(flag("--tail")):] if "--tail" in a else lines), end="")
     sys.exit(0)
 if a[0] == "wait":
     print(w["containers"][a[-1]]["code"])

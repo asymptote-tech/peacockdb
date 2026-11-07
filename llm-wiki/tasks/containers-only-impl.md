@@ -444,7 +444,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     non-zero, 5 for running, and 2 for none. This is what `nebius-test.sh run`/`status` gave
     agents.
 
-- [ ] **Step 1: failing tests**: `test_run_uses_the_given_run_image`,
+- [x] **Step 1: failing tests**: `test_run_uses_the_given_run_image`,
   `test_prepare_no_sf40_reads_no_env_file` (no env read from stdin, no `fetch-sf40.sh` call),
   `test_prepare_no_sf40_skips_the_nsight_setup` (counters admin-only on the fake host → exit 0, no
   `peacock-profiling.conf` written, no `/opt/cudf` copy),
@@ -453,10 +453,10 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   stream), `test_status_reports_running_then_exit`, `test_detached_run_returns_while_running`.
   Port every case of `scripts/nebius/tests/test_ci_ship.py` that still applies, and name any
   dropped case and why in the detail file.
-- [ ] **Step 2: run** `python3 scripts/env/tests/test_run_gpu.py` → FAIL on the new ones.
-- [ ] **Step 3: implement.** Run `shellcheck scripts/env/run-gpu.sh` → clean.
-- [ ] **Step 4: run** → `0 failed`; every other `scripts/env/tests/test_*.py` needing no image → `0 failed`.
-- [ ] **Step 5: commit** `containers-only: run-gpu.sh takes CI's run image, ships like ci-ship, runs detached`.
+- [x] **Step 2: run** `python3 scripts/env/tests/test_run_gpu.py` → FAIL on the new ones.
+- [x] **Step 3: implement.** Run `shellcheck scripts/env/run-gpu.sh` → clean.
+- [x] **Step 4: run** → `0 failed`; every other `scripts/env/tests/test_*.py` needing no image → `0 failed`.
+- [x] **Step 5: commit** `containers-only: run-gpu.sh takes CI's run image, ships like ci-ship, runs detached`.
 
 ### Task 6: `cpp-build-2502` in the image; `gpu-tests` through `run-gpu.sh`
 

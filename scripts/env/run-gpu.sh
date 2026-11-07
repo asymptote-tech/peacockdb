@@ -4,19 +4,23 @@
 #
 #   run-gpu.sh --instance-id <id> [--profile <name>] [--dir <i>] [--cudf <v>] <verb>
 #
-#   prepare                    ready the VM: Docker, the NVIDIA Container Toolkit and nsys if
+#   prepare [--no-sf40]        ready the VM: Docker, the NVIDIA Container Toolkit and nsys if
 #                                missing; the GPU's counters open to non-root; the build and run
 #                                images, each refused unless its peacockdb.inputs label is this
 #                                tree's; sf1, generated in the build image; sf40, the keys of
 #                                ~/.config/peacock/peacock.env on stdin; the run image's /opt/cudf
-#                                as ~/peacock/cudf-<v>/, for Nsight on the VM itself
+#                                as ~/peacock/cudf-<v>/, for Nsight on the VM itself. --no-sf40,
+#                                for the L40S list alone: no sf40, no env file, no nsys, counters
+#                                or /opt/cudf copy
 #   ship [--install <dir>]     the staged install (this tree's cpp/install by default, which
 #                                scripts/env/stage-install.sh makes) and the tree's committed
-#                                testdata to ~/peacock/<i>/ on the VM, the datasets linked in
-#   run <list|filter|bench>    the run image's run-tests.sh <mode> as container peacock-<i>, its
-#                                log followed; PCK_TEST_FILTER, PEACOCK_BENCH_RESUME,
-#                                PEACOCK_BENCH_CASE_TIMEOUT_S and PCK_WRITE_GPU_RESULT pass on
-#                                when set
+#                                testdata to ~/peacock/<i>/ on the VM, the datasets linked in; four
+#                                rsync streams at once, each retried
+#   run [--detach] <list|filter|bench>
+#                              the run image's run-tests.sh <mode> as container peacock-<i>, its
+#                                log followed, or, with --detach, left running; PCK_TEST_FILTER,
+#                                PEACOCK_BENCH_RESUME, PEACOCK_BENCH_CASE_TIMEOUT_S and
+#                                PCK_WRITE_GPU_RESULT pass on when set
 #   run <name> [--exact <test>]
 #                              a binary staged in the install's rust-benchmarks/ (stage-install.sh's
 #                                prototype_fused_benchmarks), run in the unchanged run image as its
@@ -24,18 +28,23 @@
 #                                --test-threads=1, and <test> or PCK_TEST_FILTER as the filter;
 #                                PEACOCK_BENCH_RESUME passes on when set. Judged as run-tests.sh
 #                                judges: a failed exit, a segfault or `running 0 tests` is exit 1
+#   status                     peacock-<i>: `running`, `exited <code>` or `none`, then the last 40
+#                                lines of its log; an ended run's log is kept for pull
 #   pull                       testdata/benchmark-results/, testdata/calibration/ and the device's
 #                                answers (testdata/goldens/*/gpu-result*.txt) into this tree, and
 #                                the runs' logs into ~/.cache/peacock/run-gpu/<i>/
 #
 # --instance-id and --profile go, as given, to every scripts/nebius.sh call ($NEBIUS_SH), which
-# picks the VM. --instance-id is required: without it nebius.sh means nebius-gpu, the shared L40S,
-# which runs no sf40 and no benchmark. run-gpu.sh never starts or stops the VM: the caller does,
-# with nebius.sh. <i> is this tree's directory name by default, <v> 25.02.
+# picks the VM. --instance-id is required, nebius-gpu's too: without it nebius.sh picks nebius-gpu
+# silently. run-gpu.sh never starts or stops the VM: the caller does, with nebius.sh. <i> is this
+# tree's directory name by default, <v> 25.02. PEACOCK_RUN_IMAGE and PEACOCK_BUILD_IMAGE, when set,
+# are the images prepare and run use instead of :cudf-<v> (CI's scripts/env/image-ref.sh refs),
+# checked alike.
 #
-# Exit 0; 1 the run failed; 2 bad input (nebius.sh's 64 too), a stale image, a run in progress,
-# or a step missing (prepare, ship); 3 the VM's driver is older than the run image needs; 4 restart
-# the VM (nebius.sh stop --force, start), then prepare again; else nebius.sh's (75, 69).
+# Exit 0; 1 the run failed, or a ship stream gave up; 2 bad input (nebius.sh's 64 too), a stale
+# image, a run in progress, or a step missing (prepare, ship); 3 the VM's driver is older than the
+# run image needs; 4 restart the VM (nebius.sh stop --force, start), then prepare again; 5 status:
+# the run goes on; else nebius.sh's (75, 69). status: 0 exited 0, 1 exited non-zero, 2 none.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -45,7 +54,7 @@ die() { echo "run-gpu.sh: $*" >&2; exit 2; }
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(git -C "$here" rev-parse --show-toplevel)
 NEBIUS=("${NEBIUS_SH:-$root/scripts/nebius.sh}")
-dir=$(basename "$root") cudf=25.02 install="" mode="" instance="" staged="" exact=""
+dir=$(basename "$root") cudf=25.02 install="" mode="" instance="" staged="" exact="" no_sf40=0 detach=0
 while [ $# -gt 0 ]; do
   case $1 in
     -h|--help) usage ;;
@@ -60,7 +69,14 @@ done
 verb=${1:-}
 shift || true
 case $verb in
-  prepare|pull) [ $# -eq 0 ] || die "$verb takes no argument: $*" ;;
+  pull|status) [ $# -eq 0 ] || die "$verb takes no argument: $*" ;;
+  prepare)
+    while [ $# -gt 0 ]; do
+      case $1 in
+        --no-sf40) no_sf40=1; shift ;;
+        *) die "unknown argument to prepare: $1" ;;
+      esac
+    done ;;
   ship)
     while [ $# -gt 0 ]; do
       case $1 in
@@ -69,10 +85,12 @@ case $verb in
       esac
     done ;;
   run)
+    if [ "${1:-}" = --detach ]; then detach=1; shift; fi
     [ $# -ge 1 ] || die "run takes a mode, list, filter or bench, or a staged binary's name"
     case $1 in
       list|filter|bench) [ $# -eq 1 ] || die "run $1 takes no argument: ${*:2}"; mode=$1 ;;
       *)
+        [ "$detach" -eq 0 ] || die "run --detach $1: --detach takes a mode, list, filter or bench; a staged binary runs attached"
         [[ "$1" =~ ^[A-Za-z0-9_]+$ ]] || die "run $1: neither list, filter, bench nor a binary's name"
         staged=$1
         shift
@@ -85,21 +103,22 @@ case $verb in
         [ -z "$exact" ] || [ -z "${PCK_TEST_FILTER:-}" ] \
           || die "--exact $exact and PCK_TEST_FILTER=$PCK_TEST_FILTER both name the tests: give one" ;;
     esac ;;
-  *) die "unknown verb ${verb:-(none)}: prepare, ship, run or pull" ;;
+  *) die "unknown verb ${verb:-(none)}: prepare, ship, run, status or pull" ;;
 esac
 # Not cudf-*: ~/peacock/cudf-<v>/ is the run image's prefix.
 [[ "$dir" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$dir" != cudf-* ]] \
   || die "--dir $dir: a directory name under ~/peacock/, of letters, digits, '.', '_' and '-', not cudf-*"
 [ -f "$root/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda has no cudf-$cudf.spec"
 [ -n "$instance" ] \
-  || die "name the VM with --instance-id: without it nebius.sh means nebius-gpu, the shared L40S, which runs no sf40"
+  || die "name the VM with --instance-id, nebius-gpu's too: without it nebius.sh picks nebius-gpu silently"
 
 . "$root/scripts/lib/peacock-config.sh"
 . "$root/scripts/lib/image-inputs.sh"
 . "$root/scripts/lib/data-inputs.sh"
 . "$root/scripts/lib/machine.sh"
-BUILD_REF=$MACHINE_IMAGE:cudf-$cudf
-RUN_REF=ghcr.io/asymptote-tech/peacockdb-run:cudf-$cudf
+BUILD_REF=${PEACOCK_BUILD_IMAGE:-$MACHINE_IMAGE:cudf-$cudf}
+RUN_REF=${PEACOCK_RUN_IMAGE:-ghcr.io/asymptote-tech/peacockdb-run:cudf-$cudf}
+SHIP_PAUSE=${RUN_GPU_SHIP_PAUSE:-15}  # seconds, times the attempt; the tests set 0
 SF40_SETS=(tpch.sf40 tpcds.sf40)
 # What prepare runs on the VM, at the same paths under ~/peacock/<i>/: machine_data_set and
 # fetch-sf40.sh, with what each reads.
@@ -180,10 +199,9 @@ vm_not_running() {
 }
 
 # vm_system: what the VM needs before any image: tools, Docker and the NVIDIA Container Toolkit,
-# nsys, the data directory, and the GPU's counters open to non-root (exit 4 until a restart).
+# and the data directory.
 vm_system() {
-  local data=${PEACOCK_DATA_DIR:-/var/lib/peacock} params=${PEACOCK_NVIDIA_PARAMS:-/proc/driver/nvidia/params}
-  local packages=() tool keyring repo found nsys
+  local data=${PEACOCK_DATA_DIR:-/var/lib/peacock} packages=() tool keyring
   for tool in curl python3 flock gpg; do
     command -v "$tool" > /dev/null || packages=(curl ca-certificates python3 util-linux gnupg)
   done
@@ -207,6 +225,13 @@ vm_system() {
     sudo nvidia-ctk runtime configure --runtime=docker
     sudo systemctl restart docker
   fi
+  if [ ! -d "$data" ]; then sudo install -d -o "$(id -un)" -g "$(id -gn)" -m 2775 "$data"; fi
+}
+
+# vm_nsight: what Nsight on the VM needs: nsys, and the GPU's counters open to non-root (exit 4
+# until a restart).
+vm_nsight() {
+  local params=${PEACOCK_NVIDIA_PARAMS:-/proc/driver/nvidia/params} keyring repo found nsys
   # nsys on PATH: a copy already on the VM (the CUDA toolkit's), else the CLI from NVIDIA's
   # devtools repository.
   if ! command -v nsys > /dev/null; then
@@ -229,7 +254,6 @@ vm_system() {
     [ -n "$found" ] || { echo "run-gpu.sh: no nsys on the VM, even after installing nsight-systems-cli" >&2; exit 1; }
     command -v nsys > /dev/null || sudo ln -sfn "$found" /usr/local/bin/nsys
   fi
-  if [ ! -d "$data" ]; then sudo install -d -o "$(id -un)" -g "$(id -gn)" -m 2775 "$data"; fi
   # The module option takes effect when the nvidia module loads, from the initramfs: at boot.
   sudo install -m 644 /dev/stdin /etc/modprobe.d/peacock-profiling.conf \
     <<< 'options nvidia NVreg_RestrictProfilingToAdminUsers=0'
@@ -275,36 +299,45 @@ vm_cudf() {
   echo "==> $dst: $ref's /opt/cudf"
 }
 
-# vm_ship_ready <i> <dataset>:<path under the data dir>…: refuses while a run is in progress, or
-# while a dataset is missing; links each into ~/peacock/<i>/testdata/ at its absolute path, which
-# run mounts at its own path.
+# vm_ship_ready <i> [?]<dataset>:<path under the data dir>…: refuses while a run is in progress, or
+# while a dataset is missing, unless it is marked ? (sf40, which prepare --no-sf40 leaves out);
+# links each one present into ~/peacock/<i>/testdata/ at its absolute path, which run mounts at its
+# own path, and drops the link of one absent.
 vm_ship_ready() {
-  local base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock} pair target
+  local base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock} pair target name
   vm_docker
   vm_not_running "$1"
   shift
   for pair in "$@"; do
     target=$data/${pair#*:}
-    [ -d "$target" ] || { echo "run-gpu.sh: no $target on the VM: run prepare first" >&2; exit 2; }
+    [ -d "$target" ] || [[ $pair == '?'* ]] || { echo "run-gpu.sh: no $target on the VM: run prepare first" >&2; exit 2; }
   done
   mkdir -p "$base/cpp/install" "$base/testdata"
-  for pair in "$@"; do ln -sfn "$data/${pair#*:}" "$base/testdata/${pair%%:*}"; done
+  for pair in "$@"; do
+    target=$data/${pair#*:} name=${pair%%:*}
+    name=${name#\?}
+    if [ -d "$target" ]; then ln -sfn "$target" "$base/testdata/$name"; else rm -f "$base/testdata/$name"; fi
+  done
 }
 
-# vm_run <i> <run image> <mode> [<NAME=value>…]: run-tests.sh <mode> as peacock-<i>; returns 0, 2
-# as the run did, else 1.
+# vm_run <i> <run image> <mode> <detach> [<NAME=value>…]: run-tests.sh <mode> as peacock-<i>;
+# returns 0, 2 as the run did, else 1. Detached (1), returns once it is up, and vm_status judges it.
 vm_run() {
-  local dir=$1 ref=$2 mode=$3 base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock}
+  local dir=$1 ref=$2 mode=$3 detach=$4 base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock}
   local name=peacock-$1 envs=() pair code
-  shift 3
+  shift 4
   for pair in "$@"; do envs+=(-e "$pair"); done
   vm_docker
   vm_not_running "$dir"
   [ -f "$base/cpp/install/lib/libpeacock_gpu.so" ] || { echo "run-gpu.sh: no install in $base: ship first" >&2; exit 2; }
   mkdir -p "$base/logs"
-  docker run -d --name "$name" --gpus all --user "$(id -u):$(id -g)" --hostname "$(hostname)" \
-    -v "$base/cpp/install:/peacock/install:ro" -v "$base/testdata:/peacock/testdata" -v "$data:$data:ro" \
-    "${envs[@]}" "$ref" "$mode" > /dev/null
+  docker run -d --name "$name" --label "peacock.log=$mode" --gpus all --user "$(id -u):$(id -g)" \
+    --hostname "$(hostname)" -v "$base/cpp/install:/peacock/install:ro" -v "$base/testdata:/peacock/testdata" \
+    -v "$data:$data:ro" "${envs[@]}" "$ref" "$mode" > /dev/null
+  if [ "$detach" -eq 1 ]; then
+    echo "==> $name: run-tests.sh $mode, detached; run-gpu.sh … status says how it goes"
+    return 0
+  fi
   docker logs -f "$name" 2>&1 | tee "$base/logs/$mode.log"
   code=$(docker wait "$name")
   docker rm "$name" > /dev/null
@@ -326,8 +359,8 @@ vm_run_staged() {
     || { echo "run-gpu.sh: no executable $base/cpp/install/rust-benchmarks/$name: stage and ship it first" >&2; exit 2; }
   mkdir -p "$base/logs"
   log=$base/logs/$name.log
-  docker run -d --name "$container" --gpus all --user "$(id -u):$(id -g)" --hostname "$(hostname)" \
-    -v "$base/cpp/install:/peacock/install:ro" -v "$base/testdata:/peacock/testdata" -v "$data:$data:ro" \
+  docker run -d --name "$container" --label "peacock.log=$name" --gpus all --user "$(id -u):$(id -g)" \
+    --hostname "$(hostname)" -v "$base/cpp/install:/peacock/install:ro" -v "$base/testdata:/peacock/testdata" -v "$data:$data:ro" \
     -e LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib -e PEACOCK_TESTDATA_DIR=/peacock/testdata \
     "${envs[@]}" --entrypoint "$entry" "$ref" "$@" > /dev/null
   docker logs -f "$container" 2>&1 | tee "$log"
@@ -336,6 +369,26 @@ vm_run_staged() {
   if [ "$code" -ne 0 ]; then echo "run-gpu.sh: $name exited $code" >&2; return 1; fi
   if grep -qE 'Segmentation fault|core dumped' "$log"; then echo "run-gpu.sh: $name: a segfault in its log" >&2; return 1; fi
   if grep -qE '^running 0 tests' "$log"; then echo "run-gpu.sh: $name ran 0 tests" >&2; return 1; fi
+}
+
+# vm_status <i>: peacock-<i>'s state and the last 40 lines of its log; returns 5 while it runs, 2
+# when there is none, else 0 or 1 as it exited. An ended run's whole log goes to
+# ~/peacock/<i>/logs/<its peacock.log label>.log, where pull finds it; the next run clears it.
+vm_status() {
+  local name=peacock-$1 log=$HOME/peacock/$1/logs state code
+  vm_docker
+  state=$(docker ps -a --filter "name=^$name\$" --format '{{.State}}')
+  case $state in
+    "") echo none; return 2 ;;
+    running|restarting|paused) echo running; docker logs --tail 40 "$name" 2>&1; return 5 ;;
+  esac
+  code=$(docker inspect --format '{{.State.ExitCode}}' "$name")
+  mkdir -p "$log"
+  log=$log/$(docker inspect --format '{{index .Config.Labels "peacock.log"}}' "$name").log
+  docker logs "$name" > "$log" 2>&1
+  echo "exited $code"
+  tail -n 40 "$log"
+  [ "$code" -eq 0 ] || return 1
 }
 
 # vm_pull_ready <i>: refuses, exit 2, before anything was shipped; makes what pull reads.
@@ -348,32 +401,75 @@ vm_pull_ready() {
 # --- the verbs -----------------------------------------------------------------------------------
 
 cmd_prepare() {
-  [ -f "$PEACOCK_ENV" ] || die "no $PEACOCK_ENV: the storage keys (llm-wiki/build-test.md, \"The env file\")"
-  peacock_env_has_storage "$PEACOCK_ENV"
+  if [ "$no_sf40" -eq 0 ]; then
+    [ -f "$PEACOCK_ENV" ] || die "no $PEACOCK_ENV: the storage keys (llm-wiki/build-test.md, \"The env file\")"
+    peacock_env_has_storage "$PEACOCK_ENV"
+  fi
   vm "mkdir -p ~/peacock/$dir"
   (cd "$root" && to_vm "peacock/$dir/" -R "${KIT[@]}")
   on_vm vm_system
+  [ "$no_sf40" -eq 1 ] || on_vm vm_nsight
   machine_image_checked "$BUILD_REF" "$root" "$cudf"
   machine_image_checked "$RUN_REF" "$root" "$cudf" run
   driver_checked
   on_vm vm_data_set "$dir" "$BUILD_REF"
-  vm "cd ~/peacock/$dir && scripts/env/fetch-sf40.sh --env - ${SF40_SETS[*]}" "$PEACOCK_ENV"
-  on_vm vm_cudf "$RUN_REF" "$cudf"
+  if [ "$no_sf40" -eq 0 ]; then
+    vm "cd ~/peacock/$dir && scripts/env/fetch-sf40.sh --env - ${SF40_SETS[*]}" "$PEACOCK_ENV"
+    on_vm vm_cudf "$RUN_REF" "$cudf"
+  fi
   echo "==> prepare: the VM is ready for $RUN_REF"
 }
 
+# ship_stream <name> <rsync arguments…>: one of ship's streams, tried 5 times, attempt × SHIP_PAUSE
+# seconds apart; its output in $SHIP_LOGS/<name>. CI's runner reaches a VM over a long, lossy path:
+# one rsync stream measured 0.24 MB/s on 2026-10-15, so a fresh 600 MB install took 40 minutes.
+# So the install mirrors into the VM's persistent ~/peacock/<i>/ and only a change crosses, as
+# rsync's delta; zstd on the wire; four streams at once, because each TCP stream backs off alone;
+# --partial-dir, so a retry resumes a big file. --checksum, not size and mtime: a rebuilt file of
+# the same size and second would be skipped, an unchanged one with a new mtime sent.
+ship_stream() {
+  local name=$1 attempt=1 t0=$SECONDS
+  shift
+  until rsync -a --checksum --timeout=120 --partial-dir=.rsync-partial --stats --compress \
+          --compress-choice=zstd --compress-level=3 -e "${NEBIUS[*]} rsh" "$@" >> "$SHIP_LOGS/$name" 2>&1; do
+    if [ "$attempt" -ge 5 ]; then
+      echo "run-gpu.sh: ship: the $name stream failed $attempt times; its last lines:" >&2
+      tail -5 "$SHIP_LOGS/$name" >&2
+      return 1
+    fi
+    echo "run-gpu.sh: ship: $name stream: attempt $attempt failed; again in $((attempt * SHIP_PAUSE)) s" >&2
+    sleep "$((attempt * SHIP_PAUSE))"
+    attempt=$((attempt + 1))
+  done
+  echo "==> ship: $name stream: done in $((SECONDS - t0)) s; $(grep -h '^Total bytes sent' "$SHIP_LOGS/$name" | tail -1)"
+}
+
 cmd_ship() {
-  local links=() entry ds
+  local links=() entry ds sub dest pids=() pid failed=0
   install=${install:-$root/cpp/install}
   [ -d "$install" ] || die "no staged install at $install: make one with scripts/env/stage-install.sh, or name it with --install"
+  for sub in lib rust-tests; do
+    [ -d "$install/$sub" ] || die "no $install/$sub: not an install scripts/env/stage-install.sh staged"
+  done
   for entry in "${DATA_SETS[@]}"; do
     ds=${entry%% *}
     links+=("$ds:$(data_inputs "$root")/$ds")
   done
-  for ds in "${SF40_SETS[@]}"; do links+=("$ds:$ds"); done
+  for ds in "${SF40_SETS[@]}"; do links+=("?$ds:$ds"); done
   on_vm vm_ship_ready "$dir" "${links[@]}"
-  to_vm "peacock/$dir/cpp/install/" --delete "$install/"
-  git -C "$root" ls-files -z -- testdata | to_vm "peacock/$dir/" --from0 --files-from=- "$root/"
+  SHIP_LOGS=$(mktemp -d)
+  trap 'rm -rf "$SHIP_LOGS"' EXIT
+  # A file, not a pipe: a retry reads the list again.
+  git -C "$root" ls-files -z -- testdata > "$SHIP_LOGS/testdata.files"
+  dest=vm:peacock/$dir
+  ship_stream lib --delete "$install/lib/" "$dest/cpp/install/lib/" & pids+=($!)
+  ship_stream rust-tests --delete "$install/rust-tests/" "$dest/cpp/install/rust-tests/" & pids+=($!)
+  # The rest of the install, bin/ and rust-benchmarks/; the excluded two are also kept from --delete.
+  ship_stream install --delete --exclude=/lib/ --exclude=/rust-tests/ "$install/" "$dest/cpp/install/" & pids+=($!)
+  ship_stream testdata --from0 --files-from="$SHIP_LOGS/testdata.files" "$root/" "$dest/" & pids+=($!)
+  # Every stream finishes, so one failure does not kill another's transfer midway.
+  for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
+  [ "$failed" -eq 0 ] || exit 1
   echo "==> ship: $install and the committed testdata to ~/peacock/$dir/"
 }
 
@@ -392,8 +488,10 @@ cmd_run() {
   [ -z "${PEACOCK_SCAN_READER:-}" ] || envs+=("PEACOCK_SCAN_READER=$PEACOCK_SCAN_READER")
   [ -z "${PEACOCK_BENCH_CASE_TIMEOUT_S:-}" ] || envs+=("PEACOCK_BENCH_CASE_TIMEOUT_S=$PEACOCK_BENCH_CASE_TIMEOUT_S")
   [ -z "${PCK_WRITE_GPU_RESULT:-}" ] || envs+=("PCK_WRITE_GPU_RESULT=$PCK_WRITE_GPU_RESULT")
-  on_vm vm_run "$dir" "$RUN_REF" "$mode" "${envs[@]}"
+  on_vm vm_run "$dir" "$RUN_REF" "$mode" "$detach" "${envs[@]}"
 }
+
+cmd_status() { on_vm vm_status "$dir"; }
 
 cmd_run_staged() {
   local envs=() args=(--nocapture --test-threads=1)

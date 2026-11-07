@@ -319,6 +319,80 @@ Branch `ENS-containers-only`, forked from `ENS-tp4-sized` at `9058709c`; its PR 
   - The 25.10 image comes from ghcr by digest (image-ref.sh's remote branch, proven anonymous in
     Task 3); locally image-ref.sh found the pulled local tag.
 
+## Task 5
+
+- Dispatched 2026-11-07 at Steps 1-4 (developer, dev, no VM). All in `scripts/env/run-gpu.sh`,
+  `scripts/env/tests/test_run_gpu.py` (50 → 68) and the fake docker in `gpu_host.py` (a detached
+  container's state, `--label`, `inspect`, `logs --tail`).
+- Red first, each for the missing feature: 16 of the 18 new tests failed on the unchanged script
+  (`prepare takes no argument: --no-sf40`, `unknown verb status`, `run --detach: neither list…`,
+  the tag pulled instead of the given ref, two rsync calls instead of four streams). The two that
+  passed already are refusals (`test_run_detach_refuses_a_staged_binary`, and the bad-argument
+  lines added to `test_run_gpu_refuses_an_unknown_verb_or_option`), now refused for the right reason.
+- Mutation checks, the script edited and restored each time: no `--checksum` → the same-size
+  rebuild and the flags test red; the lib stream not backgrounded → `four_streams_at_once` red (its
+  fake rsync waits for 4 calls at once); sf40 links required again → `runs_cis_sequence_on_nebius_gpu`
+  and `ship_after_prepare_no_sf40_links_sf1_alone` red; `PEACOCK_BUILD_IMAGE` dropped →
+  `prepare_pulls_the_given_images` red; `vm_nsight` run under `--no-sf40` →
+  `prepare_no_sf40_skips_the_nsight_setup` red; a single try → `retries_a_failed_stream_and_resumes`
+  and `gives_up_after_five` red. Each suite run takes about 2 min; six in one call outran its limit.
+- **Beyond the plan, needed by Task 6:**
+  - **`PEACOCK_BUILD_IMAGE`**, beside the plan's `PEACOCK_RUN_IMAGE`. `prepare` pulls the build image
+    too (sf1 is generated in it), and on this branch master's `:cudf-25.02` build image has other
+    inputs than the tree (Task 1 moved them: tag digest `2a0c8441…`, inputs tag `b8da5a94…`). So
+    `prepare` from CI would refuse it, exit 2. **Task 6's step 5 must also write
+    `PEACOCK_BUILD_IMAGE=$(scripts/env/image-ref.sh build 25.02)` to `$GITHUB_ENV`.**
+  - **`ship` links sf40 only when the VM has it** (`?` marks an optional set in `vm_ship_ready`;
+    an absent one's stale link is dropped). Without it, `ship` after `prepare --no-sf40` refused,
+    exit 2, "no …/tpch.sf40 on the VM: run prepare first". Pinned by
+    `test_ship_after_prepare_no_sf40_links_sf1_alone` and `test_run_gpu_runs_cis_sequence_on_nebius_gpu`
+    (Task 6's three calls, `--instance-id computeinstance-e00tnrse7ayntnzcyt`, no profile,
+    `--install cpp/install` relative).
+  - **`--no-sf40` skips nsys too**, not only the counters and the `/opt/cudf` copy: `vm_system` is
+    split, and `vm_nsight` (nsys, counters, exit 4) runs only without the flag. nsys is Nsight's alone.
+  - Nothing else refused nebius-gpu: `--instance-id` was required, never compared with an H100 id,
+    and `nebius.sh` takes nebius-gpu's id (alias `nebius-gpu`). The refusal message and the header no
+    longer say nebius-gpu "runs no sf40"; they say the id is required, nebius-gpu's too.
+- Shapes Task 6 relies on:
+  - Container `peacock-<basename of the repo root>`; on the runner `peacock-peacockdb`, as the cleanup
+    step names it. `run list` follows the log and exits as the run did (0, 2, else 1).
+  - `ship` streams: `lib/` and `rust-tests/` each `--delete`; the rest of the install `--delete
+    --exclude=/lib/ --exclude=/rust-tests/` (bin/, rust-benchmarks/, include/…); testdata as
+    `--files-from` a file of `git ls-files -z -- testdata`, not a pipe, so a retry reads it again.
+    The install must hold `lib/` and `rust-tests/` (ci-ship's check). 5 tries, attempt × 15 s
+    (`RUN_GPU_SHIP_PAUSE` overrides the 15, for the tests). Each stream prints `==> ship: <name>
+    stream: done in N s; Total bytes sent: …`, which the job log can be read for.
+  - `run --detach <mode>` sets the label `peacock.log=<mode>` (a staged run sets its name);
+    `status` keeps an ended run's whole log in `~/peacock/<i>/logs/<label>.log` and does not remove
+    the container: the next `run` clears it, as before. Exit 5 running, 2 none, 0/1 as exited.
+- Not proven here: the L40S's driver against `DRIVER_MINIMUM_25_02=535.104.05`, Docker and the
+  toolkit on nebius-gpu, and its disk; Task 6 Step 5's by-hand `prepare --no-sf40` finds them.
+- `scripts/nebius/tests/test_ci_ship.py`, case by case (the file goes in Task 6):
+  - `test_run_dir_holds_the_tree_with_symlinks_and_exec_bits` → `test_ship_keeps_symlinks_and_exec_bits`
+    (the testdata half is the existing `test_ship_sends_the_committed_testdata_and_links_the_data`).
+  - `test_the_cache_persists_and_mirrors_each_run` → the install half is the existing
+    `test_ship_keeps_what_a_run_wrote` (a file the install lost is gone on the VM) and the new
+    `test_ship_sends_a_rebuilt_file_of_the_same_size_and_time`. **Dropped: a golden removed from the
+    tree is not removed on the VM.** run-gpu.sh ships committed testdata without `--delete`, so that
+    a run's results, record and answers there survive a ship; mirroring testdata would delete them.
+  - `test_a_rerun_of_the_same_run_dir_starts_clean` → `test_ship_restores_a_committed_file_a_run_changed`.
+    There is no per-run copy: `~/peacock/<i>/` persists, the install is mounted read-only, and a
+    committed file a run changed is sent again by checksum.
+  - `test_a_stream_that_keeps_failing_is_red_and_no_run_dir_is_made` → `test_ship_gives_up_after_five`
+    (exit 1, the stream named, no final `==> ship:` line).
+  - `test_a_flaky_stream_recovers_on_retry` → `test_ship_retries_a_failed_stream_and_resumes`.
+  - `test_every_call_compresses_resumes_and_mirrors` → `test_every_ship_rsync_compresses_resumes_and_checksums`;
+    plus `test_ship_runs_four_streams_at_once`, which ci-ship never had.
+  - `test_refuses_a_run_dir_that_is_the_cache_or_outside_home` → **dropped**, no cache and no run
+    dir: `--dir` is the only path input, refused unless a plain name (`--dir ../up` in
+    `test_run_gpu_refuses_an_unknown_verb_or_option`).
+  - `test_an_install_without_lib_is_refused_before_any_transfer` →
+    `test_ship_refuses_an_install_without_lib_or_rust_tests`.
+- build-test.md "The H100's device run": the `--instance-id` sentence, the two image variables,
+  `prepare --no-sf40`, ship's streams and its retry, `run --detach`, `status`, exit 1 and 5. The
+  Images (Python) row: the new cases, 296 → 314; Python 1638 → 1656, grand 8237 → 8255. "The
+  scripts" still names `nebius-test.sh`, which Task 6 deletes.
+
 ## Notes for a restart
 
 - PR #203, a draft against `ENS-tp4-sized`, opened after Task 2 so Task 3 on has PR runs. The board

@@ -15,11 +15,14 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
-from gpu_host import BUILD_REF, DRIVER_MINIMUM, H100, HOSTNAME, RUN_REF, Host, label, log_lines  # noqa: E402
+from gpu_host import BUILD_REF, DRIVER_MINIMUM, H100, HOSTNAME, L40S, RUN_REF, Host, label, log_lines  # noqa: E402
 from machine import KEYS, REPO, lib  # noqa: E402
 
 VERBS = [("prepare",), ("ship",), ("run", "list"), ("pull",)]
 SECRETS = [KEYS["AWS_ACCESS_KEY_ID"], KEYS["AWS_SECRET_ACCESS_KEY"]]
+# What CI's image-ref.sh prints: a published image by digest.
+GIVEN_RUN = "ghcr.io/asymptote-tech/peacockdb-run@sha256:" + "ab" * 32
+GIVEN_BUILD = "ghcr.io/asymptote-tech/peacockdb-build@sha256:" + "cd" * 32
 
 
 def ok(r):
@@ -62,10 +65,23 @@ def test_run_gpu_passes_instance_and_profile_to_every_nebius_call():
 def test_run_gpu_without_an_instance_id_is_refused():
     # nebius.sh without --instance-id is nebius-gpu, the shared L40S: no sf40, no benchmarks.
     with Host() as h:
-        for verb in VERBS:
+        for verb in [*VERBS, ("status",)]:
             refused(h.gpu(*verb, vm=None), 2, "--instance-id")
             refused(h.gpu("--profile", "editor-eu", *verb, vm=None), 2, "--instance-id")
         assert h.nebius_calls() == []
+        nothing_bypassed(h)
+
+
+def test_run_gpu_runs_cis_sequence_on_nebius_gpu():
+    """gpu-tests' calls, against the L40S, named by its id with no profile, the install relative."""
+    with Host() as h:
+        ok(h.gpu(*L40S, "prepare", "--no-sf40", vm=None))
+        ok(h.gpu(*L40S, "ship", "--install", "cpp/install", vm=None))
+        r = ok(h.gpu(*L40S, "run", "list", vm=None))
+        assert "run-tests.sh list: green" in r.stdout, r.stdout
+        for a in h.nebius_calls():
+            assert a[:2] == L40S and a[2] in ("ssh", "rsh"), a
+        assert (h.vm_dir() / "cpp/install/lib/libpeacock_gpu.so").read_text() == "staged"
         nothing_bypassed(h)
 
 
@@ -100,6 +116,9 @@ def test_run_gpu_refuses_an_unknown_verb_or_option():
         refused(h.gpu("run", "every thing"), 2, "every thing")
         refused(h.gpu("--dir", "../up", "ship"), 2, "--dir")
         refused(h.gpu("--cudf", "24.12", "prepare"), 2, "24.12")
+        refused(h.gpu("prepare", "--no-sf41"), 2, "--no-sf41")
+        refused(h.gpu("status", "list"), 2, "status")
+        refused(h.gpu("run", "--detach"), 2, "run")
         assert h.nebius_calls() == []
 
 
@@ -120,6 +139,47 @@ def test_prepare_readies_the_vm():
         assert (cudf / ".image-id").read_text().strip() == "sha256:run1"
         assert not any("update-initramfs" in ln or "apt-get" in ln for ln in h.host_lines()), h.host_lines()
         nothing_bypassed(h)
+
+
+def test_prepare_pulls_the_given_images():
+    with Host() as h:
+        images = h.world()["images"]
+        h.world(images={GIVEN_RUN: images.pop(RUN_REF), GIVEN_BUILD: images.pop(BUILD_REF)})
+        ok(h.gpu("prepare", env={"PEACOCK_RUN_IMAGE": GIVEN_RUN, "PEACOCK_BUILD_IMAGE": GIVEN_BUILD}))
+        pulled = [a[-1] for a in h.docker_calls() if a[0] == "pull"]
+        assert sorted(pulled) == sorted([GIVEN_RUN, GIVEN_BUILD]), pulled
+        assert (h.home / "peacock/cudf-25.02/lib/libcudf.so").read_text() == GIVEN_RUN
+        generated = [a for a in h.docker_calls() if a[0] == "run" and "-d" not in a]
+        assert generated and all(GIVEN_BUILD in a for a in generated), generated
+
+
+def test_a_given_image_is_checked_like_the_tag():
+    with Host() as h:
+        images = h.world()["images"]
+        images[GIVEN_RUN] = images.pop(RUN_REF)
+        images[GIVEN_RUN]["labels"]["peacockdb.inputs"] = label(h.tree, "run", change="docker/run-tests.sh")
+        h.world(images=images)
+        refused(h.gpu("prepare", env={"PEACOCK_RUN_IMAGE": GIVEN_RUN}), 2, "docker/run-tests.sh", GIVEN_RUN)
+
+
+def test_prepare_no_sf40_reads_no_env_file():
+    with Host() as h:
+        (h.laptop / ".config/peacock/peacock.env").unlink()
+        ok(h.gpu("prepare", "--no-sf40"))
+        assert h.fetches() == []
+        assert (h.data / data_hash(h) / "tpch.sf1" / "generated").is_file()
+        assert not (h.data / "tpch.sf40").exists() and not (h.data / "tpcds.sf40").exists()
+
+
+def test_prepare_no_sf40_skips_the_nsight_setup():
+    with Host() as h:
+        h.params.write_text("RmProfilingAdminOnly: 1\n")
+        (h.host_bin / "nsys").unlink()
+        ok(h.gpu("prepare", "--no-sf40"))
+        assert not (h.root / "etc/modprobe.d/peacock-profiling.conf").exists()
+        assert not (h.home / "peacock" / "cudf-25.02").exists()
+        assert not any(a[0] in ("create", "cp") for a in h.docker_calls()), h.docker_calls()
+        assert not any(ln.startswith(("update-initramfs", "apt-get")) for ln in h.host_lines()), h.host_lines()
 
 
 def test_prepare_twice_copies_the_cudf_prefix_once():
@@ -236,6 +296,16 @@ def test_ship_sends_the_committed_testdata_and_links_the_data():
         assert not (hashed / "tpch.sf1" / "lineitem.parquet").exists(), "the tree's own dataset shipped"
 
 
+def test_ship_after_prepare_no_sf40_links_sf1_alone():
+    with Host() as h:
+        ok(h.gpu("prepare", "--no-sf40"))
+        ok(h.gpu("ship"))
+        t = h.vm_dir() / "testdata"
+        for ds in ("tpch.sf1", "tpcds.sf1"):
+            assert os.readlink(t / ds) == str(h.data / data_hash(h) / ds)
+        assert not os.path.lexists(t / "tpch.sf40") and not os.path.lexists(t / "tpcds.sf40")
+
+
 def test_ship_before_prepare_says_so():
     with Host() as h:
         refused(h.gpu("ship"), 2, "prepare")
@@ -252,6 +322,146 @@ def test_ship_keeps_what_a_run_wrote():
         stale.write_text("old")
         ok(h.gpu("ship"))
         assert result.is_file() and not stale.exists()
+
+
+# --- ship's transport, ci-ship.sh's ----------------------------------------------------------------
+
+# rsync on dev: records each call; with FAKE_RSYNC_FAIL=<text>:<n>, the first <n> calls naming <text>
+# fail as a dropped connection does; with FAKE_RSYNC_BARRIER=<dir>, a call waits for 4 at once.
+FAKE_RSYNC = r'''#!/usr/bin/env python3
+import json, os, pathlib, sys, time
+a = sys.argv[1:]
+log = os.environ["FAKE_RSYNC_LOG"]
+with open(log, "a") as f:
+    f.write(json.dumps(a) + "\n")
+fail = os.environ.get("FAKE_RSYNC_FAIL")
+if fail:
+    text, n = fail.rsplit(":", 1)
+    if any(text in x for x in a) and sum(text in ln for ln in open(log)) <= int(n):
+        sys.exit("rsync: connection unexpectedly closed (0 bytes received so far) [sender]")
+barrier = os.environ.get("FAKE_RSYNC_BARRIER")
+if barrier:
+    pathlib.Path(barrier, str(os.getpid())).touch()
+    deadline = time.time() + 20
+    while len(os.listdir(barrier)) < 4:
+        if time.time() > deadline:
+            sys.exit("fake rsync: the streams ran one at a time")
+        time.sleep(0.05)
+os.execv(os.environ["FAKE_REAL_RSYNC"], ["rsync", *a])
+'''
+
+
+def rsync_env(h, **extra):
+    """The env that puts FAKE_RSYNC first on dev's PATH; its calls are in h.tree/../rsync.log."""
+    d = h.tree.parent / "rsync-bin"
+    d.mkdir(exist_ok=True)
+    (d / "rsync").write_text(FAKE_RSYNC)
+    (d / "rsync").chmod(0o755)
+    return {"PATH": f"{d}:{h.env['PATH']}", "FAKE_RSYNC_LOG": str(h.tree.parent / "rsync.log"),
+            "FAKE_REAL_RSYNC": shutil.which("rsync"), "RUN_GPU_SHIP_PAUSE": "0", **extra}
+
+
+def rsync_calls(h):
+    return log_lines(h.tree.parent / "rsync.log")
+
+
+def test_ship_keeps_symlinks_and_exec_bits():
+    with Host() as h:
+        prepared(h)
+        lib_dir = h.tree / "cpp/install/lib"
+        (lib_dir / "libx.so.1.0").write_bytes(os.urandom(4096))
+        (lib_dir / "libx.so.1").symlink_to("libx.so.1.0")
+        (lib_dir / "libx.so").symlink_to("libx.so.1")
+        for rel in ("bin/peacock_gpu_tests", "rust-tests/test_gpu_corpus"):
+            (h.tree / "cpp/install" / rel).chmod(0o755)
+        ok(h.gpu("ship"))
+        shipped = h.vm_dir() / "cpp/install"
+        assert os.readlink(shipped / "lib/libx.so") == "libx.so.1"
+        assert os.readlink(shipped / "lib/libx.so.1") == "libx.so.1.0"
+        for rel in ("bin/peacock_gpu_tests", "rust-tests/test_gpu_corpus"):
+            assert os.access(shipped / rel, os.X_OK), rel
+
+
+def test_ship_sends_a_rebuilt_file_of_the_same_size_and_time():
+    """A rebuild that keeps a binary's size and second is still sent: --checksum, not size and mtime."""
+    with Host() as h:
+        prepared(h)
+        built = h.tree / "cpp/install/lib/libpeacock_gpu.so"
+        ok(h.gpu("ship"))
+        st = built.stat()
+        built.write_text("STAGED")
+        os.utime(built, ns=(st.st_atime_ns, st.st_mtime_ns))
+        ok(h.gpu("ship"))
+        assert (h.vm_dir() / "cpp/install/lib/libpeacock_gpu.so").read_text() == "STAGED"
+
+
+def test_ship_restores_a_committed_file_a_run_changed():
+    with Host() as h:
+        prepared(h)
+        ok(h.gpu("ship"))
+        golden = h.vm_dir() / "testdata/goldens/tpch.sf1/q01.txt"
+        golden.write_text("rewritten by a test\n")
+        ok(h.gpu("ship"))
+        assert golden.read_text() == "golden\n"
+
+
+def test_ship_refuses_an_install_without_lib_or_rust_tests():
+    with Host() as h:
+        prepared(h)
+        before = len(h.nebius_calls())
+        for gone in ("lib", "rust-tests"):
+            other = Host.stage_install(h.tree.parent / f"no-{gone}")
+            shutil.rmtree(other / gone)
+            refused(h.gpu("ship", "--install", other), 2, f"{other}/{gone}")
+        assert len(h.nebius_calls()) == before
+
+
+def test_ship_retries_a_failed_stream_and_resumes():
+    with Host() as h:
+        prepared(h)
+        r = ok(h.gpu("ship", env=rsync_env(h, FAKE_RSYNC_FAIL="cpp/install/lib/:2")))
+        lib_calls = [a for a in rsync_calls(h) if any("cpp/install/lib/" in x for x in a)]
+        assert len(lib_calls) == 3, lib_calls
+        assert all("--partial-dir=.rsync-partial" in a for a in lib_calls), lib_calls
+        assert "lib stream: attempt 2 failed" in r.stderr, r.stderr
+        assert (h.vm_dir() / "cpp/install/lib/libpeacock_gpu.so").read_text() == "staged"
+
+
+def test_ship_gives_up_after_five():
+    with Host() as h:
+        prepared(h)
+        r = h.gpu("ship", env=rsync_env(h, FAKE_RSYNC_FAIL="cpp/install/lib/:99"))
+        refused(r, 1, "the lib stream failed 5 times", "connection unexpectedly closed")
+        lib_calls = [a for a in rsync_calls(h) if any("cpp/install/lib/" in x for x in a)]
+        assert len(lib_calls) == 5, lib_calls
+        assert "the committed testdata to" not in r.stdout, r.stdout
+
+
+def test_ship_runs_four_streams_at_once():
+    with Host() as h:
+        prepared(h)
+        barrier = h.tree.parent / "barrier"
+        barrier.mkdir()
+        r = ok(h.gpu("ship", env=rsync_env(h, FAKE_RSYNC_BARRIER=str(barrier))))
+        assert len(rsync_calls(h)) == 4, rsync_calls(h)
+        for stream in ("lib", "rust-tests", "install", "testdata"):
+            assert f"{stream} stream: done" in r.stdout, (stream, r.stdout)
+
+
+def test_every_ship_rsync_compresses_resumes_and_checksums():
+    with Host() as h:
+        prepared(h)
+        ok(h.gpu("ship", env=rsync_env(h)))
+        calls = rsync_calls(h)
+        assert len(calls) == 4, calls
+        for a in calls:
+            for f in ("-a", "--checksum", "--partial-dir=.rsync-partial", "--compress-choice=zstd",
+                      "--compress-level=3", "--timeout=120"):
+                assert f in a, (f, a)
+        install = [a for a in calls if any("cpp/install/" in x for x in a)]
+        assert len(install) == 3 and all("--delete" in a for a in install), install
+        rest = [a for a in install if "--exclude=/lib/" in a]
+        assert len(rest) == 1 and "--exclude=/rust-tests/" in rest[0], install
 
 
 # --- run ---------------------------------------------------------------------------------------
@@ -390,6 +600,63 @@ def test_run_clears_a_finished_container_and_reports_its_exit():
         assert h.gpu("run", "list").returncode == 1
         h.world(run_code=2)
         assert h.gpu("run", "list").returncode == 2
+
+
+def test_run_uses_the_given_run_image():
+    with Host() as h:
+        images = h.world()["images"]
+        images[GIVEN_RUN] = images.pop(RUN_REF)
+        h.world(images=images)
+        env = {"PEACOCK_RUN_IMAGE": GIVEN_RUN}
+        ok(h.gpu("prepare", env=env))
+        ok(h.gpu("ship"))
+        ok(h.gpu("run", "list", env=env))
+        a = h.docker_runs()[0]
+        assert a[-2:] == [GIVEN_RUN, "list"], a
+        inspected = {a[-1] for a in h.docker_calls() if a[:2] == ["image", "inspect"]}
+        assert RUN_REF not in inspected and GIVEN_RUN in inspected, inspected
+
+
+def test_detached_run_returns_while_running():
+    with Host() as h:
+        prepared(h)
+        ok(h.gpu("ship"))
+        h.world(run_state="running")
+        r = ok(h.gpu("run", "--detach", "list"))
+        assert "status" in r.stdout, r.stdout
+        assert not any(a[0] in ("wait", "logs") for a in h.docker_calls()), h.docker_calls()
+        assert h.world()["containers"]["peacock-chain-l"]["state"] == "running"
+        refused(h.gpu("run", "list"), 2, "peacock-chain-l")
+
+
+def test_status_reports_running_then_exit():
+    with Host() as h:
+        prepared(h)
+        ok(h.gpu("ship"))
+        r = h.gpu("status")
+        assert r.returncode == 2 and r.stdout.splitlines()[0] == "none", (r.returncode, r.stdout, r.stderr)
+        h.world(run_state="running", run_output="".join(f"line {i}\n" for i in range(100)))
+        ok(h.gpu("run", "--detach", "filter", env={"PCK_TEST_FILTER": "q6"}))
+        r = h.gpu("status")
+        assert r.returncode == 5, (r.returncode, r.stdout, r.stderr)
+        lines = r.stdout.splitlines()
+        assert lines[0] == "running" and lines[1:] == [f"line {i}" for i in range(60, 100)], lines
+        w = h.world()
+        w["containers"]["peacock-chain-l"].update(state="exited", code=1)
+        h.world(containers=w["containers"])
+        r = h.gpu("status")
+        assert r.returncode == 1 and r.stdout.splitlines()[0] == "exited 1", (r.returncode, r.stdout)
+        assert (h.vm_dir() / "logs/filter.log").read_text().splitlines()[-1] == "line 99"
+        w["containers"]["peacock-chain-l"].update(code=0)
+        h.world(containers=w["containers"])
+        r = ok(h.gpu("status"))
+        assert r.stdout.splitlines()[0] == "exited 0" and r.stdout.splitlines()[-1] == "line 99", r.stdout
+
+
+def test_run_detach_refuses_a_staged_binary():
+    with Host() as h:
+        refused(h.gpu("run", "--detach", FUSED), 2, "--detach")
+        assert h.nebius_calls() == []
 
 
 def test_run_before_ship_says_so():
