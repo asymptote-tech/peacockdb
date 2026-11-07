@@ -19,7 +19,8 @@ a tuple rather than a node number.
         --peak-bw <B/s> --record testdata/calibration/<device>/tpch.sf40/records.tsv \
         --record testdata/calibration/<device>/tpcds.sf40/records.tsv --out part.tsv
     (the H200's two records lie one level up, `calibration/<dataset>.sf40/`)
-    scripts/calibration/nsys_hbm.py --parts part.tsv --parts … --record … --out hbm.tsv
+    scripts/calibration/nsys_hbm.py --parts part.tsv --parts … --record … --out hbm.tsv \
+        [--mode tp4-sized]
 
 The record is the clean run's, as published — a file per dataset, all of them given: its
 coordinates are what the output carries, and the capture supplies only bytes. The two must
@@ -28,7 +29,9 @@ they are not the same work — and be of one card, the capture's GPUs against th
 `device=`. A heading naming none predates provenance and is taken as the H200's
 (`PREDATES_PROVENANCE`). A join without --case takes every case the capture holds; with it,
 the capture must hold that case alone and is checked against that case's rows, and the merge
-of the parts is where the record as a whole is checked. The harness wraps each case in a named
+of the parts is where the record as a whole is checked. A device's record holds every mode its
+list times, and a counters pass runs one: `--mode` holds the merge to that mode's calls of the
+record, still both ways. The harness wraps each case in a named
 NVTX range, so which query a call was in is read rather than typed.
 
 The output is a row per call (`record.HBM_COLUMNS`): each reading the median over the call's
@@ -266,6 +269,8 @@ def main():
     ap.add_argument("--record", action="append", required=True,
                     help="record TSV of the clean run; repeat for each file it was published "
                          "as, one per dataset")
+    ap.add_argument("--mode", help="a merge's mode, as the record spells it (tp4-sized): the "
+                                   "parts cover that mode's calls of the record, and no other")
     ap.add_argument("--out", required=True)
     ap.add_argument("--domain", default="peacockdb", help="NVTX domain holding the regions")
     ap.add_argument(
@@ -280,6 +285,8 @@ def main():
         sys.exit("one of --capture (a join) or --parts (a merge of joins), not both or neither")
     if args.parts and (args.case or args.peak_bw is not None):
         sys.exit("--case and --peak-bw belong to a join; --parts merges finished ones")
+    if args.capture and args.mode is not None:
+        sys.exit("--mode scopes a merge; a join takes its case's rows by --case")
     if args.capture and args.peak_bw is None:
         sys.exit("--peak-bw is required with --capture: bytes are the integral of a "
                  "percentage of it, so a guessed one scales every row silently")
@@ -329,6 +336,10 @@ def merge(args, rows):
             if call_of_row(row) in parts:
                 sys.exit(f"{path} repeats call {call_of_row(row)}; the parts overlap")
             parts[call_of_row(row)] = row
+    if args.mode is not None:
+        rows = [r for r in rows if r["mode"] == args.mode]
+        if not rows:
+            sys.exit(f"--mode {args.mode}: no record given has a row at that mode")
     want = list(dict.fromkeys(call_of_row(r) for r in rows))
     missing = [k for k in want if k not in parts]
     extra = sorted(set(parts) - set(want))
@@ -337,7 +348,9 @@ def merge(args, rows):
             "the parts and the record do not describe the same calls: "
             + (f"{len(missing)} record calls have no part row, first {missing[0]}. "
                if missing else "")
-            + (f"{len(extra)} part rows are in no record, first {extra[0]}." if extra else "")
+            + (f"{len(extra)} part rows are in no record"
+               + (f" at mode {args.mode}" if args.mode is not None else "")
+               + f", first {extra[0]}." if extra else "")
         )
     out = [parts[k] for k in want]
     record.write_tsv(args.out, NOTES, record.HBM_COLUMNS,
