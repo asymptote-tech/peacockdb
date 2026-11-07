@@ -159,8 +159,8 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   -e CARGO_TARGET_DIR="$PWD/target-img-25.10" <image>`, run `scripts/build.sh --configure
   --build --install --cudf_ROOT /opt/cudf --gcc-version 14`, then `cargo test --no-run -p
   peacockdb-core --lib` → both succeed. Record the image size in the detail file.
-- [ ] **Step 7: commit** `containers-only: a CI-only cuDF 25.10 build image; images carry an inputs tag`.
-- [ ] **Step 8: publish (coordinator).** `images.yml` must be on master, because GitHub dispatches
+- [x] **Step 7: commit** `containers-only: a CI-only cuDF 25.10 build image; images carry an inputs tag`.
+- [x] **Step 8: publish (coordinator).** `images.yml` must be on master, because GitHub dispatches
   only the default branch's workflows. If `gh workflow list --all | grep -w images.yml` finds
   nothing, stop, `blocked(building)`, and ask the human to land this branch's
   `.github/workflows/images.yml` alone on master, as a separate commit (approved in advance). Never
@@ -410,7 +410,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   counts per step equal the count baseline's 25.02 leg, and the 25.10 leg's equal the baseline's
   "26.02" leg; `Generate SF-1` logs `generate_pbench.sh --check` passing. A moved count or a red
   step reaches the developer as a failing test; the developer explains it in the detail file.
-- [ ] **Step 7: commit** `containers-only: dataset-matrix in the build image, an honest 25.10 leg (closes #129)`.
+- [x] **Step 7: commit** `containers-only: dataset-matrix in the build image, an honest 25.10 leg (closes #129)`.
 
 ### Task 5: what `run-gpu.sh` needs for CI and for agents
 
@@ -549,7 +549,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   times for prepare, ship and run, and the job log's `df -h /`, and hands any failure or moved
   count to the developer as a failing test. Pass also means the job stopped the VM, or the
   watcher did.
-- [ ] **Step 7: commit** any fix with its failing test first:
+- [x] **Step 7: commit** any fix with its failing test first:
   `containers-only: gpu-tests ships and runs on nebius-gpu through run-gpu.sh; the old runner goes`.
 
 ### Task 7: `exec-model-corpus.yml` and `validate-large.yml` in the image; the guard covers every job
