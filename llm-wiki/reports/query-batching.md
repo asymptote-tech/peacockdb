@@ -10,7 +10,7 @@ from the same build as the unfused side. DuckDB is the same queries on 128 cores
 ## Reading the comparison honestly
 
 - Every peacockdb total is **device-side**: `load + execute`, the summed node times of the run's
-  tree (`device_us`). Load is included on both GPU sides. DuckDB's time is the query's wall time
+  tree (`device_us`). Load is included on every GPU side. DuckDB's time is the query's wall time
   over its warm native storage, so the `DuckDB / fused` ratio compares two different clocks.
 - Each peacockdb run reads its files from the pinned host cache, filled before any run; the
   prefill's disk read is in no total. DuckDB reads its buffer manager over a warm page cache.
@@ -185,11 +185,12 @@ ms, from one profiled run per query process (per fused batch) under Nsight: each
   or fused. TPC-H all at tp4_sized is 47.8 s of load and 14.2 s of execute over 20 of its 22
   queries, against 5.7 s and 1.8 s unfused and 3.7 s and 1.8 s fused over all 22. TPC-DS all is
   252.6 s and 217.4 s over 76 of 79, against 24.1 s and 14.5 s unfused and 17.2 s and 14.5 s
-  fused. Even first3 is 9.3 s against 1.0 s on TPC-H and 3.6 s against 0.7 s on TPC-DS. Five
-  queries do not finish at tp4_sized at all (the lines under the tables): TPC-H q8 passes the
-  driver's step cap ([#238](../tickets/system-hardening.md#t238)), and four time out at 1800 s.
+  fused. Even first3 is 9.3 s against 1.0 s on TPC-H and 3.7 s against 0.7 s on TPC-DS. Five
+  queries do not finish at tp4_sized at all (the lines under the tables): TPC-H q8 exceeds the
+  driver's step cap ([#238](../tickets/system-hardening.md#t238)), and four time out at 1800 s
+  with the host spinning ([#308](../tickets/system-hardening.md#t308)); at tp1_single those four take under 5 s.
   These are summed node times, and at tp4_sized they track the runs' wall time as at tp1_single
-  (TPC-H: 93.0 of 97.6 s, against 21.7 of 25.0 s), so the four lanes are not counted twice.
+  (over every timed TPC-H section, micro queries included: 93.0 of 97.6 s, against 21.7 of 25.0 s), so the four lanes are not counted twice.
 - **Against DuckDB** (different clocks, see above). On TPC-H fused is faster: DuckDB's warm sum
   is 1.60× to 2.48× fused's, 1.50× to 2.36× with DuckDB's `SELECT 1` floor taken off each
   query. On TPC-DS DuckDB is faster with the floors out in every batch: its time is 0.67× to

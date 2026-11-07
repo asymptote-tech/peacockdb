@@ -165,7 +165,8 @@ nothing.
 - tpch `loads.tsv` at tp4-sized (derived on the VM): 116 load nodes over 45 queries, the
   committed file's notes and columns. Summed, load 75.2 s, of which unattributed 23.6 s (31 %),
   decompress + decode 51.4 s, h2d 1.4 s; tp1-single's 130 nodes: 9.0 s, 2.0 s (22 %), 5.5 s,
-  1.6 s (Review Focus 5).
+  1.6 s (Review Focus 5). tpcds at tp4-sized (72 cases): unattributed 70.1 of 174.5 s (40 %),
+  against 6.2 of 27.3 s (23 %) at tp1-single.
 - **`nsys_calls.py` was quadratic in a thread's calls** (fixed, test first). Each region walked
   its thread's calls through `rows[lo:]`, a copy of the rest of the thread. The tpch tp4_sized
   capture holds 12.2 M libcudf calls and 1.0 M harness ranges, 5.8 M and 350 k of them on one
@@ -292,6 +293,15 @@ nothing.
     `batching_report.py --check` exit 0. The page's load split reads `LOADS_MODE = "tp1-single"`
     rows only, so the tpcds tp4 rows leave it unchanged, and it was not regenerated.
 - 2026-11-07: tpcds profiles committed. Plan complete. PR #202 against `ENS-batching-report`; board `reviewing`; reviewer round 1 dispatched.
+
+## Review round 1 (2026-11-07)
+
+0 blocking, 2 important, 4 nits.
+
+- **I1 (tickets), coordinator:** #238 now names engine `b415d375` and says the link to tpch q8 is unverified; new #308 (tp4_sized host spin) for tpch q9, tpcds q18, q24, q64 timing out at 1800 s with the host spinning; the Reading cites #308.
+- **I2, developer:** after this PR the committed tooling cannot regenerate the H100's profiles in either mode. `create_nsys_profile.sh --cases` makes a case per listed mode (now both); `nsys_hbm.py`'s merge holds parts to every call in the two-mode record; the per-case on-VM drivers live only in `/tmp/tp4-sized/bin`. **Decided:** give `nsys_hbm.py`'s merge a mode scope and `create_nsys_profile.sh --cases` a way to take one mode (test first); rewrite build-test.md "sf40 baseline" step 7 for a two-mode list, with the on-VM per-case recipe and that q14, q61, q80, q88 were left out on an estimate. The `/tmp` drivers are not committed.
+- **N3, developer:** `test_calls.py` guards `calls_in` alone; add a `main()`-level or `islice` regression.
+- **N4-N6, coordinator:** report text (3.7 s; the 93.0 of 97.6 s set named; "every GPU side"; "exceeds"), build-test.md's sf40 answer check names tp1_single, tpcds unattributed share added here.
 
 ## Checkpoints
 
