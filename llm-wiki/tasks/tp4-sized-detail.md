@@ -294,6 +294,8 @@ nothing.
     rows only, so the tpcds tp4 rows leave it unchanged, and it was not regenerated.
 - 2026-11-07: tpcds profiles committed. Plan complete. PR #202 against `ENS-batching-report`; board `reviewing`; reviewer round 1 dispatched.
 - 2026-11-07: review round 2 findings (markdown only) fixed by the coordinator; nothing outstanding. Board `completing`; completeness pass dispatched.
+- 2026-11-07: completeness approved (signoff in the spec). VMs hard-stopped. CI device run dispatched 2026-11-07T10:53:28Z on b95d08a0: run 42365843466.
+- 2026-11-07: CI run 42365843466 green, GPU Tests (nebius-gpu) included; the PR's CI green. VMs hard-stopped. Board `done`.
 
 ## Review round 1 (2026-11-07)
 
