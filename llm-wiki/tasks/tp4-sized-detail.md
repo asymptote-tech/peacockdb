@@ -232,8 +232,8 @@ nothing.
 | dataset | query | file | reason |
 |---|---|---|---|
 | tpch | global_stddev, q15, q22 | `calls.tsv` | the recipe check refuses them: the sf40 tp4-sized plan drives other seqs than `goldens/tpch.sf1/tp4-sized.plans.txt` |
-| tpcds | q88, q80, q14, q61 | all three | estimated raw capture 74, 66, 50 and 42 GB, past the 40 GB bound |
-| tpcds | the other 66 of the 72 that fit | all three | not run: the projected 8 h is past the coordinator's 6 h; q1-q6 are traced and held |
+| tpcds | q88, q80, q14, q61 | all three | estimated raw capture 74, 66, 50 and 42 GB at tpch's scale, past the 40 GB bound; at tpcds q13's measured 160 KB a row, 131, 117, 87 and 74 GB, against the H100's 80 GB free |
+| tpcds | q9, q30, q31, q32, q33, q54, q56, q60, q71, q81, q83, q85, q91, q92 | `calls.tsv` | the recipe check refuses them: the sf40 tp4-sized plan drives other seqs than `goldens/tpcds.sf1/tp4-sized.plans.txt` ("capture does not match qN's recipes -- declared but never driven: …") |
 
 ### Tasks 3 and 4 (2026-11-07)
 
@@ -251,6 +251,46 @@ nothing.
   (1209 + 2 ignored, 2451, 66, 3, …); every `scripts/calibration/tests/test_*.py` passes (119);
   the page's `--check` exit 0.
 - 2026-11-07 (coordinator): Tasks 3 and 4 committed together (7b7bc64d, bb89cbc4); tpch profiles complete. **Decided: profile the remaining 66 tpcds cases** (about 7.5 H100 hours): the spec asks for a profile of every benchmarked case, and "failed capture" covers a capture that cannot be taken (q88, q80, q14, q61 by size), not one skipped for time. q1-q6 are captured and derived in `/tmp/tp4-sized/vm-derived/`. A fresh developer resumes at q7.
+- **Third H100 session (developer), 2026-11-07 02:16-09:54 UTC: tpcds profiled.** Same install
+  (`peacock_gpu_benchmarks` sha256 `c19ed775…`) and the same `scripts/calibration/*.py` on dev and
+  the VM, checked by sha256 before the run. One detached driver on the VM, `tp4-run/run-all.sh`:
+  `trace-cases.sh` over q7 onward (66 lines), then `metrics-cases.sh` over all 72. Scratch copies
+  are in `/tmp/tp4-sized/ship/`.
+  - **`metrics-cases.sh`** (new) runs `create_nsys_profile.sh --metrics`'s per-case capture on the
+    VM: the same nsys flags, `PEACOCK_BENCHMARK_CAPTURE=metrics`, its own record path, and
+    `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12 PCK_BENCH_HBM_FREQ=10000` (required, no
+    defaults). Each case is joined by `nsys_hbm.py --case` against that case's rows of the tp4_sized
+    record alone (the notes, the header and the case's rows; the join reads only them anyway). That
+    avoids parsing the 541 MB record 72 times. The capture is then deleted, and only the part is kept.
+    The script itself was not used because it dies on the first failing case and its merge needs
+    every case. Checked on q1 first: 268 calls, 100 µs sampling. The first try read nothing,
+    because the driver changed directory before resolving its relative arguments.
+    `trace-cases.sh` has the same trait, so `run-all.sh` passes absolute paths.
+  - **Trace, q7-q99** (02:19-05:57): 66 runs, all passed, 3.63 h (9129 s run and report, 3931 s
+    export and reading). `loads.tsv` for all 66. The recipe check refuses 14 cases' `calls.tsv`:
+    q9, q30, q31, q32, q33, q54, q56, q60, q71, q81, q83, q85, q91, q92. That is tp1-single's 14
+    without q18 and q61 (neither is profiled here), plus q9 and q54.
+  - **The size scale was low.** q13 (318,220 rows, estimated 29 GB) made 51 GB of raw data in
+    `/tmp/nvidia`, leaving 27 GB free. That is about 160 KB a row, not tpch's 91 KB. Raw size does
+    not follow rows closely: q96 (324,930 rows) made a 0.6 GB report against q13's 3.3 GB. At q13's
+    rate the four held out need 74 (q61), 87 (q14), 117 (q80) and 131 GB (q88), against 80 GB free.
+    So they stay out.
+  - **Metrics, all 72** (05:57-09:53): every case passed and joined, 3.94 h (10,979 s run, 3202 s
+    export and join). The largest export was q50's 5.3 GB.
+  - Pulled: the per-case `calls.tsv` and `loads.tsv` (q1-q6 byte-identical to the earlier copies in
+    `/tmp/tp4-sized/vm-derived/`), the 72 hbm parts, and the logs, into `/tmp/tp4-sized/vm-derived2/`.
+    No capture came to dev, and none is left on the VM. The H100 stopped at 09:54 (`STOPPED`).
+  - **Merged, with the VM stopped.** `/tmp/tp4-sized/bin/concat_cases.py` joins the per-case files
+    in the list's order. It refuses differing notes or headers, and they matched the committed
+    files'. `merge_mode.py` then adds them: `calls.tsv` +36,437 rows (58 queries), `loads.tsv` +578
+    (72). For hbm, the tp4_sized tpcds record was cut to the 72 cases (3,699,290 rows), and
+    `nsys_hbm.py --parts …` (72 parts) merged against it: `369929 calls from 72 parts`, exit 0. On
+    dev that takes 10 s and 5 GB. `hbm.tsv` +369,929 rows. Additions only: `git diff --numstat`
+    shows no deleted line. `hbm.tsv` is now 35 MB (3.2 MB gzipped), the largest calibration file.
+  - Checks: the calibration tests pass (119); `test_corpus_goldens` 66 passed;
+    `every_batched_query_has_its_baseline_and_its_loads` passes (it reads `loads.tsv` at tp1 only);
+    `batching_report.py --check` exit 0. The page's load split reads `LOADS_MODE = "tp1-single"`
+    rows only, so the tpcds tp4 rows leave it unchanged, and it was not regenerated.
 
 ## Checkpoints
 
@@ -259,6 +299,7 @@ nothing.
 | Task 1 Step 5 | tp4-sized: the h100 list is written at tp1_single and tp4_sized | reported; coordinator commits |
 | Task 1 Step 5 | `49a0d619` | tp4-sized: the h100 list is written at tp1_single and tp4_sized; test_corpus_goldens 66, cpu suite green |
 | Task 2 (part) | `de71ced0` | tp4-sized: nsys_calls reads a region's own calls, not the rest of its thread; interim: benchmark done (126 cases, 5 failed), files held until the page regenerates; calibration tests 119 |
+| tpcds profiles | reported | tp4-sized: tpcds tp4_sized profiled on the H100 (72 of 76; calls.tsv 58); calibration tests 119, test_corpus_goldens 66, page --check 0 |
 
 ## VM time
 
@@ -266,4 +307,5 @@ nothing.
 |---|---|---|---|
 | nebius-h100 | 2026-11-06 16:23 UTC | 2026-11-06 22:53 UTC | 6.50 |
 | nebius-h100 | 2026-11-06 23:40 UTC | 2026-11-07 01:58 UTC | 2.30 |
-| nebius-h100, task total | | | 8.80 |
+| nebius-h100 | 2026-11-07 02:16 UTC | 2026-11-07 09:54 UTC | 7.63 |
+| nebius-h100, task total | | | 16.43 |

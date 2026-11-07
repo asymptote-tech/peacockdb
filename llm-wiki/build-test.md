@@ -3274,10 +3274,15 @@ q33, q56, q60, q61, q71, q81, q83, q85, q91 and q92. The H100's tpcds `calls.tsv
 reads a plan. tpch's three files cover all 47. No sf40 plan goldens are kept.
 
 At `tp4-sized` the files hold tpch's 45 timed queries, but `calls.tsv` holds 42: the recipe check
-refuses `global_stddev`, q15 and q22 at sf40. A tp4_sized capture is far larger than a tp1_single
-one, since sized batches make a call per batch: tpch's 45 cases made 32 GB of raw nsys data and a
-5.9 GB export. So tp4-sized captures are read on the VM, one case at a time for tpcds, and only
-the derived files come home.
+refuses `global_stddev`, q15 and q22 at sf40. tpcds's `loads.tsv` and `hbm.tsv` hold 72 of its 76
+timed queries, and `calls.tsv` holds 58. The recipe check refuses 14: q9, q30, q31, q32, q33, q54,
+q56, q60, q71, q81, q83, q85, q91 and q92. q14, q61, q80 and q88 have no profile, since their
+captures would not fit on the H100's disk. A tp4_sized capture is far larger than a tp1_single
+one, since sized batches make a call per batch. tpch's 45 cases made 32 GB of raw nsys data and a
+5.9 GB export. tpcds q13 alone made 51 GB of raw data, about 160 KB per record row. So tp4-sized
+captures are read on the VM, one case at a time for tpcds, and only the derived files come home.
+tpcds's metrics pass joined each case against that case's record rows alone, on the VM, and
+merged the parts on dev.
 
 **DuckDB's side, again**, on nebius-cpu128 (`$C`, "Nebius host"):
 
