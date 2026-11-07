@@ -10,6 +10,7 @@ use crate::repo_root;
 const IN_IMAGE_JOBS: &[(&str, &str)] = &[
     (".github/workflows/pipeline.yml", "cost-report"),
     (".github/workflows/pipeline.yml", "s3-datasets"),
+    (".github/workflows/pipeline.yml", "dataset-matrix"),
 ];
 
 /// (job, line prefix, reason): a line of a listed job that runs on the runner on purpose.
@@ -42,7 +43,10 @@ const OFF_IMAGE: &[&str] = &[
 ];
 
 /// The commands that build or run project code. A `testdata/` script is one too.
-const PROJECT_COMMANDS: &[&str] = &["cargo", "ctest", "python3"];
+const PROJECT_COMMANDS: &[&str] = &["cargo", "ctest", "python3", "cmake", "scripts/build.sh"];
+
+/// Where a job's own composite actions live; a listed job's are held to the job's rules.
+const LOCAL_ACTIONS: &str = "./.github/actions/";
 
 /// The runner's own paths, which `build-test.sh` does not mount: a wrapped command writing one
 /// writes into the container, and the runner never sees it. RUNNER_TEMP and the checkout are
@@ -84,28 +88,64 @@ fn image_problems(workflow: &str, job: &str, runner_side: &[(&str, &str, &str)])
         if line.trim_start().starts_with("container:") {
             problems.push(format!("{job}: `{}`: the job runs on the runner, and its commands in the image (container: would pull 10 GB onto an unfreed disk)", line.trim()));
         }
-        for off in OFF_IMAGE.iter().filter(|off| line.contains(*off)) {
-            problems.push(format!(
-                "{job}: `{}`: {off} is for a job outside the image",
-                line.trim()
-            ));
-        }
     }
-    let scripts: Vec<String> = run_scripts(&lines)
-        .iter()
-        .flat_map(|s| fold_continuations(s))
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .collect();
     let exempt: Vec<&str> = runner_side
         .iter()
         .filter(|(j, ..)| *j == job)
         .map(|(_, prefix, _)| *prefix)
         .collect();
-    for prefix in &exempt {
+    problems.extend(step_problems(job, &lines, &exempt));
+    problems
+}
+
+/// The local composite actions a job's steps use, by their `uses:` path.
+fn local_actions(workflow: &str, job: &str) -> Vec<String> {
+    job_lines(workflow, job)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|l| {
+            l.trim_start()
+                .trim_start_matches("- ")
+                .strip_prefix("uses: ")
+        })
+        .map(str::trim)
+        .filter(|path| path.starts_with(LOCAL_ACTIONS))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every problem with a composite action's text: its steps run in a listed job.
+fn action_problems(path: &str, text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    step_problems(path, &lines, &[])
+}
+
+/// The problems of a job's or an action's lines: anything only a job outside the image needs,
+/// and each `run:` line but the exempt ones.
+fn step_problems(owner: &str, lines: &[&str], exempt: &[&str]) -> Vec<String> {
+    let mut problems = Vec::new();
+    let code = lines
+        .iter()
+        .copied()
+        .filter(|l| !l.trim_start().starts_with('#'));
+    for line in code {
+        for off in OFF_IMAGE.iter().filter(|off| line.contains(*off)) {
+            problems.push(format!(
+                "{owner}: `{}`: {off} is for a job outside the image",
+                line.trim()
+            ));
+        }
+    }
+    let scripts: Vec<String> = run_scripts(lines)
+        .iter()
+        .flat_map(|s| fold_continuations(s))
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    for prefix in exempt {
         if !scripts.iter().any(|l| l.starts_with(prefix)) {
             problems.push(format!(
-                "{job}: RUNNER_SIDE's `{prefix}` matches no line: remove it"
+                "{owner}: RUNNER_SIDE's `{prefix}` matches no line: remove it"
             ));
         }
     }
@@ -116,7 +156,7 @@ fn image_problems(workflow: &str, job: &str, runner_side: &[(&str, &str, &str)])
         problems.extend(
             line_problems(line)
                 .into_iter()
-                .map(|p| format!("{job}: `{line}`: {p}")),
+                .map(|p| format!("{owner}: `{line}`: {p}")),
         );
     }
     problems
@@ -141,7 +181,7 @@ fn line_problems(line: &str) -> Vec<String> {
                         problems.push("the wrapped command names ~, the runner's home, which the image does not mount".to_string());
                     }
                 }
-            } else if PROJECT_COMMANDS.contains(&command)
+            } else if PROJECT_COMMANDS.contains(&command.trim_start_matches("./"))
                 || command.trim_start_matches("./").starts_with("testdata/")
             {
                 problems.push(format!(
@@ -332,6 +372,12 @@ fn every_listed_job_runs_in_the_build_image() {
         let text = std::fs::read_to_string(repo_root().join(workflow))
             .unwrap_or_else(|e| panic!("read {workflow}: {e}"));
         problems.extend(image_problems(&text, job, RUNNER_SIDE));
+        for action in local_actions(&text, job) {
+            let file = repo_root().join(&action).join("action.yml");
+            let text = std::fs::read_to_string(&file)
+                .unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
+            problems.extend(action_problems(&action, &text));
+        }
     }
     for (job, prefix, reason) in RUNNER_SIDE {
         assert!(
@@ -474,4 +520,128 @@ fn a_listed_job_off_the_image_is_refused() {
         "      - uses: actions/checkout@v4\n      - uses: dtolnay/rust-toolchain@stable\n",
     );
     refused(&rust, &[], &["dtolnay/rust-toolchain"]);
+}
+
+#[test]
+fn a_local_action_a_listed_job_uses_is_held_to_the_job_rules() {
+    let job = job_with(&[]).replace(
+        "  next-job:\n",
+        "      - uses: ./.github/actions/cpp-build\n        with:\n          cudf: \"25.02\"\n  next-job:\n",
+    );
+    assert_eq!(
+        local_actions(&job, "cost-report"),
+        [BUILD_IMAGE_ACTION, "./.github/actions/cpp-build"]
+    );
+    let action = |run: &str| {
+        format!(
+            "name: x\nruns:\n  using: composite\n  steps:\n    - name: Build\n      shell: bash\n      \
+             run: |\n        {run}\n"
+        )
+    };
+    for (run, naming) in [
+        ("./scripts/build.sh --configure --build", "scripts/build.sh"),
+        ("conda install -y gcc", "conda install"),
+        (
+            "python3 -c \"import zipfile\"",
+            "python3 runs on the runner",
+        ),
+    ] {
+        let problems = action_problems("./.github/actions/cpp-build", &action(run)).join("\n");
+        assert!(
+            problems.contains("./.github/actions/cpp-build") && problems.contains(naming),
+            "`{run}`: {problems}"
+        );
+    }
+    for run in [
+        "scripts/build-test.sh --pass-env LDFLAGS -- scripts/build.sh --configure --build",
+        "gcc=$(sed -n 's/^GCC_25_02=//p' docker/pins.env)",
+        "scripts/build-test.sh -- ccache -s",
+    ] {
+        let problems = action_problems("./.github/actions/cpp-build", &action(run));
+        assert!(problems.is_empty(), "`{run}`: {}", problems.join("\n"));
+    }
+}
+
+/// The job whose legs are the cuDF matrix.
+const MATRIX_JOB: &str = "dataset-matrix";
+
+/// Every problem with the matrix's legs: each must have a build image, which a leg names by its
+/// `cudf:` alone, so the label is the image (#129 was a label ahead of its image).
+fn leg_problems(workflow: &str, has_spec: impl Fn(&str) -> bool) -> Vec<String> {
+    let Some(lines) = job_lines(workflow, MATRIX_JOB) else {
+        return vec![format!("{MATRIX_JOB}: no such job")];
+    };
+    let mut problems = Vec::new();
+    let legs: Vec<&str> = lines
+        .iter()
+        .filter_map(|l| l.trim().strip_prefix("- cudf: "))
+        .map(|v| v.trim().trim_matches('"'))
+        .collect();
+    if legs.is_empty() {
+        problems.push(format!("{MATRIX_JOB}: no `- cudf:` legs"));
+    }
+    for leg in &legs {
+        if !has_spec(leg) {
+            problems.push(format!(
+                "{MATRIX_JOB}: the leg cudf {leg} has no build image: docker/conda/cudf-{leg}.spec is missing"
+            ));
+        }
+    }
+    for line in lines.iter().filter(|l| l.trim().starts_with("image:")) {
+        problems.push(format!(
+            "{MATRIX_JOB}: `{}`: a leg's image is the build image of its cudf, not a key of its own",
+            line.trim()
+        ));
+    }
+    let action = format!("uses: {BUILD_IMAGE_ACTION}");
+    let with_leg = lines
+        .iter()
+        .skip_while(|l| l.trim().trim_start_matches("- ") != action)
+        .skip(1)
+        .take_while(|l| !l.trim_start().starts_with("- "))
+        .any(|l| l.trim() == "cudf: ${{ matrix.cudf }}");
+    if !with_leg {
+        problems.push(format!(
+            "{MATRIX_JOB}: its `{action}` step does not take `cudf: ${{{{ matrix.cudf }}}}`, so a leg \
+             would not run in its own image"
+        ));
+    }
+    problems
+}
+
+#[test]
+fn every_cudf_leg_has_a_build_image() {
+    let text = std::fs::read_to_string(repo_root().join(".github/workflows/pipeline.yml"))
+        .expect("read pipeline.yml");
+    let problems = leg_problems(&text, |leg| {
+        repo_root()
+            .join(format!("docker/conda/cudf-{leg}.spec"))
+            .is_file()
+    });
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[test]
+fn a_leg_off_its_build_image_is_refused() {
+    let matrix = |legs: &str, cudf: &str| {
+        format!(
+            "jobs:\n  dataset-matrix:\n    strategy:\n      matrix:\n        include:\n{legs}    \
+             runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      \
+             - uses: ./.github/actions/build-image\n        with:\n          cudf: {cudf}\n      \
+             - run: scripts/build-test.sh -- true\n  next-job:\n    runs-on: ubuntu-latest\n"
+        )
+    };
+    let honest = "          - cudf: \"25.10\"\n          - cudf: \"25.02\"\n";
+    let has_spec = |leg: &str| ["25.02", "25.10", "26.02"].contains(&leg);
+    let problems = |text: &str| leg_problems(text, has_spec).join("\n");
+    assert_eq!(problems(&matrix(honest, "${{ matrix.cudf }}")), "");
+    let labelled =
+        "          - cudf: \"26.02\"\n            image: rapidsai/base:25.10a-cuda12-py3.12\n";
+    assert!(problems(&matrix(labelled, "${{ matrix.cudf }}")).contains("image: rapidsai/base"));
+    let unknown = "          - cudf: \"9.99\"\n";
+    assert!(
+        problems(&matrix(unknown, "${{ matrix.cudf }}")).contains("docker/conda/cudf-9.99.spec")
+    );
+    assert!(problems(&matrix(honest, "\"25.02\"")).contains("matrix.cudf"));
+    assert!(problems(&matrix("", "${{ matrix.cudf }}")).contains("no `- cudf:` legs"));
 }

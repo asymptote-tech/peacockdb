@@ -142,17 +142,25 @@ fn line_runs_lib_tests(line: &str) -> bool {
     after_ok && line.contains("cargo test") && line.contains("-p peacockdb-core")
 }
 
+/// A line's words from its `cargo` on, or all of them when it names no cargo: a wrapper before
+/// it, `scripts/build-test.sh [--pass-env X] --`, has a `--` and flags that are not cargo's.
+fn cargo_words(line: &str) -> impl Iterator<Item = &str> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let from = words.iter().position(|w| *w == "cargo").unwrap_or(0);
+    words.into_iter().skip(from)
+}
+
 /// The `--features` value a cargo line passes; `None` is the default set.
 pub(crate) fn cargo_features(line: &str) -> Option<&str> {
-    let mut toks = line.split_whitespace();
+    let mut toks = cargo_words(line);
     toks.find(|t| *t == "--features")?;
     toks.next()
 }
 
 /// The path filter a `cargo test … -- <filter>` line hands libtest: the first token after
-/// `--` that is not a flag. `None` runs the binary whole.
+/// cargo's `--` that is not a flag. `None` runs the binary whole.
 fn lib_run_filter(line: &str) -> Option<&str> {
-    let mut toks = line.split_whitespace();
+    let mut toks = cargo_words(line);
     toks.find(|t| *t == "--")?;
     toks.find(|t| !t.starts_with('-'))
 }
@@ -173,6 +181,20 @@ fn line_runs_ffi_rung(line: &str) -> bool {
     line_runs_lib_tests(line)
         && cargo_features(line).is_none()
         && lib_run_filter(line) == Some("ffi_tests::")
+}
+
+/// A rung's line run through `scripts/build-test.sh -- …` is still that rung: the wrapper's own
+/// `--` is not cargo's, and its flags are not cargo's.
+#[test]
+fn a_rung_line_wrapped_in_build_test_is_still_its_rung() {
+    let cpu = "scripts/build-test.sh -- cargo test --features rust-only -p peacockdb-core --lib";
+    let ffi = "scripts/build-test.sh -- cargo test -p peacockdb-core --lib -- ffi_tests::";
+    assert!(line_runs_cpu_rung(cpu), "{cpu}");
+    assert!(line_runs_ffi_rung(ffi), "{ffi}");
+    assert!(!line_runs_ffi_rung(cpu) && !line_runs_cpu_rung(ffi));
+    let passed =
+        "scripts/build-test.sh --pass-env X -- cargo test --features gpu -p peacockdb-core --lib";
+    assert_eq!(cargo_features(passed), Some("gpu"));
 }
 
 /// Does this workflow line BUILD the `peacockdb` CLI?
@@ -470,9 +492,9 @@ fn line_matcher_rejects_both_false_coverage_modes() {
 /// The gate and the leg list are two spellings of one value in one file, and only one of them
 /// is checked by anything: `every_rust_test_target_is_named_by_ci` asserts a target is NAMED
 /// by a step, never that the step can RUN. Relabel a leg or drop one and the steps gated on
-/// it stop running with that meta-test still green — and [#129](../../llm-wiki/tickets/testinfra.md#t129) records that
-/// the leg labels already disagree with their images, so the label is the untrustworthy half
-/// of a pair that seven steps now depend on.
+/// it stop running with that meta-test still green. The label is also the leg's image, its
+/// `peacockdb-build:cudf-<label>` (`ci_images.rs`, `every_cudf_leg_has_a_build_image`), so a
+/// relabel moves the leg to another cuDF and silences the steps gated on the old name at once.
 #[test]
 fn every_matrix_gated_step_names_a_leg_the_matrix_declares() {
     let text = std::fs::read_to_string(repo_root().join(PIPELINE)).expect("read pipeline.yml");

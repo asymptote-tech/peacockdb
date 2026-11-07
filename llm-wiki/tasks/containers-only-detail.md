@@ -13,6 +13,7 @@ Branch `ENS-containers-only`, forked from `ENS-tp4-sized` at `9058709c`; its PR 
   `b50d9b2a4ea0`, the ghcr digest `peacockdb-build@sha256:2a0c84414baa…`) and `mambaorg/micromamba:2.9.0`
   (Step 1's export). The 25.10 build left 3.8 GB free, too little for Step 6's cargo build; after the
   removal, 19 GB. Re-pull 25.02 from ghcr for Task 2 on.
+- Task 4: dev's docker swapped 25.02 → 25.10 → 25.02 (`## Task 4`); clones and scratch removed.
 
 ## Task 1
 
@@ -212,6 +213,111 @@ Branch `ENS-containers-only`, forked from `ENS-tp4-sized` at `9058709c`; its PR 
   for its key and cleanup (`~/.cargo/bin`, preinstalled), not the image's; the first run's
   target and registry are cold (15 min was the old cold time); `docker run` per Python file, about
   100 of them, adds 1-2 min. s3-datasets now pays the disk freeing and the pull, a few minutes.
+
+## Task 4
+
+- Dispatched 2026-11-07 at Steps 1-5 and Step 6's local half (developer, dev, no VM).
+- Step 1: `IN_IMAGE_JOBS` gains `dataset-matrix`; new `every_cudf_leg_has_a_build_image` (each
+  `- cudf:` leg has `docker/conda/cudf-<v>.spec`, no line of the job starts `image:`, the build-image
+  step takes `cudf: ${{ matrix.cudf }}`) and its doctored cases `a_leg_off_its_build_image_is_refused`.
+  Red on the unchanged workflow for the intended reasons (the two `image:` keys, `${{ matrix.image }}`,
+  no action, every bare line).
+- Beyond the plan, in the same guard:
+  - **A listed job's local actions are checked too** (`local_actions`, `action_problems`;
+    `a_local_action_a_listed_job_uses_is_held_to_the_job_rules`). Without it, cpp-build could go back
+    to `conda install` with the job still green. The doctored case found a real gap, red first: a
+    bare `./scripts/build.sh` was not seen, because `PROJECT_COMMANDS` was matched without
+    stripping `./`. `cmake` and `scripts/build.sh` joined `PROJECT_COMMANDS`.
+  - **The rung matchers read from `cargo` on** (`cargo_words` in ci_coverage.rs). Wrapping the cpu
+    rung made `each_rung_has_its_ci_line_and_the_cli_is_built` red: `lib_run_filter` took
+    build-test.sh's `--` as cargo's and read the filter as `cargo`. Pinned first by
+    `a_rung_line_wrapped_in_build_test_is_still_its_rung`, red, then fixed. Task 3's
+    `every_workflow_flag_is_one_the_binary_accepts` fix was the same shape.
+  - Guard: 51 passed (47 + those 4). `cargo test -p cost-report --bin cost-report` 49 passed;
+    `scripts/nebius/tests/test_watch_workflow.py` 10 passed.
+- **`cpp-build-2502` keeps today's action as `.github/actions/cpp-build-conda/`**, HEAD's
+  `cpp-build/action.yml` with a new name and description. The job still runs in a rapids
+  container until Task 6, and a container job cannot `docker run` build-test.sh's image. Task 6
+  deletes it (added to its Files list).
+- The cpp-build action (as built): one step. It checks the input against `PEACOCK_CUDF` (the
+  build-image action's), reads `GCC_<v>` from `docker/pins.env`, then runs
+  `scripts/build-test.sh --pass-env LDFLAGS --pass-env CCACHE_MAXSIZE -- scripts/build.sh
+  --configure --build --install --cudf_ROOT /opt/cudf --gcc-version "$gcc" --compiler-launcher
+  ccache`, with `LDFLAGS=-Wl,-rpath-link,/opt/cudf/lib` and `CCACHE_MAXSIZE=2G`. Then `ccache -s` in
+  the image, with the same bound so its report shows 2 GiB, not ccache's default 5. The old
+  `CCACHE_COMPILERCHECK=content` went: it was for conda's gcc reinstalled each run, and the image's
+  compiler is fixed by its digest. The ccache is the build-image action's (`ccache: 'true'`, key
+  `ccache-img-<cudf>-<sha>`).
+- Step 2, sf1 byte-identity (dev). Two fresh `git clone --shared` copies at `cd63a421` in
+  `/tmp/co-t4/{img,host}`, not `git worktree add`, which would write into the main repo's git dir.
+  The testdata scripts are unchanged by this task. Host: the release zip as pipeline.yml had it (sha256
+  `1f2fa724…80cf`, the pin), `HOME` a scratch dir so the extensions were fetched fresh, as in CI.
+  Image: `scripts/build-test.sh -- testdata/generate_testdata.sh --bench tpch` and `tpcds` in
+  `:cudf-25.02-in-50a0c1d7779e`. Both 32 files, identical, aggregate (sha256 of the
+  `sha256sum tpch.sf1/*.parquet tpcds.sf1/*.parquet` listing)
+  **`0e41c31d4930212fa8cfd610fd244ff93e6b0d7713bdec9a3d2a17227837a492`**, also the main worktree's
+  own sf1. Regenerated from empty twice more through the new step's text, as uid 1001: in the 25.02
+  image and in the 25.10 image. Same aggregate both times. `generate_pbench.sh --check` passed each time.
+  The host clone was removed after.
+- Step 3, FFI runtime path: **`LD_LIBRARY_PATH: /opt/cudf/lib` is needed**, and is set on both
+  Rust steps alike. Without it `cargo test -p peacockdb-ffi --test test_ffi` exits 127:
+  "libcudf.so: cannot open shared object file". With it, 4 passed, and nothing recompiled between a
+  `--no-run` without it and a run with it. The cause: peacockdb-ffi's build script runs
+  `cmake --install` into cargo's `OUT_DIR`, and that `libpeacock_gpu.so` has no RUNPATH. The ctest
+  binary keeps its build-tree RUNPATH `[$ORIGIN:/opt/cudf/lib:]`, so ctest needs nothing.
+- Runner-shaped local runs. The image clone was made self-contained (`git repack -a -d`, alternates
+  dropped), its cudf submodule taken from the local shallow module, and the clone chowned to 1001:118.
+  A fake `id` on PATH answering 1001/118 made the unmodified build-test.sh run `docker run --user
+  1001:118`. The scratch registry and ccache were 1001's. Each step's `run:` was executed as rendered
+  from the edited files (`bash -eo pipefail`, the job's and step's env), by
+  `/tmp/co-t4/tools/step.py`:
+  - 25.02 (`:cudf-25.02-in-50a0c1d7779e`): cpp-build 75 s cold, 85 ccache misses, gcc 12.4.0 and
+    nvcc 12.9.86; ctest `1 of 1`; Generate SF-1; `test_duckdb_minimal.py` 9 passed (105 s);
+    `batching_report.py --check`; validate 29/29 and 31/31; `test_ffi` 4 passed.
+  - 25.10 (`:cudf-25.10-in-6bbfdd6dbd8f`, pulled for this): cpp-build 108 s cold, gcc 14.2.0; ctest
+    `1 of 1`; Generate SF-1; validate 29/29 and 31/31; `test_ffi` 4 passed (166 s cold build). The ffi
+    rung, as the two Rust steps run it: `cargo test --no-run -p peacockdb-core --lib` 503 s cold,
+    target-img-25.10 then 4.1 GB (debuginfo=0, default features, plus test_ffi), and `--lib --
+    ffi_tests::` 5 passed, 1211 filtered out, the baseline's "26.02" line, with no `Compiling`.
+  - Warnings, none new: two `-Wstringop-overflow` from libstdc++'s `stl_algobase.h` on both gccs, and
+    on 25.10 `cudf::round(…, rounding_method, …)` deprecated (`cpp/src/expr.cpp:753`), as Task 1 found.
+  - Not run locally: the rust-only steps (`--lib`, `test_cpu_corpus`, the three golden targets, the CLI)
+    and the exec-model step. None of them sees cuDF, and Task 2 ran the same targets in the 25.02 image
+    (1209 + 2 ignored, 2451, 66, 3, 41). A cold CI-shaped target for them would not fit dev's disk
+    beside the image.
+- Checks on the edited files: YAML parses (pipeline.yml, images.yml); `bash -n` of all 25 `run:`
+  blocks of dataset-matrix and the three actions; shellcheck (the actionlint image's) over them:
+  only SC2129 in `cpp-build-conda`, HEAD's text. actionlint: the six findings HEAD has, none in
+  these jobs (pipeline.yml:363 is cpp-build-2502's staging step).
+- #129 closed: moved to `archive/archived-tickets.md` Done with a closing note. Links that followed:
+  #94's in the archive, #244's in system-hardening.md (and its "a CI leg that is really 26.02"),
+  performance.md's two 25.10a / 26.02-leg lines, `ci_coverage.rs`'s doc comment, and the comment
+  in `cpp/tests/cpu/test_executor.cpp:555` (a test comment, not an image input: only
+  `cpp/CMakeLists.txt`'s flatbuffers tag is). tickets.md: testinfra 5 → 4, 93 → 92 open. Left as
+  they are: the dated reports under `llm-wiki/reports/bugfix-proposals/` that say "26.02 leg", and
+  the links to `testinfra.md#t129` in the frozen spec, `tasks.md:201` and `verify-26.02.md:6`,
+  which now dangle. tasks.md changes only with a state, and the spec is frozen.
+- build-test.md: the dataset-matrix bullet rewritten (the image per leg, the two actions, the
+  `LD_LIBRARY_PATH` reason, test_duckdb_minimal on 25.02), the cuDF-scope bullet, the "Two traps"
+  shell line, the test table's DuckDB benchmark row `manual` → `dataset-matrix (25.02 leg)` and the
+  header's by-hand list, and the CI wiring guard row (+4, 24). Totals: Rust 6313, grand 8237.
+- dev's disk: removed `peacockdb-build:cudf-25.02-in-50a0c1d7779e` (`sha256:b8da5a94553c…`, the
+  ghcr digest) for room; pulled `:cudf-25.10-in-6bbfdd6dbd8f` (338 s). Then removed
+  the clone, its scratch registry and ccache, and the 25.10 image (`sha256:9d862501b165…`, the
+  published digest), and re-pulled the 25.02 image. Scratch logs stay in `/tmp/co-t4/` (no data).
+- What could differ on the runner:
+  - **Disk.** The gate checks 25 GB free before the pull. After it the leg holds the image (about
+    15 GB in `docker images`), the target dir, `cpp/build` and `cpp/install`, the cudf submodule,
+    sf1 (0.8 GB), ccache and the registry, and Swatinem's save writes a tarball of the target. The
+    old job had all of that beside a smaller rapids image. The cost-report job's "Free the disk" log
+    in run 42379249690 gives the margin.
+  - Cold caches on the first run: a new Swatinem key per leg (`rust-image-<v>`) and a new ccache
+    key (`ccache-img-<v>-…`), so both legs compile everything, as the first local runs did.
+  - Swatinem runs the runner's own cargo for its key and cleanup, as in cost-report.
+  - The checkout's git objects and submodule are the runner's (uid 1001, same owner as the
+    container's user), so git needs no `safe.directory`; locally the same held for the clone.
+  - The 25.10 image comes from ghcr by digest (image-ref.sh's remote branch, proven anonymous in
+    Task 3); locally image-ref.sh found the pulled local tag.
 
 ## Notes for a restart
 

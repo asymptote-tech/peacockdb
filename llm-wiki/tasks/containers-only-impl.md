@@ -381,20 +381,20 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   generated sf1, which cost-report lacks, so it lands here: the 25.02 leg runs it after `Generate
   SF-1`, wrapped, and build-test.md's row for it moves off "manual". The build-image action takes
   `ccache: 'true'` here (key `ccache-img-<cudf>-<sha>`); cpp-build's own ccache step goes.
-- [ ] **Step 1: failing tests** in `ci_images.rs`. First, add `dataset-matrix` to
+- [x] **Step 1: failing tests** in `ci_images.rs`. First, add `dataset-matrix` to
   `IN_IMAGE_JOBS`. Then `every_cudf_leg_has_a_build_image`: each `- cudf: "<v>"` leg in
   pipeline.yml has `docker/conda/cudf-<v>.spec`, no leg has an `image:` key, and the job passes
   `${{ matrix.cudf }}` to the action. Run → FAIL.
-- [ ] **Step 2: byte-identity of sf1 on dev.** In a fresh worktree, run `scripts/build-test.sh --
+- [x] **Step 2: byte-identity of sf1 on dev.** In a fresh worktree, run `scripts/build-test.sh --
   testdata/generate_testdata.sh --bench tpch` and the same for `--bench tpcds`. Separately, on the
   host, generate into another fresh worktree with the release zip, exactly as pipeline.yml lines
   156–176 do today. Then `(cd testdata && sha256sum tpch.sf1/*.parquet tpcds.sf1/*.parquet)` in
   each → identical. Record the two aggregate hashes.
-- [ ] **Step 3: FFI runtime path on dev.** Run `scripts/build-test.sh -- cargo test -p
+- [x] **Step 3: FFI runtime path on dev.** Run `scripts/build-test.sh -- cargo test -p
   peacockdb-ffi --test test_ffi` after a cpp build. If a library is not found, set
   `LD_LIBRARY_PATH: /opt/cudf/lib` in the two Rust steps' env, where it reaches the image through
   the fixed pass-through. Otherwise drop the variable. Record which in the detail file.
-- [ ] **Step 4: move the job.** Remove `container:`, `Install git`, `dtolnay` and the DuckDB curl.
+- [x] **Step 4: move the job.** (As built, beside this text: the detail file's `## Task 4`.) Remove `container:`, `Install git`, `dtolnay` and the DuckDB curl.
   Checkout keeps `submodules: recursive`. Use the action with `cudf: ${{ matrix.cudf }}` and the
   cpp-build action. Swatinem gets `shared-key: rust-image-${{ matrix.cudf }}` and
   `workspaces: ". -> target-img-${{ matrix.cudf }}"`. Every `ctest`/`cargo`/`python3`/
@@ -403,7 +403,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `CUDF_ROOT: /opt/conda` and `LD_LIBRARY_PATH: /opt/conda/lib`. Every comment that names the
   rapids container, the tmpfs or glibc-per-image is rewritten to what is true now: one image
   per leg, and a target dir per leg.
-- [ ] **Step 5: #129.** Close it the way `tickets.md` line 17 says. Its text records that the
+- [x] **Step 5: #129.** Close it the way `tickets.md` line 17 says. Its text records that the
   second leg is now `25.10` in `peacockdb-build:cudf-25.10` and that (b) was closed earlier.
   Update `testinfra.md`'s Contents and count, the index line, and `tickets.md`'s open-ticket
   total (line 22, one fewer). Update `build-test.md`'s CI
@@ -468,6 +468,10 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `ci_coverage.rs:32–35, 556–578` (F5 reads stage-install.sh), `ci_images.rs`
 - Delete: `scripts/nebius-test.sh`, `scripts/nebius/ci-ship.sh`, and their tests under
   `scripts/nebius/tests/` (`test_ci_ship.py`, `test_nebius_test.py`)
+- Delete: `.github/actions/cpp-build-conda/` (Task 4 kept HEAD's conda `cpp-build` there for this
+  job alone, since a job in a rapids container cannot run `build-test.sh`'s `docker run`). With
+  `ccache: 'true'` on this job's build-image step, it shares the key `ccache-img-25.02-<sha>` with
+  dataset-matrix's 25.02 leg: the second save in a run is refused with a warning, not an error
 - Modify (kept, spec item 2's "reduced to what `run-gpu.sh` lacks"): `scripts/nebius-sync.sh`
   becomes the tree transfer alone, the uncommitted workspace to a VM, which new-hosts' CPU-VM
   build and the wiki's recipes use. Its sf1 generation goes (it sourced the conda

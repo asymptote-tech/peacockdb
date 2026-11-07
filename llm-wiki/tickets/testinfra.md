@@ -7,7 +7,6 @@ Tests, CI, hosts, testdata etc
 
 - [#178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault](#t178)
 - [#176 (CI coverage one-way) the CI coverage guard checks one direction only](#t176)
-- [#129 (26.02 CI leg image) The "26.02" CI leg builds against a 25.10a image](#t129)
 - [#306 (no_sort ties by position) a `no_sort` comparison pairs rows by position, so tied rows in another order fail](#t306)
 - [#309 (no en_US in build image) the build image has no en_US.UTF-8 locale, so one script test cannot run in it](#t309)
 
@@ -46,21 +45,6 @@ before the file, and both legs went red on it.
 The converse is nearly free — `workspace_test_targets()` and the `--test` line parsing both exist,
 so it is one assertion that every target pipeline.yml names is in the workspace set. The exemption
 list already gets this treatment; the step lines do not.
-
-<a id="t129"></a>
-### #129 (26.02 CI leg image) The "26.02" CI leg builds against a 25.10a image
-Two unrelated smells in `pipeline.yml`, both found auditing the CI section of
-build-test.md. (a) The dataset-matrix matrix leg labelled `cudf: "26.02"` runs
-`rapidsai/base:25.10a-cuda12-py3.12`, so the compile-only 26.02 coverage the wiki and
-`#94` both rely on is actually 25.10a coverage; the label is the only place 26.02 appears.
-Either bump the image or rename the leg — as it stands, "26.02 compiles" is a claim no job
-makes. (b) `s3-datasets` explains its fork guard as mirroring "the GPU job's fork guard",
-but `gpu-tests` has no job-level `if:` — on a fork PR `secrets.SHAD_GPU_SSH_KEY` is empty,
-so Setup SSH writes an empty key and the job goes red on ssh instead of skipping. Moot
-while the repo has no forks, which is exactly why it will bite later.
-
-(b) is closed. `gpu-tests` now never runs on a pull_request, so a fork PR gets no GPU job, and
-the `s3-datasets` comment says so. Only (a) is open.
 
 <a id="t306"></a>
 ### #306 (no_sort ties by position) a `no_sort` comparison pairs rows by position, so tied rows in another order fail

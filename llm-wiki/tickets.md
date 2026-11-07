@@ -19,7 +19,7 @@ are never reused, so an old reference still resolves there.
 
 ## Contents
 
-93 open tickets, in file order.
+92 open tickets, in file order.
 
 | File | Milestone | Open | Tickets |
 |---|---|--:|---|
@@ -33,4 +33,4 @@ are never reused, so an old reference still resolves there.
 | [`performance.md`](tickets/performance.md) | The pre-production performance path | 8 | #150 #148 #231 #242 #248 #286 #290 #305 |
 | [`benchmarks.md`](tickets/benchmarks.md) | Wall-time benchmarks | 2 | #226 #69 |
 | [`system-hardening.md`](tickets/system-hardening.md) | Pre-production system hardening | 11 | #238 #13 #196 #169 #128 #244 #260 #204 #289 #307 #308 |
-| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 5 | #178 #176 #129 #306 #309 |
+| [`testinfra.md`](tickets/testinfra.md) | Tests, CI, hosts and testdata | 4 | #178 #176 #306 #309 |

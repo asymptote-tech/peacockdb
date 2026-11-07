@@ -90,103 +90,87 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Each leg runs in the build image of its cuDF, peacockdb-build:cudf-<v> (llm-wiki/build-test.md,
+        # "Images"). 25.10's image is CI's only: it has no run image.
         include:
-          - cudf: "26.02"
-            image: rapidsai/base:25.10a-cuda12-py3.12
+          - cudf: "25.10"
           - cudf: "25.02"
-            image: rapidsai/base:25.02-cuda12.0-py3.12
     name: CI Pipeline (cudf ${{ matrix.cudf }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    container:
-      image: ${{ matrix.image }}
-    # Inside a container the runner does NOT default `run:` to bash — it resolved to
-    # `sh -e {0}` in these rapids images, so a step opening with `set -euo pipefail`
-    # died on "Illegal option -o pipefail" before running anything. Declared at the job
-    # so the next step added here cannot rediscover it; the composite action already
-    # says `shell: bash` on every step, which is how bash is known to be present.
+    # A `run:` with no shell is `bash -e {0}`; a declared bash adds `-o pipefail`, which every step
+    # here assumes. Declared at the job, so the next step added cannot do without it.
     defaults:
       run:
         shell: bash
 
-    # Job level, not per step: every cargo invocation here needs both, and a step-level
-    # copy is a thing the next step added to this job can omit. The seven rust-only steps
-    # below arrived without one and the leg went red — flatc-fork's build script runs
-    # cmake, this image has ninja and no make, and a RUSTFLAGS that differs from the
-    # cached one recompiles the whole DataFusion stack, since it is part of every cargo
-    # fingerprint. Same argument as `defaults.run.shell` above.
+    # Job level, not per step: build-test.sh hands both to every command it runs in the image, and
+    # each is part of what cargo compares before reusing a build. RUSTFLAGS is in every crate's
+    # fingerprint, and CMAKE_GENERATOR reruns the build scripts that run cmake (flatc-fork's and
+    # the FFI's), so a step carrying its own copy recompiles. That is why "Run Rust tests"
+    # compiles nothing that "Build Rust tests" built.
     env:
       CMAKE_GENERATOR: Ninja
-      # Strip debug info from all Rust artifacts. The test binaries link the full
-      # DataFusion/Arrow stack plus libpeacock_gpu; with debuginfo the largest one
-      # (test_query_plan, with the TPC-DS suite merged in) overflows the container's
-      # tmpfs while lld writes its mmap'd output, crashing with SIGBUS. Debug info is
-      # dead weight for pass/fail CI.
+      # No debug info in any Rust artifact. The test binaries link the full DataFusion/Arrow stack,
+      # and the default-feature ones libpeacock_gpu too. With debuginfo the largest of them was
+      # gigabytes, and the leg's target dir shares the runner's disk with the build image. Debug
+      # info is dead weight for pass/fail CI.
       RUSTFLAGS: "-C debuginfo=0"
 
     steps:
-      - name: Install git
-        if: matrix.cudf == '25.02'
-        run: conda install -y -n base -c conda-forge git curl
-
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # Every project command below runs in the leg's build image through scripts/build-test.sh,
+      # as the runner's uid, over this checkout. The action frees the disk, pulls the image of this
+      # tree's inputs and restores the C++ ccache.
+      - uses: ./.github/actions/build-image
+        with:
+          cudf: ${{ matrix.cudf }}
+          ccache: 'true'
 
       - uses: ./.github/actions/cpp-build
         with:
           cudf: ${{ matrix.cudf }}
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      # Cache ~/.cargo + target/ so the opt-level-3 DataFusion/Arrow dep tree
-      # compiles once and restores on warm runs. The key is PER cudf matrix leg
-      # (25.02/26.02) — they must NOT share one cache. target/ holds flatc-fork's
-      # compiled `flatc` host binary, which dynamically links the build container's
-      # glibc; the two cudf images ship different glibc, so a flatc built on the
-      # 26.02 image (GLIBC_2.38) fails to run on the older-glibc 25.02 image
-      # ("GLIBC_2.38 not found" -> build.rs flatc panic). A shared key let 26.02
-      # poison 25.02's cache. The job's RUSTFLAGS (-C debuginfo=0) is what every cargo
-      # step here builds with, so restored artifacts fingerprint-match.
+      # The cargo registry and the leg's target dir, build-test.sh's target-img-<cudf>, so the
+      # opt-level-3 DataFusion/Arrow tree compiles once and restores on warm runs. One cache per
+      # leg: each leg has its own target dir, built by its own image's gcc for the build scripts'
+      # C++.
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rust-cudf-${{ matrix.cudf }}
+          shared-key: rust-image-${{ matrix.cudf }}
+          workspaces: ". -> target-img-${{ matrix.cudf }}"
 
       - name: Run CPU tests (CPP)
-        run: ctest --test-dir cpp/build -L cpu --output-on-failure
+        run: scripts/build-test.sh -- ctest --test-dir cpp/build -L cpu --output-on-failure
 
       - name: Generate SF-1 test data
         run: |
-          # Pinned: the TPC-DS dsdgen extension's column types drift across
-          # DuckDB releases (e.g. INT32 vs INT64 surrogate keys), which would
-          # shift row_width and target_batch_size across every plan golden.
-          # generate_testdata.sh asserts $(duckdb --version) matches this.
-          #
-          # Use the official GitHub RELEASE binary (v1.5.4, build 08e34c447b) — the
-          # SAME build the committed goldens are generated with on local/verda, so CI's
-          # regenerated parquet is byte-identical. (conda-forge's duckdb-cli=1.5.4 was
-          # repackaged against icu 78, which conflicts with the base env's mamba pinned
-          # to icu 75 -> LibMambaUnsatisfiableError; and a different build risks
-          # different parquet bytes vs the goldens.)
-          # Retried for the same reason the cmake/ninja fetch is: the releases CDN
-          # answers 503 often enough to be the single most common cause of a red run.
-          # No --retry-delay — curl's default doubling rides out a longer outage than any
-          # fixed delay, and --retry-max-time bounds the total.
-          curl -fsSL --retry 8 --retry-all-errors --retry-max-time 300 \
-            https://github.com/duckdb/duckdb/releases/download/v1.5.4/duckdb_cli-linux-amd64.zip -o /tmp/duckdb.zip
-          python3 -c "import zipfile; zipfile.ZipFile('/tmp/duckdb.zip').extractall('/tmp/duckdb-bin')"
-          chmod +x /tmp/duckdb-bin/duckdb
-          export DUCKDB=/tmp/duckdb-bin/duckdb
-          "$DUCKDB" --version
-          testdata/generate_testdata.sh --bench tpch
-          testdata/generate_testdata.sh --bench tpcds
+          set -euo pipefail
+          # The image's DuckDB, the official release build of docker/pins.env's DUCKDB_VERSION and
+          # DUCKDB_SHA256, with its tpch and tpcds extensions installed in the image. It is the
+          # build the committed goldens are generated with, so the parquet is byte-identical: the
+          # TPC-DS dsdgen column types drift across releases (INT32 against INT64 surrogate keys),
+          # which would move row_width and target_batch_size in every plan golden.
+          # generate_testdata.sh asserts the version.
+          scripts/build-test.sh -- duckdb --version
+          scripts/build-test.sh -- testdata/generate_testdata.sh --bench tpch
+          scripts/build-test.sh -- testdata/generate_testdata.sh --bench tpcds
           # pbench is COMMITTED, not generated: this proves the committed parquet is what
           # gen.sql makes under this exact DuckDB, including the float specials a dictionary
           # page would silently canonicalize (llm-wiki/tasks/pbench.md).
-          testdata/generate_pbench.sh --check
+          scripts/build-test.sh -- testdata/generate_pbench.sh --check
+
+      # duckdb_minimal.sh, the DuckDB timing script the 128-core VM runs at sf40, over the sf1
+      # generated above: the import, the timing loop, the answers pass and the results file's
+      # shape. Python and DuckDB only, which cannot see cuDF, so one leg.
+      - name: DuckDB benchmark script (Python)
+        if: matrix.cudf == '25.02'
+        run: scripts/build-test.sh -- python3 benchmarks/tests/test_duckdb_minimal.py
 
       # The query-batching page's numbers against the committed results they are read from:
       # a commit that changes one of those inputs without rerunning batching_report.py fails
@@ -198,13 +182,12 @@ jobs:
         if: matrix.cudf == '25.02'
         run: |
           set -euo pipefail
-          python3 scripts/calibration/batching_report.py --testdata testdata \
+          scripts/build-test.sh -- python3 scripts/calibration/batching_report.py --testdata testdata \
             --report llm-wiki/reports/query-batching.md --check
 
       # The exec-model prototype's statistics sidecars counted again from the data by
-      # gen_stats.py with the DuckDB the generator step unpacked (its `export` ends with that
-      # step, hence `env` here), and its row estimates against the engine's CPU runs, which
-      # need the sf1 tables generated above — the rest of that suite runs in the cost-report
+      # gen_stats.py with the image's DuckDB, and its row estimates against the engine's CPU runs,
+      # which need the sf1 tables generated above — the rest of that suite runs in the cost-report
       # tier, which has no dataset. One matrix leg only: the two legs differ in cuDF, which
       # this pure-python test cannot see, and a second run would only report the same failure
       # twice. The engine's plans run over the same tables in exec-model-corpus.yml on manual
@@ -213,13 +196,10 @@ jobs:
       # over two small queries, twenty seconds; both call DPhyp, so the library is built here.
       - name: Exec-model statistics, row estimates and run.py (Python)
         if: matrix.cudf == '25.02'
-        env:
-          DUCKDB: /tmp/duckdb-bin/duckdb
         run: |
           set -euo pipefail
-          python3 -c "import pandas, pyarrow" 2>/dev/null || pip install --quiet pandas pyarrow
-          cargo build --release -p peacockdb-dphyp
-          export PEACOCK_DPHYP_LIB=$PWD/target/release/libpeacockdb_dphyp.so
+          scripts/build-test.sh -- cargo build --release -p peacockdb-dphyp
+          export PEACOCK_DPHYP_LIB=$PWD/target-img-$PEACOCK_CUDF/release/libpeacockdb_dphyp.so
           # Every file runs before the step reports, so one failure does not hide the rest.
           status=0
           for f in scripts/exec_model/tests/optimizer/test_stats_sidecar.py \
@@ -227,7 +207,7 @@ jobs:
                    scripts/exec_model/tests/optimizer/test_ordered_corpus.py \
                    scripts/exec_model/tests/test_run_corpus.py; do
             echo "== $f"
-            python3 "$f" || status=1
+            scripts/build-test.sh --pass-env PEACOCK_DPHYP_LIB -- python3 "$f" || status=1
           done
           exit "$status"
 
@@ -244,48 +224,47 @@ jobs:
       # dataset, no GPU.
       - name: Cost goldens match plan-golden regeneration (Rust)
         if: matrix.cudf == '25.02'
-        run: cargo test --features rust-only -p peacockdb-core --test test_cost_model
+        run: scripts/build-test.sh -- cargo test --features rust-only -p peacockdb-core --test test_cost_model
 
       # The one reader of the golden text format, against strings rather than files:
       # no dataset, no executor — it belongs beside the cost model.
       # Every other golden assertion in the tree is a comparison through it.
       - name: The golden text format, read back (Rust)
         if: matrix.cudf == '25.02'
-        run: cargo test --features rust-only -p peacockdb-core --test test_golden_format
+        run: scripts/build-test.sh -- cargo test --features rust-only -p peacockdb-core --test test_golden_format
 
       # The corpus goldens against their own arithmetic — conservation, lane counts,
       # the loader prefix, the root against the result. Committed files only, so it
       # needs no dataset of its own.
       - name: Corpus goldens against their own redundancy (Rust)
         if: matrix.cudf == '25.02'
-        run: cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens
+        run: scripts/build-test.sh -- cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens
 
-      # Tier A: structural validation of the freshly generated sf1 data. Runs in the
-      # rapids container (matrix leg). CI generates SYNTHETIC embeddings (no fetch), so
-      # the DEEP/GloVe embedding checks auto-skip on FLOAT[8]; the row-count / schema /
-      # sort-order / clustering checks always run. numpy+pyarrow ship in the rapids base
-      # image (cudf depends on pyarrow), but self-heal if a future image drops them
-      # rather than letting the validator fail to import.
+      # Tier A: structural validation of the freshly generated sf1 data, on both legs. CI
+      # generates SYNTHETIC embeddings (no fetch), so the DEEP/GloVe embedding checks auto-skip
+      # on FLOAT[8]; the row-count / schema / sort-order / clustering checks always run. numpy
+      # and pyarrow are the image's venv's, at docker/venv.lock's pins.
       - name: Validate sf1 datasets
         run: |
-          python3 -c "import numpy, pyarrow" 2>/dev/null \
-            || pip install --quiet numpy pyarrow
-          python3 scripts/validate_tpch.py --sf 1
-          python3 scripts/validate_tpcds.py --sf 1
+          set -euo pipefail
+          scripts/build-test.sh -- python3 scripts/validate_tpch.py --sf 1
+          scripts/build-test.sh -- python3 scripts/validate_tpcds.py --sf 1
 
       # Build and run are split into two steps so a compile failure is visibly
       # distinct from a test failure, and build vs run time is legible (the
       # opt-level bump made the build phase much heavier). The two steps MUST
       # share a byte-identical env: cargo's fingerprint includes RUSTFLAGS, so any
       # drift would make the run step silently recompile, defeating the split. That is
-      # now structural for RUSTFLAGS and CMAKE_GENERATOR, which come from the job.
+      # structural for RUSTFLAGS and CMAKE_GENERATOR, which come from the job, and for
+      # LD_LIBRARY_PATH, which the two steps set alike.
       - name: Build Rust tests
         run: |
+          set -euo pipefail
           # EVERY target the run step invokes must be listed here, or its compile
           # failure surfaces as a run-step failure and the split stops meaning
           # anything.
-          cargo test --no-run -p peacockdb-core --lib
-          cargo test --no-run -p peacockdb-ffi --test test_ffi
+          scripts/build-test.sh -- cargo test --no-run -p peacockdb-core --lib
+          scripts/build-test.sh -- cargo test --no-run -p peacockdb-ffi --test test_ffi
           # Separate line because of --features rust-only: cargo's fingerprint
           # includes the feature set, so this cannot share the invocation above.
           # The feature only reaches peacockdb-ffi/peacockdb-core, not the
@@ -293,19 +272,17 @@ jobs:
           #
           # --lib is built twice, once per rung, and the two are different binaries: the
           # rust-only one here carries the cpu rung and does not link libpeacock_gpu, a
-          # smaller link in the tier that has already hit tmpfs/SIGBUS at link time, while
-          # the default-feature one above carries the ffi rung as well. Each shares its
-          # own line's already-built fingerprint, so neither costs an extra compile.
-          cargo test --no-run --features rust-only -p peacockdb-core --lib
+          # smaller link, while the default-feature one above carries the ffi rung as well. Each
+          # shares its own line's already-built fingerprint, so neither costs an extra compile.
+          scripts/build-test.sh -- cargo test --no-run --features rust-only -p peacockdb-core --lib
           # The CLI, which has no test target of its own and so is named by nothing above.
           # It is the only caller of the planner and the driver from outside the crate, so a
           # signature change that the tests absorb still breaks it — and unbuilt, it breaks
           # at the merge gate of whoever notices next. test_source_formatting asserts this line.
-          cargo build --features rust-only -p peacockdb
+          scripts/build-test.sh -- cargo build --features rust-only -p peacockdb
         env:
-          # The pair's own two only; CMAKE_GENERATOR and RUSTFLAGS come from the job.
-          LD_LIBRARY_PATH: /opt/conda/lib
-          CUDF_ROOT: /opt/conda
+          # build-test.sh hands it to the image by name; the step's own, beside the job's two.
+          LD_LIBRARY_PATH: /opt/cudf/lib
 
       # Pure run: the targets were already compiled by "Build Rust tests" above
       # with the identical env below, so cargo finds matching fingerprints and
@@ -314,25 +291,25 @@ jobs:
       # job's and identical by construction.
       - name: Run Rust tests
         run: |
+          set -euo pipefail
           # The middle rung: every test module that needs the FFI linked and no device,
           # selected by path. GpuBatch's surface is all of it today — a handle plus a Drop
           # whose release is null-guarded, so nothing here reaches a card. The device half
           # of that ABI is `gpu_backend::gpu_tests::abi`, which the gpu-tests job runs.
-          cargo test -p peacockdb-core --lib -- ffi_tests::
-          cargo test -p peacockdb-ffi --test test_ffi
+          scripts/build-test.sh -- cargo test -p peacockdb-core --lib -- ffi_tests::
+          scripts/build-test.sh -- cargo test -p peacockdb-ffi --test test_ffi
           # The cpu rung, entire: every in-crate test module that needs neither the FFI
           # nor a device. It needs the sf1 dataset generated above: the plan goldens read
           # row-group metadata off the parquet, and the end-to-end tier runs against it.
           # test_source_formatting asserts this line exists.
-          cargo test --features rust-only -p peacockdb-core --lib
+          scripts/build-test.sh -- cargo test --features rust-only -p peacockdb-core --lib
           # The corpus on the same path: every enabled query at every mode its line
           # declares, answers against DataFusion. Needs sf1, so it lives here and not
           # in the golden-only tier.
-          cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus
+          scripts/build-test.sh -- cargo test --features rust-only -p peacockdb-core --test test_cpu_corpus
         env:
-          # The pair's own two only; CMAKE_GENERATOR and RUSTFLAGS come from the job.
-          LD_LIBRARY_PATH: /opt/conda/lib
-          CUDF_ROOT: /opt/conda
+          # build-test.sh hands it to the image by name; the step's own, beside the job's two.
+          LD_LIBRARY_PATH: /opt/cudf/lib
 
   # Standalone build job for the GPU host's artifact — runs in parallel with dataset-matrix
   # so gpu-tests can start as soon as the build is done, without waiting for the
@@ -344,7 +321,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: rapidsai/base:25.02-cuda12.0-py3.12
-    # Same container sh-not-bash default as dataset-matrix above.
+    # Inside a container the runner does NOT default `run:` to bash: it resolved to `sh -e {0}` in
+    # this rapids image, and a step opening with `set -euo pipefail` died on "Illegal option -o
+    # pipefail". The job moves to the build image in containers-only Task 6.
     defaults:
       run:
         shell: bash
@@ -357,7 +336,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: ./.github/actions/cpp-build
+      - uses: ./.github/actions/cpp-build-conda
         with:
           cudf: "25.02"
 
