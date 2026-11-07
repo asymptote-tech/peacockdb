@@ -301,6 +301,32 @@ nothing.
 - **I1 (tickets), coordinator:** #238 now names engine `b415d375` and says the link to tpch q8 is unverified; new #308 (tp4_sized host spin) for tpch q9, tpcds q18, q24, q64 timing out at 1800 s with the host spinning; the Reading cites #308.
 - **I2, developer:** after this PR the committed tooling cannot regenerate the H100's profiles in either mode. `create_nsys_profile.sh --cases` makes a case per listed mode (now both); `nsys_hbm.py`'s merge holds parts to every call in the two-mode record; the per-case on-VM drivers live only in `/tmp/tp4-sized/bin`. **Decided:** give `nsys_hbm.py`'s merge a mode scope and `create_nsys_profile.sh --cases` a way to take one mode (test first); rewrite build-test.md "sf40 baseline" step 7 for a two-mode list, with the on-VM per-case recipe and that q14, q61, q80, q88 were left out on an estimate. The `/tmp` drivers are not committed.
 - **N3, developer:** `test_calls.py` guards `calls_in` alone; add a `main()`-level or `islice` regression.
+- **I2 and N3, developer, done (no VM):**
+  - `nsys_hbm.py --mode <mode>` (the record's spelling, `tp4-sized`) holds a merge to that mode's
+    calls of the record, both ways. It refuses a mode no record row has, a part of another mode
+    ("in no record at mode …"), and `--mode` with `--capture`. Red first:
+    `test_a_merge_scoped_to_a_mode_covers_that_mode_s_calls_alone` stopped on `unrecognized
+    arguments: --mode`.
+  - `create_nsys_profile.sh --cases <csv> --mode <mode>` (the list's spelling, `tp4_sized`)
+    keeps that mode's lines for both passes. It passes `--mode tp4-sized` to the merge only, not
+    to the per-case joins, whose `--case` already scopes them. It refuses `--mode` without
+    `--cases`, `--mode` with `--fused`, a mode `device_cases.py` does not know, and a known mode no
+    row carries. Without that last check, the empty list's blank line reached the goldens check as
+    dataset `.sf`. Red first: `test_cases_with_a_mode_take_that_mode_alone` failed on
+    `unknown argument: --mode`.
+  - build-test.md "sf40 baseline" step 7 is rewritten for a two-mode list: `--mode` on every
+    scripted pass, the on-VM per-case recipe in prose, the cut record for a pass that leaves cases
+    out, and q14, q61, q80 and q88 left out on an estimate. With `--mode`, tpch's tp4_sized metrics
+    pass now fits the script. tpcds's still needs the cut record (72 of 76 cases).
+  - N3: `CountedCalls` also counts what its iterator yields, and the region lies at call 50,000.
+    So `rows[lo:]` and `islice(rows, lo, None)` inside `calls_in` each read about 50,000.
+    `test_the_reader_walks_every_region_through_calls_in` wraps `calls_in` and runs `main()`: three
+    regions, three walks. Checked by mutating a copy of `nsys_calls.py`, restored byte-identical
+    after each: `islice` and the slice turn the first test red, and an inline slice walk in
+    `main()` turns the second red.
+  - Counts: calibration row 119 → 121; images row 261 → 262; grand total 8187 → 8190 (Python
+    1600 → 1603). shellcheck is not installed on dev, so the script was checked with `bash -n` and
+    its 50 tests.
 - **N4-N6, coordinator:** report text (3.7 s; the 93.0 of 97.6 s set named; "every GPU side"; "exceeds"), build-test.md's sf40 answer check names tp1_single, tpcds unattributed share added here.
 
 ## Checkpoints
@@ -311,6 +337,7 @@ nothing.
 | Task 1 Step 5 | `49a0d619` | tp4-sized: the h100 list is written at tp1_single and tp4_sized; test_corpus_goldens 66, cpu suite green |
 | Task 2 (part) | `de71ced0` | tp4-sized: nsys_calls reads a region's own calls, not the rest of its thread; interim: benchmark done (126 cases, 5 failed), files held until the page regenerates; calibration tests 119 |
 | tpcds profiles | reported | tp4-sized: tpcds tp4_sized profiled on the H100 (72 of 76; calls.tsv 58); calibration tests 119, test_corpus_goldens 66, page --check 0 |
+| review round 1 (I2, N3) | reported | tp4-sized: the hbm merge and the profile script take one mode of a two-mode list; step 7 rewritten; the region walk guarded at main(); calibration tests 121, test_run_gpu 50, test_corpus_goldens 66, page --check 0 |
 
 ## VM time
 
