@@ -198,7 +198,7 @@ sharing scans, with mergeability and pipelining hints and a memory cap; run them
 
 The same query set at sf40 tp4_sized on the H100, unfused, and its sums added to the report.
 
-### 10. [`containers-only.md`](containers-only.md) — closes [#129](../tickets/testinfra.md#t129) (part a) — state: approved to build
+### 10. [`containers-only.md`](containers-only.md) — closes [#129](../tickets/testinfra.md#t129) (part a) — state: building
 
 Retire the non-container paths: CI in the build images (25.02, and a CI-only 25.10), the L40S's `gpu-tests` through `run-gpu.sh`,
 local and verda builds through the image, the conda install and init scripts deleted, one path in
