@@ -2217,8 +2217,10 @@ mod tests {
         let mut passed: BTreeSet<String> = BTreeSet::new();
         let mut calls = 0;
         let mut in_call = false;
-        for line in wf.lines() {
-            if line.contains("cargo run") && line.contains("-p cost-report") {
+        for mut line in wf.lines() {
+            if let Some(at) = line.find("cargo run").filter(|_| line.contains("-p cost-report")) {
+                // A wrapper's flags before it, build-test.sh's `--pass-env`, are not ours.
+                line = &line[at..];
                 in_call = true;
                 calls += 1;
             }

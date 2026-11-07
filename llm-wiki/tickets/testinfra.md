@@ -9,6 +9,7 @@ Tests, CI, hosts, testdata etc
 - [#176 (CI coverage one-way) the CI coverage guard checks one direction only](#t176)
 - [#129 (26.02 CI leg image) The "26.02" CI leg builds against a 25.10a image](#t129)
 - [#306 (no_sort ties by position) a `no_sort` comparison pairs rows by position, so tied rows in another order fail](#t306)
+- [#309 (no en_US in build image) the build image has no en_US.UTF-8 locale, so one script test cannot run in it](#t309)
 
 <a id="t178"></a>
 ### #178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault
@@ -76,3 +77,14 @@ every `ORDER BY` key swap (rows counted from 1):
 
 Both rows are `wrong #306` in the H100's `cases.csv` until the oracle accepts a permutation of
 tied rows. The fix needs the sort keys, which the oracle does not hold today.
+
+<a id="t309"></a>
+### #309 (no en_US in build image) the build image has no en_US.UTF-8 locale, so one script test cannot run in it
+`test_fetch_sf40.py::test_fetch_aggregate_is_in_the_c_locales_order` proves `fetch-sf40.sh` checks
+an sf40 set in C order when the caller's locale is en_US. In the build image its probe fails:
+`locale -a` there lists `C`, `C.utf8` and `POSIX`, and the image has no locale sources to build one.
+So the cost-report job runs that file on the runner, its `on_runner` list (containers-only, Task 3).
+
+The fix: the `locales` package and `en_US.UTF-8` generated in `docker/build.Dockerfile`, then the
+file joins the in-image loop and its `RUNNER_SIDE` entry in `ci_images.rs` goes. It changes the
+build image's inputs, so it needs a publication of its own.

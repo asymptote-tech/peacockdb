@@ -1,0 +1,85 @@
+name: Build image
+description: >-
+  Frees the runner's disk and pulls the build image of this tree's inputs (llm-wiki/build-test.md,
+  "Images"). The job's later steps run project commands through scripts/build-test.sh, which reads
+  the PEACOCK_* variables this action exports. After actions/checkout.
+
+inputs:
+  cudf:
+    description: The image's cuDF version, one with a docker/conda/cudf-<v>.spec.
+    required: true
+  ccache:
+    description: >-
+      'true' for a job that builds the C++: restores and saves the image builds' ccache. Off for the
+      rest, whose empty ccache saved under the shared key would replace a building job's.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    # A standard runner has 14 GB of disk. The image takes 10 to 16 GB, by storage driver, and the
+    # job's cargo target dir comes beside it. The preinstalled SDKs go first, and the job stops
+    # short of need_gb, in GB of 10^9 bytes as docker reports sizes.
+    - name: Free the disk
+      shell: bash
+      run: |
+        set -euo pipefail
+        df -h /
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+        docker image prune --all --force > /dev/null
+        echo "docker storage driver: $(docker info --format '{{.Driver}}')"
+        root=$(docker info --format '{{.DockerRootDir}}')
+        need_gb=25
+        free_gb=$(( $(df --output=avail -B1 "$root" | tail -1) / 1000000000 ))
+        echo "$free_gb GB free under $root"
+        if [ "$free_gb" -lt "$need_gb" ]; then
+          echo "::error::$free_gb GB free under $root; the build image and a cargo target dir need $need_gb"
+          exit 1
+        fi
+
+    # By the tree's inputs, never by a moving tag: a branch that publishes images does not change
+    # what another tree runs in. image-ref.sh refuses an unpublished or differing image, naming it.
+    - name: Find the build image
+      id: image
+      shell: bash
+      env:
+        CUDF: ${{ inputs.cudf }}
+      run: |
+        set -euo pipefail
+        ref=$(scripts/env/image-ref.sh build "$CUDF")
+        echo "build image: $ref"
+        echo "ref=$ref" >> "$GITHUB_OUTPUT"
+        {
+          echo "PEACOCK_BUILD_IMAGE=$ref"
+          echo "PEACOCK_CUDF=$CUDF"
+          echo "PEACOCK_CARGO_REGISTRY=$HOME/.cargo/registry"
+          echo "PEACOCK_CCACHE_DIR=$HOME/.ccache"
+        } >> "$GITHUB_ENV"
+
+    - name: Pull the build image
+      shell: bash
+      env:
+        REF: ${{ steps.image.outputs.ref }}
+      run: |
+        set -euo pipefail
+        for attempt in 1 2 3; do
+          if docker pull --quiet "$REF"; then
+            df -h /
+            exit 0
+          fi
+          echo "docker pull failed, attempt $attempt of 3"
+          sleep $(( attempt * 30 ))
+        done
+        echo "::error::could not pull $REF"
+        exit 1
+
+    # Prefix restore: an older cache still restores, and ccache checks each object by content.
+    - name: Restore/save ccache
+      if: inputs.ccache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: ccache-img-${{ inputs.cudf }}-${{ github.sha }}
+        restore-keys: |
+          ccache-img-${{ inputs.cudf }}-

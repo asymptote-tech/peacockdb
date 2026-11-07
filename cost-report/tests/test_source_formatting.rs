@@ -13,6 +13,8 @@
 mod checkout_reads;
 #[path = "test_source_formatting/ci_coverage.rs"]
 mod ci_coverage;
+#[path = "test_source_formatting/ci_images.rs"]
+mod ci_images;
 #[path = "test_source_formatting/near_miss.rs"]
 mod near_miss;
 #[path = "test_source_formatting/privacy.rs"]

@@ -141,8 +141,82 @@ Branch `ENS-containers-only`, forked from `ENS-tp4-sized` at `9058709c`; its PR 
     held 271 by `def test_` before this task; rustfmt `--check` reports diffs in
     `cost-report/src/main.rs` and 15 peacockdb-core files nobody here touched.
 
+## Task 3
+
+- Dispatched 2026-11-07 at Steps 2, 3 and Step 4's local half (developer, dev, no VM). Image
+  `:cudf-25.02-in-50a0c1d7779e`, `target-img-25.02` warm; `/` stayed at 16 GB free.
+- Step 2: `ci_images.rs` written with a checker that accepted everything: the four doctored tests
+  red. Checker written: they pass, and `every_listed_job_runs_in_the_build_image` red on the
+  unchanged workflow, naming the missing action, `dtolnay`, three `pip install` lines and every
+  bare `cargo`/`python3` line of both jobs. Step 3: green, `test_source_formatting` 47 passed
+  (41 at the baseline, +1 Task 2, +5 here).
+- The checker (`image_problems`): a job's lines run from `  <job>:` to the next two-space key;
+  `run:` values inline or block; `\` lines folded (`fold_continuations`); `$(…)` read as its own
+  line; a simple command's first word, past keywords and `NAME=` words (`NAME=(…)` is one word),
+  is the command. Comment lines are skipped by every rule, `OFF_IMAGE` too. "Unmounted" is a
+  deny list, not the plan's allow list: `HOME`, `GITHUB_{OUTPUT,ENV,STEP_SUMMARY,PATH,STATE,
+  EVENT_PATH}`, `RUNNER_*` but `RUNNER_TEMP`, and `~`. A value like `$REPORT_SHA` is not a path,
+  and an allow list cannot tell. Words after a redirection are the runner's. A `RUNNER_SIDE`
+  entry that matches no line is refused.
+- **cost-report's own `every_workflow_flag_is_one_the_binary_accepts` (`main.rs`) broke**: it took
+  every `--word` of a line with `cargo run -p cost-report`, so `build-test.sh`'s `--pass-env`
+  read as a cost-report flag. Fixed: a line is read from `cargo run` on. Mutation-checked: a
+  `--bogus` on the wrapped cost-diff line is still refused.
+- Diverged from the plan:
+  - **`benchmarks/tests` is not in cost-report**: `test_duckdb_minimal.py` asserts the generated
+    sf1 (`testdata/tpch.sf1/lineitem.parquet`), which that job has not. Moved to Task 4's 25.02 leg
+    (plan note at Task 4). It is "manual" today, so no coverage moves.
+  - **Three `scripts/env/tests` files run on the runner** (`on_runner`, one `RUNNER_SIDE` entry):
+    `test_fetch_sf40.py` needs `en_US.UTF-8`, and the image has only `C`, `C.utf8`, `POSIX` and no
+    locale sources (#309, new). `test_bootstrap.py` (`pwd.getpwuid`) and `test_provision.py`
+    (`provision-vm.sh`'s `id -un`) need a user name, and the runner's uid 1001 has none in the
+    image. Found only by running as 1001: as dev's uid 1000 (the image's `peacock`) they pass.
+    The scripts are right to want one: they run as a VM's or laptop's own user. All three are
+    stdlib only and pass on python 3.12.3 (17, 20, 23).
+  - The action has a second input, `ccache` (default `'false'`), key `ccache-img-<cudf>-<sha>`.
+    Unconditional, cost-report would save an empty `~/.ccache` under the key the C++ jobs share,
+    and a prefix restore would then hand them the empty one. `img` keeps the conda-era caches out.
+  - `--pass-env` names what the program reads, not what the step sets: `GITHUB_REPOSITORY` on
+    both report lines, plus `GITHUB_SHA` on the cost-diff line, which has no `--sha`. `REPORT_SHA`,
+    `PAGES_URL`, `BASE_SHA` expand on the runner into argv.
+  - The registry the action names is the runner's `~/.cargo/registry`, which Swatinem caches; the
+    pull step reads the ref from the find step's output, not from `GITHUB_ENV`.
+  - `PEACOCK_DPHYP_LIB` is `$PWD/target-img-$PEACOCK_CUDF/release/…`, passed by `--pass-env`.
+- Local evidence (dev, 2026-11-07):
+  - Every `run:` of the edited cost-report job executed as rendered (`/tmp/co-sim/run_job.py`,
+    bash -e, `RUNNER_TEMP`/`GITHUB_OUTPUT` as temp paths, event `pull_request`), after the action's
+    "Find the build image" step run as written. All green but shellcheck, absent on dev; its line
+    passes under the actionlint image's shellcheck 0.11.0. Report, `join-optimizer` page,
+    `pr_comment.md` and the gate (1017 compared, 0 changed, `rc=0` to `GITHUB_OUTPUT`) produced.
+  - Counts against `## Counts before`, cost-report job, log order: every Python line identical,
+    both `1 runs …, 1 failed` lines included (`run.py:243` prints `1 runs in 1.1 s, 1 failed`).
+    Rust: `--bin cost-report` 49, `test_source_formatting` 41 → 47 (above), the rest equal.
+  - As the runner's uid: a clone owned by 1001:118, no submodules, every in-image Python file of
+    the job `docker run --user 1001:118`: 91 of 93 files green, the two above red. `cargo run
+    --cost-diff` as 1001 with an empty registry: crates fetched, built, `git show` of the base
+    fine.
+  - `image-ref.sh`'s remote branch with an empty `DOCKER_CONFIG`: `buildx imagetools inspect`
+    and `docker pull …@sha256:b8da5a94553c…` both anonymous, exit 0.
+  - The new step as rendered: 17 files in the image, 201 tests; 3 on the runner, 60; exit 0.
+  - actionlint: the six findings HEAD's files already have, none in these jobs. YAML parses;
+    `bash -n` of all 17 `run:` blocks; shellcheck of the action's three scripts clean.
+- Wiki: build-test.md's cost-report and s3-datasets bullets, the second trap, the "Images" test
+  paragraph, the CI wiring guard row (+5, 20) and the Images (Python) row: its N was 287 and the
+  files hold 296 (`def test_`; the run's 201+60 plus 35 by hand), the drift Task 2 recorded. Totals
+  now Rust 6309, Python 1638, 8233. Ticket #309 in testinfra.md, tickets.md's index, total 93 and
+  next free 310.
+- Plan bookkeeping: Task 2 Step 5 ticked (committed `1a1b9e56`), Task 4 Step 7 unticked (it was
+  ticked, not done).
+- What could differ on the runner: free disk after the removals against `need_gb=25` (the image
+  is 10 GB uncompressed, 15.4 GB in `docker images` here); Swatinem runs the runner's own cargo
+  for its key and cleanup (`~/.cargo/bin`, preinstalled), not the image's; the first run's
+  target and registry are cold (15 min was the old cold time); `docker run` per Python file, about
+  100 of them, adds 1-2 min. s3-datasets now pays the disk freeing and the pull, a few minutes.
+
 ## Notes for a restart
 
+- PR #203, a draft against `ENS-tp4-sized`, opened after Task 2 so Task 3 on has PR runs. The board
+  moves to `reviewing` only at the plan's last step.
 - `images.yml` is on master (workflow "Images", id 409646666), from the merge of #193; Task 1
   Step 8's master check passes. A dispatch runs the ref's own copy of the file.
 - dev's disk: 13 GB free on `/` at branch time; local images `peacockdb-build:cudf-25.02` (15.4 GB),

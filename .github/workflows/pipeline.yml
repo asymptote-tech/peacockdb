@@ -610,24 +610,29 @@ jobs:
           # gate's `git show <base.sha>:…` baseline read (default checkout is shallow).
           fetch-depth: 0
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      # Every project command below runs in the build image, through scripts/build-test.sh: the
+      # image's rust, and its Python with the venv the committed costs ran on. Only shellcheck,
+      # curl and the comment upserts run on the runner (cost-report's ci_images.rs).
+      - uses: ./.github/actions/build-image
+        with:
+          cudf: "25.02"
 
       # Cache the Rust dep tree so this job restores the opt-3 deps instead of
       # recompiling the whole DataFusion/Arrow stack (the opt-level bump pushed this
       # job 3m30s -> 15m40s cold). Own shared-key, NOT dataset-matrix's: this job sets no
       # RUSTFLAGS (keeps debug symbols), whereas dataset-matrix builds with -C debuginfo=0,
       # so the dep fingerprints differ — a shared key would fingerprint-miss and
-      # rebuild anyway. With its own key it warm-restores its own opt-3 deps, which
-      # is what makes the 2nd-run cost-report time drop.
+      # rebuild anyway. The target dir is build-test.sh's, and the registry the one the
+      # action mounts, the runner's ~/.cargo/registry.
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rust-cost-report
+          shared-key: rust-cost-report-image
+          workspaces: ". -> target-img-25.02"
 
       # Guard the two DuckDB generators' logic on every PR (before generating), so a
       # broken classifier/normalizer, or a result rendering that drifted from arrow-rs,
-      # fails CI fast. python3 is preinstalled, and neither file needs duckdb or parquet.
+      # fails CI fast. Neither file needs duckdb or parquet.
       #
       # Enumerated by glob for the reason the exec-model step below gives: there is no meta
       # guard over python files, so a hand-written list rots the way the CI coverage
@@ -643,20 +648,20 @@ jobs:
           for f in "${files[@]}"; do
             echo "== $f"
             # Run every file before reporting, so one failure does not hide the rest.
-            python3 "$f" || status=1
+            scripts/build-test.sh -- python3 "$f" || status=1
           done
           exit "$status"
 
       # The report widget's registry reader: a quoted oracle cell, a registry older than the
       # duckdb_oracle column, and the include fallback. Stdlib only, no cargo.
       - name: Ticket widget unit tests (Python)
-        run: python3 scripts/test_ticket_widget.py
+        run: scripts/build-test.sh -- python3 scripts/test_ticket_widget.py
 
       # The execution-model prototype. No project code, so it belongs
       # in this cheap tier next to the extractor tests. The scheduler tests are stdlib
       # only; the operator tests need pandas, and they FAIL rather than skip when it is
-      # absent — a skipped operator suite reads exactly like a passing one. Same
-      # self-heal shape the dataset-matrix and s3-datasets jobs use for numpy/pyarrow.
+      # absent — a skipped operator suite reads exactly like a passing one. The image's
+      # venv has it, at the version the committed costs ran on.
       #
       # Enumerated by glob rather than by name, unlike the rust targets above: there is
       # no meta guard over python files, so a hand-written list would rot the way
@@ -664,11 +669,10 @@ jobs:
       - name: Exec-model prototype tests (Python)
         run: |
           set -euo pipefail
-          python3 -c "import pandas, pyarrow" 2>/dev/null || pip install --quiet pandas pyarrow
           # test_dphyp.py calls the DPhyp crate through its C ABI and refuses to run without
           # it, so the library is built here, seconds, and named for it.
-          cargo build --release -p peacockdb-dphyp
-          export PEACOCK_DPHYP_LIB=$PWD/target/release/libpeacockdb_dphyp.so
+          scripts/build-test.sh -- cargo build --release -p peacockdb-dphyp
+          export PEACOCK_DPHYP_LIB=$PWD/target-img-$PEACOCK_CUDF/release/libpeacockdb_dphyp.so
           # globstar: the tests sit in one folder per component, and `**` also matches
           # tests/ itself.
           shopt -s nullglob globstar
@@ -705,19 +709,18 @@ jobs:
           for f in "${files[@]}"; do
             echo "== $f"
             # Run every file before reporting, so one failure does not hide the rest.
-            python3 "$f" || status=1
+            scripts/build-test.sh --pass-env PEACOCK_DPHYP_LIB -- python3 "$f" || status=1
           done
           exit "$status"
 
       # The calibration scripts' own tests: a synthetic capture and a synthetic record, so
       # no device, no nsys and no measurement. Beside the exec-model set because they are
       # the same kind of thing — python over text, cheap, and nothing else in CI runs them.
-      # matplotlib is self-healed the way pandas is above; plot.py is a hard import of it,
-      # and a test that skipped for want of it would read exactly like a passing one.
+      # plot.py is a hard import of matplotlib, which the image's venv has; a test that
+      # skipped for want of it would read exactly like a passing one.
       - name: Calibration script tests (Python)
         run: |
           set -euo pipefail
-          python3 -c "import matplotlib" 2>/dev/null || pip install --quiet matplotlib
           shopt -s nullglob
           files=(scripts/calibration/tests/test_*.py)
           # A vanished glob makes the loop body disappear and the step pass green.
@@ -726,11 +729,13 @@ jobs:
           for f in "${files[@]}"; do
             echo "== $f"
             # Run every file before reporting, so one failure does not hide the rest.
-            python3 "$f" || status=1
+            scripts/build-test.sh -- python3 "$f" || status=1
           done
           exit "$status"
 
       # The Nebius VM scripts, against fake nebius/ssh and synthetic clocks: no VM, no secret.
+      # The tests run in the image. shellcheck stays on the runner, which has it: a linter over
+      # the scripts, running none of the project's code, and the image has none.
       - name: Nebius script tests
         run: |
           set -euo pipefail
@@ -739,18 +744,54 @@ jobs:
           # A vanished glob makes the loop body disappear and the step pass green.
           [ ${#files[@]} -gt 0 ] || { echo "no nebius test files matched"; exit 1; }
           status=0
-          for f in "${files[@]}"; do echo "== $f"; python3 "$f" || status=1; done
+          for f in "${files[@]}"; do
+            echo "== $f"
+            scripts/build-test.sh -- python3 "$f" || status=1
+          done
           shellcheck scripts/nebius.sh scripts/nebius-sync.sh scripts/nebius-test.sh \
             scripts/nebius/check-actor.sh scripts/nebius/ci-ship.sh scripts/nebius/watch.sh || status=1
           exit "$status"
 
+      # The image, image-ref, build-test and run-gpu scripts, against fake docker, ssh and aws.
+      # needs_docker are the three that build or run the images themselves: by hand
+      # (build-test.md, "Images"). on_runner are stdlib only and need what the image cannot give
+      # the runner's uid: the en_US.UTF-8 locale (#309), or a user name, which bootstrap-vm.sh
+      # and provision-vm.sh read as the VM's or laptop's own user. Both named, and a missing one
+      # is an error, as the exec-model step's elsewhere list is.
+      - name: Image and run script tests (Python)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          needs_docker=(test_image_any_user.py test_run_image.py test_run_tests.py)
+          on_runner=(test_fetch_sf40.py test_bootstrap.py test_provision.py)
+          for n in "${needs_docker[@]}" "${on_runner[@]}"; do
+            [ -f "scripts/env/tests/$n" ] || { echo "scripts/env/tests/$n is missing; is it still named here?"; exit 1; }
+          done
+          files=()
+          for f in scripts/env/tests/test_*.py; do
+            case " ${needs_docker[*]} ${on_runner[*]} " in *" ${f##*/} "*) ;; *) files+=("$f") ;; esac
+          done
+          # A vanished glob makes the loop body disappear and the step pass green.
+          [ ${#files[@]} -gt 0 ] || { echo "no image script test files matched"; exit 1; }
+          status=0
+          for f in "${files[@]}"; do
+            echo "== $f"
+            # Run every file before reporting, so one failure does not hide the rest.
+            scripts/build-test.sh -- python3 "$f" || status=1
+          done
+          for n in "${on_runner[@]}"; do
+            echo "== scripts/env/tests/$n, on the runner"
+            python3 "scripts/env/tests/$n" || status=1
+          done
+          exit "$status"
+
       - name: cost-report unit tests (Rust)
-        run: cargo test -p cost-report --bin cost-report
+        run: scripts/build-test.sh -- cargo test -p cost-report --bin cost-report
 
       # Dependency-free, so it builds in seconds beside cost-report rather than in the jobs that
       # carry the DataFusion stack.
       - name: DPhyp unit tests (Rust)
-        run: cargo test -p peacockdb-dphyp
+        run: scripts/build-test.sh -- cargo test -p peacockdb-dphyp
 
       # The tests whose subject is the source tree: every rust test target wired into CI (CI
       # does not sweep them as a set, so a new tests/*.rs is invisible here until someone adds
@@ -758,18 +799,19 @@ jobs:
       # and that no peacockdb-core test reads the checkout. They read src/, tests/ and the
       # workflows, so they live in cost-report, which is never staged to a remote host.
       - name: The source tree's own rules hold
-        run: cargo test -p cost-report --test test_source_formatting
+        run: scripts/build-test.sh -- cargo test -p cost-report --test test_source_formatting
 
       # A component's private module is unreachable from outside the crate: a probe compiled
       # against the built library, so it needs no dataset and no device.
       - name: A private module is unreachable from outside the crate
-        run: cargo test --features rust-only -p peacockdb-core --test test_crate_privacy
+        run: scripts/build-test.sh -- cargo test --features rust-only -p peacockdb-core --test test_crate_privacy
 
       - name: Generate report
         env:
           # Golden cell links point at the code version the report was generated
           # from: the PR head commit on PRs (GITHUB_SHA is the merge ref there),
-          # the pushed commit on master. GITHUB_REPOSITORY is read for the slug.
+          # the pushed commit on master. cost-report reads GITHUB_REPOSITORY for the slug, so it
+          # is passed into the image.
           REPORT_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           PAGES_URL: https://asymptote-tech.github.io/peacockdb
         run: |
@@ -788,21 +830,21 @@ jobs:
                   || rmdir "report/$sha" 2>/dev/null || true
               done < report/history.tsv
             fi
-            cargo run -p cost-report -- --published \
+            scripts/build-test.sh --pass-env GITHUB_REPOSITORY -- cargo run -p cost-report -- --published \
               --sha "$REPORT_SHA" --generated-at "$GENERATED_AT" \
               --site report --md "$RUNNER_TEMP/pr_comment.md"
           else
             # PR: single standalone report for the artifact-less comment; the page
             # isn't published for this change yet, so no --site / no nav links.
-            cargo run -p cost-report -- \
+            scripts/build-test.sh --pass-env GITHUB_REPOSITORY -- cargo run -p cost-report -- \
               --sha "$REPORT_SHA" --generated-at "$GENERATED_AT" \
               --html report/index.html --md "$RUNNER_TEMP/pr_comment.md"
           fi
           # The join optimizer's report, from the committed .costs.txt and .optimizer.txt,
-          # its links into that commit's files. This python3 has pandas from the prototype's
-          # step; test_cost_report renders the page with it blocked. Rendered on a PR too, so
+          # its links into that commit's files. The image's python3 has pandas;
+          # test_cost_report renders the page with it blocked. Rendered on a PR too, so
           # a page that cannot render fails here; only master's report/ is deployed.
-          python3 scripts/exec_model/cost_report.py --sha "$REPORT_SHA"
+          scripts/build-test.sh -- python3 scripts/exec_model/cost_report.py --sha "$REPORT_SHA"
           mkdir -p report/join-optimizer
           cp scripts/exec_model/testdata/goldens/cost_report.html report/join-optimizer/index.html
 
@@ -863,14 +905,18 @@ jobs:
           # and unaffected by other PRs merged to master meanwhile. Present locally
           # thanks to fetch-depth: 0 above.
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        # With no --sha, cost-report reads GITHUB_SHA for its links, and GITHUB_REPOSITORY for
+        # the slug: both are passed into the image.
         run: |
           set +e
-          cargo run -q -p cost-report -- --cost-diff --base "$BASE_SHA" \
+          scripts/build-test.sh --pass-env GITHUB_SHA --pass-env GITHUB_REPOSITORY -- \
+            cargo run -q -p cost-report -- --cost-diff --base "$BASE_SHA" \
             --html "$RUNNER_TEMP/cost_diff.html" --md-diff "$RUNNER_TEMP/cost_diff.md"
           rc=$?
           set -e
           # rc is three things and the fail step below says which: 0 clean, 1 regressions
-          # found, anything else the binary died. `set +e` made a crash and a regression the
+          # found, anything else the binary died or the image would not start (build-test.sh
+          # exits 2, docker 125). `set +e` made a crash and a regression the
           # same red for an hour when a dead flag panicked here.
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
           echo "cost-diff exit code: $rc"
@@ -966,21 +1012,21 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v4
+      # The check reads parquet footers over ranged GETs with pyarrow, and lists with aws: the
+      # build image has both.
+      - uses: ./.github/actions/build-image
+        with:
+          cudf: "25.02"
       - name: Check dataset buckets
         # Endpoint + region are not secret; every aws call must pass the endpoint or it
         # hits real AWS. If the secrets are unset (should not happen given the guard),
-        # skip loudly rather than error on missing creds.
+        # skip loudly rather than error on missing creds. The keys reach the image by name,
+        # never in argv.
         run: |
           if [ -z "$AWS_ACCESS_KEY_ID" ]; then
             echo "S3 credentials not present — skipping (fork PR or unconfigured)."
             exit 0
           fi
-          # NEW DEPENDENCY: the check now reads parquet FOOTERS over ranged GETs to verify
-          # schema/embedding-dims/row-counts, so it needs pyarrow (it previously needed only
-          # aws + python3). Same import-or-pip self-heal as the Tier A step.
-          # numpy is belt-and-braces: dataset_checks.py imports it lazily (inside the
-          # embedding-stats helpers only), so a footer-only run does NOT need it — but a
-          # future top-level numpy use here must not turn this job red again.
-          python3 -c "import pyarrow, numpy" 2>/dev/null || pip install --quiet pyarrow numpy
-          python3 scripts/check_s3_datasets.py \
+          scripts/build-test.sh --pass-env AWS_ACCESS_KEY_ID --pass-env AWS_SECRET_ACCESS_KEY -- \
+            python3 scripts/check_s3_datasets.py \
             --endpoint https://storage.eu-north1.nebius.cloud:443

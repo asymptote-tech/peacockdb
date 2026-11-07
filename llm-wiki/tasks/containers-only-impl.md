@@ -283,7 +283,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `scripts/build-test.sh -- cargo test -p cost-report --test test_source_formatting` → all pass.
   Then `scripts/build-test.sh --rust-only --build --run` on dev → green, with the cpu counts of
   build-test.md's table (`--lib` 780, `test_cpu_corpus` 2009, …). Record them in the detail file.
-- [ ] **Step 5: commit** `containers-only: build-test.sh builds and runs in the build image; image-ref.sh; cargo-cudf.sh gone`.
+- [x] **Step 5: commit** `containers-only: build-test.sh builds and runs in the build image; image-ref.sh; cargo-cudf.sh gone`.
 
 ### Task 3: the CPU-only jobs in the image (`cost-report`, `s3-datasets`)
 
@@ -319,7 +319,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   branch's own first PR run, before Step 3, if the parent has none). Save, per job, the lines
   matching `test result:`, `\[  PASSED  \]` and the Python harness's summary, to the detail file
   `## Counts before`, naming the run.
-- [ ] **Step 2: failing tests** `ci_images.rs::every_listed_job_runs_in_the_build_image` (as in
+- [x] **Step 2: failing tests** `ci_images.rs::every_listed_job_runs_in_the_build_image` (as in
   Interfaces), and its doctored-workflow cases: `a_bare_cargo_line_in_a_listed_job_is_refused`
   (a `cost-report`-shaped job with `run: cargo test -p cost-report` → refused, naming the job and
   line; the same line in `RUNNER_SIDE` → accepted) and `a_wrapped_command_writing_an_unmounted_path_is_refused`
@@ -327,7 +327,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `--md "$RUNNER_TEMP/r.md"` and `scripts/build-test.sh -- … >> "$GITHUB_OUTPUT"` → accepted). Run `scripts/build-test.sh -- cargo test -p cost-report --test
   test_source_formatting ci_images` → FAIL (the action is absent; cost-report still has
   `dtolnay`).
-- [ ] **Step 3: move the jobs.**
+- [x] **Step 3: move the jobs.** (As built, beside this text: the detail file's `## Task 3`.)
   - `cost-report`: after checkout (fetch-depth 0), use the action with `cudf: "25.02"`, then
     Swatinem with `shared-key: rust-cost-report-image` and `workspaces: ". ->
     target-img-25.02"`. Every `python3 …`/`cargo …` line becomes `scripts/build-test.sh -- <same
@@ -348,7 +348,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   - `s3-datasets`: use the action, then `scripts/build-test.sh --pass-env AWS_ACCESS_KEY_ID
     --pass-env AWS_SECRET_ACCESS_KEY -- python3 scripts/check_s3_datasets.py --endpoint …`. Its
     fork guard and `exit 0` on missing keys stay on the runner.
-- [ ] **Step 4: run** the guard locally → PASS. Then (coordinator) push; on the branch's PR run,
+- [ ] **Step 4: run** the guard locally → PASS (done, 47 passed; the detail file). Then (coordinator) push; on the branch's PR run,
   `cost-report` and `s3-datasets` are green, and the counts equal Step 1's baseline, plus the
   `benchmarks/tests` suites now run. The coordinator hands any red job or moved count to the
   developer as a failing test, with the venv pins (`pandas 3.0.6`, `matplotlib`) as the first
@@ -377,6 +377,10 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   ccache` with `LDFLAGS=-Wl,-rpath-link,/opt/cudf/lib`, then `ccache -s` in the image. No conda,
   no cmake/ninja download: the image has both at the pins.
 
+- From Task 3 (detail file `## Task 3`): `benchmarks/tests/test_duckdb_minimal.py` needs the
+  generated sf1, which cost-report lacks, so it lands here: the 25.02 leg runs it after `Generate
+  SF-1`, wrapped, and build-test.md's row for it moves off "manual". The build-image action takes
+  `ccache: 'true'` here (key `ccache-img-<cudf>-<sha>`); cpp-build's own ccache step goes.
 - [ ] **Step 1: failing tests** in `ci_images.rs`. First, add `dataset-matrix` to
   `IN_IMAGE_JOBS`. Then `every_cudf_leg_has_a_build_image`: each `- cudf: "<v>"` leg in
   pipeline.yml has `docker/conda/cudf-<v>.spec`, no leg has an `image:` key, and the job passes
@@ -410,7 +414,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   counts per step equal the count baseline's 25.02 leg, and the 25.10 leg's equal the baseline's
   "26.02" leg; `Generate SF-1` logs `generate_pbench.sh --check` passing. A moved count or a red
   step reaches the developer as a failing test; the developer explains it in the detail file.
-- [x] **Step 7: commit** `containers-only: dataset-matrix in the build image, an honest 25.10 leg (closes #129)`.
+- [ ] **Step 7: commit** `containers-only: dataset-matrix in the build image, an honest 25.10 leg (closes #129)`.
 
 ### Task 5: what `run-gpu.sh` needs for CI and for agents
 
