@@ -727,3 +727,8 @@ test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 - dev's disk filled during that work (0 bytes free): an image test pulled both run images. Removed
   this worktree's `target-img-25.02` and `target-img-25.10`, the two run images, the shellcheck
   and ubuntu images, then `docker image prune`: 29 GB free. dev holds only the 25.02 build image.
+
+## Task 6 Step 6 (device run through CI)
+
+- `c3668d65` (the SC2015 fix) pushed; `pipeline.yml` dispatched 2026-11-07T18:27:10Z on
+  `ENS-containers-only`: run 42401363998. A restart that finds it unfinished dispatches it again.
