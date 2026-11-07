@@ -190,6 +190,66 @@ nothing.
   - **tpcds profiles: option (b), bounded.** Estimate each tpcds case's capture size from its tp4_sized record rows (tpch's 32 GB raw for 351 k rows is the scale). Capture one case at a time where it fits the H100's free disk with margin. Derive `calls.tsv`, `loads.tsv` and `hbm.tsv` on the VM, and never pull a capture to dev (dev has about 7 GB free). Every case that does not fit is listed as a failed capture, with the estimated size as its reason, as the spec's Profiles paragraph allows. If the estimate for the cases that fit exceeds 6 H100 hours, report before starting.
   - **The stray tp4_sized answers** in `testdata/goldens/{tpch,tpcds}.sf40/gpu-result.txt` were dropped (`git checkout`). They are outside the spec's scope, and nothing reads them.
   - **The benchmark files, `cases.csv`, `records.sha256` and the regenerated page are held** (uncommitted) until Task 4 regenerates `llm-wiki/reports/query-batching.md`. Committed alone they would turn CI's page `--check` red. Task 3's commit takes them together with Task 4's page.
+- **Second H100 session (developer), from 23:40.** No capture comes to dev.
+  - **The bound for tpcds:** a case fits when its estimated raw nsys data (tpch's 32 GB per
+    351,269 record rows, 91 KB a row) is at most 40 GB, about half the VM's 81 GB free (the raw
+    data, the report and the export are on disk together). 72 of tpcds's 76 timed cases fit.
+    Four do not, and are failed captures: q88 (817,100 rows, about 74 GB), q80 (728,260, 66 GB),
+    q14 (544,450, 50 GB), q61 (462,090, 42 GB). The first estimate for the 72 was 5.3 h: 3.3 h
+    of trace and 2.0 h of metrics (the benchmark's wall time per case, plus tpch's 13 s/GB of
+    report and export and 0.68 ms/row of reading).
+  - **The driver**, `/tmp/tp4-sized/bin/trace-cases.sh` (also on the VM in `tp4-run/`), does
+    what `create_nsys_profile.sh --trace` does on the host (same env, nsys flags, binary and
+    `--exact` names) for one capture per line, then runs `nsys_loads.py` and `nsys_calls.py`
+    there and deletes the capture. The script itself was not used for the trace because it
+    pulls each capture home. Per-case outputs go to `~/peacock/peacockdb-beta/derived/<ds>/`,
+    one summary line per capture in `derived/summary.tsv`. A line whose `loads.tsv` exists is
+    skipped, so a rerun resumes.
+  - **tpch, 42 cases** (`global_stddev`, q15, q22 left out): one capture, 42 passed, report
+    2.17 GB, export 5.82 GB, 2306 s of run and report, 543 s of export and reading. `calls.tsv`
+    exit 0 (all 42 match their recipes).
+  - **tpcds q1-q6**, one capture each: all passed, all `calls.tsv` match their recipes. q4
+    took 1547 s, 1.56x its estimate. At that rate the 72 need about 8 h (about 5.1 h of trace and
+    3 h of metrics), past the coordinator's 6 h. So the driver was ended after q6 (its group
+    file truncated; the full list kept as `tp4-run/groups-all.txt`), and the rest waits on
+    the coordinator.
+  - **tpch metrics**, 01:09: `create_nsys_profile.sh --metrics --cases /tmp/tp4-sized/tpch-tp4.csv
+    --device h100-tp4-scratch`, with `PCK_BENCH_HBM_SET=gh100 PCK_BENCH_HBM_PEAK_BW=3.35e12
+    PCK_BENCH_HBM_FREQ=10000`. The scratch slug's records are the tp4_sized segments alone,
+    joined and split against the profiled cases (tpch 45, tpcds 72), in
+    `testdata/calibration/h100-tp4-scratch/` (ignored, removed afterwards).
+  - **tpch metrics done, 01:58:** exit 0, `35121 calls from 45 parts`. `hbm.tsv` came home
+    (3.5 MB), the flat file was restored from git, and the H100 was stopped (01:58, `STOPPED`).
+    The tpcds q1-q6 derived files are home too (`/tmp/tp4-sized/vm-derived/`), and are held,
+    not merged, until tpcds is settled.
+- **tpch's calibration files**, merged by `/tmp/tp4-sized/bin/merge_mode.py` (the committed
+  notes and header, the other modes' rows, then the new tp4-sized rows; the headers and notes
+  matched): `loads.tsv` +116 rows (45 queries, from the first capture), `calls.tsv` +7,990 (42),
+  `hbm.tsv` +35,121 (45). Additions only.
+
+### Capture failed
+
+| dataset | query | file | reason |
+|---|---|---|---|
+| tpch | global_stddev, q15, q22 | `calls.tsv` | the recipe check refuses them: the sf40 tp4-sized plan drives other seqs than `goldens/tpch.sf1/tp4-sized.plans.txt` |
+| tpcds | q88, q80, q14, q61 | all three | estimated raw capture 74, 66, 50 and 42 GB, past the 40 GB bound |
+| tpcds | the other 66 of the 72 that fit | all three | not run: the projected 8 h is past the coordinator's 6 h; q1-q6 are traced and held |
+
+### Tasks 3 and 4 (2026-11-07)
+
+- Task 3 Step 1: `test_corpus_goldens` 66 passed with every file in place.
+- Task 4: `batching_report.py --check` exit 1 (stale), the regeneration exit 0, `--check` exit
+  0. Both tables carry `tp4_sized load (ms) | tp4_sized execute (ms)`; first3's sums equal the
+  three trailers added (tpch 3924.0 and 5363.3 ms, tpcds 2002.4 and 1649.0); the five failures
+  show as `(n/N)` with their reasons under the tables. The intro names the tp4_sized side. A new
+  Reading bullet compares it with tp1_single, and states that at tp4_sized the summed node times
+  track the wall time (TPC-H 93.0 of 97.6 s; tp1_single 21.7 of 25.0 s). The other Reading
+  bullets were re-read; their numbers are untouched by tp4_sized and still hold.
+- #238's "No corpus or benchmark case reaches it today" now names tpch q8 at tp4_sized.
+  build-test.md, "What `calls.tsv` does not cover", gives tp4-sized coverage and capture size.
+- Final checks: full `cargo test --features rust-only -p peacockdb-core` exit 0, no warnings
+  (1209 + 2 ignored, 2451, 66, 3, …); every `scripts/calibration/tests/test_*.py` passes (119);
+  the page's `--check` exit 0.
 
 ## Checkpoints
 
@@ -204,3 +264,5 @@ nothing.
 | VM | start (local) | stop (local) | hours |
 |---|---|---|---|
 | nebius-h100 | 2026-11-06 16:23 UTC | 2026-11-06 22:53 UTC | 6.50 |
+| nebius-h100 | 2026-11-06 23:40 UTC | 2026-11-07 01:58 UTC | 2.30 |
+| nebius-h100, task total | | | 8.80 |

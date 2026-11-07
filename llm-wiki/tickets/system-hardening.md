@@ -23,7 +23,7 @@ batch per lane, and the prototype's driver, which steps the same way, takes 137,
 tpch q8 at `tp4-rowgroup` sf1. Steps grow with the data and the lane count, so sf40, or the CLI
 at `num_cpus` lanes, can pass the cap and fail with "no termination".
 
-No corpus or benchmark case reaches it today. Measure `RunReport.steps` for q8 at sf1
+tpch q8 at `tp4_sized` sf40 reaches it on the H100 (tp4-sized). Measure `RunReport.steps` for q8 at sf1
 `tp4_rowgroup` first. The fix is the prototype's
 (`scripts/exec_model/engine/partitioned_driver.py`): a cap of the calls the run owes — declared
 source batches, batches queued below the root, one closing call per readiness index — checked
