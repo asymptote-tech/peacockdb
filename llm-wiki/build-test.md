@@ -3302,7 +3302,8 @@ merged the parts on dev.
    tpch's `filter-project` is 96 M rows: 9 min, 13.5 GB.
 
 **The sf40 answer check**, `every_sf40_device_answer_meets_duckdb` in `test_cpu_corpus`. It holds
-each `ok` and `wrong` row's `goldens/<ds>.sf40/gpu-result.txt` section to DuckDB's, under the
+each `ok` and `wrong` row's tp1_single `goldens/<ds>.sf40/gpu-result.txt` section to DuckDB's
+(a row's tp4_sized answer is held by nothing), under the
 oracle of the query's sf1 registry line. An `ok` row must meet DuckDB and a `wrong` row must still
 differ; a `skipped` row is not judged. No registry line is written for sf40, so the two sections
 are compared by fingerprint whenever either holds one: at sf40 an answer passes the cap by scale,
