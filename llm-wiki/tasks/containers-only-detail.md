@@ -732,3 +732,12 @@ test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 - `c3668d65` (the SC2015 fix) pushed; `pipeline.yml` dispatched 2026-11-07T18:27:10Z on
   `ENS-containers-only`: run 42401363998. A restart that finds it unfinished dispatches it again.
+- Run 42401363998 green, every job (s3-datasets skipped on a dispatch, as in the baseline).
+  `gpu-tests` used run image `peacockdb-run@sha256:3a69a03c7b69…` and build image
+  `peacockdb-build@sha256:b8da5a94553c…` (the inputs tags'), logged `run-tests.sh list: green`, no
+  `miniforge` anywhere. Per-binary counts equal the baseline's `gpu-tests`: C++ 67 / 5 / 56 / 136,
+  rust 9 (650 filtered) / 748 (1216 filtered) / 1009 / 1. Wall times: prepare 24 s (the VM was
+  prepared by hand in Step 5), ship 13 s, run 13 min 54 s (the old runner's ship alone had a
+  50-minute limit). The job printed no `df -h /` (no step runs one); Step 5's reading stands. The
+  cleanup soft-stopped the VM (19:11:01Z, `stopped`); `nebius.sh status` afterwards: STOPPED.
+  Task 6 done; next: Task 7.

@@ -539,7 +539,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 - [x] **Step 3: run** `scripts/build-test.sh -- cargo test -p cost-report --test
   test_source_formatting` → PASS. Run `python3` on each `scripts/nebius/tests/test_*.py` →
   `0 failed`.
-- [ ] **Step 4: commit; (coordinator) push; the PR is green.** `cpp-build-2502` uploads an
+- [x] **Step 4: commit; (coordinator) push; the PR is green.** `cpp-build-2502` uploads an
   artifact that holds `lib/libpeacock_gpu.so`, `bin/peacock_*_tests` and the four `rust-tests/`
   files.
 - [x] **Step 5: `prepare` on nebius-gpu by hand, once, before any CI dispatch.** With the sandbox
@@ -549,7 +549,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   by `scripts/nebius.sh stop --force && scripts/nebius.sh start` and a second `prepare --no-sf40`.
   `scripts/nebius.sh ssh 'df -h /'` again; record both, the wall time and what the run image and
   sf1 took; `scripts/nebius.sh stop`.
-- [ ] **Step 6: device run through CI (coordinator).** The coordinator runs `gh workflow run
+- [x] **Step 6: device run through CI (coordinator).** The coordinator runs `gh workflow run
   pipeline.yml --ref ENS-containers-only` (its actor is in `GPU_ALLOWED_ACTORS`) and watches the
   run. Pass means `gpu-tests` green and its log shows the run image's digest, `run-tests.sh
   list: green`, no `miniforge`, and per-binary counts equal the count baseline's `gpu-tests`, or
@@ -557,7 +557,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   times for prepare, ship and run, and the job log's `df -h /`, and hands any failure or moved
   count to the developer as a failing test. Pass also means the job stopped the VM, or the
   watcher did.
-- [ ] **Step 7: commit** any fix with its failing test first:
+- [x] **Step 7: commit** any fix with its failing test first:
   `containers-only: gpu-tests ships and runs on nebius-gpu through run-gpu.sh; the old runner goes`.
 
 ### Task 7: `exec-model-corpus.yml` and `validate-large.yml` in the image; the guard covers every job
