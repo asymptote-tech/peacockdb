@@ -1043,3 +1043,9 @@ build, the H100) is next.
 - Watch: the CPU-VM recipe names `peacockdb-build:cudf-25.02`, the moving tag, whose inputs are
   master's, not this tree's, until the branch lands; `check-build-image.sh` and the recipe must agree
   with the inputs-tag rule (`image-ref.sh`).
+
+## Review
+
+- 2026-11-08T00:52:43Z: plan complete at `a9ff18cc` (every box ticked); board `reviewing`; PR #203 marked ready.
+  VM time for the task: 1.68 h (nebius-gpu 0.53, nebius-cpu128 0.34, nebius-h100 0.81). Round 1
+  dispatched.

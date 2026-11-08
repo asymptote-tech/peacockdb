@@ -624,7 +624,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `grep -rn 'conda install\|miniforge\|rapids-cuda-12.2\|envs/rapids' --exclude-dir=archive
   --exclude-dir=tasks . | grep -v 'third_party/'` → only shad-gpu's files (`build-test-shadgpu.sh`,
   `lib/shadgpu-env.sh`, `setup-glibc.sh`) and the shad-gpu wiki section.
-- [ ] **Step 3: commit** `containers-only: the conda installers and machine-setup scripts go`;
+- [x] **Step 3: commit** `containers-only: the conda installers and machine-setup scripts go`;
   (coordinator) push; the PR is green.
 
 ### Task 9: the wiki describes one path
