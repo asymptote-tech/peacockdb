@@ -703,6 +703,38 @@ Branch `ENS-containers-only`, forked from `ENS-tp4-sized` at `9058709c`; its PR 
   shape (15 GB). The whole clone was removed at the end; `/` back to 29 GB free. No image was pulled
   or removed. Logs stay in `/tmp/co-t9/logs/` (no data).
 
+- **VM half (Step 2), a fix the recipes needed.** Every moving tag on ghcr differs from the image
+  of this tree's inputs, and the two build images carry other inputs: master's `:cudf-25.02` and
+  `:cudf-26.02` build images differ in `docker/build.Dockerfile` (Task 1's edit). The run images'
+  moving tags carry the same inputs. So, as written, `run-gpu.sh prepare` (nebius-gpu and the H100)
+  and `check-build-image.sh` would each pull master's build image (10 GB) and refuse it, exit 2. The
+  CPU-VM `docker run` named `:cudf-25.02` outright. CI set the refs from `image-ref.sh` (Task 6);
+  the developer recipes did not. Fixed before any VM started:
+  - `check-build-image.sh` takes `$PEACOCK_BUILD_IMAGE` when set, as `run-gpu.sh` does; else
+    `:cudf-<v>`. Test first: `test_check_build_image_pulls_and_checks_the_given_image` and
+    `…_refuses_a_given_image_of_other_inputs`, both red (exit 1: the script pulled the tag, which
+    the fake registry no longer held), then green; the file 8/8.
+  - build-test.md: the L40S, H100 and CPU-VM recipes export the refs from `image-ref.sh` before the
+    VM starts. A short paragraph after the L40S recipe says why. The CPU-VM `docker run` names
+    `$PEACOCK_BUILD_IMAGE`. "The CPU-VM build" gains how another build runs there:
+    `build-test.sh`'s in-image half in a `docker run` with `-e PEACOCK_IN_IMAGE=1`, in its own
+    `--dest` dir. The multi-GPU build is given that way. The Images (Python) row: 314 → 316, Python
+    1638 → 1640, grand 8243 → 8245.
+  - prompts.md's L40S bracket: one clause, the refs before `start`.
+  - Not changed: `run-gpu.sh`'s default stays `:cudf-<v>`. Resolving with `image-ref.sh` on every
+    `run` would add a registry query to each of `bench-each.sh`'s per-case calls, which is H100
+    time. Once this branch lands and `images.yml` moves the tags on master, the default works again.
+  - After the fix, `scripts/env/tests/` the way CI runs it: 17 files in the image, 3 on dev, every
+    one green (283 cases; `test_run_gpu.py` 69, `test_check_build_image.py` 8).
+  - CI's shellcheck list (pipeline.yml:679) does not name `check-build-image.sh`. dev and the image
+    have no shellcheck; `bash -n` is clean. Not added: outside this step.
+- **Disk, VM half.** dev: removed `/tmp/co-t9vm/install-cpu128` (749 MB, the H100's staged
+  install) and this worktree's `target-img-25.02` (15 GB) after the runs. The October host
+  `cpp/build` and `cpp/install` went before the build (above). The new image-built `cpp/build` and
+  `cpp/install` stay. nebius-cpu128: removed `~/peacockdb-beta-26` (16 GB) and the 26.02 build image
+  `peacockdb-build@sha256:9199d3efd54c…` (re-pullable); the 25.02 inputs-tag image stays for the
+  next CPU-VM build. Logs in `/tmp/co-t9vm/logs/` (no data).
+
 ## Notes for a restart
 
 - PR #203, a draft against `ENS-tp4-sized`, opened after Task 2 so Task 3 on has PR runs. The board
@@ -850,6 +882,12 @@ test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 | VM | start (local) | stop (local) | hours |
 |---|---|---|---|
 | nebius-gpu | 2026-11-07 17:30:37 UTC | 2026-11-07 17:42:58 UTC | 0.21 (Task 6 Step 5, prepare) |
+| nebius-gpu | 2026-11-07 23:08:20 UTC | 2026-11-07 23:27:20 UTC | 0.32 (Task 9 Step 2: prepare --no-sf40, ship, run list) |
+| nebius-cpu128 | 2026-11-07 23:27:33 UTC | 2026-11-07 23:47:43 UTC | 0.34 (Task 9 Step 2: the CPU-VM build and the 26.02 multi-GPU build, in parallel) |
+| nebius-h100 | 2026-11-07 23:47:52 UTC | 2026-11-08 00:36:22 UTC | 0.81 (Task 9 Step 2: prepare twice, ship, run list, pull; about 10 min idle after the first prepare was killed, below) |
+
+Per VM for the task: nebius-gpu 0.53 h, nebius-cpu128 0.34 h, nebius-h100 0.81 h; 1.68 h in all.
+Every stop was a soft `nebius.sh stop`, exit 0, and `status` read STOPPED after it.
 
 ## Task 1 Step 8 (publish)
 
@@ -953,6 +991,43 @@ constraints" says. Counts are the wiki's rows ("Test categories").
 | `scripts/build-test.sh --gpu --build` | dev | 0 | 25 min cold; six binaries staged. Listed in the image: `gpu_tests::` 748, `test_gpu_corpus` 1009, `peacock_gpu_benchmarks` 659, `test_node_timing` 1, `prototype_fused_benchmarks` 8: the gpu row's 2425 |
 | `scripts/env/image-ref.sh build 25.10` | dev | 0 | `peacockdb-build@sha256:9d862501b165…`, the published digest; no pull |
 | `scripts/env/image.sh build build 25.02 --dry-run` | dev | 0 | one `docker build` line |
+
+VM half: 2026-11-07/08, from this worktree (`6e4740be` plus the fix below), sandbox off. The refs
+were resolved on dev before each VM started: build `peacockdb-build:cudf-25.02-in-50a0c1d7779e`
+(the local tag; `b8da5a94553c…` on ghcr), run `peacockdb-run@sha256:3a69a03c7b69…`, 26.02 build
+`peacockdb-build@sha256:9199d3efd54c…`.
+
+| command | host | exit | result |
+|---|---|---|---|
+| `scripts/build-test.sh --gpu --build` | dev | 2, then 0 | first: refused this worktree's October `cpp/build`, a host (conda) configure with no `.peacock-cudf` stamp, as "Local build workflows" says. `rm -rf cpp/build cpp/install` (both gitignored, as the message says), rerun: 30 min 46 s, six binaries staged |
+| `export PEACOCK_BUILD_IMAGE PEACOCK_RUN_IMAGE`; each `=$(scripts/env/image-ref.sh build\|run 25.02)` | dev | 0, 0 | the two refs above |
+| `scripts/nebius.sh start` | dev → nebius-gpu | 0 | 63 s; `df -h /` 19 GB free |
+| `$G prepare --no-sf40` (nebius-gpu) | nebius-gpu | 0 | 76 s; both images already there; sf1 generated again under `46088dcae6d3296d`: Task 8 (`27cf22e5`) edited `generate_testdata.sh`, which the data hash covers |
+| `$G ship` | nebius-gpu | 0 | 64 s, four streams |
+| `$G run --detach list` | nebius-gpu | 0 | detached in 16 s |
+| `$G status`, every 60 s | nebius-gpu | 5 ×15, then 0 | `exited 0`, `run-tests.sh list: green` at 23:26. C++ 67 / 5 / 56 / 136; rust 9 (650 filtered) / 748 (1216 filtered) / 1009 / 1; corpus 794.5 s |
+| `scripts/nebius.sh stop` | nebius-gpu | 0 | 17 GB free before it |
+| `C=…`; `export PEACOCK_BUILD_IMAGE`; `=$(scripts/env/image-ref.sh build 25.02)` | dev | 0 | |
+| `$C start` | dev → nebius-cpu128 | 0 | 73 s; `df -h / /var/lib/peacock` 59 GB free of 213 GB |
+| `D=$(scripts/nebius-sync.sh --instance-id … --profile eu-west1)` | dev → nebius-cpu128 | 0 | `peacockdb-peacockdb-beta` |
+| `scripts/env/check-build-image.sh --instance-id … --profile eu-west1` | nebius-cpu128 | 0 | pulled the inputs tag; label this tree's. As first written (`:cudf-25.02`) it would refuse, exit 2: `docker/build.Dockerfile` differs (the fix, `## Task 9`) |
+| `$C ssh "cd ~/$D && docker run … $PEACOCK_BUILD_IMAGE scripts/env/stage-install.sh"` | nebius-cpu128 | 0 | 8 min 20 s, `target-img-25.02` warm from 11-04; six binaries staged; no warning |
+| `rsync -a -e "$C rsh" "nebius-cpu128:$D/cpp/install/" /tmp/co-t9vm/install-cpu128/` | dev | 0 | 15 s, 749 MB |
+| `scripts/nebius-sync.sh … --dest peacockdb-beta-26` | dev → nebius-cpu128 | 0 | |
+| `PEACOCK_BUILD_IMAGE=<26.02 ref> scripts/env/check-build-image.sh … --cudf 26.02` | nebius-cpu128 | 0 | pulled; label this tree's |
+| `$C ssh "cd ~/peacockdb-beta-26 && docker run … -e PEACOCK_IN_IMAGE=1 … <26.02 ref> scripts/build-test.sh --cudf 26.02 --build"` | nebius-cpu128 | 0 | 9 min cold, beside the 25.02 build. 4 warnings, none this task's: two cuDF 26.02 deprecations in `cpp/src/expr.cpp` (`cudf::round` :753, `cudf::strings::like` :922) and two gcc 14 `-Wstringop-overflow` in `stl_algobase.h:452` |
+| the same, `scripts/build-test.sh --cudf 26.02 -- cmake --build cpp/build --target peacock_multi_gpu_tpch_tests` | nebius-cpu128 | 0 | 13 s, `[8/8] Linking CXX executable peacock_multi_gpu_tpch_tests`, no warning. The wiki's multi-GPU line, first proof |
+| `$C stop` | nebius-cpu128 | 0 | after removing `~/peacockdb-beta-26` (16 GB) and the 26.02 image: 45 GB free |
+| `N=…`, `G=…`, the two refs as for nebius-gpu | dev | 0 | |
+| `$N start` | dev → nebius-h100 | 0 | 63 s; `df -h / /var/lib/peacock` 80 GB free of 174 GB |
+| `$G prepare` | nebius-h100 | killed, then 0 | first: pulled both refs (it had only the moving tags), sf1 under `46088dcae6d3296d`, sf40 `fetched 0, kept 8` and `kept 24`, `/opt/cudf` copied at 00:09; then my tool call's time limit killed it before its last line. Not the script's. Rerun: exit 0 in 41 s, all `already`. No exit 4 |
+| `$G ship --install /tmp/co-t9vm/install-cpu128` | nebius-h100 | 0 | 24 s |
+| `$G run list` | nebius-h100 | 0 | 14 min 28 s, `run-tests.sh list: green`; the L40S's counts exactly, corpus 843.4 s |
+| `$G pull` | nebius-h100 | 0 | 6 s; nothing new in the tree: `git status` and a `find -newer` over `testdata/` unchanged; logs in `~/.cache/peacock/run-gpu/peacockdb-beta/` |
+| `$N stop` | nebius-h100 | 0 | 65 GB free before it |
+
+Not run, by the coordinator's decision (long measurements): `bench-each.sh`, Nsight
+(`create_nsys_profile.sh --ssh`), `run prototype_fused_benchmarks`, and `run bench`.
 
 Not run on dev, by design: the run-image commands of "Images" (a pull, `docker run --gpus`,
 `docker image inspect` of a run image: no run image on dev, and none is pulled), `image.sh push`,

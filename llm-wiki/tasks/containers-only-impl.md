@@ -656,7 +656,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 - [x] **Step 1:** `grep -rn 'build-test\.sh --host\|--local-cudf-root\|cargo-cudf\|CUDF_ROOT=\|conda\|nebius-test\|gpu-host-test\|gpu-host-sync\|rapidsai/base'
   llm-wiki/*.md .claude/agents/` → the list to rewrite. Rewrite it in short sentences
   (prompts.md "Shared rules"). Name the CI-only 25.10 image once in "Images", with "no run image".
-- [ ] **Step 2: run every command once on dev** in a fresh worktree:
+- [x] **Step 2: run every command once on dev** in a fresh worktree:
   - `scripts/build-test.sh --rust-only --build --run`;
   - `scripts/build-test.sh --build --run` (FFI; counts = build-test.md's ffi row);
   - `scripts/build-test.sh --gpu --build`;
@@ -679,8 +679,10 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu`, as
   new-hosts' section words them. Record each in `## Wiki commands run`. A command that fails is
   fixed in the wiki or the script, test first, before the commit.
+  Done 2026-11-08; `bench-each.sh`, Nsight and `run prototype_fused_benchmarks` not run, by the
+  coordinator's decision (detail file, `## Wiki commands run`).
 - [x] **Step 3:** `grep` from Step 1 → only shad-gpu lines and archive/tasks.
-- [ ] **Step 4: commit** `containers-only: one build-and-run path in the wiki; shad-gpu the one exception`.
+- [x] **Step 4: commit** `containers-only: one build-and-run path in the wiki; shad-gpu the one exception`.
 
 ---
 

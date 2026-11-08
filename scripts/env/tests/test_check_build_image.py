@@ -13,6 +13,9 @@ from harness import main  # noqa: E402
 from gpu_host import BUILD_REF, CPU_VM, Host, label  # noqa: E402
 
 SCRIPT = "scripts/env/check-build-image.sh"
+# What image-ref.sh prints for a tree whose inputs the moving tag does not hold: a published image by
+# digest.
+GIVEN_BUILD = "ghcr.io/asymptote-tech/peacockdb-build@sha256:" + "cd" * 32
 
 
 def checked(h, *args, env=None):
@@ -30,6 +33,30 @@ def test_check_build_image_pulls_then_reads_the_label_on_the_vm():
         assert all(a[:4] == CPU_VM for a in h.nebius_calls()), h.nebius_calls()
         assert set(h.verbs()) == {"ssh"}, h.verbs()
         assert not h.dev_log.exists(), h.dev_log.read_text()
+
+
+def test_check_build_image_pulls_and_checks_the_given_image():
+    with Host() as h:
+        images = h.world()["images"]
+        images[GIVEN_BUILD] = images.pop(BUILD_REF)
+        h.world(images=images)
+        r = checked(h, *CPU_VM, env={"PEACOCK_BUILD_IMAGE": GIVEN_BUILD})
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        calls = h.docker_calls()
+        assert calls[0] == ["pull", GIVEN_BUILD], calls
+        assert any(a[:2] == ["image", "inspect"] and a[-1] == GIVEN_BUILD for a in calls[1:]), calls
+        assert not any(BUILD_REF in a for a in calls), calls
+
+
+def test_check_build_image_refuses_a_given_image_of_other_inputs():
+    with Host() as h:
+        images = h.world()["images"]
+        images[GIVEN_BUILD] = images.pop(BUILD_REF)
+        images[GIVEN_BUILD]["labels"]["peacockdb.inputs"] = label(h.tree, "build", change="docker/build.Dockerfile")
+        h.world(images=images)
+        r = checked(h, *CPU_VM, env={"PEACOCK_BUILD_IMAGE": GIVEN_BUILD})
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        assert "docker/build.Dockerfile" in r.stderr and GIVEN_BUILD in r.stderr, r.stderr
 
 
 def test_check_build_image_refuses_one_built_from_other_inputs():
