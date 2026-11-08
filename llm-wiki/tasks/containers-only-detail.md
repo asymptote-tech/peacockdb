@@ -1369,7 +1369,7 @@ Fixed (developer): `machine_image_checked` sets an EXIT trap around the pull tha
 - Analyst: `containers-only-analysis.md` (0 blocking, 6 important, falsified sentences, shortcuts).
   Reviewer: 0 blocking, 2 important — verda cannot run an rsync'd tree (no `.git`) and was never
   run; `build-test.sh` does not forward `PCK_UPDATE_SECTIONS` / `PEACOCK_REWRITE_RECIPE_BYTES`.
-- Coordinator, in `19151f53` and `1e7dde77`: the falsified sentences (build-test.md, prompts.md,
+- Coordinator, in `19151f53` and `9ef051b0`: the falsified sentences (build-test.md, prompts.md,
   #226, #244), `ticket_widget.py` through the image, #309 widened to the uid-name pair, #310 filed
   (nebius-gpu's disk fills with images), verda taken off the image path in prompts.md and
   build-test.md.

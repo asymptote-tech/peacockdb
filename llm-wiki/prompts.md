@@ -393,7 +393,7 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
     → `scripts/env/run-gpu.sh … ship | run | pull` → `… stop`. `prepare` comes first on a fresh
     VM, and again whenever `run` refuses its image, exit 2: the run image no longer matches the tree.
   - The 128-core CPU VM (nebius-cpu128) runs DuckDB and stages the H100's install: binaries for
-    H100 runs are built there. Local and verda builds, in the build image, stay for development.
+    H100 runs are built there. Local builds, in the build image, stay for development.
 
   If a host is lost mid-step: `status`, `start` (on 75, report to the coordinator, which owns
   the retry), `ship` again, rerun the step. A soft stop's exit 2 is someone else's run on the card:
@@ -426,7 +426,7 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
 - Anything the next developer on this task would want to know goes in
   `llm-wiki/tasks/<task>-detail.md` — what you tried, what is subtle, what a finding
   actually meant. You may be replaced between review rounds.
-- Definition of done: CPU tests green (locally or on verda), GPU tests green on nebius-gpu's L40S list
+- Definition of done: CPU tests green (locally), GPU tests green on nebius-gpu's L40S list
   (and, for a task whose plan has H100 runs, those runs done),
   clean build with no new warnings, plan goldens regenerated iff plan shape changed, no
   leftover debug prints or scratch files, and a final message naming files touched and the

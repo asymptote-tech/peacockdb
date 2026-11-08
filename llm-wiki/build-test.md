@@ -2414,7 +2414,7 @@ pulled a newer run image, with sf40 all kept, took 15.5 min; that case took 76 m
 ### The CPU-VM build
 
 Binaries for H100 runs are built on nebius-cpu128, from the workspace as it stands, uncommitted,
-never from a `git pull`: a clone on the VM holds only what was last pushed. Local and verda builds
+never from a `git pull`: a clone on the VM holds only what was last pushed. Local builds
 stay for development. The synced tree has no `.git`, so `build-test.sh` cannot find its image
 there: the build is a plain `docker run` of the image `check-build-image.sh` checked and
 printed.
