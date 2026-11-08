@@ -1211,3 +1211,6 @@ on `bootstrap-vm.sh`'s `docker() { sudo docker …; }` line, the same on HEAD an
 - Round 1 fixes committed as `385b0cb7` and pushed: PR run 42437388041. `images.yml -f kind=run -f
   cudf=25.02` dispatched to prove the new Test step (`test_run_tests.py` in the run job): run
   42437382608. Finding 8's H100 commands dispatched to the developer next.
+- Round 1 runs: PR run 42437388041 green; images run 42437382608 green, its new Test step ran
+  `test_run_tests.py` against the built run image, 23 passed. Finding 8 done (`## Wiki commands
+  run`). Round 2 dispatched.
