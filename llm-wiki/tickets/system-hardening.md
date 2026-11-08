@@ -171,7 +171,8 @@ Both cuDF environments were created from one `conda list --explicit` of the buil
 - libarrow 21.0.0 (cpu);
 - cuda-version 12.9, cuda-cudart 12.9.79, nvcc 12.9.86 from that env.
 
-The build is `scripts/build-test.sh --gpu --build` with gcc-14 14.2.0, cmake 4.2.3 or 4.3.4,
+The build was the host build `build-test.sh --gpu --build` made before containers-only, into
+`cpp/build26`, with gcc-14 14.2.0, cmake 4.2.3 or 4.3.4,
 ninja 1.12.1 and rustc 1.99.0. `libpeacock_gpu.so` is built for sm_80 and sm_90, so both cards
 JIT its PTX. That does not matter here: the faulting kernel is in libcudf, which ships SASS for
 both cards.
@@ -179,7 +180,9 @@ both cards.
 The data is `testdata/generate_testdata.sh --bench tpch` with the DuckDB 1.5.4 release CLI and
 synthetic embeddings. `lineitem.parquet` has sha256 `91e14da396295b2f…`, the same on both hosts.
 
-**To reproduce** on either host, from the repo root, after the build:
+**To reproduce** on either host, from the repo root, after that build (today's equivalent is
+`scripts/build-test.sh --cudf 26.02 --gpu --build`, which stages `cpp/install/`, run in the 26.02
+run image with `--entrypoint`):
 
     E=<the cuDF env>
     LD_LIBRARY_PATH=cpp/build26/install/lib:$E/lib PEACOCK_TESTDATA_DIR=$PWD/testdata \

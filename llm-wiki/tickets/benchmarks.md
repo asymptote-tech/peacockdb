@@ -30,7 +30,7 @@ Moving the H200 record under `h200/` is one change:
 
 Two hazards until then:
 - The GPU host's own tree still holds flat `tpch.sf40/` and `tpcds.sf40/`. No push or pull prunes
-  it: both scripts' `--pull-benchmarks` rsync it additively. So the first old-path run with this
+  it: `build-test-shadgpu.sh --pull-benchmarks` rsyncs it additively. So the first old-path run with this
   binary brings them home beside `h200/`, and two goldens go red. A filtered run there writes an
   `h200/` holding only the cases it timed, and the pull copies it over the committed files.
 - A publish adds an `h200/` pin line beside the flat one: `publish_record` replaces only a line

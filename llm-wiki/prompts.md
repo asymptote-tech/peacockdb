@@ -42,7 +42,7 @@ Starting a chain, and everything else the human does: `llm-wiki/README.md`.
 - **The registry's report moves with the registry.** `testdata/report.html` is checked in: the
   PR widget's tables for every dataset, with tickets, oracles and per-mode links. A commit that
   changes `testdata/cost-registry.csv` regenerates it in the same commit, with
-  `python3 scripts/ticket_widget.py`, which writes it and needs nothing else. The developer
+  `scripts/build-test.sh -- python3 scripts/ticket_widget.py`, which writes it and needs nothing else. The developer
   runs it whenever it touches the registry; the reviewer treats a registry diff without a
   report diff as a finding.
 - **Only production behaviour gets a ticket.** A ticket says the engine does the wrong thing
@@ -400,7 +400,7 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
     H100 runs are built there. Local and verda builds, in the build image, stay for development.
 
   If a host is lost mid-step: `status`, `start` (on 75, report to the coordinator, which owns
-  the retry), sync, rerun the step. A soft stop's exit 2 is someone else's run on the card:
+  the retry), `ship` again, rerun the step. A soft stop's exit 2 is someone else's run on the card:
   leave it. Never edit `~/.ssh/config` for a VM, and never accept a host key by hand:
   `nebius.sh` resolves the IP and replaces a changed key itself.
 - **You never look at CI.** Not a run, not its logs, not its config. Work the tests
