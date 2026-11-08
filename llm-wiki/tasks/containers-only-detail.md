@@ -1349,3 +1349,7 @@ cost-report` 49 passed); every image-free file of `scripts/env/tests` (20 files)
 `scripts/nebius/tests` (11), 0 failed (test_build_test 25, test_run_gpu 71, test_check_build_image
 10, test_bootstrap 20, test_bench_each 13); shellcheck 0.9.0 over CI's list clean. Outside the list, `bench-each.sh` keeps SC2015 and SC2088
 and `bootstrap-vm.sh` SC2032/SC2033, each the same on HEAD.
+- Round 2 important 2 closed: device run 42440753811 (`--dir ci`, cold `~/peacock/ci/`) green, every
+  job; gpu-tests counts as the baseline (C++ 67/5/56/136, rust 9/748/1009/1), `run-tests.sh list:
+  green`, cleanup removed `peacock-ci` and the VM stopped. Round 2 fixes committed as `ff9dbf5b`.
+  Round 3 dispatched.
