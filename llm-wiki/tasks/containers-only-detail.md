@@ -1363,3 +1363,16 @@ script exits 2 with empty stderr and leaks the temp file; fix with an EXIT trap,
 `test_check_build_image_refuses_bad_input` assert the message. Board `completing`.
 
 Fixed (developer): `machine_image_checked` sets an EXIT trap around the pull that prints and removes the temp file, then runs the caller's own EXIT trap, and puts the caller's trap back afterwards. The trap runs inside the pull's `2> "$err"`, so it writes to a saved copy of stderr. A plain `cat "$err" >&2` reads its own output file and fails, and under `set -e` the script then exits 1. `test_check_build_image_refuses_bad_input` now asserts that both refusal messages reach stderr and that `TMPDIR` is left empty.
+
+## Completeness pass
+
+- Analyst: `containers-only-analysis.md` (0 blocking, 6 important, falsified sentences, shortcuts).
+  Reviewer: 0 blocking, 2 important — verda cannot run an rsync'd tree (no `.git`) and was never
+  run; `build-test.sh` does not forward `PCK_UPDATE_SECTIONS` / `PEACOCK_REWRITE_RECIPE_BYTES`.
+- Coordinator, in `19151f53` and `1e7dde77`: the falsified sentences (build-test.md, prompts.md,
+  #226, #244), `ticket_widget.py` through the image, #309 widened to the uid-name pair, #310 filed
+  (nebius-gpu's disk fills with images), verda taken off the image path in prompts.md and
+  build-test.md.
+- To the developer: the two forwarded variables (+ `COST_FILTER`); `dphyp.py`'s refusal text; two
+  stale comments; a 25.10 any-user case and the by-hand image tests run once on the published
+  images; the timing-dependent signal test made robust.
