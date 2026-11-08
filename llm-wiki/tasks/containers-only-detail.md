@@ -1353,3 +1353,11 @@ and `bootstrap-vm.sh` SC2032/SC2033, each the same on HEAD.
   job; gpu-tests counts as the baseline (C++ 67/5/56/136, rust 9/748/1009/1), `run-tests.sh list:
   green`, cleanup removed `peacock-ci` and the VM stopped. Round 2 fixes committed as `ff9dbf5b`.
   Round 3 dispatched.
+
+### Round 3 (reviewer, 2026-11-08): 0 blocking, 0 important, 1 nit
+
+Round 2's fixes verified by mutation (each reverted fix turned its test red). PR run 42445243365
+(`ff9dbf5b`) green. Nit, taken (a real silent failure): `machine.sh`'s pull now sends stderr to a
+temp file, so when `check-build-image.sh`'s `docker()` wrapper dies on `nebius.sh`'s exit 64 the
+script exits 2 with empty stderr and leaks the temp file; fix with an EXIT trap, and make
+`test_check_build_image_refuses_bad_input` assert the message. Board `completing`.
