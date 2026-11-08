@@ -887,8 +887,9 @@ test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 | nebius-h100 | 2026-11-07 23:47:52 UTC | 2026-11-08 00:36:22 UTC | 0.81 (Task 9 Step 2: prepare twice, ship, run list, pull; about 10 min idle after the first prepare was killed, below) |
 | nebius-cpu128 | 2026-11-08 02:13:33 UTC | 2026-11-08 02:17:05 UTC | 0.06 (review finding 8: the CPU-VM build, warm) |
 | nebius-h100 | 2026-11-08 02:17:11 UTC | 2026-11-08 02:40:25 UTC | 0.39 (review finding 8: prepare 15.5 min, ship, run bench, bench-each twice, the fused batch, one Nsight trace, pulls) |
+| nebius-cpu128 | 2026-11-08 05:44:34 UTC | 2026-11-08 06:08:44 UTC | 0.40 (completeness fixes: the by-hand image tests on the published images, two stage-installs) |
 
-Per VM for the task: nebius-gpu 0.53 h, nebius-cpu128 0.40 h, nebius-h100 1.20 h; 2.13 h in all.
+Per VM for the task: nebius-gpu 0.53 h, nebius-cpu128 0.80 h, nebius-h100 1.20 h; 2.53 h in all.
 Every stop was a soft `nebius.sh stop`, exit 0, and `status` read STOPPED after it.
 
 ## Task 1 Step 8 (publish)
@@ -1376,3 +1377,65 @@ Fixed (developer): `machine_image_checked` sets an EXIT trap around the pull tha
 - To the developer: the two forwarded variables (+ `COST_FILTER`); `dphyp.py`'s refusal text; two
   stale comments; a 25.10 any-user case and the by-hand image tests run once on the published
   images; the timing-dependent signal test made robust.
+
+### Completeness fixes (developer, 2026-11-08)
+
+1. **build-test.sh forwards the regen knobs.** `FORWARDED` and the header now carry
+   `PCK_UPDATE_SECTIONS`, `PEACOCK_REWRITE_RECIPE_BYTES`, `COST_FILTER` and `PCK_GPU_RESULT_VERSION`.
+   `test_runs_in_the_image_as_the_caller` sets all four and wants each by name, never `NAME=value`;
+   red before (`PCK_UPDATE_SECTIONS` missing from the `-e` list). The sweep: every `env::var` in
+   Rust and `os.environ` in Python, against the wiki's commands. Added `PCK_GPU_RESULT_VERSION`: the
+   `duckdb_gpu_*` cases read it in the local cpu corpus (build-test.md, "The device's own answers").
+   Left out, each with its reason: `PCK_WRITE_GPU_RESULT`, `PEACOCK_BENCH_RESUME`,
+   `PEACOCK_BENCH_CASE_TIMEOUT_S`, `PEACOCK_RECORD_PATH`, `PEACOCK_BENCHMARK_CAPTURE`,
+   `PEACOCK_PINNED_HOST_CACHE_BYTES` and `PEACOCK_SCAN_READER` act on a device run, which is
+   run-gpu.sh's and forwards its own; `PEACOCK_TESTDATA_DIR` and `PEACOCK_EMBEDDINGS_CACHE` name a
+   path, and the container sees the tree alone; `PCK_MODE` and `PEACOCK_DPHYP_LIB` are already given
+   with `--pass-env` wherever the wiki and CI set them; `DUCKDB` names a host binary, and the image
+   has `duckdb` on PATH; `CUDF_ROOT` and `CUDF_BUILD_FROM_SOURCE` are the image's.
+2. **dphyp.py's refusal** names `scripts/build-test.sh -- cargo build --release -p peacockdb-dphyp`,
+   then `export PEACOCK_DPHYP_LIB=$PWD/target-img-25.02/release/libpeacockdb_dphyp.so`, passed with
+   `--pass-env`, as the README's DPhyp section does. `test_run.py`'s
+   `test_a_missing_dataset_or_dphyp_library_is_refused_before_any_work` now matches both strings; red
+   before on the old `CARGO_TARGET_DIR=/build/peacock/rust-only-target` text. `test_run.py`: 12 passed.
+   No other test reads the text; no `rust-only-target` is left outside `llm-wiki/tasks/`.
+3. **Two stale comments.** build-test.sh's `gpu_runtime_targets` now names stage-install.sh's
+   `GPU_TESTS`, which runners.rs reads, not pipeline.yml's array. gen_reconstruction_report.py says no
+   test reads the reports, and `run-gpu.sh ship` sends them anyway (it ships every committed testdata/
+   file).
+4. **The early-signal test is deterministic.** The cause of the 2-in-12 failures: the fake `docker
+   run` created its container on a 2 s timer, whatever the script did. A first `docker kill` that
+   started late (a python fake, 0.7-5 s to start on a loaded dev) found the container, so only one
+   kill was recorded and `len(kills) >= 2` failed. With the timer at 0.01 s the count was 1 every
+   time. Now the fake's `kill` writes `kill.missed` when it finds no container, and `run` given
+   `FAKE_DOCKER_CREATE_AFTER_MISS` creates its container only after that. So the first kill always
+   misses, and the script must kill again, however slowly either process starts. Mutation: with the
+   retry loop cut to one kill per wake, the test fails (`TimeoutExpired`: the script waits out the
+   container). 30 runs, all at once on dev's 8 cores: 30 passed (90 signals).
+5. **25.10 any-user case and the by-hand image tests**, on nebius-cpu128, 2026-11-08 05:44-06:08 UTC.
+   Added `test_the_25_10_image_runs_as_any_user` (red on dev, no 25.10 image there). Counts: Images
+   row 335 → 336, the image-needing tests 34 → 35, Python 1659 → 1660, grand total 8268 → 8269.
+   The tests look up `peacockdb-<kind>:cudf-<v>`, the local tag `image.sh build` makes. The VM held
+   an older image under `peacockdb-build:cudf-25.02` (`2a0c84414baa`). So each published ref was
+   pulled (build images through `check-build-image.sh`, run images by the digest `image-ref.sh`
+   printed on dev) and tagged `:cudf-<v>` for the run. Afterwards the tag went back to
+   `2a0c84414baa`, and the images that were not there before were removed: 45 GB free before and
+   after.
+   - `test_image_any_user.py`: 25.02 (`sha256:b8da5a94…`) ok, 25.10 (`sha256:9d862501…`) ok,
+     26.02 (`sha256:9199d3ef…`) ok.
+   - `test_run_image.py`: 9 passed, run images 25.02 (`sha256:6aa01d4f…`) and 26.02
+     (`sha256:5117c1ab…`). No GPU needed: ldd, inspect and a shell in the image. The staged installs
+     were built on the VM from this tree: `stage-install.sh` in the 25.02 build image (synced to the
+     default dir, warm), and `stage-install.sh --cudf 26.02 --no-release-bench` in the 26.02 image
+     (`--dest peacockdb-beta-26`, cold, then removed). They were named by
+     `PEACOCK_STAGED_INSTALLS`. The VM has no binutils, and `no-static-cudart.sh` calls `nm`. So an
+     `nm` on PATH ran the 25.02 build image's `nm`: 1194 and 881 dynamic symbols read, exit 0 both.
+
+Checks after the fixes, on dev: the guard
+(`scripts/build-test.sh -- cargo test -p cost-report --test test_source_formatting`) 61 passed;
+every image-free `scripts/env/tests` file (20) and every `scripts/nebius/tests` file (11) passed,
+twice. The first parallel batch had one `test_stage_install_fails_naming_a_build_that_fails`
+timeout (60 s; under 1 s alone). It did not come back in 32 more runs, 30 of them at once, and the
+second batch passed whole. In that batch three tiny files took 44 s each at the same moment, so
+the likely cause is a stall on dev, not the test. It was not disabled. shellcheck v0.9.0 over CI's
+list: clean, and the image removed.

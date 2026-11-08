@@ -44,9 +44,10 @@ if [ -n "${FAKE_IMAGE_REF_EXIT:-}" ]; then echo "$FAKE_IMAGE_REF_ERR" >&2; exit 
 if [ "$1" = --ref ]; then echo "${FAKE_IMAGE_REF:-$2}"; exit 0; fi
 echo "${FAKE_IMAGE_REF:-ghcr.io/asymptote-tech/peacockdb-build:cudf-x-in-0}"
 '''
-# `ps` answers FAKE_DOCKER_PS; a `run` given FAKE_DOCKER_SLEEP writes run.started, then after
-# FAKE_DOCKER_CREATE_S (its container created) its pid to run.pid, and waits. `kill` ends it, as a
-# container killed ends its `docker run`, and before run.pid fails as docker does on no such container.
+# `ps` answers FAKE_DOCKER_PS; a `run` given FAKE_DOCKER_SLEEP writes run.started, then (its container
+# created) its pid to run.pid, and waits. `kill` ends it, as a container killed ends its `docker run`,
+# and before run.pid fails as docker does on no such container, writing kill.missed. Given
+# FAKE_DOCKER_CREATE_AFTER_MISS, `run` creates its container only once a `kill` has missed it.
 FAKE_DOCKER = r'''#!/usr/bin/env python3
 import json, os, signal, sys, time
 a = sys.argv[1:]
@@ -58,6 +59,7 @@ if a[0] == "ps":
     sys.exit(0)
 if a[0] == "kill":
     if not os.path.exists(os.path.join(logs, "run.pid")):
+        open(os.path.join(logs, "kill.missed"), "w").close()
         print(f"Error response from daemon: No such container: {a[-1]}", file=sys.stderr)
         sys.exit(1)
     with open(os.path.join(logs, "run.pid")) as f:
@@ -65,7 +67,11 @@ if a[0] == "kill":
     sys.exit(0)
 if a[0] == "run" and os.environ.get("FAKE_DOCKER_SLEEP"):
     open(os.path.join(logs, "run.started"), "w").close()
-    time.sleep(float(os.environ.get("FAKE_DOCKER_CREATE_S", "0")))
+    deadline = time.monotonic() + 60
+    while os.environ.get("FAKE_DOCKER_CREATE_AFTER_MISS") and not os.path.exists(os.path.join(logs, "kill.missed")):
+        if time.monotonic() > deadline:
+            sys.exit(99)
+        time.sleep(0.05)
     with open(os.path.join(logs, "run.pid.tmp"), "w") as f:
         f.write(str(os.getpid()))
     os.rename(os.path.join(logs, "run.pid.tmp"), os.path.join(logs, "run.pid"))
@@ -92,6 +98,7 @@ sys.exit(101 if name in os.environ.get("FAKE_CARGO_FAILS", "").split() else 0)
 SCRUBBED = ("CARGO_TARGET_DIR", "PEACOCK_IN_IMAGE", "PEACOCK_CUDF", "PEACOCK_BUILD_IMAGE", "RUNNER_TEMP",
             "RUSTFLAGS", "CMAKE_GENERATOR", "LDFLAGS", "LD_LIBRARY_PATH", "PCK_TEST_FILTER", "PCK_SHARD",
             "UPDATE_CANONICAL", "PEACOCK_NO_FETCH", "RUST_TEST_THREADS", "CARGO_BUILD_JOBS", "GCC_VERSION",
+            "PCK_UPDATE_SECTIONS", "PEACOCK_REWRITE_RECIPE_BYTES", "COST_FILTER", "PCK_GPU_RESULT_VERSION",
             "PEACOCK_CARGO_REGISTRY", "PEACOCK_CCACHE_DIR", "XDG_CACHE_HOME", "AWS_SECRET_ACCESS_KEY")
 
 
@@ -198,7 +205,11 @@ def after_image(argv, image):
 def test_runs_in_the_image_as_the_caller():
     with tempfile.TemporaryDirectory() as tmp:
         t = Tree(tmp)
-        ok(t.run("--rust-only", "--build", "--run", env={"RUSTFLAGS": "-D warnings", "RUST_TEST_THREADS": "2"}))
+        # The regen knobs the wiki puts in front of a build-test.sh command, beside the build's own.
+        regen = {"PCK_UPDATE_SECTIONS": "1", "PEACOCK_REWRITE_RECIPE_BYTES": "1", "COST_FILTER": "q1",
+                 "PCK_GPU_RESULT_VERSION": "26.02"}
+        ok(t.run("--rust-only", "--build", "--run",
+                 env={"RUSTFLAGS": "-D warnings", "RUST_TEST_THREADS": "2", **regen}))
         argv = t.the_docker_run()
         root = str(t.root)
         assert values(argv, "--user") == [f"{os.getuid()}:{os.getgid()}"], argv
@@ -206,10 +217,11 @@ def test_runs_in_the_image_as_the_caller():
         assert values(argv, "-w") == [root], argv
         env = values(argv, "-e")
         for want in ("PEACOCK_IN_IMAGE=1", "PEACOCK_CUDF=25.02", f"HOME={root}/.home-img",
-                     f"CARGO_TARGET_DIR={root}/target-img-25.02", "RUSTFLAGS", "RUST_TEST_THREADS"):
+                     f"CARGO_TARGET_DIR={root}/target-img-25.02", "RUSTFLAGS", "RUST_TEST_THREADS", *regen):
             assert want in env, (want, env)
         assert "PCK_SHARD" not in env and "LDFLAGS" not in env, env
-        assert not [e for e in env if e.startswith("RUSTFLAGS=")], "a forwarded value is in argv"
+        assert not [e for e in env if "=" in e and e.split("=")[0] in ("RUSTFLAGS", *regen)], \
+            "a forwarded value is in argv"
         mounts = values(argv, "-v")
         assert f"{t.cache}/peacock/cargo-registry:/opt/rust/cargo/registry" in mounts, mounts
         assert f"{t.cache}/peacock/ccache-25.02:/tmp/ccache" in mounts, mounts
@@ -327,11 +339,13 @@ def test_a_signal_kills_the_container():
 
 def test_a_signal_before_the_container_exists_still_kills_it():
     """docker run is up and its container not yet created: the first `docker kill` finds nothing, and
-    the container must not then run the build out."""
+    the container must not then run the build out. The fake creates it only after that miss, so the
+    order holds however slowly either process starts."""
     for sig, code in ((signal.SIGTERM, 143), (signal.SIGINT, 130), (signal.SIGHUP, 129)):
         with tempfile.TemporaryDirectory() as tmp:
             t = Tree(tmp)
-            p = started_run(t, "--rust-only", "--build", env={"FAKE_DOCKER_CREATE_S": "2"}, up="run.started")
+            p = started_run(t, "--rust-only", "--build", env={"FAKE_DOCKER_CREATE_AFTER_MISS": "1"},
+                            up="run.started")
             t0 = time.monotonic()
             p.send_signal(sig)
             assert p.wait(timeout=30) == code, (sig, p.returncode, p.stderr.read())

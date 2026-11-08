@@ -14,7 +14,8 @@ import os
 from dataclasses import dataclass
 from typing import Callable
 
-BUILD = "CARGO_TARGET_DIR=/build/peacock/rust-only-target cargo build --release -p peacockdb-dphyp"
+BUILD = "scripts/build-test.sh -- cargo build --release -p peacockdb-dphyp"
+LIB = "$PWD/target-img-25.02/release/libpeacockdb_dphyp.so"
 _SET_COST = ctypes.CFUNCTYPE(ctypes.c_double, ctypes.c_uint64, ctypes.c_void_p)
 _REASONS = {1: "budget", 2: "disconnected", -1: "relation count", -2: "edge", -3: "capacity"}
 
@@ -90,8 +91,8 @@ def load():
     if _LOADED is None:
         path = os.environ.get("PEACOCK_DPHYP_LIB")
         if not path or not os.path.exists(path):
-            raise RuntimeError(f"PEACOCK_DPHYP_LIB names no library ({path!r}): build it with `{BUILD}` "
-                               "and point it at libpeacockdb_dphyp.so")
+            raise RuntimeError(f"PEACOCK_DPHYP_LIB names no library ({path!r}): build it with `{BUILD}`, "
+                               f"then `export PEACOCK_DPHYP_LIB={LIB}` and pass it with --pass-env")
         lib = ctypes.CDLL(path)
         lib.dphyp_solve.restype = ctypes.c_int32
         lib.dphyp_solve.argtypes = [

@@ -24,7 +24,9 @@
 # reconfigured. --run runs every target even after one fails.
 # These reach the container by name when set, never by value: RUSTFLAGS CMAKE_GENERATOR LDFLAGS
 # LD_LIBRARY_PATH PCK_TEST_FILTER PCK_SHARD UPDATE_CANONICAL PEACOCK_NO_FETCH RUST_TEST_THREADS
-# CARGO_BUILD_JOBS, and each --pass-env NAME. RUNNER_TEMP is mounted at its own path when set.
+# CARGO_BUILD_JOBS, the regeneration knobs PCK_UPDATE_SECTIONS PEACOCK_REWRITE_RECIPE_BYTES
+# COST_FILTER PCK_GPU_RESULT_VERSION, and each --pass-env NAME. RUNNER_TEMP is mounted at its own
+# path when set.
 # The container, peacock-build-<tree>-<v>-<pid>, runs with --init, and -it when stdin and stdout
 # are terminals and this is no background job of its terminal. HUP, INT or TERM kills it, one that
 # comes before docker has created it too. One left by a build-test.sh that is gone is refused.
@@ -38,7 +40,8 @@ die() { echo "build-test.sh: $*" >&2; exit 2; }
 removed() { die "$1 is gone: $2"; }
 
 FORWARDED=(RUSTFLAGS CMAKE_GENERATOR LDFLAGS LD_LIBRARY_PATH PCK_TEST_FILTER PCK_SHARD UPDATE_CANONICAL
-           PEACOCK_NO_FETCH RUST_TEST_THREADS CARGO_BUILD_JOBS)
+           PEACOCK_NO_FETCH RUST_TEST_THREADS CARGO_BUILD_JOBS
+           PCK_UPDATE_SECTIONS PEACOCK_REWRITE_RECIPE_BYTES COST_FILTER PCK_GPU_RESULT_VERSION)
 DEVICE_RUN="scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt"
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
@@ -212,8 +215,9 @@ rust_only_targets() {
 
 # The GPU-RUNTIME set: targets that need a GPU when they RUN, whatever they need to
 # compile. Declared once here and subtracted wherever a mode cannot satisfy it, rather
-# than filtered by name. Kept in step with build-test-shadgpu.sh's RUST_TESTS and pipeline.yml's
-# gpu-tests staging array (cost-report's test_source_formatting, runners.rs, reads all three).
+# than filtered by name. Kept in step with build-test-shadgpu.sh's RUST_TESTS and stage-install.sh's
+# GPU_TESTS, which CI's gpu-tests job stages (cost-report's test_source_formatting, runners.rs, reads
+# all three).
 gpu_runtime_targets() {
   cat <<'GPUSET'
 peacockdb-core:test_gpu_corpus
