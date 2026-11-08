@@ -1439,3 +1439,4 @@ timeout (60 s; under 1 s alone). It did not come back in 32 more runs, 30 of the
 second batch passed whole. In that batch three tiny files took 44 s each at the same moment, so
 the likely cause is a stall on dev, not the test. It was not disabled. shellcheck v0.9.0 over CI's
 list: clean, and the image removed.
+- 2026-11-08T06:10:16Z: signoff written; board `completeness approved`.
