@@ -1361,3 +1361,5 @@ Round 2's fixes verified by mutation (each reverted fix turned its test red). PR
 temp file, so when `check-build-image.sh`'s `docker()` wrapper dies on `nebius.sh`'s exit 64 the
 script exits 2 with empty stderr and leaks the temp file; fix with an EXIT trap, and make
 `test_check_build_image_refuses_bad_input` assert the message. Board `completing`.
+
+Fixed (developer): `machine_image_checked` sets an EXIT trap around the pull that prints and removes the temp file, then runs the caller's own EXIT trap, and puts the caller's trap back afterwards. The trap runs inside the pull's `2> "$err"`, so it writes to a saved copy of stderr. A plain `cat "$err" >&2` reads its own output file and fails, and under `set -e` the script then exits 1. `test_check_build_image_refuses_bad_input` now asserts that both refusal messages reach stderr and that `TMPDIR` is left empty.

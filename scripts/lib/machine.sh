@@ -60,14 +60,22 @@ machine_cudf_source() {
 # default) or run, then machine_image_label_checked. A failed pull names the images.yml dispatch
 # that publishes <tree>'s image: return 2 when the registry has no such tag, else docker's status (a
 # network error, or the caller's ssh). docker's stderr goes to a file, not `$(…)`, so a docker
-# wrapper's own exit still ends the script.
+# wrapper's own exit still ends the script; an EXIT trap, ahead of the caller's own, then prints
+# the file and removes it. The trap runs inside the pull's `2>`, so it writes to a copy of stderr.
 machine_image_checked() {
-  local ref=$1 tree=$2 cudf=$3 kind=${4:-build} err rc=0 unpublished=0 branch publish
+  local ref=$1 tree=$2 cudf=$3 kind=${4:-build} err rc=0 unpublished=0 branch publish caller_trap=() stderr
   err=$(mktemp)
+  exec {stderr}>&2
+  eval "caller_trap=($(trap -p EXIT))"  # trap -- '<command>' EXIT, or nothing
+  # shellcheck disable=SC2064  # expanded now: the file, the fd and the caller's command are this call's
+  trap "{ cat ${err@Q} >&2; rm -f ${err@Q}; ${caller_trap[2]:-}
+} 2>&$stderr" EXIT
   docker pull "$ref" 2> "$err" || rc=$?
   cat "$err" >&2
   grep -qE ': not found$|manifest unknown' "$err" && unpublished=1
   rm -f "$err"
+  if [ "${#caller_trap[@]}" -gt 0 ]; then trap -- "${caller_trap[2]}" EXIT; else trap - EXIT; fi
+  exec {stderr}>&-
   if [ "$rc" -ne 0 ]; then
     branch=$(git -C "$tree" rev-parse --abbrev-ref HEAD 2> /dev/null || true)
     [ -n "$branch" ] && [ "$branch" != HEAD ] || branch="<this tree's branch>"

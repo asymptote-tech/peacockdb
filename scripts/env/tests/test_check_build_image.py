@@ -119,8 +119,14 @@ def test_check_build_image_refuses_bad_input():
                            ((*CPU_VM, "build"), "build")):
             r = checked(h, *args)
             assert r.returncode == 2 and word in r.stderr, (args, r.returncode, r.stderr)
-        r = checked(h, *CPU_VM, env={"FAKE_NEBIUS_RC": "64"})
+        # nebius.sh refuses during the pull, whose stderr machine.sh sends to a temp file: the refusal
+        # still reaches stderr, and the file is removed.
+        scratch = pathlib.Path(h.tmp.name) / "scratch"
+        scratch.mkdir()
+        r = checked(h, *CPU_VM, env={"FAKE_NEBIUS_RC": "64", "TMPDIR": str(scratch)})
         assert r.returncode == 2, (r.returncode, r.stderr)
+        assert "nebius: refused by the test" in r.stderr and "refused its options" in r.stderr, r.stderr
+        assert list(scratch.iterdir()) == [], list(scratch.iterdir())
         assert h.docker_calls() == []
 
 
