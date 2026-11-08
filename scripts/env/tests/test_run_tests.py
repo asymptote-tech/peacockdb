@@ -3,8 +3,10 @@ arguments and library path, and what fails a run. The fakes are shell scripts mo
 /peacock/install; each records its argv and environment under /peacock/testdata/calls/. The
 container runs as a uid with no passwd entry and no network.
 
-Needs the run image (`scripts/env/image.sh build run 25.02`), so it is not in the cheap tier.
+Needs the run image (`scripts/env/image.sh build run 25.02`), so it is not in the cheap tier: CI runs
+it in images.yml's run job, on the image the job built, which IMAGE names.
 """
+import os
 import pathlib
 import re
 import subprocess
@@ -15,7 +17,10 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" /
 from harness import main  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
-IMAGE = "ghcr.io/asymptote-tech/peacockdb-run:cudf-25.02"
+# The image under test, else 25.02's; every image the committed script must be in, else both versions'.
+IMAGE = os.environ.get("IMAGE", "ghcr.io/asymptote-tech/peacockdb-run:cudf-25.02")
+IMAGES = ([IMAGE] if "IMAGE" in os.environ
+          else [f"ghcr.io/asymptote-tech/peacockdb-run:cudf-{v}" for v in ("25.02", "26.02")])
 SCRIPT = REPO / "docker" / "run-tests.sh"
 LIBRARY_PATH = "/peacock/install/lib:/opt/cudf/lib"
 THREADS = ["--nocapture", "--test-threads=1"]
@@ -273,21 +278,20 @@ def test_only_the_binaries_command_line_sets_the_library_path():
     assert not re.search(r"^\s*export\b", text, re.M), "run-tests.sh exports a variable"
 
 
-def test_both_images_carry_the_committed_script():
+def test_each_image_carries_the_committed_script():
     want = (REPO / "docker" / "run-tests.sh").read_text()
-    for cudf in ["25.02", "26.02"]:
+    for ref in IMAGES:
         proc = subprocess.run(["docker", "run", "--rm", "--network", "none", "--entrypoint", "cat",
-                               f"ghcr.io/asymptote-tech/peacockdb-run:cudf-{cudf}", "/opt/run/run-tests.sh"],
+                               ref, "/opt/run/run-tests.sh"],
                               capture_output=True, text=True, timeout=120)
-        assert proc.returncode == 0 and proc.stdout == want, (cudf, proc.stderr)
+        assert proc.returncode == 0 and proc.stdout == want, (ref, proc.stderr)
         # The image's own entrypoint, unmounted, as a uid with no passwd entry.
-        image = ["docker", "run", "--rm", "--network", "none", "--user", "4242:4242",
-                 f"ghcr.io/asymptote-tech/peacockdb-run:cudf-{cudf}"]
+        image = ["docker", "run", "--rm", "--network", "none", "--user", "4242:4242", ref]
         usage = subprocess.run([*image, "--help"], capture_output=True, text=True, timeout=120)
-        assert usage.returncode == 0 and "run-tests.sh list" in usage.stdout, (cudf, usage)
+        assert usage.returncode == 0 and "run-tests.sh list" in usage.stdout, (ref, usage)
         bare = subprocess.run(image, capture_output=True, text=True, timeout=120)
-        assert bare.returncode == 2 and bare.stdout == "", (cudf, bare)
-        assert bare.stderr.startswith("run-tests.sh: ") and len(bare.stderr.strip().splitlines()) == 1, (cudf, bare.stderr)
+        assert bare.returncode == 2 and bare.stdout == "", (ref, bare)
+        assert bare.stderr.startswith("run-tests.sh: ") and len(bare.stderr.strip().splitlines()) == 1, (ref, bare.stderr)
 
 
 if __name__ == "__main__":

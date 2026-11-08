@@ -143,6 +143,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: rust-image-${{ matrix.cudf }}
+          # The image built what the target dir holds; Swatinem's own key does not see it.
+          key: ${{ env.PEACOCK_BUILD_IMAGE }}
           workspaces: ". -> target-img-${{ matrix.cudf }}"
 
       - name: Run CPU tests (CPP)
@@ -349,6 +351,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: rust-gpu-build-image
+          # The image built what the target dir holds; Swatinem's own key does not see it.
+          key: ${{ env.PEACOCK_BUILD_IMAGE }}
           workspaces: ". -> target-img-25.02"
 
       # scripts/env/stage-install.sh in the build image: the C++ built and installed into
@@ -479,18 +483,19 @@ jobs:
       # reads no sf40 and needs none of Nsight's setup.
       - name: Prepare nebius-gpu
         timeout-minutes: 40
-        run: scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt prepare --no-sf40
+        run: scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt --dir ci prepare --no-sf40
 
       - name: Ship the staged install
-        # The install and the committed testdata into ~/peacock/peacockdb/ on the VM, which
-        # persists between runs, so later runs send only what changed. Four zstd rsync streams
+        # The install and the committed testdata into ~/peacock/ci/ on the VM, which persists
+        # between runs, so later runs send only what changed. --dir ci on every call: the default,
+        # the checkout's name, is a developer's clone's on the VM too. Four zstd rsync streams
         # with retries: the runner-to-VM path is slow and lossy (0.24 MB/s for one stream,
         # 2026-10-15), so a first run can take most of the limit.
         timeout-minutes: 50
-        run: scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt ship --install cpp/install
+        run: scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt --dir ci ship --install cpp/install
 
       - name: Run the L40S list
-        # The run image's run-tests.sh list, as container peacock-peacockdb, its log followed;
+        # The run image's run-tests.sh list, as container peacock-ci, its log followed;
         # the step exits as the run did. What the list keeps from this job's history:
         # - Every shipped peacock_*_tests binary, by glob rather than a hand-written list: a
         #   named list once let peacock_tpchv_tests be built, shipped and never run, green.
@@ -503,7 +508,7 @@ jobs:
         #   concurrent GPU tests OOM the device and poison the CUDA context for every later test.
         # - A segfault, or a death by a signal, fails the run.
         # Out of it on an L40S: the sf40 pair and every bench_ case.
-        run: scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt run list
+        run: scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt --dir ci run list
 
       - name: Clean up and soft-stop
         # Whenever the start step ran at all: a start that failed or was cancelled half way can
@@ -513,8 +518,8 @@ jobs:
         run: |
           # A cancelled run leaves its container running on the VM, and a process on the card
           # keeps the idle watcher from stopping it; the next run's `run` would refuse the busy
-          # name. Remove it first.
-          scripts/nebius.sh ssh 'docker rm -f peacock-peacockdb' || true
+          # name. Remove it first: peacock-ci alone, never a developer's run.
+          scripts/nebius.sh ssh 'docker rm -f peacock-ci' || true
           scripts/nebius.sh stop || echo "soft stop declined (rc=$?); the watchers will take it down"
 
   # GPU coverage + cost-ratio report (Task 6). Pure CPU/dry: reads only the
@@ -555,6 +560,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: rust-cost-report-image
+          # The image built what the target dir holds; Swatinem's own key does not see it.
+          key: ${{ env.PEACOCK_BUILD_IMAGE }}
           workspaces: ". -> target-img-25.02"
 
       # Guard the two DuckDB generators' logic on every PR (before generating), so a
@@ -683,16 +690,17 @@ jobs:
 
       # The image, image-ref, build-test and run-gpu scripts, against fake docker, ssh and aws.
       # needs_docker are the three that build or run the images themselves: by hand
-      # (build-test.md, "Images"). on_runner are stdlib only and need what the image cannot give
-      # the runner's uid: the en_US.UTF-8 locale (#309), or a user name, which bootstrap-vm.sh
-      # and provision-vm.sh read as the VM's or laptop's own user. Both named, and a missing one
-      # is an error, as the exec-model step's elsewhere list is.
+      # (build-test.md, "Images"); images.yml's run job runs test_run_tests.py. on_runner are
+      # stdlib only and need what the image cannot give the runner's uid: a locale that sorts
+      # unlike C, en_US.UTF-8 (#309: test_fetch_sf40.py, test_image.py), or a user name, which
+      # bootstrap-vm.sh and provision-vm.sh read as the VM's or laptop's own user. Both named, and
+      # a missing one is an error, as the exec-model step's elsewhere list is.
       - name: Image and run script tests (Python)
         run: |
           set -euo pipefail
           shopt -s nullglob
           needs_docker=(test_image_any_user.py test_run_image.py test_run_tests.py)
-          on_runner=(test_fetch_sf40.py test_bootstrap.py test_provision.py)
+          on_runner=(test_fetch_sf40.py test_image.py test_bootstrap.py test_provision.py)
           for n in "${needs_docker[@]}" "${on_runner[@]}"; do
             [ -f "scripts/env/tests/$n" ] || { echo "scripts/env/tests/$n is missing; is it still named here?"; exit 1; }
           done

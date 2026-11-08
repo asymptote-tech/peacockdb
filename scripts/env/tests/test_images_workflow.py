@@ -204,13 +204,13 @@ scripts/env/image.sh push "$KIND" "$CUDF" "${moving[@]}"
 """
 
 
-def test_the_job_runs_its_four_steps_unconditionally():
+def test_the_job_runs_its_five_steps_unconditionally():
     """No `if:` or `continue-on-error:` anywhere: a skipped or forgiven step would publish an image
-    the disk gate or a failed build should have stopped."""
+    the disk gate, a failed build or a failed test should have stopped."""
     assert set(job()) == {"name", "runs-on", "timeout-minutes", "strategy", "defaults", "env", "steps"}, set(job())
     shapes = [(s.get("name"), set(s)) for s in job()["steps"]]
     assert shapes == [(None, {"uses", "with"}), ("Free the disk", {"name", "run"}), ("Build", {"name", "run"}),
-                      ("Push", {"name", "env", "run"})], shapes
+                      ("Test", {"name", "run"}), ("Push", {"name", "env", "run"})], shapes
     assert job()["steps"][0] == {"uses": "actions/checkout@v4", "with": {"persist-credentials": "false"}}
 
 
@@ -222,6 +222,51 @@ def test_the_image_is_built_and_pushed_through_image_sh_and_nothing_else():
     assert step("Push")["run"] == PUSH
     for s in job()["steps"]:
         assert not re.search(r"\bdocker\s+(image\s+)?(build|push)\b|\bbuildx\b", s.get("run", "")), s
+
+
+TEST = """set -euo pipefail
+# docker/run-tests.sh's rules over fake binaries, in the run image just built and found by this
+# tree's inputs: no GPU. A build image has no run-tests.sh.
+if [ "$KIND" = run ]; then
+  IMAGE=$(scripts/env/image-ref.sh run "$CUDF")
+  export IMAGE
+  python3 scripts/env/tests/test_run_tests.py
+fi
+"""
+
+
+def test_the_run_image_is_tested_before_it_is_pushed():
+    """run-tests.sh is a run-image input that only test_run_tests.py proves, and it needs the image."""
+    assert step("Test")["run"] == TEST
+
+
+def run_test_step(kind, image_ref_exit=0):
+    """The Test step with fakes for image-ref.sh and python3: what python3 ran, with which IMAGE."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        log = root / "log"
+        fakes = {root / "bin" / "python3": 'echo "python3 $* IMAGE=$IMAGE" >> "$FAKE_LOG"\n',
+                 root / "scripts" / "env" / "image-ref.sh":
+                     f'echo "image-ref.sh $*" >> "$FAKE_LOG"\necho "ref-of-$2"\nexit {image_ref_exit}\n'}
+        for path, body in fakes.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("#!/bin/bash\n" + body)
+            path.chmod(0o755)
+        env = dict(os.environ, PATH=f"{root / 'bin'}:{os.environ['PATH']}", FAKE_LOG=str(log), KIND=kind,
+                   CUDF="26.02")
+        proc = subprocess.run(["bash", "-c", step("Test")["run"]], cwd=root, env=env, capture_output=True,
+                              text=True, timeout=30)
+        return proc, log.read_text().splitlines() if log.exists() else []
+
+
+def test_the_test_step_runs_test_run_tests_in_the_run_image_of_the_job_s_cudf():
+    proc, calls = run_test_step("run")
+    assert proc.returncode == 0, proc
+    assert calls == ["image-ref.sh run 26.02", "python3 scripts/env/tests/test_run_tests.py IMAGE=ref-of-26.02"], calls
+    proc, calls = run_test_step("build")
+    assert proc.returncode == 0 and calls == [], (proc, calls)
+    proc, calls = run_test_step("run", image_ref_exit=2)
+    assert proc.returncode != 0 and not [c for c in calls if c.startswith("python3")], (proc, calls)
 
 
 FAKES = {

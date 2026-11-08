@@ -9,10 +9,13 @@ the tree that do the same. Nothing builds, pulls or runs a container.
 import json
 import os
 import pathlib
+import pty
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
@@ -38,12 +41,29 @@ RECORD = '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG_DIR/{log}"\n'
 FAKE_IMAGE_REF = r'''#!/bin/sh
 printf "%s\n" "$*" >> "$FAKE_LOG_DIR/image-ref.log"
 if [ -n "${FAKE_IMAGE_REF_EXIT:-}" ]; then echo "$FAKE_IMAGE_REF_ERR" >&2; exit "$FAKE_IMAGE_REF_EXIT"; fi
+if [ "$1" = --ref ]; then echo "${FAKE_IMAGE_REF:-$2}"; exit 0; fi
 echo "${FAKE_IMAGE_REF:-ghcr.io/asymptote-tech/peacockdb-build:cudf-x-in-0}"
 '''
+# `ps` answers FAKE_DOCKER_PS; a `run` given FAKE_DOCKER_SLEEP writes its pid to run.pid and waits, and
+# `kill` ends it, as a container killed ends its `docker run`.
 FAKE_DOCKER = r'''#!/usr/bin/env python3
-import json, os, sys
-with open(os.path.join(os.environ["FAKE_LOG_DIR"], "docker.log"), "a") as f:
-    f.write(json.dumps(sys.argv[1:]) + "\n")
+import json, os, signal, sys, time
+a = sys.argv[1:]
+logs = os.environ["FAKE_LOG_DIR"]
+with open(os.path.join(logs, "docker.log"), "a") as f:
+    f.write(json.dumps(a) + "\n")
+if a[0] == "ps":
+    print(os.environ.get("FAKE_DOCKER_PS", ""), end="")
+    sys.exit(0)
+if a[0] == "kill":
+    with open(os.path.join(logs, "run.pid")) as f:
+        os.kill(int(f.read()), signal.SIGKILL)
+    sys.exit(0)
+if a[0] == "run" and os.environ.get("FAKE_DOCKER_SLEEP"):
+    with open(os.path.join(logs, "run.pid.tmp"), "w") as f:
+        f.write(str(os.getpid()))
+    os.rename(os.path.join(logs, "run.pid.tmp"), os.path.join(logs, "run.pid"))
+    time.sleep(float(os.environ["FAKE_DOCKER_SLEEP"]))
 sys.exit(int(os.environ.get("FAKE_DOCKER_EXIT", "0")))
 '''
 FAKE_CARGO = r'''#!/usr/bin/env python3
@@ -114,15 +134,24 @@ class Tree:
         self.env.update(PATH=f"{self.bin}:{os.environ['PATH']}", FAKE_LOG_DIR=str(self.logs),
                         XDG_CACHE_HOME=str(self.cache))
 
-    def run(self, *args, env=None, inside=False):
+    def environ(self, env, inside):
         e = {**self.env, **(env or {})}
         if inside:
             e.update(PEACOCK_IN_IMAGE="1", GCC_VERSION=e.get("GCC_VERSION", "12"))
         else:
             e.setdefault("PEACOCK_BUILD_IMAGE", "img:test")
-        e = {k: v for k, v in e.items() if v is not None}
-        return subprocess.run([str(self.root / "scripts/build-test.sh"), *args], cwd=self.root, env=e,
-                              capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=60)
+        return {k: v for k, v in e.items() if v is not None}
+
+    def run(self, *args, env=None, inside=False):
+        return subprocess.run([str(self.root / "scripts/build-test.sh"), *args], cwd=self.root,
+                              env=self.environ(env, inside), capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=60)
+
+    def start(self, *args, env=None, **streams):
+        """build-test.sh <args> outside the image, left running."""
+        streams = {"stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, **streams}
+        return subprocess.Popen([str(self.root / "scripts/build-test.sh"), *args], cwd=self.root,
+                                env=self.environ(env, False), **streams)
 
     def lines(self, name):
         p = self.logs / name
@@ -134,8 +163,11 @@ class Tree:
     def cargo(self):
         return [json.loads(line) for line in self.lines("cargo.log")]
 
+    def runs(self):
+        return [c for c in self.docker() if c[0] == "run"]
+
     def the_docker_run(self):
-        calls = self.docker()
+        calls = self.runs()
         assert len(calls) == 1 and calls[0][:2] == ["run", "--rm"], calls
         return calls[0]
 
@@ -178,7 +210,7 @@ def test_runs_in_the_image_as_the_caller():
         assert (t.cache / "peacock/cargo-registry").is_dir() and (t.cache / "peacock/ccache-25.02").is_dir()
         assert (t.root / ".home-img").is_dir()
         assert after_image(argv, "img:test") == ["scripts/build-test.sh", "--rust-only", "--build", "--run"], argv
-        assert t.lines("image-ref.log") == [], "PEACOCK_BUILD_IMAGE names the image"
+        assert t.lines("image-ref.log") == ["--ref img:test build 25.02"], "PEACOCK_BUILD_IMAGE is checked"
         assert t.cargo() == [] and t.lines("build.log") == [], "nothing builds outside the image"
 
 
@@ -187,6 +219,82 @@ def test_the_container_exit_is_the_scripts():
         t = Tree(tmp)
         r = t.run("--rust-only", "--run", env={"FAKE_DOCKER_EXIT": "7"})
         assert r.returncode == 7, (r.returncode, r.stderr)
+
+
+def label_values(argv):
+    return dict(v.split("=", 1) for v in values(argv, "--label"))
+
+
+def test_the_container_has_an_init_and_a_name_by_worktree_and_version():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        ok(t.run("--cudf", "26.02", "--rust-only", "--build"))
+        argv = t.the_docker_run()
+        assert "--init" in argv[:argv.index("img:test")], argv
+        assert "-it" not in argv and "-t" not in argv and "-i" not in argv, "no terminal, no -it"
+        [name] = values(argv, "--name")
+        labels = label_values(argv)
+        assert labels["peacock.tree"] == str(t.root) and labels["peacock.cudf"] == "26.02", labels
+        assert name == f"peacock-build-tree-26.02-{labels['peacock.pid']}", (name, labels)
+        [ps] = [c for c in t.docker() if c[0] == "ps"]
+        assert f"label=peacock.tree={t.root}" in values(ps, "--filter"), ps
+        assert "label=peacock.cudf=26.02" in values(ps, "--filter"), ps
+
+
+def test_a_terminal_gets_it():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        primary, secondary = pty.openpty()
+        try:
+            p = t.start("--rust-only", "--build", stdin=secondary, stdout=secondary)
+            assert p.wait(timeout=60) == 0, p.stderr.read()
+        finally:
+            os.close(secondary)
+            os.close(primary)
+        argv = t.the_docker_run()
+        assert "-it" in argv[:argv.index("img:test")], argv
+        p = t.start("--rust-only", "--build", stdin=subprocess.DEVNULL)
+        assert p.wait(timeout=60) == 0
+        assert "-it" not in t.runs()[-1], "stdin is no terminal"
+
+
+def started_run(t, *args, env=None):
+    """build-test.sh <args>, once its fake `docker run` is up."""
+    p = t.start(*args, env={"FAKE_DOCKER_SLEEP": "60", **(env or {})})
+    deadline = time.monotonic() + 30
+    while not (t.logs / "run.pid").exists():
+        assert p.poll() is None and time.monotonic() < deadline, (p.poll(), p.stderr.read() if p.poll() else "")
+        time.sleep(0.05)
+    return p
+
+
+def test_a_signal_kills_the_container():
+    for sig, code in ((signal.SIGTERM, 143), (signal.SIGINT, 130)):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Tree(tmp)
+            p = started_run(t, "--rust-only", "--build")
+            t0 = time.monotonic()
+            p.send_signal(sig)
+            assert p.wait(timeout=30) == code, (sig, p.returncode, p.stderr.read())
+            assert time.monotonic() - t0 < 20, "the script waited out the container"
+            [name] = values(t.the_docker_run(), "--name")
+            assert ["kill", name] in t.docker(), t.docker()
+
+
+def test_a_leftover_container_is_refused():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        gone = 2 ** 22 + 7
+        while pathlib.Path(f"/proc/{gone}").exists():
+            gone += 1
+        left = f"peacock-build-tree-25.02-{gone} {gone}\n"
+        r = t.run("--rust-only", "--build", env={"FAKE_DOCKER_PS": left})
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert f"peacock-build-tree-25.02-{gone}" in r.stderr and "docker kill" in r.stderr, r.stderr
+        assert t.runs() == [], t.docker()
+        # One whose build-test.sh still runs is another build here, not a leftover.
+        alive = f"peacock-build-tree-25.02-{os.getpid()} {os.getpid()}\n"
+        ok(t.run("--rust-only", "--build", env={"FAKE_DOCKER_PS": alive}))
 
 
 def test_target_dir_is_per_worktree_and_version():
@@ -204,13 +312,13 @@ def test_target_dir_is_per_worktree_and_version():
 
         r = t.run("--rust-only", "--build", env={"CARGO_TARGET_DIR": "/elsewhere"})
         assert r.returncode == 2 and "/elsewhere" in r.stderr, (r.returncode, r.stderr)
-        assert len(t.docker()) == 1, "a refused target dir ran a container"
+        assert len(t.runs()) == 1, "a refused target dir ran a container"
 
         ok(t.run("--rust-only", "--build", env={"CARGO_TARGET_DIR": f"{root}/target-mine"}))
-        assert f"CARGO_TARGET_DIR={root}/target-mine" in values(t.docker()[-1], "-e"), t.docker()[-1]
+        assert f"CARGO_TARGET_DIR={root}/target-mine" in values(t.runs()[-1], "-e"), t.runs()[-1]
 
         ok(t.run("--rust-only", "--build", env={"PEACOCK_CUDF": "26.02"}))
-        assert "PEACOCK_CUDF=26.02" in values(t.docker()[-1], "-e"), t.docker()[-1]
+        assert "PEACOCK_CUDF=26.02" in values(t.runs()[-1], "-e"), t.runs()[-1]
 
         r = t.run("--cudf", "24.12", "--rust-only", "--build")
         assert r.returncode == 2 and "24.12" in r.stderr, (r.returncode, r.stderr)
@@ -222,16 +330,16 @@ def test_worktree_mounts_its_git_dir():
         main_tree = Tree(tmp)
         ok(main_tree.run("--rust-only", "--build"))
         root = str(main_tree.root)
-        assert [m for m in values(main_tree.docker()[-1], "-v") if ".git" in m] == [], \
+        assert [m for m in values(main_tree.runs()[-1], "-v") if ".git" in m] == [], \
             "a plain clone's git dir is inside the mounted tree"
         wt = pathlib.Path(tmp) / "wt"
         git(main_tree.root, "worktree", "add", "-q", str(wt))
         t = Tree(tmp, root=wt)
         ok(t.run("--rust-only", "--build"))
         common = f"{root}/.git"
-        mounts = values(t.docker()[-1], "-v")
+        mounts = values(t.runs()[-1], "-v")
         assert f"{common}:{common}" in mounts and f"{t.root}:{t.root}" in mounts, mounts
-        assert values(t.docker()[-1], "-w") == [str(t.root)]
+        assert values(t.runs()[-1], "-w") == [str(t.root)]
 
 
 def test_pass_env_never_puts_a_value_in_argv():
@@ -245,7 +353,7 @@ def test_pass_env_never_puts_a_value_in_argv():
         assert after_image(argv, "img:test")[-2:] == ["python3", "scripts/check_s3_datasets.py"], argv
         r = t.run("--pass-env", "AWS_SECRET_ACCESS_KEY=s3cr3t", "--", "true")
         assert r.returncode == 2 and "--pass-env" in r.stderr, (r.returncode, r.stderr)
-        assert len(t.docker()) == 1
+        assert len(t.runs()) == 1
 
 
 def test_refuses_a_stale_image():
@@ -257,6 +365,18 @@ def test_refuses_a_stale_image():
                   env={"PEACOCK_BUILD_IMAGE": None, "FAKE_IMAGE_REF_EXIT": "2", "FAKE_IMAGE_REF_ERR": err})
         assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
         assert "docker/pins.env" in r.stderr, r.stderr
+        assert t.docker() == [], t.docker()
+
+
+def test_refuses_a_given_image_of_other_inputs():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        err = "image-ref.sh: img:2502 was built from other inputs than this tree: docker/conda/cudf-25.02.spec"
+        r = t.run("--cudf", "26.02", "--rust-only", "--build",
+                  env={"PEACOCK_BUILD_IMAGE": "img:2502", "FAKE_IMAGE_REF_EXIT": "2", "FAKE_IMAGE_REF_ERR": err})
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert "img:2502" in r.stderr and "docker/conda/cudf-25.02.spec" in r.stderr, r.stderr
+        assert t.lines("image-ref.log") == ["--ref img:2502 build 26.02"], t.lines("image-ref.log")
         assert t.docker() == [], t.docker()
 
 
@@ -437,10 +557,10 @@ def test_runner_temp_is_mounted_when_set():
         runner_temp = str((pathlib.Path(tmp) / "runner-temp").resolve())
         os.mkdir(runner_temp)
         ok(t.run("--", "true", env={"RUNNER_TEMP": runner_temp}))
-        argv = t.docker()[-1]
+        argv = t.runs()[-1]
         assert f"{runner_temp}:{runner_temp}" in values(argv, "-v") and "RUNNER_TEMP" in values(argv, "-e"), argv
         ok(t.run("--", "true"))
-        argv = t.docker()[-1]
+        argv = t.runs()[-1]
         assert not [v for v in values(argv, "-v") if "runner-temp" in v], argv
         assert "RUNNER_TEMP" not in values(argv, "-e"), argv
 

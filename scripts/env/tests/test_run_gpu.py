@@ -15,7 +15,7 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
-from gpu_host import BUILD_REF, DRIVER_MINIMUM, H100, HOSTNAME, L40S, RUN_REF, Host, label, log_lines  # noqa: E402
+from gpu_host import DRIVER_MINIMUM, H100, HOSTNAME, L40S, Host, label, log_lines  # noqa: E402
 from machine import KEYS, REPO, lib  # noqa: E402
 
 VERBS = [("prepare",), ("ship",), ("run", "list"), ("pull",)]
@@ -34,6 +34,10 @@ def refused(r, code, *words):
     assert r.returncode == code, (r.returncode, r.stdout, r.stderr)
     for w in words:
         assert w in r.stderr, (w, r.stderr)
+
+
+def values(argv, flag):
+    return [argv[i + 1] for i, token in enumerate(argv[:-1]) if token == flag]
 
 
 def data_hash(h):
@@ -73,15 +77,18 @@ def test_run_gpu_without_an_instance_id_is_refused():
 
 
 def test_run_gpu_runs_cis_sequence_on_nebius_gpu():
-    """gpu-tests' calls, against the L40S, named by its id with no profile, the install relative."""
+    """gpu-tests' calls, against the L40S, named by its id with no profile, the install relative, in
+    ~/peacock/ci/ as container peacock-ci: never the dir and container of a clone named peacockdb."""
     with Host() as h:
-        ok(h.gpu(*L40S, "prepare", "--no-sf40", vm=None))
-        ok(h.gpu(*L40S, "ship", "--install", "cpp/install", vm=None))
-        r = ok(h.gpu(*L40S, "run", "list", vm=None))
+        ok(h.gpu(*L40S, "--dir", "ci", "prepare", "--no-sf40", vm=None))
+        ok(h.gpu(*L40S, "--dir", "ci", "ship", "--install", "cpp/install", vm=None))
+        r = ok(h.gpu(*L40S, "--dir", "ci", "run", "list", vm=None))
         assert "run-tests.sh list: green" in r.stdout, r.stdout
         for a in h.nebius_calls():
             assert a[:2] == L40S and a[2] in ("ssh", "rsh"), a
-        assert (h.vm_dir() / "cpp/install/lib/libpeacock_gpu.so").read_text() == "staged"
+        assert (h.vm_dir("ci") / "cpp/install/lib/libpeacock_gpu.so").read_text() == "staged"
+        assert [values(a, "--name") for a in h.docker_runs()] == [["peacock-ci"]], h.docker_runs()
+        assert not h.vm_dir().exists()
         nothing_bypassed(h)
 
 
@@ -133,9 +140,9 @@ def test_prepare_readies_the_vm():
         sets = h.data / data_hash(h)
         assert (sets / "tpch.sf1" / "generated").is_file() and (sets / "tpcds.sf1").is_dir(), list(h.data.iterdir())
         pulled = [a[-1] for a in h.docker_calls() if a[0] == "pull"]
-        assert set(pulled) == {RUN_REF, BUILD_REF}, pulled
+        assert set(pulled) == {h.run_ref, h.build_ref}, pulled
         cudf = h.home / "peacock" / "cudf-25.02"
-        assert (cudf / "lib" / "libcudf.so").read_text() == RUN_REF
+        assert (cudf / "lib" / "libcudf.so").read_text() == h.run_ref
         assert (cudf / ".image-id").read_text().strip() == "sha256:run1"
         assert not any("update-initramfs" in ln or "apt-get" in ln for ln in h.host_lines()), h.host_lines()
         nothing_bypassed(h)
@@ -144,7 +151,7 @@ def test_prepare_readies_the_vm():
 def test_prepare_pulls_the_given_images():
     with Host() as h:
         images = h.world()["images"]
-        h.world(images={GIVEN_RUN: images.pop(RUN_REF), GIVEN_BUILD: images.pop(BUILD_REF)})
+        h.world(images={GIVEN_RUN: images.pop(h.run_ref), GIVEN_BUILD: images.pop(h.build_ref)})
         ok(h.gpu("prepare", env={"PEACOCK_RUN_IMAGE": GIVEN_RUN, "PEACOCK_BUILD_IMAGE": GIVEN_BUILD}))
         pulled = [a[-1] for a in h.docker_calls() if a[0] == "pull"]
         assert sorted(pulled) == sorted([GIVEN_RUN, GIVEN_BUILD]), pulled
@@ -156,7 +163,7 @@ def test_prepare_pulls_the_given_images():
 def test_a_given_image_is_checked_like_the_tag():
     with Host() as h:
         images = h.world()["images"]
-        images[GIVEN_RUN] = images.pop(RUN_REF)
+        images[GIVEN_RUN] = images.pop(h.run_ref)
         images[GIVEN_RUN]["labels"]["peacockdb.inputs"] = label(h.tree, "run", change="docker/run-tests.sh")
         h.world(images=images)
         refused(h.gpu("prepare", env={"PEACOCK_RUN_IMAGE": GIVEN_RUN}), 2, "docker/run-tests.sh", GIVEN_RUN)
@@ -188,7 +195,7 @@ def test_prepare_twice_copies_the_cudf_prefix_once():
         prepared(h)
         assert [a[0] for a in h.docker_calls()].count("cp") == 1, h.docker_calls()
         h.world(images={**h.world()["images"],
-                        RUN_REF: {**h.world()["images"][RUN_REF], "id": "sha256:run2"}})
+                        h.run_ref: {**h.world()["images"][h.run_ref], "id": "sha256:run2"}})
         prepared(h)
         assert [a[0] for a in h.docker_calls()].count("cp") == 2
         assert (h.home / "peacock" / "cudf-25.02" / ".image-id").read_text().strip() == "sha256:run2"
@@ -230,19 +237,19 @@ def test_prepare_says_restart_when_counters_are_admin_only():
 def test_prepare_refuses_stale_run_image():
     with Host() as h:
         images = h.world()["images"]
-        images[RUN_REF]["labels"]["peacockdb.inputs"] = label(h.tree, "run", change="docker/run-tests.sh")
+        images[h.run_ref]["labels"]["peacockdb.inputs"] = label(h.tree, "run", change="docker/run-tests.sh")
         h.world(images=images)
         r = h.gpu(*H100, "prepare")
-        refused(r, 2, "docker/run-tests.sh", RUN_REF)
+        refused(r, 2, "docker/run-tests.sh", h.run_ref)
         assert h.fetches() == [] and not (h.home / "peacock" / "cudf-25.02").exists()
 
 
 def test_prepare_refuses_stale_build_image():
     with Host() as h:
         images = h.world()["images"]
-        images[BUILD_REF]["labels"]["peacockdb.inputs"] = label(h.tree, "build", change="docker/venv.lock")
+        images[h.build_ref]["labels"]["peacockdb.inputs"] = label(h.tree, "build", change="docker/venv.lock")
         h.world(images=images)
-        refused(h.gpu("prepare"), 2, "docker/venv.lock", BUILD_REF)
+        refused(h.gpu("prepare"), 2, "docker/venv.lock", h.build_ref)
         assert not any(h.data.iterdir())
 
 
@@ -259,11 +266,11 @@ def test_prepare_refuses_a_run_image_without_a_driver_minimum():
         with Host() as h:
             images = h.world()["images"]
             if minimum is None:
-                del images[RUN_REF]["labels"]["peacockdb.driver-minimum"]
+                del images[h.run_ref]["labels"]["peacockdb.driver-minimum"]
             else:
-                images[RUN_REF]["labels"]["peacockdb.driver-minimum"] = minimum
+                images[h.run_ref]["labels"]["peacockdb.driver-minimum"] = minimum
             h.world(images=images)
-            refused(h.gpu("prepare"), 2, "no peacockdb.driver-minimum label", RUN_REF)
+            refused(h.gpu("prepare"), 2, "no peacockdb.driver-minimum label", h.run_ref)
             assert h.fetches() == []
 
 
@@ -492,9 +499,9 @@ def test_run_refuses_old_driver():
 def test_run_before_prepare_says_so():
     with Host() as h:
         images = h.world()["images"]
-        del images[RUN_REF]
+        del images[h.run_ref]
         h.world(images=images)
-        refused(h.gpu("run", "list"), 2, "prepare", RUN_REF)
+        refused(h.gpu("run", "list"), 2, "prepare", h.run_ref)
         assert h.docker_runs() == []
 
 
@@ -503,9 +510,9 @@ def test_run_refuses_a_run_image_built_from_other_inputs():
         prepared(h)
         ok(h.gpu("ship"))
         images = h.world()["images"]
-        images[RUN_REF]["labels"]["peacockdb.inputs"] = label(h.tree, "run", change="docker/run-tests.sh")
+        images[h.run_ref]["labels"]["peacockdb.inputs"] = label(h.tree, "run", change="docker/run-tests.sh")
         h.world(images=images)
-        refused(h.gpu("run", "list"), 2, "docker/run-tests.sh", RUN_REF)
+        refused(h.gpu("run", "list"), 2, "docker/run-tests.sh", h.run_ref)
         assert h.docker_runs() == []
 
 
@@ -518,7 +525,7 @@ def test_run_checks_the_run_image_without_pulling_it():
         run_calls = h.docker_calls()[before:]
         assert not any(a[0] == "pull" for a in run_calls), run_calls
         inspected = [a for a in run_calls if a[:2] == ["image", "inspect"] and "peacockdb.inputs" in " ".join(a)]
-        assert inspected and inspected[0][-1] == RUN_REF, run_calls
+        assert inspected and inspected[0][-1] == h.run_ref, run_calls
 
 
 def test_run_passes_the_machines_hostname():
@@ -534,7 +541,7 @@ def test_run_passes_the_machines_hostname():
         assert a[a.index("--name") + 1] == "peacock-chain-l"
         assert "--gpus" in a and a[a.index("--gpus") + 1] == "all"
         assert a[a.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
-        assert a[-2:] == [RUN_REF, "list"], a
+        assert a[-2:] == [h.run_ref, "list"], a
 
 
 def test_run_mounts_the_data_dir_at_its_own_path():
@@ -619,7 +626,7 @@ def test_run_clears_a_finished_container_and_reports_its_exit():
 def test_run_uses_the_given_run_image():
     with Host() as h:
         images = h.world()["images"]
-        images[GIVEN_RUN] = images.pop(RUN_REF)
+        images[GIVEN_RUN] = images.pop(h.run_ref)
         h.world(images=images)
         env = {"PEACOCK_RUN_IMAGE": GIVEN_RUN}
         ok(h.gpu("prepare", env=env))
@@ -628,7 +635,7 @@ def test_run_uses_the_given_run_image():
         a = h.docker_runs()[0]
         assert a[-2:] == [GIVEN_RUN, "list"], a
         inspected = {a[-1] for a in h.docker_calls() if a[:2] == ["image", "inspect"]}
-        assert RUN_REF not in inspected and GIVEN_RUN in inspected, inspected
+        assert h.run_ref not in inspected and GIVEN_RUN in inspected, inspected
 
 
 def test_detached_run_returns_while_running():
@@ -710,7 +717,7 @@ def test_run_names_a_staged_binary():
         envs = [a[i + 1] for i, x in enumerate(a) if x == "-e"]
         assert envs == ["LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib", "PEACOCK_TESTDATA_DIR=/peacock/testdata",
                         "PEACOCK_BENCH_RESUME=1"], envs
-        assert a[a.index(RUN_REF):] == [RUN_REF, "--nocapture", "--test-threads=1", "--exact", FIRST3], a
+        assert a[a.index(h.run_ref):] == [h.run_ref, "--nocapture", "--test-threads=1", "--exact", FIRST3], a
         assert not {"list", "filter", "bench"} & set(a), a
         assert a[a.index("--hostname") + 1] == HOSTNAME and a[a.index("--name") + 1] == "peacock-chain-l"
         mounts = [a[i + 1] for i, x in enumerate(a) if x == "-v"]
@@ -723,7 +730,7 @@ def test_run_staged_narrows_by_the_filter():
         staged_fused(h)
         ok(h.gpu("run", FUSED, env={"PCK_TEST_FILTER": "tpcds"}))
         a = h.docker_runs()[0]
-        assert a[a.index(RUN_REF):] == [RUN_REF, "--nocapture", "--test-threads=1", "tpcds"], a
+        assert a[a.index(h.run_ref):] == [h.run_ref, "--nocapture", "--test-threads=1", "tpcds"], a
         assert "PCK_TEST_FILTER=tpcds" in [a[i + 1] for i, x in enumerate(a) if x == "-e"], a
 
 

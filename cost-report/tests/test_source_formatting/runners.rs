@@ -32,7 +32,7 @@ pub(crate) const GPU_RUN_STEP: &str = "Run the L40S list";
 
 /// The run step's command: run-tests.sh's list on nebius-gpu, attached, its exit the run's.
 const GPU_RUN: &str =
-    "scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt run list";
+    "scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt --dir ci run list";
 
 /// The body of one step of pipeline.yml's GPU jobs, by its `name:`.
 fn gpu_job_step(name: &str) -> String {
@@ -554,28 +554,66 @@ fn the_staged_lib_is_the_crates_own_test_binary() {
 /// crash, job green.
 #[test]
 fn the_gpu_step_cannot_report_success_over_a_failure() {
-    let step: Vec<String> = gpu_job_step(GPU_RUN_STEP)
-        .lines()
-        .filter(|l| !l.trim_start().starts_with('#'))
-        .map(str::to_string)
-        .collect();
-    let step = step.join("\n");
-    assert!(
-        step.contains(GPU_RUN) && !step.contains("--detach"),
-        "the `{GPU_RUN_STEP}` step does not run `{GPU_RUN}`, attached. run-gpu.sh's `run list` \
-         follows the run and exits as it did; detached, it returns once the container is up, and \
-         the step is green before a single binary has run:\n{step}"
-    );
-    assert!(
-        !step.contains("|| true") && !step.contains("; true"),
-        "the `{GPU_RUN_STEP}` step swallows the runner's status:\n{step}"
-    );
-    assert!(
-        !step.contains("export LD_LIBRARY_PATH"),
-        "the `{GPU_RUN_STEP}` step exports a library path"
-    );
+    let problems = gpu_run_step_problems(&gpu_job_step(GPU_RUN_STEP));
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
     if let Err(why) = run_tests_cannot_report_success_over_a_failure(&read(RUN_TESTS)) {
         panic!("{RUN_TESTS} can report success over a failure: {why}");
+    }
+}
+
+/// Each way the GPU run step's body, the lines after its `- name:`, could be green over a failed
+/// run.
+fn gpu_run_step_problems(body: &str) -> Vec<String> {
+    let step = body
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut problems = Vec::new();
+    if !step.contains(GPU_RUN) || step.contains("--detach") {
+        problems.push(format!(
+            "the `{GPU_RUN_STEP}` step does not run `{GPU_RUN}`, attached. run-gpu.sh's `run list` \
+             follows the run and exits as it did; detached, it returns once the container is up, \
+             and the step is green before a single binary has run:\n{step}"
+        ));
+    }
+    if step.contains("|| true") || step.contains("; true") {
+        problems.push(format!(
+            "the `{GPU_RUN_STEP}` step swallows the runner's status:\n{step}"
+        ));
+    }
+    if step.contains("export LD_LIBRARY_PATH") {
+        problems.push(format!("the `{GPU_RUN_STEP}` step exports a library path"));
+    }
+    for key in ["continue-on-error:", "if:"] {
+        if step.lines().any(|l| l.trim_start().starts_with(key)) {
+            problems.push(format!(
+                "the `{GPU_RUN_STEP}` step has `{key}`: a forgiven or skipped run is a green job \
+                 that ran nothing"
+            ));
+        }
+    }
+    problems
+}
+
+/// The run step's reader: the step as committed passes, and each way to be green over a failed
+/// run is refused, a skip or a forgiven failure among them.
+#[test]
+fn the_gpu_run_step_reader_refuses_each_way_to_hide_a_failure() {
+    let body = format!("        timeout-minutes: 90\n        run: {GPU_RUN}\n");
+    assert_eq!(gpu_run_step_problems(&body), Vec::<String>::new());
+    for (what, broken) in [
+        ("detached", body.replace("run list", "run --detach list")),
+        ("another command", body.replace(GPU_RUN, "true")),
+        ("swallowed", body.replace(GPU_RUN, &format!("{GPU_RUN} || true"))),
+        ("forgiven", format!("        continue-on-error: true\n{body}")),
+        ("skipped", format!("        if: github.event_name == 'push'\n{body}")),
+        ("skipped, at the step's end", format!("{body}        if: false\n")),
+    ] {
+        assert!(
+            !gpu_run_step_problems(&broken).is_empty(),
+            "{what}: accepted\n{broken}"
+        );
     }
 }
 

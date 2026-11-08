@@ -1076,3 +1076,90 @@ Nits taken because they are cheap and real: 2 (the GPU run step's guard does not
 `continue-on-error` or an `if:`), 8 (the Rust cache key ignores the image), 9 (wiki drift:
 `stage-install.sh` usage, a long line, "passes none of the step's environment"). Dropped: 1, 3, 4,
 5, 6, 7, 10.
+
+### Round 1 fixes (developer, 2026-11-08)
+
+Each code fix had its test red first. No image input changed: `image_inputs_tag . build 25.02` is
+still `cudf-25.02-in-50a0c1d7779e`, the local image's; `docker/`, `cpp/CMakeLists.txt` untouched.
+No republish.
+
+1. CI's dir and container: the three `run-gpu.sh` calls in `gpu-tests` take `--dir ci`
+   (`~/peacock/ci/`, container `peacock-ci`); cleanup removes `peacock-ci`. The guard moved to
+   `ci_gpu.rs::the_gpu_job_owns_its_dir_and_removes_its_container`: it reads `--dir` off the
+   `Run the L40S list` step, refuses none or `peacockdb` (the checkout's name, a developer's
+   clone's on the VM), another call naming another dir, and a cleanup of anything but
+   `peacock-<dir>` (red on the old pipeline.yml). `runners.rs`'s `GPU_RUN` carries `--dir ci`;
+   `test_run_gpu.py`'s CI-sequence test runs `--dir ci` and checks the dir and container name.
+   build-test.md's CI section, disk section and tests table say `~/peacock/ci/`, `peacock-ci`.
+2. A given `$PEACOCK_BUILD_IMAGE` is label-checked: `image-ref.sh --ref <ref> build <v>` looks the
+   ref up as it does the inputs tag (local, else the registry's digest) and refuses a label that
+   differs from the tree's for `<v>`, naming the inputs (a 25.02 image under 26.02 names
+   `docker/conda/cudf-25.02.spec`). `build-test.sh` calls it for a given ref; exit 2, no `docker
+   run`. Tests: `test_image_ref.py::test_checks_a_given_ref_against_the_tree`,
+   `test_refuses_a_given_ref_of_other_inputs`; `test_build_test.py::test_refuses_a_given_image_of_other_inputs`;
+   `test_runs_in_the_image_as_the_caller` now expects the `--ref` call (it pinned "no check").
+   CI: the action's `PEACOCK_BUILD_IMAGE` is image-ref.sh's digest, pulled, so the local
+   `docker image inspect <repo>@sha256:…` answers. Checked by hand on dev: the local inputs tag
+   passes, and under `--cudf 26.02` it is refused naming the two inputs.
+3. `test_image.py::test_the_inputs_are_the_same_in_every_locale` fails, not skips, with no locale
+   sorting unlike C (red in the image: "no installed locale sorts unlike C"), and the file joins
+   the cost-report step's `on_runner` list beside `test_fetch_sf40.py`; RUNNER_SIDE's reason says
+   so. #309 now names both files.
+4. `images.yml` has a `Test` step between Build and Push: for `KIND=run`, `IMAGE=$(image-ref.sh run
+   $CUDF)` (the image just built, label-checked) and `python3 scripts/env/tests/test_run_tests.py`;
+   a build image skips it inside the script, so no step has an `if:`. `test_run_tests.py` needs the
+   run image and docker only: fake binaries, `--network none`, no `--gpus`, stdlib python. It reads
+   `IMAGE`; with it set, `test_each_image_carries_the_committed_script` (was
+   `test_both_images_…`) checks that one image instead of both moving tags. Tests:
+   `test_images_workflow.py::test_the_job_runs_its_five_steps_unconditionally`,
+   `test_the_run_image_is_tested_before_it_is_pushed`,
+   `test_the_test_step_runs_test_run_tests_in_the_run_image_of_the_job_s_cudf` (the step run over
+   fakes: run → image-ref then python3 with IMAGE; build → nothing; image-ref failing → no
+   python3). Not run on dev against an image: dev holds no run image and must not pull one; with a
+   fake docker the file passes `IMAGE` through to every `docker run`.
+5. `ci_images.rs` finds a command behind `timeout` (with its duration), `env` (options and
+   assignments), `exec`, `nice`, `nohup`, `command` (`-v` runs nothing), `sudo`, `xargs`; reads
+   `bash`/`sh` `-c` text as a line and `bash <script>` as the script; and treats any python and
+   any file of `scripts/`, `benchmarks/`, `testdata/`, `docker/` run by its path as project code.
+   RUNNER_SIDE entries now name a command (from its command word, at a word boundary) for any owner:
+   in-image job, host job or local action; an entry naming no command is refused. The reader moved
+   to `ci_workflow.rs` (ci_images.rs was at 966 lines). A multi-line array assignment
+   (`elsewhere=(… \n …)`) is one line, else its paths read as commands. New entries with reasons:
+   gpu-tests (`check-actor.sh`, `image-ref.sh`, `nebius.sh`, `run-gpu.sh`), image (`image.sh`,
+   `image-ref.sh`, `python3 scripts/env/tests/test_run_tests.py`), watch (`watch.sh`), the
+   build-image action (`image-ref.sh`). Tests: `a_project_command_behind_a_prefix_word_or_a_shell_is_found`
+   (22 refused, 8 accepted), `a_runner_side_entry_names_a_command`, and the host-job case in
+   `a_job_neither_in_the_image_nor_said_why_is_refused`.
+6. `build-test.sh`: `docker run --init --name peacock-build-<tree>-<v>-<pid>` with labels
+   `peacock.tree`, `peacock.cudf`, `peacock.pid`; `-it` only when stdin and stdout are terminals.
+   docker run goes to the background (`<&0`) so an INT/TERM trap runs at once and `docker kill`s
+   the container; exit 130/143, else the container's. Before the run, a labelled container of this
+   tree and version whose pid is gone (`/proc/<pid>`) is refused, exit 2, naming `docker kill`.
+   The pid is in the name so two runs in one tree (an agent's background build and a quick test)
+   still work. Tests over the fake docker: `test_the_container_has_an_init_and_a_name_by_worktree_and_version`,
+   `test_a_terminal_gets_it` (a pty), `test_a_signal_kills_the_container` (TERM 143, INT 130),
+   `test_a_leftover_container_is_refused`; exit passthrough unchanged. By hand on dev: `timeout 8
+   scripts/build-test.sh -- sleep 100` returns at 8 s with no container left; PID 1 is
+   docker-init.
+7. `run-gpu.sh`, `check-build-image.sh` and `bootstrap-vm.sh` default to
+   `…:$(image_inputs_tag <tree> <kind> <v>)`; the `PEACOCK_*_IMAGE` overrides stay (bootstrap had
+   none). `bootstrap-vm.sh` sources `image-inputs.sh` from its clone, as before, so a raw-view
+   fetch of the one file still works; a clone at a ref older than `image_inputs_tag` is refused
+   naming it and `--ref`. `check-build-image.sh` prints the checked ref alone on stdout (its other
+   output to stderr), so the CPU-VM recipe is `I=$(check-build-image.sh …)`. The wiki's three
+   recipes and prompts.md's L40S line lose their exports. Tests: `gpu_host.py` keys its images by
+   the tree's inputs tag (`h.run_ref`, `h.build_ref`), which turned 48 of test_run_gpu's tests and 4
+   of check-build-image's red until the scripts changed; `test_check_build_image.py` checks stdout;
+   `test_bootstrap.py::test_bootstrap_uses_the_image_of_the_clones_inputs`,
+   `test_bootstrap_refuses_a_clone_older_than_the_inputs_tag`.
+- Nit 2: `runners.rs::gpu_run_step_problems` also refuses `continue-on-error:` and `if:` in the
+  run step; `the_gpu_run_step_reader_refuses_each_way_to_hide_a_failure` pins each way.
+- Nit 8: the three `Swatinem/rust-cache` steps take `key: ${{ env.PEACOCK_BUILD_IMAGE }}`;
+  `ci_images.rs::a_rust_cache_is_keyed_by_the_build_image` (red on the old pipeline.yml).
+- Nit 9: build-test.md gives `stage-install.sh [--cudf <v>] [--no-release-bench]` and what the flag
+  does, the long line there is rewrapped, and "passes none of the step's environment" now says
+  `build-test.sh` forwards a fixed list by name.
+
+Pre-existing, not touched: actionlint (its image's shellcheck 0.11) reports SC2001 (style) in
+`changes`' run block at pipeline.yml:53, the same on HEAD; shellcheck 0.9.0 reports SC2032/SC2033
+on `bootstrap-vm.sh`'s `docker() { sudo docker …; }` line, the same on HEAD and outside CI's list.

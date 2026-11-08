@@ -6,7 +6,8 @@
 #                 [--pass-env NAME]... [-- <command...>]
 #
 # <v> is $PEACOCK_CUDF, else 25.02. Outside the image the script runs itself again in
-# $PEACOCK_BUILD_IMAGE, else in the image `scripts/env/image-ref.sh build <v>` finds: docker run as
+# $PEACOCK_BUILD_IMAGE, else in the image `scripts/env/image-ref.sh build <v>` finds, either refused
+# unless its peacockdb.inputs label is this tree's for <v>: docker run as
 # the caller's uid, the tree at its own path, cargo's target in <tree>/target-img-<v>, HOME in
 # <tree>/.home-img, the cargo registry and ccache under ~/.cache/peacock. Inside it:
 #
@@ -24,8 +25,11 @@
 # These reach the container by name when set, never by value: RUSTFLAGS CMAKE_GENERATOR LDFLAGS
 # LD_LIBRARY_PATH PCK_TEST_FILTER PCK_SHARD UPDATE_CANONICAL PEACOCK_NO_FETCH RUST_TEST_THREADS
 # CARGO_BUILD_JOBS, and each --pass-env NAME. RUNNER_TEMP is mounted at its own path when set.
+# The container, peacock-build-<tree>-<v>-<pid>, runs with --init, and -it when stdin and stdout
+# are terminals. INT or TERM kills it. One left by a build-test.sh that is gone is refused.
 #
-# Exit 0; 1 a build or a test failed; 2 bad input, or a refused image, target dir or cpp/build.
+# Exit 0; 1 a build or a test failed; 2 bad input, or a refused image, target dir, cpp/build or
+# leftover container; 130 or 143 interrupted. Outside the image, any other is the container's.
 set -euo pipefail
 
 usage() { sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
@@ -100,16 +104,26 @@ if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
     "$root"/*) ;;
     *) die "CARGO_TARGET_DIR=$target is outside this tree, $root: each worktree keeps its own target dir. Unset it or name a dir inside the tree" ;;
   esac
-  if [ -n "${PEACOCK_BUILD_IMAGE:-}" ]; then
-    image=$PEACOCK_BUILD_IMAGE
-  else
-    image=$("$root/scripts/env/image-ref.sh" build "$cudf") || exit 2
-  fi
+  # A given image is held to this tree's inputs for <v> as a found one is.
+  given=()
+  if [ -n "${PEACOCK_BUILD_IMAGE:-}" ]; then given=(--ref "$PEACOCK_BUILD_IMAGE"); fi
+  image=$("$root/scripts/env/image-ref.sh" "${given[@]}" build "$cudf") || exit 2
   cache=${XDG_CACHE_HOME:-$HOME/.cache}/peacock
   registry=${PEACOCK_CARGO_REGISTRY:-$cache/cargo-registry}
   ccache=${PEACOCK_CCACHE_DIR:-$cache/ccache-$cudf}
   mkdir -p "$registry" "$ccache" "$root/.home-img"
-  args=(run --rm --user "$(id -u):$(id -g)" -v "$root:$root")
+  # One container a run, named by worktree and version, so a signal here can kill it. Its labels
+  # let a later run find one that outlived its build-test.sh (a kill -9) and still holds cargo's lock.
+  tree=${root##*/}
+  name=peacock-build-${tree//[^A-Za-z0-9_.-]/-}-$cudf-$$
+  while read -r left pid; do
+    [ -z "$left" ] || [ -e "/proc/$pid" ] \
+      || die "$left, left by a build-test.sh that is gone, still runs in this tree for cuDF $cudf and holds cargo's lock: docker kill $left"
+  done < <(docker ps --filter "label=peacock.tree=$root" --filter "label=peacock.cudf=$cudf" \
+             --format '{{.Names}} {{.Label "peacock.pid"}}')
+  args=(run --rm --init --name "$name" --label "peacock.tree=$root" --label "peacock.cudf=$cudf"
+        --label "peacock.pid=$$" --user "$(id -u):$(id -g)" -v "$root:$root")
+  if [ -t 0 ] && [ -t 1 ]; then args+=(-it); fi
   # A worktree's git dir lies in its main clone's.
   common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)
   case "$common/" in "$root"/*) ;; *) args+=(-v "$common:$common") ;; esac
@@ -117,11 +131,22 @@ if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
          -e "CARGO_TARGET_DIR=$target" -v "$registry:/opt/rust/cargo/registry" -v "$ccache:/tmp/ccache")
   # A CI step's report files; GITHUB_OUTPUT and the like stay the runner's, written by redirecting.
   if [ -n "${RUNNER_TEMP:-}" ]; then args+=(-v "$RUNNER_TEMP:$RUNNER_TEMP" -e RUNNER_TEMP); fi
-  for name in "${FORWARDED[@]}"; do
-    if [ -n "${!name+set}" ]; then args+=(-e "$name"); fi
+  for var in "${FORWARDED[@]}"; do
+    if [ -n "${!var+set}" ]; then args+=(-e "$var"); fi
   done
-  for name in "${pass_env[@]}"; do args+=(-e "$name"); done
-  exec docker "${args[@]}" "$image" scripts/build-test.sh "${original[@]}"
+  for var in "${pass_env[@]}"; do args+=(-e "$var"); done
+  # docker run in the background: bash runs a trap only once a foreground child ends, and the
+  # container outlives a docker run that is killed. Its exit is the script's.
+  signalled=""
+  trap 'signalled=130; docker kill "$name" > /dev/null 2>&1 || true' INT
+  trap 'signalled=143; docker kill "$name" > /dev/null 2>&1 || true' TERM
+  docker "${args[@]}" "$image" scripts/build-test.sh "${original[@]}" <&0 &
+  run=$!
+  rc=0
+  wait "$run" || rc=$?
+  # A trap ends the wait early; docker run ends once its container does.
+  while kill -0 "$run" 2> /dev/null; do rc=0; wait "$run" || rc=$?; done
+  exit "${signalled:-$rc}"
 fi
 
 # ---- inside the image -------------------------------------------------------------------------

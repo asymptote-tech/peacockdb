@@ -461,9 +461,9 @@ def a_locale_sorting_unlike_c():
 def test_the_inputs_are_the_same_in_every_locale():
     """The label is made on one host and checked on another, each in its own locale."""
     locale = a_locale_sorting_unlike_c()
-    if locale is None:
-        print("  SKIP test_the_inputs_are_the_same_in_every_locale: no installed locale sorts unlike C")
-        return
+    # Fails rather than skips: a skip reads as a pass. The build image has none (#309), so CI runs
+    # this file on the runner.
+    assert locale is not None, "no installed locale sorts unlike C, such as en_US.UTF-8: run this file outside the image"
 
     def inputs(loc):
         call = f'. "{REPO}/scripts/lib/image-inputs.sh"; image_inputs "{REPO}" build 25.02'

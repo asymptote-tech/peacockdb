@@ -26,8 +26,6 @@ TREE_FILES = [
     "scripts/lib/s3.sh", "scripts/lib/pinned.sh", "testdata/generate_testdata.sh", "cpp/CMakeLists.txt",
 ]
 CUDF = "25.02"
-RUN_REF = f"ghcr.io/asymptote-tech/peacockdb-run:cudf-{CUDF}"
-BUILD_REF = f"ghcr.io/asymptote-tech/peacockdb-build:cudf-{CUDF}"
 H100 = ["--instance-id", "computeinstance-e00e6yena4nzjgaym0", "--profile", "editor-eu"]
 L40S = ["--instance-id", "computeinstance-e00tnrse7ayntnzcyt"]
 CPU_VM = ["--instance-id", "computeinstance-e01t2mm4265y8x88ey", "--profile", "eu-west1"]
@@ -193,6 +191,12 @@ def label(tree, kind, change=None):
     return " ".join(lines)
 
 
+def inputs_ref(tree, kind):
+    """The image of the tree's own inputs, by its inputs tag: what the scripts default to."""
+    return f"ghcr.io/asymptote-tech/peacockdb-{kind}:" + lib(tree, "image-inputs.sh",
+                                                             f'image_inputs_tag "{tree}" {kind} {CUDF}')
+
+
 def log_lines(path):
     return [json.loads(ln) for ln in path.read_text().splitlines()] if path.exists() else []
 
@@ -228,11 +232,13 @@ class Host:
         self.nebius_log, self.docker_log = tmp / "nebius.log", tmp / "docker.log"
         self.host_log, self.dev_log, self.fetch_log = tmp / "vm.log", tmp / "dev.log", tmp / "fetch.log"
         self.world_path = tmp / "world.json"
+        self.run_ref, self.build_ref = inputs_ref(self.tree, "run"), inputs_ref(self.tree, "build")
         self.world_path.write_text(json.dumps({
             "images": {
-                RUN_REF: {"id": "sha256:run1", "labels": {"peacockdb.inputs": label(self.tree, "run"),
-                                                          "peacockdb.driver-minimum": DRIVER_MINIMUM}},
-                BUILD_REF: {"id": "sha256:build1", "labels": {"peacockdb.inputs": label(self.tree, "build")}},
+                self.run_ref: {"id": "sha256:run1",
+                               "labels": {"peacockdb.inputs": label(self.tree, "run"),
+                                          "peacockdb.driver-minimum": DRIVER_MINIMUM}},
+                self.build_ref: {"id": "sha256:build1", "labels": {"peacockdb.inputs": label(self.tree, "build")}},
             },
             "containers": {}, "driver": "550.54.15", "runtimes": ["nvidia", "runc"],
             "run_code": 0, "run_output": "==> run-tests.sh list: green\n",

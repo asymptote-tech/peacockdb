@@ -87,9 +87,11 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
    build: refuse, naming both. Cargo target dirs are separate per version and always inside the
    worktree. → Task 2, `test_refuses_cpp_build_of_another_cudf`,
    `test_target_dir_is_per_worktree_and_version`.
-4. **A cancelled `gpu-tests` run leaves `peacock-peacockdb` running on the VM.** The next run
+4. **A cancelled `gpu-tests` run leaves its container running on the VM.** The next run
    should not hang or skip. Cleanup removes the container on every outcome, and `run` refuses a
-   busy name with exit 2. → Task 6, `ci_images.rs::the_gpu_cleanup_removes_the_run_container`.
+   busy name with exit 2. The job's dir and container are `ci`'s (`--dir ci`, `peacock-ci`), never
+   a developer's clone's. → Task 6 and review round 1,
+   `ci_gpu.rs::the_gpu_job_owns_its_dir_and_removes_its_container`.
 5. **A secret passed into the image.** The AWS keys for `s3-datasets`/`validate-large`
    should never appear in argv or `ps`. → Task 2,
    `test_pass_env_never_puts_a_value_in_argv`.

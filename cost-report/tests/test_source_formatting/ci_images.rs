@@ -3,7 +3,9 @@
 //! a job would build on the runner's own toolchain and pass there, so the image would stop being
 //! what CI proves.
 
-use crate::ci_coverage::fold_continuations;
+use crate::ci_workflow::{
+    commands, job_lines, job_steps, logical_lines, run_scripts, unquoted, workflow_jobs,
+};
 use crate::repo_root;
 
 /// (workflow, job): the jobs that run in the build image.
@@ -33,13 +35,13 @@ const HOST_JOBS: &[(&str, &str, &str)] = &[
     (
         ".github/workflows/pipeline.yml",
         "gpu-tests",
-        "runs only scripts/nebius.sh and run-gpu.sh on the runner, and the code in the run image \
-         on the VM",
+        "runs only the VM's door and its checks on the runner (RUNNER_SIDE), and the code in the \
+         run image on the VM",
     ),
     (
         ".github/workflows/images.yml",
         "image",
-        "builds and pushes the images themselves, with docker",
+        "builds, tests and pushes the images themselves, with docker",
     ),
     (
         ".github/workflows/nebius-watch.yml",
@@ -50,20 +52,70 @@ const HOST_JOBS: &[(&str, &str, &str)] = &[
 
 const WORKFLOWS: &str = ".github/workflows";
 
-/// (job, line prefix, reason): a line of a listed job that runs on the runner on purpose.
+/// (owner, command, reason): a command that a job, listed in either list, or a local action runs
+/// on the runner on purpose. The command is named from its command word on, as far as needed.
 const RUNNER_SIDE: &[(&str, &str, &str)] = &[
     (
         "cost-report",
-        "shellcheck ",
+        "shellcheck",
         "a linter over the Nebius scripts, running none of the project's code; the runner has it \
          and the build image does not",
     ),
     (
         "cost-report",
         "python3 \"scripts/env/tests/$n\"",
-        "the step's on_runner files need what the image cannot give the runner's uid: the \
-         en_US.UTF-8 locale (#309), or a user name, which bootstrap-vm.sh and provision-vm.sh \
-         read as a VM's or laptop's own user; stdlib only, so the runner's python3 runs them",
+        "the step's on_runner files need what the image cannot give the runner's uid: a locale \
+         that sorts unlike C, en_US.UTF-8 (#309), or a user name, which bootstrap-vm.sh and \
+         provision-vm.sh read as a VM's or laptop's own user; stdlib only, so the runner's \
+         python3 runs them",
+    ),
+    (
+        "./.github/actions/build-image",
+        "scripts/env/image-ref.sh",
+        "finds the build image the job's later steps run in, with the runner's docker, before \
+         there is an image to run anything in",
+    ),
+    (
+        "gpu-tests",
+        "scripts/nebius/check-actor.sh",
+        "the actor check, before anything reaches the VM: bash over two strings",
+    ),
+    (
+        "gpu-tests",
+        "scripts/env/image-ref.sh",
+        "finds the run and build images by the tree's inputs before the VM is paid for, reading \
+         labels with the runner's docker",
+    ),
+    (
+        "gpu-tests",
+        "scripts/nebius.sh",
+        "the VM's door: the nebius CLI and ssh, starting, reaching and stopping it",
+    ),
+    (
+        "gpu-tests",
+        "scripts/env/run-gpu.sh",
+        "drives the VM through nebius.sh; the tests run there, in the run image",
+    ),
+    (
+        "image",
+        "scripts/env/image.sh",
+        "builds and pushes the image with the runner's docker: there is no image to run it in",
+    ),
+    (
+        "image",
+        "scripts/env/image-ref.sh",
+        "finds the run image the job just built, by the tree's inputs, with the runner's docker",
+    ),
+    (
+        "image",
+        "python3 scripts/env/tests/test_run_tests.py",
+        "runs the run image the job just built with the runner's docker, over fake binaries; \
+         stdlib only",
+    ),
+    (
+        "watch",
+        "scripts/nebius/watch.sh",
+        "the idle checker: the nebius CLI and ssh, no build or test of project code",
     ),
 ];
 
@@ -79,8 +131,11 @@ const OFF_IMAGE: &[&str] = &[
     "dtolnay/rust-toolchain",
 ];
 
-/// The commands that build or run project code. A `testdata/` script is one too.
-const PROJECT_COMMANDS: &[&str] = &["cargo", "ctest", "python3", "cmake", "scripts/build.sh"];
+/// The commands that build or run project code, besides python and the tree's own files.
+const PROJECT_COMMANDS: &[&str] = &["cargo", "ctest", "cmake"];
+
+/// The tree's directories of code: a file in one, run by its path, is project code.
+const PROJECT_DIRS: &[&str] = &["scripts/", "benchmarks/", "testdata/", "docker/"];
 
 /// Where a job's own composite actions live; a listed job's are held to the job's rules.
 const LOCAL_ACTIONS: &str = "./.github/actions/";
@@ -126,12 +181,7 @@ fn image_problems(workflow: &str, job: &str, runner_side: &[(&str, &str, &str)])
             problems.push(format!("{job}: `{}`: the job runs on the runner, and its commands in the image (container: would pull 10 GB onto an unfreed disk)", line.trim()));
         }
     }
-    let exempt: Vec<&str> = runner_side
-        .iter()
-        .filter(|(j, ..)| *j == job)
-        .map(|(_, prefix, _)| *prefix)
-        .collect();
-    problems.extend(step_problems(job, &lines, &exempt));
+    problems.extend(step_problems(job, &lines, &exempt_for(job, runner_side)));
     problems
 }
 
@@ -152,9 +202,18 @@ fn local_actions(workflow: &str, job: &str) -> Vec<String> {
 }
 
 /// Every problem with a composite action's text: its steps run in a listed job.
-fn action_problems(path: &str, text: &str) -> Vec<String> {
+fn action_problems(path: &str, text: &str, runner_side: &[(&str, &str, &str)]) -> Vec<String> {
     let lines: Vec<&str> = text.lines().collect();
-    step_problems(path, &lines, &[])
+    step_problems(path, &lines, &exempt_for(path, runner_side))
+}
+
+/// The commands RUNNER_SIDE lets a job or a local action run on the runner.
+fn exempt_for<'a>(owner: &str, runner_side: &[(&str, &'a str, &str)]) -> Vec<&'a str> {
+    runner_side
+        .iter()
+        .filter(|(o, ..)| *o == owner)
+        .map(|(_, command, _)| *command)
+        .collect()
 }
 
 /// The problems of a job's or an action's lines: anything only a job outside the image needs,
@@ -183,65 +242,77 @@ fn off_image_problems(owner: &str, lines: &[&str]) -> Vec<String> {
     problems
 }
 
-/// The problems of each `run:` line but the exempt ones: a project command on the runner, or a
-/// wrapped one naming a runner path.
+/// The problems of each command the `run:` lines run but the exempt ones: a project command on the
+/// runner, or a wrapped one naming a runner path. An exempt entry names a command from its command
+/// word on, and one that names none is a problem too.
 fn run_line_problems(owner: &str, lines: &[&str], exempt: &[&str]) -> Vec<String> {
     let mut problems = Vec::new();
     let scripts: Vec<String> = run_scripts(lines)
         .iter()
-        .flat_map(|s| fold_continuations(s))
-        .map(|l| l.trim().to_string())
+        .flat_map(|s| logical_lines(s))
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .collect();
-    for prefix in exempt {
-        if !scripts.iter().any(|l| l.starts_with(prefix)) {
-            problems.push(format!(
-                "{owner}: RUNNER_SIDE's `{prefix}` matches no line: remove it"
-            ));
+    let mut used = vec![false; exempt.len()];
+    for line in &scripts {
+        for words in commands(line) {
+            let text = words.join(" ");
+            let named = exempt
+                .iter()
+                .position(|e| text == *e || text.starts_with(&format!("{e} ")));
+            if let Some(at) = named {
+                used[at] = true;
+                continue;
+            }
+            problems.extend(
+                command_problems(&words)
+                    .into_iter()
+                    .map(|p| format!("{owner}: `{line}`: {p}")),
+            );
         }
     }
-    for line in scripts
-        .iter()
-        .filter(|l| !exempt.iter().any(|p| l.starts_with(p)))
-    {
-        problems.extend(
-            line_problems(line)
-                .into_iter()
-                .map(|p| format!("{owner}: `{line}`: {p}")),
-        );
+    for (entry, _) in exempt.iter().zip(used).filter(|(_, used)| !used) {
+        problems.push(format!(
+            "{owner}: RUNNER_SIDE's `{entry}` matches no command: remove it"
+        ));
     }
     problems
 }
 
-/// One logical line's problems: a project command on the runner, or a wrapped one naming a
-/// runner path.
-fn line_problems(line: &str) -> Vec<String> {
+/// One command's problems: a project command on the runner, or a wrapped one naming a runner
+/// path.
+fn command_problems(words: &[String]) -> Vec<String> {
+    let command = unquoted(&words[0]);
+    let path = command.trim_start_matches("./");
+    if path != WRAPPER {
+        if !is_project_command(path) {
+            return Vec::new();
+        }
+        return vec![format!(
+            "{command} runs on the runner: wrap it as `{WRAPPER} -- {command} …`, or list the \
+             command in RUNNER_SIDE with its reason"
+        )];
+    }
     let mut problems = Vec::new();
-    for part in substitutions(line) {
-        for words in simple_commands(&part) {
-            let Some(at) = words.iter().position(|w| !is_keyword_or_assignment(w)) else {
-                continue;
-            };
-            let command = words[at].as_str();
-            if command == WRAPPER || command.strip_prefix("./") == Some(WRAPPER) {
-                for word in &words[at + 1..] {
-                    problems.extend(unmounted_names(word).into_iter().map(|name| {
-                        format!("the wrapped command names ${name}, which the image does not mount: redirect the command's output to it on the runner instead")
-                    }));
-                    if word.starts_with('~') {
-                        problems.push("the wrapped command names ~, the runner's home, which the image does not mount".to_string());
-                    }
-                }
-            } else if PROJECT_COMMANDS.contains(&command.trim_start_matches("./"))
-                || command.trim_start_matches("./").starts_with("testdata/")
-            {
-                problems.push(format!(
-                    "{command} runs on the runner: wrap it as `{WRAPPER} -- {command} …`, or list the line in RUNNER_SIDE with its reason"
-                ));
-            }
+    for word in &words[1..] {
+        problems.extend(unmounted_names(word).into_iter().map(|name| {
+            format!("the wrapped command names ${name}, which the image does not mount: redirect the command's output to it on the runner instead")
+        }));
+        if word.starts_with('~') {
+            problems.push("the wrapped command names ~, the runner's home, which the image does not mount".to_string());
         }
     }
     problems
+}
+
+/// Whether a command word builds or runs project code: a toolchain the image holds, any python, or
+/// a file of the tree's own code, run by its path.
+fn is_project_command(path: &str) -> bool {
+    let python = path
+        .strip_prefix("python")
+        .is_some_and(|v| v.chars().all(|c| c.is_ascii_digit() || c == '.'));
+    python
+        || PROJECT_COMMANDS.contains(&path)
+        || PROJECT_DIRS.iter().any(|dir| path.starts_with(dir))
 }
 
 /// The `NAME`s of `$NAME` and `${NAME…}` in a word that are runner paths.
@@ -252,164 +323,6 @@ fn unmounted_names(word: &str) -> Vec<String> {
         .map(|rest| rest[..rest.find(|c| !name_char(c)).unwrap_or(rest.len())].to_string())
         .filter(|name| is_unmounted(name))
         .collect()
-}
-
-fn is_keyword_or_assignment(word: &str) -> bool {
-    let assignment = word.split_once('=').is_some_and(|(name, _)| {
-        let name = name.trim_end_matches('+');
-        !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-    });
-    assignment
-        || matches!(
-            word,
-            "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "{" | "}" | "time"
-        )
-}
-
-/// The job's lines, from its header to the next job's, comments included.
-fn job_lines<'a>(workflow: &'a str, job: &str) -> Option<Vec<&'a str>> {
-    let header = format!("  {job}:");
-    let mut lines = workflow.lines().skip_while(|l| l.trim_end() != header);
-    lines.next()?;
-    Some(
-        lines
-            .take_while(|l| {
-                let body = l.trim_start();
-                body.is_empty() || body.starts_with('#') || l.len() - body.len() > 2
-            })
-            .collect(),
-    )
-}
-
-/// The text of each `run:` of a job: an inline value, or a block scalar, dedented.
-fn run_scripts(lines: &[&str]) -> Vec<String> {
-    let mut scripts = Vec::new();
-    let mut i = 0;
-    while i < lines.len() {
-        let line = lines[i];
-        i += 1;
-        let body = line.trim_start().trim_start_matches("- ");
-        let Some(value) = body.strip_prefix("run:") else {
-            continue;
-        };
-        let value = value.trim();
-        if !value.starts_with(['|', '>']) {
-            scripts.push(value.to_string());
-            continue;
-        }
-        let key_column = line.len() - body.len();
-        let mut block = Vec::new();
-        while let Some(l) = lines.get(i) {
-            if !l.trim().is_empty() && l.len() - l.trim_start().len() <= key_column {
-                break;
-            }
-            block.push(l.trim_start());
-            i += 1;
-        }
-        scripts.push(block.join("\n"));
-    }
-    scripts
-}
-
-/// The line with each `$(…)` replaced by a word, then each substitution's own text: a command
-/// inside one runs where the line runs.
-fn substitutions(line: &str) -> Vec<String> {
-    let mut outer = String::new();
-    let mut inner = Vec::new();
-    let mut chars = line.char_indices().peekable();
-    let mut quoted = false;
-    while let Some((at, c)) = chars.next() {
-        if c == '\'' {
-            quoted = !quoted;
-        }
-        if quoted || c != '$' || chars.peek().map(|(_, n)| *n) != Some('(') {
-            outer.push(c);
-            continue;
-        }
-        chars.next();
-        let mut depth = 1;
-        let start = at + 2;
-        let mut end = line.len();
-        for (i, n) in chars.by_ref() {
-            depth += match n {
-                '(' => 1,
-                ')' => -1,
-                _ => 0,
-            };
-            if depth == 0 {
-                end = i;
-                break;
-            }
-        }
-        outer.push('_');
-        inner.extend(substitutions(&line[start..end]));
-    }
-    let mut all = vec![outer];
-    all.extend(inner);
-    all
-}
-
-/// The simple commands of a line, each its words up to its first redirection, quotes kept.
-fn simple_commands(line: &str) -> Vec<Vec<String>> {
-    let mut commands = Vec::new();
-    let mut words: Vec<String> = Vec::new();
-    let mut word = String::new();
-    // After a redirection the words are its target and what the runner's shell does with it.
-    let mut redirected = false;
-    let mut chars = line.chars().peekable();
-    let end_word = |word: &mut String, words: &mut Vec<String>, redirected: bool| {
-        if !word.is_empty() && !redirected {
-            words.push(std::mem::take(word));
-        }
-        word.clear();
-    };
-    while let Some(c) = chars.next() {
-        match c {
-            '\'' | '"' => {
-                word.push(c);
-                for n in chars.by_ref() {
-                    word.push(n);
-                    if n == c {
-                        break;
-                    }
-                }
-            }
-            '\\' => {
-                word.push(c);
-                word.extend(chars.next());
-            }
-            '#' if word.is_empty() => break,
-            // An array assignment, `files=(a b)`, is one word: its elements run nothing.
-            '(' if word.ends_with('=') => {
-                word.push(c);
-                for n in chars.by_ref() {
-                    word.push(n);
-                    if n == ')' {
-                        break;
-                    }
-                }
-            }
-            ';' | '|' | '&' | '(' | ')' => {
-                end_word(&mut word, &mut words, redirected);
-                commands.push(std::mem::take(&mut words));
-                redirected = false;
-            }
-            '<' | '>' => {
-                if !word.chars().all(|d| d.is_ascii_digit()) {
-                    end_word(&mut word, &mut words, redirected);
-                }
-                word.clear();
-                while chars.next_if(|n| matches!(n, '>' | '&')).is_some() {}
-                redirected = true;
-            }
-            c if c.is_whitespace() => end_word(&mut word, &mut words, redirected),
-            c => word.push(c),
-        }
-    }
-    end_word(&mut word, &mut words, redirected);
-    commands.push(words);
-    commands.retain(|w| !w.is_empty());
-    commands
 }
 
 #[test]
@@ -427,17 +340,20 @@ fn every_listed_job_runs_in_the_build_image() {
             let file = repo_root().join(&action).join("action.yml");
             let text = std::fs::read_to_string(&file)
                 .unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
-            problems.extend(action_problems(&action, &text));
+            problems.extend(action_problems(&action, &text, RUNNER_SIDE));
         }
     }
-    for (job, prefix, reason) in RUNNER_SIDE {
+    for (owner, command, reason) in RUNNER_SIDE {
         assert!(
             !reason.is_empty(),
-            "RUNNER_SIDE's `{prefix}` in {job} has no reason"
+            "RUNNER_SIDE's `{command}` in {owner} has no reason"
         );
+        let known = IN_IMAGE_JOBS.iter().any(|(_, j)| j == owner)
+            || HOST_JOBS.iter().any(|(_, j, _)| j == owner)
+            || owner.starts_with(LOCAL_ACTIONS);
         assert!(
-            IN_IMAGE_JOBS.iter().any(|(_, j)| j == job),
-            "RUNNER_SIDE names {job}, which IN_IMAGE_JOBS does not list"
+            known,
+            "RUNNER_SIDE names {owner}, which is no listed job and no local action"
         );
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
@@ -516,12 +432,73 @@ fn a_project_command_anywhere_in_a_line_is_found() {
         "# python3 runs in the image",
         "echo \"== python3 $f\"",
         "files=(testdata/test_*.py)",
+        "elsewhere=(scripts/a.py\n           scripts/b.py\n           scripts/c.py)",
         "scripts/build-test.sh --pass-env A -- python3 \"$f\" || status=1",
         "for f in a b; do scripts/build-test.sh -- python3 \"$f\"; done",
         "scripts/build-test.sh -- cargo run -p cost-report -- \\\n  --sha \"$REPORT_SHA\"",
     ] {
         accepted(&job_with(&[line]), &[]);
     }
+}
+
+/// A project command hides behind a word that runs the word after it, inside a shell's `-c` text
+/// or as a shell's script, or as a script of the tree run by its path: each is found.
+#[test]
+fn a_project_command_behind_a_prefix_word_or_a_shell_is_found() {
+    for (line, naming) in [
+        ("timeout 600 cargo test", "cargo"),
+        ("timeout -k 10 --signal=INT 600 ctest --test-dir cpp/build", "ctest"),
+        ("env RUST_LOG=debug cargo test", "cargo"),
+        ("env -u HOME -- cargo test", "cargo"),
+        ("exec cargo test", "cargo"),
+        ("nice -n 5 cargo build", "cargo"),
+        ("command cargo test", "cargo"),
+        ("sudo -E -u runner cargo test", "cargo"),
+        ("ls | xargs -n 1 -I {} cargo test {}", "cargo"),
+        ("timeout 60 env A=1 nice cargo test", "cargo"),
+        ("bash -c 'cargo test'", "cargo"),
+        ("sh -ec \"ctest --test-dir cpp/build\"", "ctest"),
+        ("bash -euo pipefail -c 'x=1; cmake -B b'", "cmake"),
+        ("bash scripts/env/stage-install.sh", "scripts/env/stage-install.sh"),
+        ("sh -e testdata/generate_testdata.sh --sf 1", "testdata/generate_testdata.sh"),
+        ("scripts/env/stage-install.sh", "scripts/env/stage-install.sh"),
+        ("./scripts/case-inventory.sh", "scripts/case-inventory.sh"),
+        ("benchmarks/run.sh", "benchmarks/run.sh"),
+        ("docker/run-tests.sh list", "docker/run-tests.sh"),
+        ("python scripts/x.py", "python"),
+        ("python3.12 -m pytest", "python3.12"),
+        ("v=$(timeout 5 python3 -c 'print(1)')", "python3"),
+    ] {
+        refused(&job_with(&[line]), &[], &[&format!("{naming} runs on the runner")]);
+    }
+    for line in [
+        "timeout 600 scripts/build-test.sh -- cargo test",
+        "scripts/build-test.sh -- bash -c 'cargo test && ctest'",
+        "command -v cargo",
+        "sudo rm -rf /usr/local/lib/android",
+        "bash -c 'echo ready'",
+        "env | sort",
+        "echo scripts/env/stage-install.sh",
+        "docker image prune --all --force",
+    ] {
+        accepted(&job_with(&[line]), &[]);
+    }
+}
+
+/// A RUNNER_SIDE entry names a command, from its command word, wherever the line runs it: inside
+/// `$(…)` or behind a prefix word too. A word that only starts with it is another command.
+#[test]
+fn a_runner_side_entry_names_a_command() {
+    let side: &[(&str, &str, &str)] = &[("cost-report", "scripts/env/image-ref.sh", "a reason")];
+    for line in [
+        "ref=$(scripts/env/image-ref.sh build \"$CUDF\")",
+        "timeout 60 scripts/env/image-ref.sh run 25.02",
+    ] {
+        refused(&job_with(&[line]), &[], &["scripts/env/image-ref.sh runs on the runner"]);
+        accepted(&job_with(&[line]), side);
+    }
+    refused(&job_with(&["scripts/env/image-ref.shx run 25.02"]), side, &["image-ref.shx"]);
+    refused(&job_with(&["true"]), side, &["matches no command"]);
 }
 
 #[test]
@@ -597,7 +574,7 @@ fn a_local_action_a_listed_job_uses_is_held_to_the_job_rules() {
             "python3 runs on the runner",
         ),
     ] {
-        let problems = action_problems("./.github/actions/cpp-build", &action(run)).join("\n");
+        let problems = action_problems("./.github/actions/cpp-build", &action(run), &[]).join("\n");
         assert!(
             problems.contains("./.github/actions/cpp-build") && problems.contains(naming),
             "`{run}`: {problems}"
@@ -608,7 +585,7 @@ fn a_local_action_a_listed_job_uses_is_held_to_the_job_rules() {
         "gcc=$(sed -n 's/^GCC_25_02=//p' docker/pins.env)",
         "scripts/build-test.sh -- ccache -s",
     ] {
-        let problems = action_problems("./.github/actions/cpp-build", &action(run));
+        let problems = action_problems("./.github/actions/cpp-build", &action(run), &[]);
         assert!(problems.is_empty(), "`{run}`: {}", problems.join("\n"));
     }
 }
@@ -697,114 +674,63 @@ fn a_leg_off_its_build_image_is_refused() {
     assert!(problems(&matrix("", "${{ matrix.cudf }}")).contains("no `- cudf:` legs"));
 }
 
-/// The steps of a job, each its lines from its `- ` to the next step's, comments included.
-fn job_steps<'a>(lines: &[&'a str]) -> Vec<Vec<&'a str>> {
-    let Some(at) = lines.iter().position(|l| l.trim() == "steps:") else {
-        return Vec::new();
-    };
-    let body = &lines[at + 1..];
-    let Some(indent) = body
-        .iter()
-        .find(|l| l.trim_start().starts_with("- "))
-        .map(|l| l.len() - l.trim_start().len())
-    else {
-        return Vec::new();
-    };
-    let mut steps: Vec<Vec<&str>> = Vec::new();
-    for line in body {
-        let at_step =
-            line.len() - line.trim_start().len() == indent && line.trim_start().starts_with("- ");
-        if at_step {
-            steps.push(Vec::new());
-        }
-        if let Some(step) = steps.last_mut() {
-            step.push(line);
-        }
-    }
-    steps
-}
+/// The key a job's Rust cache must carry: the target dir holds what the image built, against its
+/// gcc and cuDF, which Swatinem's own key (rustc's version, the lockfiles) does not see.
+const RUST_CACHE_KEY: &str = "key: ${{ env.PEACOCK_BUILD_IMAGE }}";
 
-/// The gpu-tests step that removes the run's container, and its `if:`, or what is wrong.
-fn gpu_cleanup_problems(workflow: &str) -> Vec<String> {
-    let Some(lines) = job_lines(workflow, "gpu-tests") else {
-        return vec!["gpu-tests: no such job".to_string()];
-    };
-    let removes = |step: &Vec<&str>| {
-        step.iter().any(|l| {
-            !l.trim_start().starts_with('#') && l.contains("docker rm -f peacock-peacockdb")
+/// Each `Swatinem/rust-cache` step of a job without RUST_CACHE_KEY.
+fn rust_cache_problems(workflow: &str, job: &str) -> Vec<String> {
+    let lines = job_lines(workflow, job).unwrap_or_default();
+    job_steps(&lines)
+        .iter()
+        .filter(|step| {
+            step.iter().any(|l| {
+                l.trim_start()
+                    .trim_start_matches("- ")
+                    .starts_with("uses: Swatinem/rust-cache@")
+            })
         })
-    };
-    let steps = job_steps(&lines);
-    let Some(step) = steps.iter().find(|s| removes(s)) else {
-        return vec![
-            "gpu-tests: no step runs `docker rm -f peacock-peacockdb`, so a cancelled run's \
-             container keeps the card, and the next run's `run` refuses the busy name"
-                .to_string(),
-        ];
-    };
-    let condition = step
-        .iter()
-        .find_map(|l| l.trim_start().trim_start_matches("- ").strip_prefix("if:"))
-        .map(str::trim);
-    if !condition.is_some_and(|c| c.starts_with("always()")) {
-        return vec![format!(
-            "gpu-tests: the step removing the run container runs on {condition:?}, not on \
-             `always() && …`: a failed or cancelled run would leave its container on the VM"
-        )];
-    }
-    Vec::new()
+        .filter(|step| !step.iter().any(|l| l.trim() == RUST_CACHE_KEY))
+        .map(|_| {
+            format!(
+                "{job}: a Swatinem/rust-cache step without `{RUST_CACHE_KEY}`: a new image would \
+                 restore a target dir another image built"
+            )
+        })
+        .collect()
 }
 
-/// A cancelled or failed `gpu-tests` run leaves `peacock-peacockdb` running on nebius-gpu,
-/// which keeps the card busy and the idle watcher off. The cleanup removes it on every outcome:
-/// the step runs `docker rm -f peacock-peacockdb`, under an `if:` that starts `always()`.
 #[test]
-fn the_gpu_cleanup_removes_the_run_container() {
-    let text = std::fs::read_to_string(repo_root().join(".github/workflows/pipeline.yml"))
-        .expect("read pipeline.yml");
-    let problems = gpu_cleanup_problems(&text);
+fn a_rust_cache_is_keyed_by_the_build_image() {
+    let mut problems = Vec::new();
+    for (workflow, job) in IN_IMAGE_JOBS {
+        let text = std::fs::read_to_string(repo_root().join(workflow))
+            .unwrap_or_else(|e| panic!("read {workflow}: {e}"));
+        problems.extend(rust_cache_problems(&text, job));
+    }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 
-    let job = |cleanup: &str| {
-        format!(
-            "jobs:\n  gpu-tests:\n    runs-on: ubuntu-latest\n    steps:\n      \
-             - uses: actions/checkout@v4\n      - name: Run\n        run: x\n{cleanup}  \
-             next-job:\n    runs-on: ubuntu-latest\n"
+    let cache = |key: &str| {
+        job_with(&[]).replace(
+            "  next-job:\n",
+            &format!(
+                "      - name: Cache Rust build\n        uses: Swatinem/rust-cache@v2\n        \
+                 with:\n          shared-key: rust-x\n{key}  next-job:\n"
+            ),
         )
     };
-    let step = |condition: &str, run: &str| {
-        format!("      - name: Clean up\n{condition}        run: |\n          {run}\n")
-    };
-    let always = "        if: always() && steps.start.outcome == 'success'\n";
-    let rm = "scripts/nebius.sh ssh 'docker rm -f peacock-peacockdb' || true";
-    assert_eq!(
-        gpu_cleanup_problems(&job(&step(always, rm))),
-        Vec::<String>::new()
-    );
-    for (what, text) in [
-        ("no if", job(&step("", rm))),
-        ("not always()", job(&step("        if: success()\n", rm))),
-        ("commented out", job(&step(always, &format!("# {rm}")))),
-        ("no cleanup", job("")),
+    let keyed = format!("          {RUST_CACHE_KEY}\n");
+    assert_eq!(rust_cache_problems(&cache(&keyed), "cost-report"), Vec::<String>::new());
+    for (what, key) in [
+        ("no key", String::new()),
+        ("commented out", format!("          # {RUST_CACHE_KEY}\n")),
+        ("another key", "          key: ${{ github.sha }}\n".to_string()),
     ] {
         assert!(
-            !gpu_cleanup_problems(&text).is_empty(),
-            "{what}: accepted\n{text}"
+            !rust_cache_problems(&cache(&key), "cost-report").is_empty(),
+            "{what}: accepted"
         );
     }
-}
-
-/// The jobs of a workflow: the keys under its top-level `jobs:`.
-fn workflow_jobs(workflow: &str) -> Vec<&str> {
-    workflow
-        .lines()
-        .skip_while(|l| l.trim_end() != "jobs:")
-        .skip(1)
-        .take_while(|l| l.is_empty() || l.starts_with([' ', '#']))
-        .filter_map(|l| l.strip_prefix("  "))
-        .filter(|l| !l.starts_with([' ', '#']))
-        .filter_map(|l| l.trim_end().strip_suffix(':'))
-        .collect()
 }
 
 /// Every problem with one workflow's jobs: a job in neither list or in both, a listed job it
@@ -815,6 +741,7 @@ fn accounting_problems(
     workflow: &str,
     in_image: &[(&str, &str)],
     host: &[(&str, &str, &str)],
+    runner_side: &[(&str, &str, &str)],
 ) -> Vec<String> {
     let jobs = workflow_jobs(workflow);
     let in_image: Vec<&str> = in_image
@@ -858,7 +785,7 @@ fn accounting_problems(
     problems.extend(off_image_problems(path, &lines));
     for job in host.iter().filter(|j| jobs.contains(j)) {
         let lines = job_lines(workflow, job).unwrap_or_default();
-        problems.extend(run_line_problems(job, &lines, &[]));
+        problems.extend(run_line_problems(job, &lines, &exempt_for(job, runner_side)));
     }
     problems
 }
@@ -882,7 +809,7 @@ fn every_job_runs_in_the_image_or_says_why() {
     for path in &paths {
         let text = std::fs::read_to_string(repo_root().join(path))
             .unwrap_or_else(|e| panic!("read {path}: {e}"));
-        problems.extend(accounting_problems(path, &text, IN_IMAGE_JOBS, HOST_JOBS));
+        problems.extend(accounting_problems(path, &text, IN_IMAGE_JOBS, HOST_JOBS, RUNNER_SIDE));
     }
     for (workflow, job, reason) in HOST_JOBS {
         assert!(!reason.is_empty(), "HOST_JOBS' {job} has no reason");
@@ -912,9 +839,14 @@ fn a_job_neither_in_the_image_nor_said_why_is_refused() {
     };
     let quiet = workflow("      - run: scripts/nebius.sh start\n");
     assert_eq!(workflow_jobs(&quiet), ["a", "b"]);
-    let problems =
-        |text: &str, host: &[(&str, &str, &str)]| accounting_problems(WF, text, &[(WF, "a")], host);
+    let side: &[(&str, &str, &str)] = &[("b", "scripts/nebius.sh", "the VM's door, no project code")];
+    let problems = |text: &str, host: &[(&str, &str, &str)]| {
+        accounting_problems(WF, text, &[(WF, "a")], host, side)
+    };
     assert_eq!(problems(&quiet, &[(WF, "b", "why")]), Vec::<String>::new());
+    // A host job's script of the tree runs on the runner too, so it needs its entry.
+    let unlisted = accounting_problems(WF, &quiet, &[(WF, "a")], &[(WF, "b", "why")], &[]).join("\n");
+    assert!(unlisted.contains("scripts/nebius.sh runs on the runner"), "{unlisted}");
 
     let unlisted = problems(&quiet, &[]).join("\n");
     assert!(unlisted.contains("job b is in neither"), "{unlisted}");
@@ -922,7 +854,7 @@ fn a_job_neither_in_the_image_nor_said_why_is_refused() {
         !unlisted.contains("workflow_dispatch") && !unlisted.contains("push"),
         "{unlisted}"
     );
-    let both = accounting_problems(WF, &quiet, &[(WF, "a"), (WF, "b")], &[(WF, "b", "why")]);
+    let both = accounting_problems(WF, &quiet, &[(WF, "a"), (WF, "b")], &[(WF, "b", "why")], side);
     assert!(both.join("\n").contains("job b is in both"), "{both:?}");
     let stale = problems(&quiet, &[(WF, "b", "why"), (WF, "gone", "why")]);
     assert!(
@@ -960,7 +892,7 @@ fn a_job_neither_in_the_image_nor_said_why_is_refused() {
     let commented =
         workflow("      # the pip install went: pandas is in the image\n      - run: true\n");
     assert_eq!(
-        problems(&commented, &[(WF, "b", "why")]),
+        accounting_problems(WF, &commented, &[(WF, "a")], &[(WF, "b", "why")], &[]),
         Vec::<String>::new()
     );
 }

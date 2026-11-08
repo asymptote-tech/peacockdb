@@ -166,9 +166,39 @@ def test_refuses_the_run_image_of_a_build_only_cudf():
         assert p.calls == [], p.calls
 
 
+def test_checks_a_given_ref_against_the_tree():
+    with Repo() as r:
+        label, _ = r.inputs("build", "25.02")
+        given = f"{REGISTRY}/peacockdb-build@sha256:" + "cd" * 32
+        p = r.run("--ref", given, "build", "25.02", local={given: label})
+        assert p.returncode == 0, (p.returncode, p.stderr)
+        assert p.stdout == f"{given}\n", p.stdout
+        assert not [c for c in p.calls if c[:1] == ["buildx"]], p.calls
+        tagged = f"{REGISTRY}/peacockdb-build:mine"
+        p = r.run("--ref", tagged, "build", "25.02", remote={tagged: [DIGEST, label]})
+        assert p.returncode == 0, (p.returncode, p.stderr)
+        assert p.stdout == f"{REGISTRY}/peacockdb-build@{DIGEST}\n", p.stdout
+
+
+def test_refuses_a_given_ref_of_other_inputs():
+    with Repo() as r:
+        label, _ = r.inputs("build", "25.02")
+        given = "img:test"
+        p = r.run("--ref", given, "build", "25.02", local={given: with_pins_hash(label, "0" * 64)})
+        assert p.returncode == 2 and p.stdout == "", (p.returncode, p.stdout, p.stderr)
+        assert given in p.stderr and "docker/pins.env" in p.stderr, p.stderr
+        # A 25.02 image given for a 26.02 build: the 25.02 spec is an input of it alone.
+        p = r.run("--ref", given, "build", "26.02", local={given: label})
+        assert p.returncode == 2 and "docker/conda/cudf-25.02.spec" in p.stderr, (p.returncode, p.stderr)
+        p = r.run("--ref", given, "build", "25.02")
+        assert p.returncode == 2 and given in p.stderr and p.stdout == "", (p.returncode, p.stderr)
+        assert "image.sh build" not in p.stderr, "a given ref is not this tree's to build"
+
+
 def test_refuses_bad_arguments_before_docker():
     with Repo() as r:
-        for args in (["build"], ["image", "25.02"], ["build", "24.12"], ["build", "25.02", "x"]):
+        for args in (["build"], ["image", "25.02"], ["build", "24.12"], ["build", "25.02", "x"], ["--ref"],
+                 ["--ref", "", "build", "25.02"]):
             p = r.run(*args)
             assert p.returncode == 2 and p.stderr, (args, p.returncode, p.stderr)
         # Every version docker/conda holds a spec for, in order, one space apart.

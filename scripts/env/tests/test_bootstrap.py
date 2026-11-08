@@ -192,6 +192,30 @@ def test_bootstrap_refuses_an_image_of_other_inputs():
         assert [c for c in m.docker_calls() if c[0] == "run"] == [], m.docker_calls()
 
 
+def test_bootstrap_uses_the_image_of_the_clones_inputs():
+    """By the inputs tag, so a clone whose inputs master's :cudf-<v> no longer holds still finds its image."""
+    with Machine() as m:
+        bootstrap_whole(m)
+        tag = lib(m.clone, "image-inputs.sh", f'image_inputs_tag "{m.clone}" build 25.02')
+        ref = f"ghcr.io/asymptote-tech/peacockdb-build:{tag}"
+        calls = m.docker_calls()
+        assert [c for c in calls if c[0] == "pull"] == [["pull", ref]], calls
+        runs = [c for c in calls if c[0] == "run"]
+        assert runs and all(ref in c for c in runs), runs
+
+
+def test_bootstrap_refuses_a_clone_older_than_the_inputs_tag():
+    """A --ref of a branch before the inputs tag: its image-inputs.sh has no image_inputs_tag."""
+    with Machine() as m:
+        env = whole_run_env(m)
+        lib_file = m.clone / "scripts" / "lib" / "image-inputs.sh"
+        text = lib_file.read_text()
+        lib_file.write_text(text[:text.index("# image_inputs_tag ")])
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2 and "image_inputs_tag" in r.stderr and "--ref" in r.stderr, (r.returncode, r.stderr)
+        assert [c for c in m.docker_calls() if c[0] in ("pull", "run")] == [], m.docker_calls()
+
+
 def test_bootstrap_fetches_the_registry_with_the_clone_read_only():
     with Machine() as m:
         bootstrap_whole(m)

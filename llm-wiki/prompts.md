@@ -386,8 +386,7 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
   host roles). The VM-time rule: a VM starts right before its first remote command and stops
   right after its last pull, never up across a local build, CI, a review or the human.
   - The L40S (nebius-gpu), for correctness: `scripts/build-test.sh --gpu --build` (local, in
-    the build image, the L40S stopped) → `PEACOCK_BUILD_IMAGE` and `PEACOCK_RUN_IMAGE` from
-    `scripts/env/image-ref.sh`, exported (`build-test.md`, "The scripts") → `scripts/nebius.sh start` →
+    the build image, the L40S stopped) → `scripts/nebius.sh start` →
     `scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt ship` → `… run
     --detach list`, polled with `… status`, → `scripts/nebius.sh stop`. `… prepare --no-sf40`
     comes first on a fresh VM, and again whenever `run` refuses its image, exit 2. Only the L40S

@@ -3,7 +3,7 @@
 #
 #   stage-install.sh [--cudf <v>] [--no-release-bench]
 #
-# Run at the tree root inside ghcr.io/asymptote-tech/peacockdb-build:cudf-<v>, 25.02 by default
+# Run at the tree root inside the build image of cuDF <v>, 25.02 by default
 # (llm-wiki/build-test.md, "The CPU-VM build"). The C++ build and install into cpp/install; then,
 # staged from empty, the gpu test binaries into cpp/install/rust-tests/ (test_gpu_corpus,
 # test_node_timing, peacock_gpu_benchmarks, and the crate's own as peacockdb_core_gpu_lib) and

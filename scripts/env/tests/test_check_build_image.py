@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
-from gpu_host import BUILD_REF, CPU_VM, Host, label  # noqa: E402
+from gpu_host import CPU_VM, Host, label  # noqa: E402
 
 SCRIPT = "scripts/env/check-build-image.sh"
 # What image-ref.sh prints for a tree whose inputs the moving tag does not hold: a published image by
@@ -26,9 +26,10 @@ def test_check_build_image_pulls_then_reads_the_label_on_the_vm():
     with Host() as h:
         r = checked(h, *CPU_VM)
         assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert r.stdout == f"{h.build_ref}\n", "the ref alone, for the build's docker run"
         calls = h.docker_calls()
-        assert calls[0] == ["pull", BUILD_REF], calls
-        assert any(a[:2] == ["image", "inspect"] and a[-1] == BUILD_REF for a in calls[1:]), calls
+        assert calls[0] == ["pull", h.build_ref], calls
+        assert any(a[:2] == ["image", "inspect"] and a[-1] == h.build_ref for a in calls[1:]), calls
         assert not any(a[0] == "run" for a in calls), calls
         assert all(a[:4] == CPU_VM for a in h.nebius_calls()), h.nebius_calls()
         assert set(h.verbs()) == {"ssh"}, h.verbs()
@@ -38,20 +39,21 @@ def test_check_build_image_pulls_then_reads_the_label_on_the_vm():
 def test_check_build_image_pulls_and_checks_the_given_image():
     with Host() as h:
         images = h.world()["images"]
-        images[GIVEN_BUILD] = images.pop(BUILD_REF)
+        images[GIVEN_BUILD] = images.pop(h.build_ref)
         h.world(images=images)
         r = checked(h, *CPU_VM, env={"PEACOCK_BUILD_IMAGE": GIVEN_BUILD})
         assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert r.stdout == f"{GIVEN_BUILD}\n", r.stdout
         calls = h.docker_calls()
         assert calls[0] == ["pull", GIVEN_BUILD], calls
         assert any(a[:2] == ["image", "inspect"] and a[-1] == GIVEN_BUILD for a in calls[1:]), calls
-        assert not any(BUILD_REF in a for a in calls), calls
+        assert not any(h.build_ref in a for a in calls), calls
 
 
 def test_check_build_image_refuses_a_given_image_of_other_inputs():
     with Host() as h:
         images = h.world()["images"]
-        images[GIVEN_BUILD] = images.pop(BUILD_REF)
+        images[GIVEN_BUILD] = images.pop(h.build_ref)
         images[GIVEN_BUILD]["labels"]["peacockdb.inputs"] = label(h.tree, "build", change="docker/build.Dockerfile")
         h.world(images=images)
         r = checked(h, *CPU_VM, env={"PEACOCK_BUILD_IMAGE": GIVEN_BUILD})
@@ -62,17 +64,17 @@ def test_check_build_image_refuses_a_given_image_of_other_inputs():
 def test_check_build_image_refuses_one_built_from_other_inputs():
     with Host() as h:
         images = h.world()["images"]
-        images[BUILD_REF]["labels"]["peacockdb.inputs"] = label(h.tree, "build", change="docker/venv.lock")
+        images[h.build_ref]["labels"]["peacockdb.inputs"] = label(h.tree, "build", change="docker/venv.lock")
         h.world(images=images)
         r = checked(h, *CPU_VM)
         assert r.returncode == 2, (r.returncode, r.stderr)
-        assert "docker/venv.lock" in r.stderr and BUILD_REF in r.stderr, r.stderr
+        assert "docker/venv.lock" in r.stderr and h.build_ref in r.stderr, r.stderr
 
 
 def test_check_build_image_refuses_one_without_a_label():
     with Host() as h:
         images = h.world()["images"]
-        images[BUILD_REF]["labels"] = {}
+        images[h.build_ref]["labels"] = {}
         h.world(images=images)
         r = checked(h, *CPU_VM)
         assert r.returncode == 2 and "peacockdb.inputs" in r.stderr, (r.returncode, r.stderr)

@@ -37,9 +37,9 @@
 # --instance-id and --profile go, as given, to every scripts/nebius.sh call ($NEBIUS_SH), which
 # picks the VM. --instance-id is required, nebius-gpu's too: without it nebius.sh picks nebius-gpu
 # silently. run-gpu.sh never starts or stops the VM: the caller does, with nebius.sh. <i> is this
-# tree's directory name by default, <v> 25.02. PEACOCK_RUN_IMAGE and PEACOCK_BUILD_IMAGE, when set,
-# are the images prepare and run use instead of :cudf-<v> (CI's scripts/env/image-ref.sh refs),
-# checked alike.
+# tree's directory name by default, <v> 25.02. prepare and run use the images of this tree's inputs,
+# by their inputs tag (scripts/lib/image-inputs.sh), or PEACOCK_RUN_IMAGE and PEACOCK_BUILD_IMAGE
+# when set (CI's scripts/env/image-ref.sh refs), checked alike.
 #
 # Exit 0; 1 the run failed, or a ship stream gave up; 2 bad input (nebius.sh's 64 too), a stale
 # image, a run in progress, or a step missing (prepare, ship); 3 the VM's driver is older than the
@@ -116,8 +116,8 @@ esac
 . "$root/scripts/lib/image-inputs.sh"
 . "$root/scripts/lib/data-inputs.sh"
 . "$root/scripts/lib/machine.sh"
-BUILD_REF=${PEACOCK_BUILD_IMAGE:-$MACHINE_IMAGE:cudf-$cudf}
-RUN_REF=${PEACOCK_RUN_IMAGE:-ghcr.io/asymptote-tech/peacockdb-run:cudf-$cudf}
+BUILD_REF=${PEACOCK_BUILD_IMAGE:-$MACHINE_IMAGE:$(image_inputs_tag "$root" build "$cudf")}
+RUN_REF=${PEACOCK_RUN_IMAGE:-ghcr.io/asymptote-tech/peacockdb-run:$(image_inputs_tag "$root" run "$cudf")}
 SHIP_PAUSE=${RUN_GPU_SHIP_PAUSE:-15}  # seconds, times the attempt; the tests set 0
 SF40_SETS=(tpch.sf40 tpcds.sf40)
 # What prepare runs on the VM, at the same paths under ~/peacock/<i>/: machine_data_set and
