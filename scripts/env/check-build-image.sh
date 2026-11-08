@@ -12,7 +12,8 @@
 # `scripts/env/image-ref.sh build <v>` prints. Prints the ref alone, for the build's docker run.
 #
 # Exit 0 the VM's image is this tree's; 2 bad input (nebius.sh's 64 too), or an image without a
-# label or built from other inputs; else nebius.sh's (75, 69, 1).
+# label, built from other inputs, or not published (the images.yml dispatch named); else nebius.sh's
+# (75, 69, 1), or a failed pull's.
 set -euo pipefail
 shopt -s inherit_errexit
 

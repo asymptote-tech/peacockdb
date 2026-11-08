@@ -86,8 +86,14 @@ if a[0] == "info":
     if "--format" in a:
         print(json.dumps({r: {} for r in w["runtimes"]}))
     sys.exit(0)
+# A pull of an image the world lacks fails as dev's docker does on an unpublished tag, or with the
+# world's pull_error, such as a network error.
 if a[0] == "pull":
-    sys.exit(0 if a[-1] in w["images"] else 1)
+    if a[-1] in w["images"]:
+        sys.exit(0)
+    print(w.get("pull_error") or f'Error response from daemon: failed to resolve reference "{a[-1]}": {a[-1]}: not found',
+          file=sys.stderr)
+    sys.exit(1)
 if a[:2] == ["image", "inspect"]:
     image = w["images"].get(a[-1])
     if image is None:

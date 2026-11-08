@@ -26,10 +26,11 @@
 # LD_LIBRARY_PATH PCK_TEST_FILTER PCK_SHARD UPDATE_CANONICAL PEACOCK_NO_FETCH RUST_TEST_THREADS
 # CARGO_BUILD_JOBS, and each --pass-env NAME. RUNNER_TEMP is mounted at its own path when set.
 # The container, peacock-build-<tree>-<v>-<pid>, runs with --init, and -it when stdin and stdout
-# are terminals. INT or TERM kills it. One left by a build-test.sh that is gone is refused.
+# are terminals and this is no background job of its terminal. HUP, INT or TERM kills it, one that
+# comes before docker has created it too. One left by a build-test.sh that is gone is refused.
 #
 # Exit 0; 1 a build or a test failed; 2 bad input, or a refused image, target dir, cpp/build or
-# leftover container; 130 or 143 interrupted. Outside the image, any other is the container's.
+# leftover container; 129, 130 or 143 interrupted. Outside the image, any other is the container's.
 set -euo pipefail
 
 usage() { sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
@@ -123,7 +124,11 @@ if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
              --format '{{.Names}} {{.Label "peacock.pid"}}')
   args=(run --rm --init --name "$name" --label "peacock.tree=$root" --label "peacock.cudf=$cudf"
         --label "peacock.pid=$$" --user "$(id -u):$(id -g)" -v "$root:$root")
-  if [ -t 0 ] && [ -t 1 ]; then args+=(-it); fi
+  # docker run -it sets the terminal's modes, and SIGTTOU stops a background job that does. With no
+  # controlling terminal, tpgid is -1 and nothing can stop it.
+  stat=$(< "/proc/$$/stat")
+  read -r _ _ pgrp _ _ tpgid _ <<< "${stat##*) }"
+  if [ -t 0 ] && [ -t 1 ] && { [ "$tpgid" = -1 ] || [ "$tpgid" = "$pgrp" ]; }; then args+=(-it); fi
   # A worktree's git dir lies in its main clone's.
   common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)
   case "$common/" in "$root"/*) ;; *) args+=(-v "$common:$common") ;; esac
@@ -138,14 +143,22 @@ if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
   # docker run in the background: bash runs a trap only once a foreground child ends, and the
   # container outlives a docker run that is killed. Its exit is the script's.
   signalled=""
-  trap 'signalled=130; docker kill "$name" > /dev/null 2>&1 || true' INT
-  trap 'signalled=143; docker kill "$name" > /dev/null 2>&1 || true' TERM
+  trap 'signalled=129' HUP
+  trap 'signalled=130' INT
+  trap 'signalled=143' TERM
   docker "${args[@]}" "$image" scripts/build-test.sh "${original[@]}" <&0 &
   run=$!
-  rc=0
-  wait "$run" || rc=$?
-  # A trap ends the wait early; docker run ends once its container does.
-  while kill -0 "$run" 2> /dev/null; do rc=0; wait "$run" || rc=$?; done
+  # A trap ends the wait early; docker run ends once its container does. A signal can come before
+  # docker has created the container, so it is killed by name for as long as docker run lives.
+  while :; do
+    rc=0
+    wait "$run" || rc=$?
+    kill -0 "$run" 2> /dev/null || break
+    while [ -n "$signalled" ] && kill -0 "$run" 2> /dev/null; do
+      docker kill "$name" > /dev/null 2>&1 || true
+      sleep 0.5
+    done
+  done
   exit "${signalled:-$rc}"
 fi
 

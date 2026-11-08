@@ -14,7 +14,8 @@
 # and the pulled testdata/calibration/records.tsv moved to <dir>/<ds>-<q>-<mode>.<attempt>.tsv and
 # removed on the VM, <attempt> one past the highest already there. Before each run, a record a killed
 # run left on the VM is pulled and set aside under its last row's case. The device tree is the one
-# the first measured case's pull wrote into; its slug is kept in <dir>/device for a rerun.
+# the first measured case's pull wrote into or, when the run kept the case's section (measured on
+# this VM before), the one whose section names the VM's host; its slug is kept in <dir>/device.
 # --instance-id and --profile go to every run-gpu.sh and scripts/nebius.sh call, --dir to
 # run-gpu.sh alone. --instance-id is required, as run-gpu.sh requires it: without it nebius.sh means
 # nebius-gpu, which runs no sf40. The VM is the caller's to start and stop.
@@ -130,6 +131,28 @@ holders() {
   return 0
 }
 
+# kept_by <host> <ds> <sf> <query>: the slug of each device tree whose section of the case has
+# <host>'s trailer, as one a resumed run kept does.
+kept_by() {
+  local file
+  for file in "$results"/*/"$2.sf$3/$mode.benchmark.txt"; do
+    [ -f "$file" ] || continue
+    if awk -v wanted="== ${4//_/-}" -v host="host=$1" '/^== / { here = $0 == wanted }
+           here && $0 == host { found = 1 } END { exit !found }' "$file"; then
+      basename "$(dirname "$(dirname "$file")")"
+    fi
+  done
+  return 0
+}
+
+# learn <slug>: the device tree, for this run and a rerun.
+learn() {
+  slug=$1
+  echo "$slug" > "$records/device"
+  echo "==> the device tree: $results/$slug"
+}
+
+vm_host=""
 [ ! -s "$record" ] || set_aside
 for entry in "${selected[@]}"; do
   read -r ds sf query <<< "$entry"
@@ -155,9 +178,16 @@ for entry in "${selected[@]}"; do
   if [ -z "$slug" ]; then
     new=$(comm -13 <(sort <<< "$before") <(sort <<< "$(holders "$ds" "$sf" "$query")") | awk '{ print $2 }')
     if [ "$(grep -c . <<< "$new")" -eq 1 ]; then
-      slug=$(basename "$(dirname "$(dirname "$new")")")
-      echo "$slug" > "$records/device"
-      echo "==> the device tree: $results/$slug"
+      learn "$(basename "$(dirname "$(dirname "$new")")")"
+    else
+      # No file changed: the run kept a section this VM measured before, so no pull names the tree.
+      if [ -z "$vm_host" ]; then
+        rc=0
+        vm_host=$("${NEBIUS[@]}" ssh hostname) || rc=$?
+        [ "$rc" -eq 0 ] || { echo "bench-each.sh: asking the VM its hostname exited $rc" >&2; exit "$rc"; }
+      fi
+      named=$(kept_by "$vm_host" "$ds" "$sf" "$query")
+      if [ "$(grep -c . <<< "$named")" -eq 1 ]; then learn "$named"; fi
     fi
   fi
 done

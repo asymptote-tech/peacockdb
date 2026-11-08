@@ -57,9 +57,31 @@ machine_cudf_source() {
 }
 
 # machine_image_checked <ref> <tree> <cudf> [<kind>] — pulls the image <ref>, of <kind> build (the
-# default) or run, then machine_image_label_checked.
+# default) or run, then machine_image_label_checked. A failed pull names the images.yml dispatch
+# that publishes <tree>'s image: return 2 when the registry has no such tag, else docker's status (a
+# network error, or the caller's ssh). docker's stderr goes to a file, not `$(…)`, so a docker
+# wrapper's own exit still ends the script.
 machine_image_checked() {
-  docker pull "$1"
+  local ref=$1 tree=$2 cudf=$3 kind=${4:-build} err rc=0 unpublished=0 branch publish
+  err=$(mktemp)
+  docker pull "$ref" 2> "$err" || rc=$?
+  cat "$err" >&2
+  grep -qE ': not found$|manifest unknown' "$err" && unpublished=1
+  rm -f "$err"
+  if [ "$rc" -ne 0 ]; then
+    branch=$(git -C "$tree" rev-parse --abbrev-ref HEAD 2> /dev/null || true)
+    [ -n "$branch" ] && [ "$branch" != HEAD ] || branch="<this tree's branch>"
+    publish="images.yml publishes this tree's $kind image for cuDF $cudf as \
+${MACHINE_IMAGE%-build}-$kind:$(image_inputs_tag "$tree" "$kind" "$cudf"):
+  gh workflow run images.yml --ref $branch -f kind=$kind -f cudf=$cudf"
+    if [ "$unpublished" = 1 ]; then
+      echo "${0##*/}: $ref is not published. $publish" >&2
+      return 2
+    fi
+    echo "${0##*/}: cannot pull $ref: a registry or network error (above), so try again." \
+      "If the image was never published, $publish" >&2
+    return "$rc"
+  fi
   machine_image_label_checked "$@"
 }
 

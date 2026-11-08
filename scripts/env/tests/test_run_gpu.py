@@ -16,7 +16,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
 from gpu_host import DRIVER_MINIMUM, H100, HOSTNAME, L40S, Host, label, log_lines  # noqa: E402
-from machine import KEYS, REPO, lib  # noqa: E402
+from machine import KEYS, NO_HOST, REPO, UNPUBLISHED, lib  # noqa: E402
 
 VERBS = [("prepare",), ("ship",), ("run", "list"), ("pull",)]
 SECRETS = [KEYS["AWS_ACCESS_KEY_ID"], KEYS["AWS_SECRET_ACCESS_KEY"]]
@@ -251,6 +251,33 @@ def test_prepare_refuses_stale_build_image():
         h.world(images=images)
         refused(h.gpu("prepare"), 2, "docker/venv.lock", h.build_ref)
         assert not any(h.data.iterdir())
+
+
+def test_prepare_names_the_publish_of_an_unpublished_image():
+    for kind in ("run", "build"):
+        with Host() as h:
+            ref = h.run_ref if kind == "run" else h.build_ref
+            images = h.world()["images"]
+            images.pop(ref)
+            h.world(images=images)
+            r = h.gpu("prepare", "--no-sf40")
+            refused(r, 2, f"{ref} is not published",
+                    f"gh workflow run images.yml --ref master -f kind={kind} -f cudf=25.02")
+            assert h.docker_runs() == [] and not any(h.data.iterdir())
+    with Host() as h:
+        images = h.world()["images"]
+        images.pop(h.run_ref)
+        h.world(images=images, pull_error=UNPUBLISHED[1].format(ref=h.run_ref))
+        refused(h.gpu("prepare", "--no-sf40"), 2, f"{h.run_ref} is not published")
+
+
+def test_prepare_names_a_pull_that_failed_otherwise():
+    with Host() as h:
+        images = h.world()["images"]
+        images.pop(h.run_ref)
+        h.world(images=images, pull_error=NO_HOST)
+        refused(h.gpu("prepare", "--no-sf40"), 1, f"cannot pull {h.run_ref}", NO_HOST,
+                "gh workflow run images.yml --ref master -f kind=run -f cudf=25.02")
 
 
 def test_prepare_refuses_old_driver():

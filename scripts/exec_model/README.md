@@ -7,26 +7,23 @@ it.
 
 ## Environment
 
-- **Python 3.12 or 3.13, with pandas and pyarrow** (numpy comes with pandas). Seen green:
-  3.12.3 with pandas 2.2.2 and pyarrow 18.1; CI's `rapidsai/base:25.02-cuda12.0-py3.12`, 3.12.9
-  with pandas 2.2.3 and pyarrow 18.1; and 3.13.15 with pandas 3.0.6 and pyarrow 25.0.1 on
-  shad-gpu. The tests run with whatever `python3` is on the PATH, so that one needs both
-  packages. Files that need them fail rather than skip without them: a skipped operator suite
-  reads exactly like a passing one. pytest is optional (below).
+- **The build image.** On dev, verda and CI every command here runs in the build image, through
+  `scripts/build-test.sh -- <command>` ([`build-test.md`](../../llm-wiki/build-test.md), "Build
+  and run"). Its venv is Python 3.13 with pandas 3.0.6 and pyarrow 25.0.1 (numpy comes with
+  pandas), and its DuckDB is 1.5.4, the GitHub release build (08e34c447b) every golden is
+  generated with: the dsdgen column types drift between releases, and another build may write
+  other parquet bytes. The image sees the tree alone, so a path a command names must be inside it.
+  A variable reaches the image by name, `--pass-env NAME`; `UPDATE_CANONICAL` and `PCK_SHARD` pass
+  by themselves. Files that need pandas or pyarrow fail rather than skip without them: a skipped
+  operator suite reads exactly like a passing one.
 
   ```
-  python3 -c "import pandas, pyarrow; print(pandas.__version__, pyarrow.__version__)"
+  scripts/build-test.sh -- python3 -c "import pandas, pyarrow; print(pandas.__version__, pyarrow.__version__)"
   ```
 
-- **DuckDB 1.5.4**, the GitHub release build (08e34c447b) every golden is generated with — the
-  dsdgen column types drift between releases, and another build may write other parquet bytes.
-  The corpus oracle and `gen_stats.py` find it by `DUCKDB`, else `duckdb` on the PATH:
-
-  ```
-  curl -fsSL https://github.com/duckdb/duckdb/releases/download/v1.5.4/duckdb_cli-linux-amd64.zip -o duckdb.zip
-  python3 -c "import zipfile; zipfile.ZipFile('duckdb.zip').extractall('duckdb-bin')"
-  chmod +x duckdb-bin/duckdb && export DUCKDB=$PWD/duckdb-bin/duckdb && "$DUCKDB" --version
-  ```
+- **shad-gpu**, which has no Docker, is the one host that runs them with its own `python3`:
+  3.13.15 with pandas 3.0.6 and pyarrow 25.0.1. There the corpus oracle and `gen_stats.py` find
+  DuckDB 1.5.4 by `DUCKDB`, else `duckdb` on the PATH.
 
 - **The sf1 tables**, `testdata/{tpch,tpcds}.sf1`, from `testdata/generate_testdata.sh`
   ([`build-test.md`](../../llm-wiki/build-test.md) has the recipe). Only the dataset and corpus
@@ -40,16 +37,17 @@ with `PEACOCK_DPHYP_LIB`; every file that calls DPhyp refuses to run without it,
 build:
 
 ```
-cargo build --release -p peacockdb-dphyp
-export PEACOCK_DPHYP_LIB=${CARGO_TARGET_DIR:-$PWD/target}/release/libpeacockdb_dphyp.so
+scripts/build-test.sh -- cargo build --release -p peacockdb-dphyp
+export PEACOCK_DPHYP_LIB=$PWD/target-img-25.02/release/libpeacockdb_dphyp.so
+py() { scripts/build-test.sh --pass-env PEACOCK_DPHYP_LIB -- python3 "$@"; }
 ```
 
-The library links against the host's glibc, so build it on the host that loads it: one built
-on a newer system does not load on shad-gpu.
+`py` runs a file in the image with the library named; the commands below use it. The library
+links against the image's glibc. One built on a newer system than shad-gpu's does not load there.
 
 ## The tests
 
-Every test file runs on its own with `python3 <file>`, no pytest: `tests/harness.py` runs a
+Every test file runs on its own with `py <file>`, no pytest: `tests/harness.py` runs a
 module's `test_*` functions, and its `bug_*` ones, which assert a known-wrong behaviour beside its
 ticket, and provides `raises`. A test file's five-line header puts the repo
 root on `sys.path`, so the relative imports resolve either way. Arguments select tests: a test's
@@ -67,20 +65,20 @@ matches nothing fails.
 **Cheap.** One file, then the tier as CI selects it, in bash or zsh:
 
 ```
-python3 scripts/exec_model/tests/engine/test_determinism.py
+py scripts/exec_model/tests/engine/test_determinism.py
 shopt -s globstar 2>/dev/null  # bash; zsh globs ** without it
 heavy='test_engine_answers|test_engine_dynamic_filters|test_engine_reassembled|test_engine_optimized|test_stats_sidecar|test_cardinality_corpus|test_ordered_corpus|test_run_corpus|test_stats_embeddings|test_call_cost_measured'
 for f in scripts/exec_model/tests/**/test_*.py; do
-  [[ $(basename "$f" .py) =~ ^($heavy)$ ]] || python3 "$f" || break
+  [[ $(basename "$f" .py) =~ ^($heavy)$ ]] || py "$f" || break
 done
 ```
 
-pytest collects the same files and selects by node id. Do not point it at the whole `tests/`
-folder: it would import and run the corpus files, every query of them.
+One test by its full name. The image has no pytest; on a host with it, pytest collects the same
+files and selects by node id. Do not point it at the whole `tests/` folder: it would import and
+run the corpus files, every query of them.
 
 ```
-python3 scripts/exec_model/tests/engine/test_plan.py test_height_is_distance_to_root
-python3 -m pytest scripts/exec_model/tests/engine/test_plan.py::test_height_is_distance_to_root -q
+py scripts/exec_model/tests/engine/test_plan.py test_height_is_distance_to_root
 ```
 
 **Dataset.** Seconds to a minute or two each. `test_stats_sidecar` recounts the committed sidecars
@@ -92,11 +90,11 @@ aggregate's groups split across lanes; `test_run_corpus` runs `run.py` over thre
 temp directory.
 
 ```
-python3 scripts/exec_model/tests/optimizer/test_stats_sidecar.py
-python3 scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
-UPDATE_CANONICAL=1 python3 scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
-python3 scripts/exec_model/tests/optimizer/test_ordered_corpus.py
-python3 scripts/exec_model/tests/test_run_corpus.py
+py scripts/exec_model/tests/optimizer/test_stats_sidecar.py
+py scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
+UPDATE_CANONICAL=1 py scripts/exec_model/tests/optimizer/test_cardinality_corpus.py
+py scripts/exec_model/tests/optimizer/test_ordered_corpus.py
+py scripts/exec_model/tests/test_run_corpus.py
 ```
 
 **Corpus.** Each file runs the planned queries it applies to, from one mode's plan golden,
@@ -107,8 +105,8 @@ process-minute per query at `tp4-single`, so run whole files on shad-gpu, in sha
 queries locally:
 
 ```
-PCK_MODE=tp4-single PCK_SHARD=0/3 python3 scripts/exec_model/tests/plans/test_engine_answers.py
-python3 scripts/exec_model/tests/optimizer/test_engine_optimized.py test_tpch_q3
+PCK_MODE=tp4-single PCK_SHARD=0/3 scripts/build-test.sh --pass-env PCK_MODE -- python3 scripts/exec_model/tests/plans/test_engine_answers.py
+py scripts/exec_model/tests/optimizer/test_engine_optimized.py test_tpch_q3
 ```
 
 The workflow runs the four files in three shards at `tp4-single`, its `filter` input passed as
@@ -117,11 +115,12 @@ eight to fifteen minutes each.
 
 **Manual.** `test_stats_embeddings` generates tpch sf1 with external embeddings in a temp
 directory — a minute or two and about 1.5 GB — and checks it gives the committed sidecar. It
-needs the embeddings cache (`testdata/fetch_embeddings.sh`), which no CI host may fetch, named by
-`PEACOCK_EMBEDDINGS_CACHE` when it is kept outside the tree:
+needs the embeddings cache (`testdata/fetch_embeddings.sh`), which no CI host may fetch. The image
+sees the tree alone, so the cache is the tree's own `embeddings-cache/`; shad-gpu names one kept
+elsewhere with `PEACOCK_EMBEDDINGS_CACHE`:
 
 ```
-PEACOCK_EMBEDDINGS_CACHE=/path/to/embeddings-cache python3 scripts/exec_model/tests/optimizer/test_stats_embeddings.py
+py scripts/exec_model/tests/optimizer/test_stats_embeddings.py
 ```
 
 `test_call_cost_measured` fits `optimizer/call_cost.py` to tpch sf40's calibration record and
@@ -129,13 +128,15 @@ asks that it order each query's modes as the device did: at least fifteen pairs 
 times differ by more than 10 %, none reversed. The record is not in git; it lives in the
 `calibration` bucket by its sha256, which `testdata/calibration/records.sha256` pins, and the
 fetch puts it in `testdata/calibration/tpch.sf40/records.tsv`, checked. The test fails naming
-the fetch when the record is absent. With an aws CLI and the bucket's credentials on this host,
-or through shad-gpu, whose CLI is not on a non-interactive ssh's PATH:
+the fetch when the record is absent. With the bucket's credentials in this shell's environment,
+through the image's aws CLI as CI's call-cost job does, or through shad-gpu, whose CLI is not on a
+non-interactive ssh's PATH:
 
 ```
-scripts/calibration/fetch_record.sh tpch.sf40
+scripts/build-test.sh --pass-env AWS_ACCESS_KEY_ID --pass-env AWS_SECRET_ACCESS_KEY -- \
+  scripts/calibration/fetch_record.sh tpch.sf40
 AWS=/home/info/bin/aws scripts/calibration/fetch_record.sh --ssh shad-gpu tpch.sf40
-python3 scripts/exec_model/tests/optimizer/test_call_cost_measured.py
+py scripts/exec_model/tests/optimizer/test_call_cost_measured.py
 ```
 
 ## run.py: the corpus through the optimizer
@@ -146,8 +147,8 @@ It checks the sf1 tables and loads DPhyp before any work. Every filter is option
 every planned query, all five modes; `--jobs` worker processes, one task per (query, mode).
 
 ```
-python3 scripts/exec_model/run.py --bench tpch --query q3 join-int --mode tp1-single --jobs 2 --out "${TMPDIR:-/tmp}/exec-model-run"
-python3 scripts/exec_model/cost_report.py --out "${TMPDIR:-/tmp}/exec-model-run"
+py scripts/exec_model/run.py --bench tpch --query q3 join-int --mode tp1-single --jobs 2 --out target-img-25.02/exec-model-run
+py scripts/exec_model/cost_report.py --out target-img-25.02/exec-model-run
 ```
 
 Under `--out`, by default `testdata/goldens/` here, it writes per bench and mode:
@@ -216,7 +217,7 @@ environment, and send exploratory runs elsewhere with `--out`. Python 3.13.0 and
 same bytes.
 
 ```
-python3 scripts/exec_model/run.py --jobs 16
+py scripts/exec_model/run.py --jobs 16
 ```
 
 A whole run is 620 (query, mode) runs. The committed one ran on a 12-core, 15 GiB host in one

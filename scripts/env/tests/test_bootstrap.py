@@ -19,7 +19,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
-from machine import FAKE_ROOT_ID, Machine, git, lib, path_without  # noqa: E402
+from machine import FAKE_ROOT_ID, NO_HOST, UNPUBLISHED, Machine, git, lib, path_without  # noqa: E402
 
 FAKE_SUDO = '#!/bin/sh\nprintf "%s\\n" "sudo $*" >> "$FAKE_SUDO_LOG"\nexit "${FAKE_SUDO_STATUS:-1}"\n'
 FAKE_CURL = '#!/bin/sh\nprintf "%s\\n" "curl $*" >> "$FAKE_SUDO_LOG"\nexit 22\n'
@@ -202,6 +202,25 @@ def test_bootstrap_uses_the_image_of_the_clones_inputs():
         assert [c for c in calls if c[0] == "pull"] == [["pull", ref]], calls
         runs = [c for c in calls if c[0] == "run"]
         assert runs and all(ref in c for c in runs), runs
+
+
+def test_bootstrap_names_the_publish_of_an_unpublished_image():
+    for message in UNPUBLISHED:
+        with Machine() as m:
+            env = whole_run_env(m)
+            tag = lib(m.clone, "image-inputs.sh", f'image_inputs_tag "{m.clone}" build 25.02')
+            ref = f"ghcr.io/asymptote-tech/peacockdb-build:{tag}"
+            m.world(pull_error=message.format(ref=ref))
+            r = m.run("bootstrap-vm.sh", env=env)
+            branch = git(m.clone, "branch", "--show-current")
+            assert r.returncode == 2 and f"{ref} is not published" in r.stderr, (r.returncode, r.stderr)
+            assert f"gh workflow run images.yml --ref {branch} -f kind=build -f cudf=25.02" in r.stderr, r.stderr
+            assert [c for c in m.docker_calls() if c[0] == "run"] == [], m.docker_calls()
+    with Machine() as m:
+        env = whole_run_env(m)
+        m.world(pull_error=NO_HOST)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 1 and "cannot pull" in r.stderr and NO_HOST in r.stderr, (r.returncode, r.stderr)
 
 
 def test_bootstrap_refuses_a_clone_older_than_the_inputs_tag():

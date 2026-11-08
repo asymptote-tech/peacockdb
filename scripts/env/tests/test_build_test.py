@@ -44,8 +44,9 @@ if [ -n "${FAKE_IMAGE_REF_EXIT:-}" ]; then echo "$FAKE_IMAGE_REF_ERR" >&2; exit 
 if [ "$1" = --ref ]; then echo "${FAKE_IMAGE_REF:-$2}"; exit 0; fi
 echo "${FAKE_IMAGE_REF:-ghcr.io/asymptote-tech/peacockdb-build:cudf-x-in-0}"
 '''
-# `ps` answers FAKE_DOCKER_PS; a `run` given FAKE_DOCKER_SLEEP writes its pid to run.pid and waits, and
-# `kill` ends it, as a container killed ends its `docker run`.
+# `ps` answers FAKE_DOCKER_PS; a `run` given FAKE_DOCKER_SLEEP writes run.started, then after
+# FAKE_DOCKER_CREATE_S (its container created) its pid to run.pid, and waits. `kill` ends it, as a
+# container killed ends its `docker run`, and before run.pid fails as docker does on no such container.
 FAKE_DOCKER = r'''#!/usr/bin/env python3
 import json, os, signal, sys, time
 a = sys.argv[1:]
@@ -56,10 +57,15 @@ if a[0] == "ps":
     print(os.environ.get("FAKE_DOCKER_PS", ""), end="")
     sys.exit(0)
 if a[0] == "kill":
+    if not os.path.exists(os.path.join(logs, "run.pid")):
+        print(f"Error response from daemon: No such container: {a[-1]}", file=sys.stderr)
+        sys.exit(1)
     with open(os.path.join(logs, "run.pid")) as f:
         os.kill(int(f.read()), signal.SIGKILL)
     sys.exit(0)
 if a[0] == "run" and os.environ.get("FAKE_DOCKER_SLEEP"):
+    open(os.path.join(logs, "run.started"), "w").close()
+    time.sleep(float(os.environ.get("FAKE_DOCKER_CREATE_S", "0")))
     with open(os.path.join(logs, "run.pid.tmp"), "w") as f:
         f.write(str(os.getpid()))
     os.rename(os.path.join(logs, "run.pid.tmp"), os.path.join(logs, "run.pid"))
@@ -258,18 +264,56 @@ def test_a_terminal_gets_it():
         assert "-it" not in t.runs()[-1], "stdin is no terminal"
 
 
-def started_run(t, *args, env=None):
-    """build-test.sh <args>, once its fake `docker run` is up."""
+# A session leader holding the pty named by argv[1] as its controlling terminal runs argv[3:] on
+# it, in its own foreground process group when argv[2] is `fg`, else in a background one.
+ON_A_TERMINAL = r'''
+import os, sys
+os.setsid()
+tty = os.open(sys.argv[1], os.O_RDWR)
+pid = os.fork()
+if pid == 0:
+    if sys.argv[2] != "fg":
+        os.setpgid(0, 0)
+    os.dup2(tty, 0)
+    os.dup2(tty, 1)
+    os.execv(sys.argv[3], sys.argv[3:])
+sys.exit(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))
+'''
+
+
+def test_a_background_job_on_a_terminal_does_not_get_it():
+    """docker run -it sets the terminal's modes, and a process group in the background that does is
+    stopped by SIGTTOU: `build-test.sh … &` from a shell would hang."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        primary, secondary = pty.openpty()
+        try:
+            for group, want in (("fg", True), ("bg", False)):
+                p = subprocess.run([sys.executable, "-c", ON_A_TERMINAL, os.ttyname(secondary), group,
+                                    str(t.root / "scripts/build-test.sh"), "--rust-only", "--build"],
+                                   cwd=t.root, env=t.environ(None, False), stdin=subprocess.DEVNULL,
+                                   capture_output=True, text=True, timeout=60)
+                assert p.returncode == 0, (group, p.returncode, p.stderr)
+                argv = t.runs()[-1]
+                assert ("-it" in argv[:argv.index("img:test")]) == want, (group, argv)
+        finally:
+            os.close(secondary)
+            os.close(primary)
+
+
+def started_run(t, *args, env=None, up="run.pid"):
+    """build-test.sh <args>, once its fake `docker run` has written <up>: run.pid once its container
+    runs, run.started before."""
     p = t.start(*args, env={"FAKE_DOCKER_SLEEP": "60", **(env or {})})
     deadline = time.monotonic() + 30
-    while not (t.logs / "run.pid").exists():
+    while not (t.logs / up).exists():
         assert p.poll() is None and time.monotonic() < deadline, (p.poll(), p.stderr.read() if p.poll() else "")
         time.sleep(0.05)
     return p
 
 
 def test_a_signal_kills_the_container():
-    for sig, code in ((signal.SIGTERM, 143), (signal.SIGINT, 130)):
+    for sig, code in ((signal.SIGTERM, 143), (signal.SIGINT, 130), (signal.SIGHUP, 129)):
         with tempfile.TemporaryDirectory() as tmp:
             t = Tree(tmp)
             p = started_run(t, "--rust-only", "--build")
@@ -279,6 +323,22 @@ def test_a_signal_kills_the_container():
             assert time.monotonic() - t0 < 20, "the script waited out the container"
             [name] = values(t.the_docker_run(), "--name")
             assert ["kill", name] in t.docker(), t.docker()
+
+
+def test_a_signal_before_the_container_exists_still_kills_it():
+    """docker run is up and its container not yet created: the first `docker kill` finds nothing, and
+    the container must not then run the build out."""
+    for sig, code in ((signal.SIGTERM, 143), (signal.SIGINT, 130), (signal.SIGHUP, 129)):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Tree(tmp)
+            p = started_run(t, "--rust-only", "--build", env={"FAKE_DOCKER_CREATE_S": "2"}, up="run.started")
+            t0 = time.monotonic()
+            p.send_signal(sig)
+            assert p.wait(timeout=30) == code, (sig, p.returncode, p.stderr.read())
+            assert time.monotonic() - t0 < 20, "the script waited out the container"
+            [name] = values(t.the_docker_run(), "--name")
+            kills = [c for c in t.docker() if c == ["kill", name]]
+            assert len(kills) >= 2, ("killed once, before the container existed", t.docker())
 
 
 def test_a_leftover_container_is_refused():

@@ -1079,6 +1079,37 @@ Not run on dev, by design: the run-image commands of "Images" (a pull, `docker r
 `gh workflow run`, `docker login`, verda (no address; down). The VM half (nebius-gpu, the CPU-VM
 build, the H100) is next.
 
+### Review round 2, important 1 (2026-11-08)
+
+On dev, in the worktree, image `peacockdb-build:cudf-25.02-in-50a0c1d7779e`, `PEACOCK_DPHYP_LIB` as
+the recipes set it. `git status` after every run: nothing but this round's edits.
+
+| command | host | exit | result |
+|---|---|---|---|
+| `scripts/build-test.sh -- cargo build --release -p peacockdb-dphyp` | dev | 0 | `target-img-25.02/release/libpeacockdb_dphyp.so` |
+| build-test.md's gate loop, `py scripts/exec_model/tests/$f.py` over its six files | dev | 0 ×6 | 9, 7, 21, 1, 2, 2 passed |
+| `py scripts/exec_model/tests/optimizer/test_ordered_corpus.py` | dev | 0 | 2 passed |
+| `UPDATE_CANONICAL=1 py scripts/exec_model/tests/optimizer/test_cardinality_corpus.py` | dev | 0 | 3 passed; golden unchanged |
+| `scripts/build-test.sh -- testdata/gen_duckdb_cost.sh --gen`, over a scratch copy (`<tree>/target-img-25.02/gen-check`: the sf1 parquet linked, profiles, dynamic filters and sf1 goldens copied) | dev | 0 | tpch 48, tpcds 99, 0 failed; every profile, dynamic-filter file and `.duckdb_cost.txt` byte-identical to the committed ones. The pyarrow warning (25.0.1, pinned 19.0.1) moves nothing |
+| `scripts/build-test.sh -- cargo test -p cost-report every_registry_query_has_a_duckdb_cost` | dev | 0 | 1 passed |
+| `UPDATE_CANONICAL=1 scripts/build-test.sh -- cargo test --features rust-only -p peacockdb-core --test test_corpus_goldens -- the_benchmark_cases_follow_the_registry` | dev | 0 | 1 passed; `corpus_benchmark_cases.inc` unchanged |
+| the same, `-- the_benchmark_report_matches_the_trees` | dev | 0 | 1 passed; the page unchanged |
+| the same, `-- the_h100_list_is_the_lists_measured` | dev | 0 | 1 passed; `h100-80gb-hbm3/cases.csv` unchanged |
+| `scripts/build-test.sh -- python3 testdata/duckdb_result.py --dataset tpch` (the sf1 form; the wiki's sf40 `--answers` form needs the CPU VM's 13.5 GB database) | dev | 0 | 6 min 20 s; `goldens/tpch.sf1/duckdb-result.txt` byte-identical |
+| `scripts/build-test.sh -- python3 scripts/calibration/plot.py --record … --record … --hbm … --out-dir …` (the H100's two fetched records and its tpch `hbm.tsv`, into `target-img-25.02/plot-check`, not the committed `plots/`) | dev | 0 | 18 min; 509 panels and `index.html`. A first try, under the tool's 10-minute background limit, was killed: its container went with it |
+| README: `scripts/build-test.sh -- python3 -c "import pandas, pyarrow; …"` | dev | 0 | `3.0.6 25.0.1` |
+| README: `py …/engine/test_determinism.py`, then the cheap-tier loop | dev | 0 | 4 passed; 48 files, 0 failed |
+| README: `py …/engine/test_plan.py test_height_is_distance_to_root` | dev | 0 | 1 passed |
+| README: the dataset tier, `py` over `test_stats_sidecar`, `test_cardinality_corpus`, `test_run_corpus` (`test_ordered_corpus` and the `UPDATE_CANONICAL` form above) | dev | 0 ×3 | 4, 3, 1 passed |
+| README: `PCK_MODE=tp4-single scripts/build-test.sh --pass-env PCK_MODE -- python3 …/plans/test_engine_answers.py test_tpch_q3` (one query, not a shard) | dev | 0 | 1 passed |
+| README: `py …/optimizer/test_engine_optimized.py test_tpch_q3` | dev | 0 | 1 passed |
+| README: `py scripts/exec_model/run.py --bench tpch --query q3 join-int --mode tp1-single --jobs 2 --out target-img-25.02/exec-model-run`, then `cost_report.py --out …` | dev | 0, 0 | 2 runs in 37.9 s, 0 failed; `cost_report.html` written |
+
+Not run: the README's `test_stats_embeddings.py` (dev has no embeddings cache, and fetching it is
+the manual tier's own step), `fetch_record.sh` and `test_call_cost_measured.py` (no bucket keys in
+this shell; CI's call-cost job runs that pair in the image), and the whole-corpus `run.py --jobs
+16` (5 h; the two-run form above is the same path).
+
 ## Task 9, the VM half (coordinator's dispatch notes)
 
 - Task 8's PR run 42412769493 green. Task 9 Step 1, Step 3 and Step 2's dev half committed as
@@ -1231,3 +1262,90 @@ the inputs and the `images.yml` dispatch — Review Focus 1), 6 (the `bench-each
 wipes the mode's committed file for a partial run; dated history line; the script never learns the
 device when every case is already measured). Dropped: 3 (more reader shapes), 7 (line length, a count
 off by one, test file size).
+
+### Round 2 fixes (developer, 2026-11-08)
+
+Each code fix had its test red first, for the reason the finding gives. No image input changed:
+`docker/`, `cpp/CMakeLists.txt` and `third_party/` untouched, `image_inputs_tag . build 25.02` still
+`cudf-25.02-in-50a0c1d7779e`, the local image's. No republish.
+
+1. **Important 1, the wiki's host commands.** build-test.md: the exec-model gates block runs as CI's
+   steps do: `scripts/build-test.sh -- cargo build --release -p peacockdb-dphyp`,
+   `PEACOCK_DPHYP_LIB=$PWD/target-img-25.02/release/libpeacockdb_dphyp.so`, each python file
+   through `scripts/build-test.sh --pass-env PEACOCK_DPHYP_LIB --` (a `py` helper), and
+   `gen_duckdb_cost.sh` and the cost-report test through `build-test.sh --`. The three
+   `UPDATE_CANONICAL=1 cargo test … test_corpus_goldens` lines go through `build-test.sh --`, which
+   forwards `UPDATE_CANONICAL` by name. `duckdb_result.py`: the `duckdb` module is the image's (the
+   venv recipe is gone), and the sf40 step copies the answers database into the tree. The shad-gpu
+   recipe's step 6, `plot.py`, runs on dev: `/usr/bin/python3` became `build-test.sh -- python3`.
+   A new rule beside "A one-off cudf/FFI cargo command": a python script needing more than the
+   standard library runs in the image; a stdlib-only one may use the host's `python3`.
+   scripts/exec_model/README.md: Environment is the image (Python 3.13.0, pandas 3.0.6, pyarrow
+   25.0.1, DuckDB 1.5.4) and shad-gpu as the one host with its own python3; DPhyp built in the image
+   with the `py` helper beside it; every command through `py` or `build-test.sh`; `PCK_MODE` by
+   `--pass-env` (not in the forwarded list); `run.py --out` inside the tree; the pytest line dropped
+   (the image has no pytest); the record fetch as CI's call-cost job does it. Left alone by the new
+   rule: `python3 scripts/ticket_widget.py` (prompts.md), `join_records.py` and `split_record.py`
+   (build-test.md; stdlib only, and their `<dir>`/`<joined>` may lie outside the tree, which an
+   image run cannot see). Left as prose, not commands to run: `cargo test --features rust-only -p
+   peacockdb-core` in prompts.md and "What rust-only means", coding-style.md's `cargo build -p
+   peacockdb`, architecture.md's `cargo build`. Runs: `## Wiki commands run`, "Review round 2".
+   Found while running: `duckdb_result.py --only q1` at sf1 writes q1's section alone, dropping the
+   rest of the file (10,100 lines). The file was put back from HEAD at once, byte-identical (md5).
+   The wiki never gives `--only` at sf1; tooling, not production behaviour, so no ticket.
+2. **Nit 1, `-it` and a background job.** `build-test.sh` reads its process group and its terminal's
+   foreground group from `/proc/$$/stat` and adds `-it` only when stdin and stdout are terminals and
+   it is not a background job of that terminal: `tpgid` is its own group, or -1 (no controlling
+   terminal, so no SIGTTOU can stop it). Test: `test_a_background_job_on_a_terminal_does_not_get_it`,
+   a session leader holding a pty as its controlling terminal runs the script in its foreground
+   group (`-it`) and in a background one (none); red before (`-it` in the background). The first fix
+   (`pgrp == tpgid` alone) turned `test_a_terminal_gets_it` red: its pty is no controlling terminal,
+   `tpgid` -1, which is the case the -1 clause covers.
+3. **Nit 2, early signals and HUP.** HUP, INT and TERM each only record 129, 130 or 143. After the
+   wait ends early, the script kills the container by name every 0.5 s for as long as `docker run`
+   lives, so a signal before docker has created the container still kills it. The fake docker's
+   `run` now creates its container after `FAKE_DOCKER_CREATE_S`, and its `kill` fails before that,
+   as docker's does. Tests: `test_a_signal_before_the_container_exists_still_kills_it` (TERM, INT,
+   HUP; red before: the script waited out the 60 s container), `test_a_signal_kills_the_container`
+   now with HUP (red before: died of the signal). By hand on dev: a `plot.py` run whose
+   `build-test.sh` the tool's background limit killed left no container behind.
+4. **Nit 4, the cleanup check parses.** `ci_gpu.rs` reads every command of each gpu-tests step, and
+   after a `nebius.sh … ssh` the commands of its remote text. A `docker rm|kill|stop` (or `docker
+   container …`) naming anything but `peacock-<dir>` alone is refused anywhere in the job, and the
+   cleanup must hold a `docker rm -f peacock-<dir>`. Pinned as refused: `peacock-cix` (red before:
+   the substring test took it), `peacock-ci peacock-peacockdb`, a second `docker rm` of
+   `peacock-peacockdb`, a `docker kill` in another step, a `docker stop -t 5`, a `$(docker ps -q)`.
+   Mutation: with the "names anything else" loop off, "a second docker rm: accepted".
+5. **Nit 5, an unpublished inputs tag.** `machine_image_checked` keeps docker pull's stderr in a
+   file (not `$(…)`, so a docker wrapper's `die` still ends the script) and prints it. A failed pull
+   whose message says `: not found` (dev's docker 28) or `manifest unknown` (older ones) returns 2:
+   "<ref> is not published", the tag of the tree's inputs, and `gh workflow run images.yml --ref
+   <branch> -f kind=<kind> -f cudf=<v>` (`<this tree's branch>` when detached). Any other failure
+   keeps docker's status (a network error, or ssh's 75 through run-gpu.sh) and names the same
+   dispatch "if the image was never published". Messages taken from dev's docker: a missing tag
+   says `failed to resolve reference …: not found`; an unknown host `dial tcp: lookup …: no such
+   host`. The fakes (`gpu_host.py`, `machine.py`) now fail a pull with those words. Tests, red
+   before (exit 1, docker's line alone): `test_check_build_image_names_the_publish_of_an_unpublished_image`,
+   `…_names_a_pull_that_failed_otherwise`; `test_run_gpu.py::test_prepare_names_the_publish_of_an_unpublished_image`
+   (run and build kinds), `test_prepare_names_a_pull_that_failed_otherwise`;
+   `test_bootstrap.py::test_bootstrap_names_the_publish_of_an_unpublished_image`. Headers of
+   run-gpu.sh and check-build-image.sh, and build-test.md ("Images"), say so.
+6. **Nit 6, `bench-each.sh`.** The script: when a case's run changes no tree file (it kept a section
+   this VM measured before), the device tree is the one whose section of the case names the VM's
+   `hostname` (one `nebius.sh ssh hostname`, once). Small, so no ticket. Test:
+   `test_bench_each_learns_the_device_from_a_section_the_run_kept`, a fresh `--records` over a tree
+   the VM measured, with an L40S tree of another host holding q1 too: one run, the device learnt,
+   the rest kept on dev, exit 0. Red before: all four kept, exit 1, "4 of 4 cases … have no
+   section". The fake `run-gpu.sh` now keeps a section whose trailer is this run's under resume, as
+   the harness does (its first cut split sections without their last newline and never matched;
+   caught because the test passed through the old learning path). The wiki: "It keeps what this VM
+   measured before"; the whole mode is re-measured by removing the mode's file on both sides after
+   `ship`, which a partial run must not do; some cases by removing just their sections (an `awk`
+   line, checked on a copy of the H100 tpch tp1_single file: q6's 31 lines gone, 47 sections left);
+   the dated sentence is gone.
+
+Verification, after the last edit: the guard (`test_source_formatting` 61 passed, `--bin
+cost-report` 49 passed); every image-free file of `scripts/env/tests` (20 files) and
+`scripts/nebius/tests` (11), 0 failed (test_build_test 25, test_run_gpu 71, test_check_build_image
+10, test_bootstrap 20, test_bench_each 13); shellcheck 0.9.0 over CI's list clean. Outside the list, `bench-each.sh` keeps SC2015 and SC2088
+and `bootstrap-vm.sh` SC2032/SC2033, each the same on HEAD.

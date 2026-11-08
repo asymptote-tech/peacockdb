@@ -11,6 +11,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
 from gpu_host import CPU_VM, Host, label  # noqa: E402
+from machine import NO_HOST, UNPUBLISHED  # noqa: E402
 
 SCRIPT = "scripts/env/check-build-image.sh"
 # What image-ref.sh prints for a tree whose inputs the moving tag does not hold: a published image by
@@ -78,6 +79,30 @@ def test_check_build_image_refuses_one_without_a_label():
         h.world(images=images)
         r = checked(h, *CPU_VM)
         assert r.returncode == 2 and "peacockdb.inputs" in r.stderr, (r.returncode, r.stderr)
+
+
+def test_check_build_image_names_the_publish_of_an_unpublished_image():
+    for message in UNPUBLISHED:
+        with Host() as h:
+            images = h.world()["images"]
+            images.pop(h.build_ref)
+            h.world(images=images, pull_error=message.format(ref=h.build_ref))
+            r = checked(h, *CPU_VM)
+            assert r.returncode == 2, (message, r.returncode, r.stderr)
+            assert f"{h.build_ref} is not published" in r.stderr, r.stderr
+            assert "gh workflow run images.yml --ref master -f kind=build -f cudf=25.02" in r.stderr, r.stderr
+            assert r.stdout == "", r.stdout
+
+
+def test_check_build_image_names_a_pull_that_failed_otherwise():
+    with Host() as h:
+        images = h.world()["images"]
+        images.pop(h.build_ref)
+        h.world(images=images, pull_error=NO_HOST)
+        r = checked(h, *CPU_VM)
+        assert r.returncode == 1, (r.returncode, r.stderr)
+        assert f"cannot pull {h.build_ref}" in r.stderr and NO_HOST in r.stderr, r.stderr
+        assert "gh workflow run images.yml --ref master -f kind=build -f cudf=25.02" in r.stderr, r.stderr
 
 
 def test_check_build_image_without_an_instance_id_is_refused():

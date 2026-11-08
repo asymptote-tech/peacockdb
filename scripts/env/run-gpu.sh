@@ -42,7 +42,8 @@
 # when set (CI's scripts/env/image-ref.sh refs), checked alike.
 #
 # Exit 0; 1 the run failed, or a ship stream gave up; 2 bad input (nebius.sh's 64 too), a stale
-# image, a run in progress, or a step missing (prepare, ship); 3 the VM's driver is older than the
+# image, one not published (the images.yml dispatch named), a run in progress, or a step missing
+# (prepare, ship); a pull that failed otherwise, docker's; 3 the VM's driver is older than the
 # run image needs; 4 restart the VM (nebius.sh stop --force, start), then prepare again; 5 status:
 # the run goes on; else nebius.sh's (75, 69). status: 0 exited 0, 1 exited non-zero, 2 none.
 set -euo pipefail
