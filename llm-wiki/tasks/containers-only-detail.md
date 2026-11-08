@@ -885,8 +885,10 @@ test result: ok. 2451 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 | nebius-gpu | 2026-11-07 23:08:20 UTC | 2026-11-07 23:27:20 UTC | 0.32 (Task 9 Step 2: prepare --no-sf40, ship, run list) |
 | nebius-cpu128 | 2026-11-07 23:27:33 UTC | 2026-11-07 23:47:43 UTC | 0.34 (Task 9 Step 2: the CPU-VM build and the 26.02 multi-GPU build, in parallel) |
 | nebius-h100 | 2026-11-07 23:47:52 UTC | 2026-11-08 00:36:22 UTC | 0.81 (Task 9 Step 2: prepare twice, ship, run list, pull; about 10 min idle after the first prepare was killed, below) |
+| nebius-cpu128 | 2026-11-08 02:13:33 UTC | 2026-11-08 02:17:05 UTC | 0.06 (review finding 8: the CPU-VM build, warm) |
+| nebius-h100 | 2026-11-08 02:17:11 UTC | 2026-11-08 02:40:25 UTC | 0.39 (review finding 8: prepare 15.5 min, ship, run bench, bench-each twice, the fused batch, one Nsight trace, pulls) |
 
-Per VM for the task: nebius-gpu 0.53 h, nebius-cpu128 0.34 h, nebius-h100 0.81 h; 1.68 h in all.
+Per VM for the task: nebius-gpu 0.53 h, nebius-cpu128 0.40 h, nebius-h100 1.20 h; 2.13 h in all.
 Every stop was a soft `nebius.sh stop`, exit 0, and `status` read STOPPED after it.
 
 ## Task 1 Step 8 (publish)
@@ -1027,7 +1029,50 @@ were resolved on dev before each VM started: build `peacockdb-build:cudf-25.02-i
 | `$N stop` | nebius-h100 | 0 | 65 GB free before it |
 
 Not run, by the coordinator's decision (long measurements): `bench-each.sh`, Nsight
-(`create_nsys_profile.sh --ssh`), `run prototype_fused_benchmarks`, and `run bench`.
+(`create_nsys_profile.sh --ssh`), `run prototype_fused_benchmarks`, and `run bench`. Run once each
+after round 1, below.
+
+Review finding 8, 2026-11-08, from this worktree at `5f396a94` (round 1's fixes), sandbox off,
+one case each. No `PEACOCK_*_IMAGE` exported: the scripts' own inputs-tag default (round 1's
+item 7) chose every image. `N`, `G` as "The H100's device run"; scratch under `/tmp/co-f8/`.
+
+| command | host | exit | result |
+|---|---|---|---|
+| `$C start` | dev → nebius-cpu128 | 0 | 68 s |
+| `D=$(scripts/nebius-sync.sh --instance-id … --profile eu-west1)` | dev → nebius-cpu128 | 0 | `peacockdb-peacockdb-beta`, 1 s |
+| `I=$(scripts/env/check-build-image.sh --instance-id … --profile eu-west1)` | nebius-cpu128 | 0 | stdout the ref alone, `…peacockdb-build:cudf-25.02-in-50a0c1d7779e`; label this tree's |
+| `$C ssh "cd ~/$D && docker run … $I scripts/env/stage-install.sh"` | nebius-cpu128 | 0 | 72 s warm, no warning; `rust-tests/` four, `rust-benchmarks/peacock_gpu_benchmarks` and `prototype_fused_benchmarks` |
+| `rsync -a -e "$C rsh" "nebius-cpu128:$D/cpp/install/" /tmp/co-f8/install/` | dev | 0 | 14 s, 749 MB |
+| `$C stop` | nebius-cpu128 | 0 | 45 GB free before it |
+| `$N start` | dev → nebius-h100 | 0 | 72 s |
+| `$G prepare` | nebius-h100 | 0 | 932 s. Build image up to date; pulled the run image's inputs tag `cudf-25.02-in-4f971122ddad`, a newer digest (`6aa01d4f…`) than 11-07's, likely the in-flight `images.yml` dispatch's; sf1 kept, sf40 `fetched 0, kept 8` / `kept 24`; `/opt/cudf` copied. No exit 4 |
+| `$G ship --install /tmp/co-f8/install` | nebius-h100 | 0 | 21 s |
+| `PCK_TEST_FILTER=bench_tpch_sf40_q6_tp1_single $G run bench` | nebius-h100 | 0 | 27 s; prefill 9.0 GB in 5.5 s; q6 75.6 ms (second-smallest of 10); 1 benchmark file, 81 calibration rows; green |
+| `$G pull`, then `$N ssh 'rm -f …/calibration/records.tsv'` | nebius-h100 | 0, 0 | 6 s; `tpch.sf40/tp1_single.benchmark.txt` changed (q6), `records.tsv` home with 81 rows |
+| `scripts/env/bench-each.sh --instance-id … --profile editor-eu --cases <one line: tpch q22> --mode tp1_single --timeout 1800 --records /tmp/co-f8/records` | nebius-h100 | 1 | 27 s. The binary printed `kept`: the shipped committed tree holds q22 from this host, driver, CUDA and cuDF (11-05), and `PEACOCK_BENCH_RESUME=1` keeps it. No file changed, so no slug: "1 of 1 cases … have no section; rerun". A rerun repeats it. The wiki was wrong (below) |
+| `$G run prototype_fused_benchmarks --exact bench_fused_tpcds_sf40_first3_tp1_single` | nebius-h100 | 0 | 31 s, the smallest batch (15 GB prefill against tpch first3's 42); fused 606.9 ms, the answers checked; ok |
+| `PCK_BENCH_HBM_PEAK_BW=3.35e12 PCK_BENCH_HBM_FREQ=10000 PCK_TEST_FILTER=bench_tpch_sf40_q6_tp1_single scripts/create_nsys_profile.sh --trace --ssh "$N rsh" --host nebius-h100 --remote-dir /home/dmitry/peacock/peacockdb-beta --remote-cudf-root /home/dmitry/peacock/cudf-25.02` | nebius-h100 | 0 | 17 s; trace pass ran 1 test; capture 2.1 MB home; `loads.tsv` 2 rows, `calls.tsv` 58 rows (q6 checked against the sf1 goldens) |
+| `$G pull`; `$N ssh 'rm -rf ~/peacock/peacockdb-beta/testdata/benchmark-results/h100-80gb-hbm3'` | nebius-h100 | 0, 0 | the device tree cleared after `ship`, as the wiki now says (a narrower removal, the mode's file, is what it gives) |
+| the same `bench-each.sh`, `--records /tmp/co-f8/records2` | nebius-h100 | 0 | 31 s; q22 207.3 ms; record set aside as `tpch-q22-tp1_single.1.tsv` (251 rows), `device` = `h100-80gb-hbm3`, "1 cases at tp1_single, every one with its section" |
+| `$G pull`; `$N ssh 'rm -f …/calibration/{records.tsv,capture.*}'` | nebius-h100 | 0, 0 | 13 s |
+| `$N stop` | nebius-h100 | 0 | 60 GB free before it; no process on the card |
+
+Round 1's `run-gpu.sh` changes held on a real VM: the inputs-tag default picked both images, and
+`--dir` defaulted to `peacockdb-beta`. `--dir` itself was not given. The device answers recorded
+with `PCK_WRITE_GPU_RESULT=1` (q22, through `bench-each.sh`) left `goldens/tpch.sf40/gpu-result.txt`
+byte-identical. Afterwards dev's tree was restored: the three tracked files the pulls and the
+capture changed (`checkout`), the run's ignored files deleted (`capture.*`, `loads.tsv`), and the
+pre-existing ignored `calibration/fused/tpcds.sf40/first3.records.tsv`, which the pull overwrote,
+put back from a tar taken before. `hbm-parts/` was not touched: the VM's 45 files there match dev's
+by size and mtime, so no pull wrote one.
+
+The wiki fix: "The H100's device run" says `bench-each.sh` measures into an empty file. After
+`ship`, remove the mode's `<device>/<ds>.sf<sf>/<mode>.benchmark.txt` on the VM and on dev, since
+on dev a committed section counts as measured once the slug is known (code: `has_section`).
+"sf40 baseline" step 2 cleared the VM's tree before step 3's `ship`, which sends it back; that
+worked on 11-05 only because no H100 tree was committed yet. It now clears after `ship`. No
+script changed: `bench-each.sh` does what its header says. What it does not say is that a
+committed section of the same host counts as done; the wiki now says it.
 
 Not run on dev, by design: the run-image commands of "Images" (a pull, `docker run --gpus`,
 `docker image inspect` of a run image: no run image on dev, and none is pulled), `image.sh push`,

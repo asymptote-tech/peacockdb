@@ -2344,6 +2344,14 @@ keeps the queries with an `ok` or `wrong` row in a device list. Per case:
   past the highest there, and is removed on the VM. A record a killed run left on the VM is pulled
   and set aside the same way first, under its last row's case.
 
+**It measures into an empty file.** `ship` sends the committed device tree. `PEACOCK_BENCH_RESUME=1`
+keeps a section there that this device, driver, CUDA, cuDF and host wrote, so the case is not
+measured. No tree file changes, and the run ends exit 1, "no section". A rerun does the same. So,
+after `ship`, remove `<device>/<ds>.sf<sf>/<mode>.benchmark.txt` under `testdata/benchmark-results/`
+for the mode it times, on the VM (`~/peacock/<i>/`) and on dev. On dev a committed section counts as
+measured once the slug is known. A one-case run hit this on the H100 on 2026-11-08, against the
+tree of 11-05.
+
 The device tree is the one the first measured case's pull changed; its slug is kept in
 `<dir>/device` for a rerun. Exit 0 when every case has its section, 1 when one has none (rerun),
 2 on bad input, else the `run-gpu.sh` exit that stopped it. The segments then go home as one
@@ -2377,7 +2385,8 @@ pass by their names; `--device <slug>` reads the pinned records from
 
 On 2026-11-04 the first `prepare` took about 21 min: 8 for the two images, 12 for sf40. A second
 took about 1 min. The sf1 list ran green in 14 min, each binary at the count this page gives. One
-benchmark case, `bench_tpch_sf40_q6_tp1_single`, took 97 ms a run.
+benchmark case, `bench_tpch_sf40_q6_tp1_single`, took 97 ms a run. On 2026-11-08 a `prepare` that
+pulled a newer run image, with sf40 all kept, took 15.5 min; that case took 76 ms a run.
 
 ### The CPU-VM build
 
@@ -3325,9 +3334,11 @@ A timed section with `pinned_cache` other than `on`, or with `prefill_files=0`, 
 
 1. The install, built on the CPU VM ("The CPU-VM build"), into
    `/home/dmitry/build/peacock/sf40-baseline/install`.
-2. Set aside dev's `testdata/calibration/records.tsv` if a run other than this one left it. Clear
-   the H100's `~/peacock/<i>/testdata/benchmark-results/h100-80gb-hbm3/`, so nothing stale comes home.
+2. Set aside dev's `testdata/calibration/records.tsv` if a run other than this one left it.
 3. `$H start`; `$G prepare`; `$G ship --install /home/dmitry/build/peacock/sf40-baseline/install`.
+   Then remove the two modes' `h100-80gb-hbm3/<ds>.sf40/<mode>.benchmark.txt` on the VM and on dev:
+   `ship` sends the committed tree back, and `bench-each.sh` would keep its sections ("The H100's
+   device run").
 4. `scripts/env/bench-each.sh $VM --cases peacockdb-core/tests/common/corpus_benchmark_cases.inc --mode tp1_single --timeout 1800 --records <scratch>/records`,
    then, for the list's second mode, the same with `--mode tp4_sized --within
    testdata/benchmark-results/h100-80gb-hbm3/cases.csv` (without `--within` it also times
