@@ -1440,3 +1440,4 @@ second batch passed whole. In that batch three tiny files took 44 s each at the 
 the likely cause is a stall on dev, not the test. It was not disabled. shellcheck v0.9.0 over CI's
 list: clean, and the image removed.
 - 2026-11-08T06:10:16Z: signoff written; board `completeness approved`.
+- Final device run: hard stop of all three VMs, then `pipeline.yml` dispatched 2026-11-08T06:10:24Z at `ecc27e12`: run 42453649934. A restart that finds it unfinished dispatches it again.
