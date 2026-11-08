@@ -1163,3 +1163,6 @@ No republish.
 Pre-existing, not touched: actionlint (its image's shellcheck 0.11) reports SC2001 (style) in
 `changes`' run block at pipeline.yml:53, the same on HEAD; shellcheck 0.9.0 reports SC2032/SC2033
 on `bootstrap-vm.sh`'s `docker() { sudo docker …; }` line, the same on HEAD and outside CI's list.
+- Round 1 fixes committed as `385b0cb7` and pushed: PR run 42437388041. `images.yml -f kind=run -f
+  cudf=25.02` dispatched to prove the new Test step (`test_run_tests.py` in the run job): run
+  42437382608. Finding 8's H100 commands dispatched to the developer next.
