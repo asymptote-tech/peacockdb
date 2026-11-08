@@ -1214,3 +1214,20 @@ on `bootstrap-vm.sh`'s `docker() { sudo docker …; }` line, the same on HEAD an
 - Round 1 runs: PR run 42437388041 green; images run 42437382608 green, its new Test step ran
   `test_run_tests.py` against the built run image, 23 passed. Finding 8 done (`## Wiki commands
   run`). Round 2 dispatched.
+
+### Round 2 findings (reviewer, 2026-11-08): 0 blocking, 2 important, 7 nits
+
+Round 1's important 1–7 and nits 2, 8, 9 verified fixed, each with a test.
+1. Important: the wiki still shows host builds — bare `cargo test` at build-test.md ~1541, 2965,
+   3222, 3284, and the exec-model block (~1528-1541) needing host DuckDB/pyarrow/DPhyp. Fix: through
+   `scripts/build-test.sh --`, run each once.
+2. Important: `gpu-tests` with `--dir ci` never ran live. Coordinator: `pipeline.yml` dispatched
+   2026-11-08T03:21:46Z at `f4515fb4`, run 42441133052.
+Nits taken: 1 (a backgrounded `build-test.sh` on a terminal hangs on SIGTTOU: also require the
+foreground process group), 2 (an early INT/TERM is lost before the container exists; HUP not
+trapped), 4 (`ci_gpu.rs`'s cleanup check is a substring test: accepts a second container), 5 (an
+unpublished inputs tag now fails with docker's "manifest unknown", exit 1, instead of exit 2 naming
+the inputs and the `images.yml` dispatch — Review Focus 1), 6 (the `bench-each.sh` wiki instruction
+wipes the mode's committed file for a partial run; dated history line; the script never learns the
+device when every case is already measured). Dropped: 3 (more reader shapes), 7 (line length, a count
+off by one, test file size).
