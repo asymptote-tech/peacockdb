@@ -14,7 +14,7 @@ through `run prototype_fused_benchmarks`), and the sf40 C++ pair
 has no host while shad-gpu is down (its rows say so) · `manual` = no CI step runs it · `2gpu` =
 manual, host with ≥2 GPUs (verda-gpu) · `validate-large` = validate-large.yml manual dispatch.
 The first table says it once per block: cpu and ffi are dataset-matrix, gpu is shad-gpu. Everything
-except the `shad-gpu` and `2gpu` rows also runs locally; large CPU batches go to verda.
+except the `shad-gpu` and `2gpu` rows also runs locally.
 
 ### Rust tests against the engine
 
@@ -2008,8 +2008,8 @@ own so `corpus_query!` expands, and `inventory::submit!` runs, in that binary al
 
 ## Local build workflows and caches
 
-Every shape builds in the build image, through `scripts/build-test.sh`, on dev, verda or a CPU VM
-alike. Cargo's target dir is `target-img-<v>`, one per cuDF version, inside the tree. A build
+Every shape builds in the build image, through `scripts/build-test.sh`, in a git checkout on dev
+or a CPU VM alike. Cargo's target dir is `target-img-<v>`, one per cuDF version, inside the tree. A build
 script bakes `CARGO_MANIFEST_DIR`, so a target dir is never shared across worktrees.
 
 | Shape | Command | C++ build dir |
@@ -2143,7 +2143,7 @@ scripts/nebius.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-
 device runs go through `run-gpu.sh` and the 25.02 run image, as the H100's do ("The L40S list").
 The device tier runs there while shad-gpu is down. Only device runs go there: the install is
 built locally, in the build image, and shipped.
-Every CPU build and run stays local, or on verda.
+Every CPU build and run stays local.
 
 - **It is preemptible.** It can stop, change IP or vanish mid-step. Preemption is a stop: the
   boot disk keeps its trees, builds and data.
@@ -2611,7 +2611,7 @@ hand. A new region repeats these steps.
 |---|---|---|
 | **nebius-gpu** | GPU test suite while shad-gpu is down (L40S, cuDF 25.02, glibc 2.39) | `scripts/nebius.sh`, `scripts/env/run-gpu.sh`; see *Nebius host* |
 | **shad-gpu** | Down until further notice; see *Nebius host*. When up: GPU test suite (cudf 25.02, H200-class; old glibc → patch step). The one host without Docker ("shad-gpu", below) | `scripts/build-test-shadgpu.sh` (`--build --push-binaries --patch --run[-detached]` / `--all`, `--run-status`). Resilient rsync + retries — the link is flaky |
-| **verda** (when available) | large CPU runs, golden regen | `scripts/build-test.sh` in a checkout on verda, as on dev |
+| **verda** (when available) | none yet on the image path: `build-test.sh` needs Docker and a git checkout, and an rsync'd tree has no `.git`; never run there since containers-only | — |
 | **verda-gpu** | same root volume as verda, with an H200 attached | builds as verda does. `run-gpu.sh` reaches Nebius VMs only; the benchmark and Nsight run on nebius-h100 (*Nebius host*) |
 | **nebius-h100** | sf40, the corpus benchmark and its Nsight passes (H100 80GB) | `scripts/env/run-gpu.sh`; see *Nebius host* |
 | **nebius-cpu128** | DuckDB, and the CPU-VM build of the H100's install (128 cores, no card) | `scripts/nebius.sh`, `provision-vm.sh`; see *Nebius host* |
@@ -2645,16 +2645,13 @@ hand. A new region repeats these steps.
   `scripts/list_verda_instances.sh` is what finds it (`VERDA_CLIENT_ID`, `VERDA_CLIENT_SECRET`).
   `ssh verda` resolves nowhere, so a probe of the bare name reports "down" whether the instance
   is up or not. Only shad-gpu has a stanza in `~/.ssh/config`.
-- **Prefer verda for large CPU runs** (whole suite or big selections). It is not always
-  up (the human starts it manually) — falling back to a local run is completely fine.
 - **Comparing files across hosts: use checksums, and `LC_ALL=C sort` for any listing.**
   Two hosts collate `ls`/`sort` differently, so a manifest diff reports differences that
   are pure collation — this produced two false alarms in one session before checksums
   settled it. Compare `sha256sum`/`md5sum` output, not directory listings.
 - Rented hosts change SSH host keys on reprovision: `ssh-keygen -R <host>` + re-keyscan
   rather than fighting the mismatch. nebius-gpu is the exception: `nebius.sh` handles its key.
-- **Golden regen**: `UPDATE_CANONICAL=1 scripts/build-test.sh --rust-only --run`, locally or in
-  verda's checkout. From verda, copy the changed goldens home and compare them by checksum.
+- **Golden regen**: `UPDATE_CANONICAL=1 scripts/build-test.sh --rust-only --run`, locally.
   `recipe-payloads.txt` is not rewritten: its test refuses without
   `PEACOCK_REWRITE_RECIPE_BYTES=1`.
 - **A golden that pins a producer against itself proves consistency, not correctness.** Where
@@ -2667,7 +2664,7 @@ hand. A new region repeats these steps.
   progress may stall (flaky links, OOM kills), and a silent stall looks identical to a
   long run.
 - **Large CPU + GPU batches run in parallel** — kick off the GPU host run and the
-  verda/local CPU run concurrently; neither waits for the other.
+  local CPU run concurrently; neither waits for the other.
 - **The device's own answers are a knob, not a flag**: `PCK_WRITE_GPU_RESULT=1` on a gate
   run has the device corpus tier write `gpu-result.txt` beside the cpu's goldens, before it
   asserts against them — so an answer the cpu rejects is still recorded for DuckDB to judge.

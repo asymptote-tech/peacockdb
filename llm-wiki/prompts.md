@@ -187,13 +187,9 @@ state, and a watchdog restarts you.
     rule exists to prevent, and a silent dispatch is evidence the rule was broken.
   - **Then the analyst, then the board.** Spend an analyst on the obstacle; if that does not
     resolve it, write `blocked(building)` with what you learned from all three steps.
-- **Check whether verda is up before each dispatch** — one `ssh` with a short timeout. When
-  it answers, tell the developer to run that task's CPU tests there: `scripts/build-test.sh`
-  in a checkout on verda, as locally; when it does not, say so, and a local run is fine.
-  The human starts verda by hand, so this is per dispatch rather than per chain. `verda` is a
-  name for the host and not an address of it: it is an ephemeral instance with a new IP per
-  reprovision and no `~/.ssh/config` stanza, so `ssh verda` fails to resolve whether it is up or
-  down. Ask the human for the address, or `scripts/list_verda_instances.sh` for it.
+- **A developer's CPU tests run locally**, through `scripts/build-test.sh`. verda has no route
+  on the image path yet: `build-test.sh` needs a git checkout, a developer's work is uncommitted,
+  and nothing installs Docker there. Do not send a dispatch to verda until a human gives it one.
 - **The hosts are the three Nebius VMs** (`build-test.md`, "Nebius host", host roles), each
   started and stopped through `scripts/nebius.sh`. You pre-start no VM: a developer's step starts
   each VM right before its first remote command, and stops it after its last pull. Your one start
