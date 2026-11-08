@@ -1222,7 +1222,7 @@ Round 1's important 1–7 and nits 2, 8, 9 verified fixed, each with a test.
    3222, 3284, and the exec-model block (~1528-1541) needing host DuckDB/pyarrow/DPhyp. Fix: through
    `scripts/build-test.sh --`, run each once.
 2. Important: `gpu-tests` with `--dir ci` never ran live. Coordinator: `pipeline.yml` dispatched
-   2026-11-08T03:21:46Z at `f4515fb4`, run 42441133052.
+   2026-11-08T02:58:53Z at `f4515fb4`, run 42440753811.
 Nits taken: 1 (a backgrounded `build-test.sh` on a terminal hangs on SIGTTOU: also require the
 foreground process group), 2 (an early INT/TERM is lost before the container exists; HUP not
 trapped), 4 (`ci_gpu.rs`'s cleanup check is a substring test: accepts a second container), 5 (an
