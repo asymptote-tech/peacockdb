@@ -1049,3 +1049,30 @@ build, the H100) is next.
 - 2026-11-08T00:52:43Z: plan complete at `a9ff18cc` (every box ticked); board `reviewing`; PR #203 marked ready.
   VM time for the task: 1.68 h (nebius-gpu 0.53, nebius-cpu128 0.34, nebius-h100 0.81). Round 1
   dispatched.
+
+### Round 1 findings (reviewer, 2026-11-08): 0 blocking, 8 important, 10 nits
+
+Important, all routed to the developer:
+1. CI's `run-gpu.sh` dir and container (`~/peacock/peacockdb/`, `peacock-peacockdb`) are the human's
+   main clone's too; CI's cleanup can kill a by-hand run. Fix: `--dir ci`, cleanup `peacock-ci`,
+   the guard reads the name from the run step.
+2. `build-test.sh` never label-checks a given `$PEACOCK_BUILD_IMAGE` (stale image, or a 25.02 ref
+   under `--cudf 26.02`); the wiki says it refuses. Fix: check it, test exit 2 with no `docker run`.
+3. `test_image.py::test_the_inputs_are_the_same_in_every_locale` skips-as-ok in the image (no
+   locale, #309). Fix: run the file on the runner, or fail instead of skip; correct #309.
+4. CI no longer tests `docker/run-tests.sh`'s rules (`test_run_tests.py` is `needs_docker`).
+   Fix: run it in `images.yml`'s run job between build and push.
+5. `ci_images.rs` misses project commands behind `timeout`/`env`/`exec`/`nice`, `bash -c`, `bash
+   <script>`, shebang scripts under `scripts/` etc., and `python`. Fix and pin each as refused.
+6. `build-test.sh`'s `exec docker run` has no `--init`: an interrupted build keeps running in the
+   container, holding cargo's lock. Fix: `--init`, `-it` on a terminal, a named container and a
+   trap.
+7. After the merge `bootstrap-vm.sh`, `check-build-image.sh` and `run-gpu.sh` refuse master's
+   `:cudf-<v>` until someone moves it. Fix: default all three to the inputs tag.
+8. Spec item 6: `bench-each.sh`, Nsight, `run prototype_fused_benchmarks` and `run bench` were not
+   run. Coordinator: run each once at the smallest scope (one case) on the H100 after the fixes.
+
+Nits taken because they are cheap and real: 2 (the GPU run step's guard does not refuse
+`continue-on-error` or an `if:`), 8 (the Rust cache key ignores the image), 9 (wiki drift:
+`stage-install.sh` usage, a long line, "passes none of the step's environment"). Dropped: 1, 3, 4,
+5, 6, 7, 10.
