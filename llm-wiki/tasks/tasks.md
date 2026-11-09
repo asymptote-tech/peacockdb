@@ -144,6 +144,27 @@ human lands it, and new-hosts' live three-VM watch check is dispatched from mast
     means containers-rebase is mid-surgery: resume from `.claude/ensemble/L.surgery` (or the
     detail file's `## Surgery` once Step 5 has folded it in).
 
+> **Report rebase, 2026-11-09, by the human.** Two report commits landed below the top of the
+> chain after the tasks above them were built: `fc4decfb` on `ENS-query-fuser` (fused-batches
+> tables) and `a647a223` on `ENS-tp4-sized` (the tp1_single main table and the Modes tables).
+> batching-report, tp4-sized and containers-only are marked `rebase needed(done)`: rebase them in
+> chain order before sirius-bench, each onto its rebased parent (`git rebase --onto <new parent>
+> <old parent tip>`), and force-push each with lease. This rebase is an exception to the
+> protocol's re-proving:
+>
+> - **Verification builds nothing.** On each rebased branch, regenerate the page with
+>   `UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test
+>   test_corpus_goldens -- the_benchmark_report_matches_the_trees` (commit it if it changed),
+>   then run, `--features rust-only`, `--lib -- prototypes::fuser::report
+>   test_support::benchmark_report` and that test without the variable. No image, C++ or device
+>   build, and no re-run of the tasks' own proving commands.
+> - **No review round** for these rebases.
+> - **Each task is `done` again once those pass and its branch is pushed**, without waiting for
+>   CI on its PR. A red CI run there is reported to the human, not a block on sirius-bench.
+> - A conflict in `testdata/benchmark-report.html` is resolved by regenerating it; a conflict in
+>   code goes to a developer, resolved to the report commits' intent; `tasks.md` and the wiki
+>   by the usual ownership rule.
+
 ### 1. [`containers-rebase.md`](containers-rebase.md) — closes [#226](../tickets/benchmarks.md#t226) — state: done — PR #193
 
 `ENS-containers-rebase`: containers' 16 commits replayed on master, plus the optimizer's benchmark
@@ -190,19 +211,25 @@ per-consumer limits and an optional concurrency cap.
 Production (its code under `src/prototypes/`): fuse the first 3/10/20/all queries into one DAG
 sharing scans, with mergeability and pipelining hints and a memory cap; run them on the H100.
 
-### 8. [`batching-report.md`](batching-report.md) — closes no ticket — state: done — PR #201
+### 8. [`batching-report.md`](batching-report.md) — closes no ticket — state: rebase needed(done) — PR #201
 
 `llm-wiki/reports/query-batching.md`: fused vs unfused vs DuckDB per batch size.
 
-### 9. [`tp4-sized.md`](tp4-sized.md) — closes no ticket — state: done — PR #202
+### 9. [`tp4-sized.md`](tp4-sized.md) — closes no ticket — state: rebase needed(done) — PR #202
 
 The same query set at sf40 tp4_sized on the H100, unfused, and its sums added to the report.
 
-### 10. [`containers-only.md`](containers-only.md) — closes [#129](../archive/archived-tickets.md#t129) (part a) — state: done — PR #203
+### 10. [`containers-only.md`](containers-only.md) — closes [#129](../archive/archived-tickets.md#t129) (part a) — state: rebase needed(done) — PR #203
 
 Retire the non-container paths: CI in the build images (25.02, and a CI-only 25.10), the L40S's `gpu-tests` through `run-gpu.sh`,
 local and verda builds through the image, the conda install and init scripts deleted, one path in
 the wiki. shad-gpu stays as it is, since it has no Docker.
+
+### 11. [`sirius-bench.md`](sirius-bench.md) — closes no ticket — state: approved to build
+
+SiriusDB (`stable`, prebuilt) on the H100, warm from pinned parquet bytes, one process per
+dataset: its total beside peacockdb's and DuckDB's on the page, with a Σ Sirius / Σ DuckDB line,
+and `testdata/benchmarks.csv` of every result. Starts after the report rebase (note above).
 
 ## Chain M (base: master)
 
