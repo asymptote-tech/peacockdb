@@ -155,6 +155,7 @@ def test_refuses_an_image_without_a_label():
         ref = f"{REGISTRY}/peacockdb-run:{tag}"
         p = r.run("run", "25.02", local={ref: "<no value>"})
         assert p.returncode == 2 and "peacockdb.inputs" in p.stderr, (p.returncode, p.stderr)
+        assert "scripts/env/image.sh" in p.stderr, p.stderr
         assert p.stdout == ""
 
 

@@ -184,11 +184,16 @@ def test_bootstrap_refuses_an_image_of_other_inputs():
         r = m.run("bootstrap-vm.sh", env=env)
         assert r.returncode == 2 and "third_party/cudf" in r.stderr and "docker/pins.env" not in r.stderr, r.stderr
         assert [c for c in m.docker_calls() if c[0] == "run"] == [], m.docker_calls()
+
+
+def test_a_plain_build_is_refused_naming_image_sh():
+    """A plain `docker build` has no peacockdb.inputs label."""
     with Machine() as m:
         env = whole_run_env(m)
         m.world(label=None)
         r = m.run("bootstrap-vm.sh", env=env)
-        assert r.returncode == 2 and "peacockdb.inputs" in r.stderr, r.stderr
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        assert "peacockdb.inputs" in r.stderr and "scripts/env/image.sh" in r.stderr, r.stderr
         assert [c for c in m.docker_calls() if c[0] == "run"] == [], m.docker_calls()
 
 
