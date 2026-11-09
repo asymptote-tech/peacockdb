@@ -505,13 +505,16 @@ fn extra_table(table: &ReportTable) -> String {
     html
 }
 
+/// A cell's text may span lines: each `\n` is a `<br>`, so a long list stacks its items rather
+/// than widening the page.
 fn report_cell(cell: &ReportCell) -> String {
     let class = cell.class.map_or(String::new(), |class| {
         format!(" class=\"{}\"", escape(class))
     });
+    let shown = escape(&cell.text).replace('\n', "<br>");
     let text = match &cell.href {
-        Some(href) => format!("<a href=\"{}\">{}</a>", escape(href), escape(&cell.text)),
-        None => escape(&cell.text),
+        Some(href) => format!("<a href=\"{}\">{shown}</a>", escape(href)),
+        None => shown,
     };
     format!("<td{class}>{text}</td>")
 }

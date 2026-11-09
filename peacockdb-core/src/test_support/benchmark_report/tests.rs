@@ -516,7 +516,7 @@ fn an_extra_table_follows_the_datasets() {
         columns: vec!["batch".to_string(), "total (ms)".to_string()],
         rows: vec![vec![
             ReportCell {
-                text: "q1+q6".to_string(),
+                text: "q1, q6\nq7 & q8".to_string(),
                 href: None,
                 class: None,
             },
@@ -535,6 +535,7 @@ fn an_extra_table_follows_the_datasets() {
         .expect("the extra table");
     assert!(dataset < fused);
     assert!(html.contains("<th>batch</th><th>total (ms)</th>"), "{html}");
+    assert!(html.contains("<td>q1, q6<br>q7 &amp; q8</td>"), "{html}");
     assert!(
         html.contains("<td class=\"off\"><a href=\"https://example.com/x\">2.0</a></td>"),
         "{html}"

@@ -25,7 +25,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3729 cases: `--lib` 1211, `test_cpu_corpus` 2451, `test_corpus_goldens` 64, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3730 cases: `--lib` 1212, `test_cpu_corpus` 2451, `test_corpus_goldens` 64, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -922,7 +922,7 @@ own provenance, an out-of-memory one by its five keys; the second-smallest run; 
 baseline its queries' sections in batch order, a missing one panicking naming it, and every
 batched query of both lists holding a baseline section and `loads.tsv` rows
 
-| Fused batches on the report page | [prototypes::fuser::report::tests](../peacockdb-core/src/prototypes/fuser/report/tests.rs) | 6 |
+| Fused batches on the report page | [prototypes::fuser::report::tests](../peacockdb-core/src/prototypes/fuser/report/tests.rs) | 7 |
 |---|---|--:|
 
 a table per fused file, by device, dataset and sf; a measured batch's load, execute and peak in
@@ -3119,9 +3119,12 @@ linked to its line, or `failed`; else `—`. A time whose `warm` verdict is not 
 `not warm: <verdict>`. The intro says what one DuckDB time is, a CLI process's wall time, and
 names each DuckDB file's `duckdb`, `threads`, `host` and floor (`floor_ms`). Last, one
 fused-batches table per `<device>/fused/<ds>.sf<sf>/tp1_single.fused.txt` (*Fused batches*,
-below), read through the fused format's own reader: per batch its queries, outcome, fused load
-and execute (ms), the accountant's peak (GiB, a lower bound), cap and reads per table, the batch
-linked to its section. An out-of-memory batch shows `out of memory (cap k)`, a marker `same set as
+below), read through the fused format's own reader: per batch its queries (ten to a line),
+outcome, nonfused total load, fused load, nonfused total execute and fused execute (ms), the
+accountant's peak (GiB, a lower bound), cap and reads per table, one to a line as `table:n/m`, the
+batch linked to its section. The nonfused figures are the batch's queries run alone, off the same
+device's `<ds>.sf<sf>/tp1_single.benchmark.txt`: `load_us` and `execute_us` summed, and `m` the
+table's `GpuLoadParquet` nodes across them. A cell's `\n` renders as `<br>`. An out-of-memory batch shows `out of memory (cap k)`, a marker `same set as
 all`. No fused file, no table. `render_benchmark_report` in `test_support` writes it through `parse_benchmark_section`
 and `parse_duckdb_results`, with no time and no absolute path, in `testdata/report.html`'s look.
 **A commit that changes a results tree, a fused file or the registry's device cells regenerates
