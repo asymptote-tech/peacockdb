@@ -2,16 +2,19 @@
 
 The laptop is a home with a git identity and a clone of the scripts whose origin is the GitHub
 repository. `ssh` is a fake that records each call's argv and stdin and runs the remote command in
-a fake VM: a directory per address holding passwd, group, the users' homes, and `root/` for what
-is written under /etc and /var. A user is reached only with an authorized_keys. As ssh does, `-t`
-gives the far end a terminal only when the laptop's stdin is one, and otherwise says so. On a VM, sudo runs
-its command as the caller; getent, groupadd, useradd, usermod and install act on that directory;
-gh keeps its login in ~/.config/gh/hosts.yml on the laptop and on a VM alike. The clone's
-bootstrap-vm.sh is a stub that records its user and arguments, installs a fake claude, whose login
-needs a terminal, into ~/.local/bin, which is not on ssh's PATH, and makes an
-empty clone on the --ref branch; like the real one, it refuses a --ref other than the branch an
-existing clone is on, naming both. The laptop holds a GPU key pair where provision-vm.sh looks by
-default, and ssh-keygen is a fake that records any call.
+a fake VM: a directory per address holding passwd, group, the users' homes, and `root/` for what is
+written under /etc and /var. A user is reached only with an authorized_keys. As ssh does, `-t`
+gives the far end a terminal only when the laptop's stdin is one, and otherwise says so. Its own
+lines go to its `-E` log when it has one, with `Authenticated to` once a user is reached; `-G`
+prints the `loglevel` and is not a call. FAKE_SSH_REFUSALS=<n> refuses the first n calls before
+authenticating, reading none of stdin and recording no call, and counts them in <ssh log>.refused.
+On a VM, sudo runs its command as the caller; getent, groupadd, useradd, usermod and install act on
+that directory; gh keeps its login in ~/.config/gh/hosts.yml on the laptop and on a VM alike. The
+clone's bootstrap-vm.sh is a stub that records its user and arguments, exits FAKE_BOOTSTRAP_RC when
+it is set, installs a fake claude, whose login needs a terminal, into ~/.local/bin, which is not on
+ssh's PATH, and makes an empty clone on the --ref branch; like the real one, it refuses a --ref
+other than the branch an existing clone is on, naming both. The laptop holds a GPU key pair where
+provision-vm.sh looks by default, and ssh-keygen is a fake that records any call.
 """
 import json
 import os
@@ -23,7 +26,7 @@ import tempfile
 
 from machine import KEYS, REPO, git
 
-LAPTOP_FILES = ["scripts/env/provision-vm.sh", "scripts/lib/peacock-config.sh"]
+LAPTOP_FILES = ["scripts/env/provision-vm.sh", "scripts/lib/peacock-config.sh", "scripts/lib/ssh-retry.sh"]
 ORIGIN = "git@github.com:asymptote-tech/peacockdb.git"
 PAT = "github_pat_11FAKETOKEN0value_Zq81"
 LAPTOP_GITCONFIG = "[user]\n\tname = Ada Laptop\n\temail = ada@example.test\n"
@@ -40,23 +43,37 @@ while i < len(args) and args[i].startswith("-"):
     step = 2 if args[i] in WITH_VALUE else 1
     opts += args[i:i + step]
     i += step
+if "-G" in opts:
+    levels = [o.split("=", 1)[1] for o in opts if o.startswith("LogLevel=")]
+    print("loglevel " + (levels[0] if levels else "INFO"))
+    sys.exit(0)
+log = open(opts[opts.index("-E") + 1], "a") if "-E" in opts else sys.stderr
 target, command = args[i], " ".join(args[i + 1:])
+user, _, address = target.rpartition("@")
+refused = pathlib.Path(os.environ["FAKE_SSH_LOG"] + ".refused")
+n = int(refused.read_text()) if refused.exists() else 0
+if n < int(os.environ.get("FAKE_SSH_REFUSALS", "0")):
+    refused.write_text(str(n + 1))
+    print(f"ssh: connect to host {address} port 22: Connection refused", file=log)
+    sys.exit(255)
 tty = "-t" in opts and sys.stdin.isatty()
 if "-t" in opts and not tty:
-    print("Pseudo-terminal will not be allocated because stdin is not a terminal.", file=sys.stderr)
+    print("Pseudo-terminal will not be allocated because stdin is not a terminal.", file=log)
 stdin = b"" if "-n" in opts or tty else sys.stdin.buffer.read()
 with open(os.environ["FAKE_SSH_LOG"], "a") as f:
     f.write(json.dumps({"argv": args, "stdin": stdin.decode(errors="replace")}) + "\n")
-user, _, address = target.rpartition("@")
 vm = pathlib.Path(os.environ["FAKE_VMS"]) / address
 if not vm.is_dir() or address in os.environ.get("FAKE_SSH_DOWN", "").split():
-    print(f"ssh: connect to host {address} port 22: No route to host", file=sys.stderr)
+    print(f"ssh: connect to host {address} port 22: No route to host", file=log)
     sys.exit(255)
 homes = {ln.split(":")[0]: ln.split(":")[5] for ln in (vm / "passwd").read_text().splitlines() if ln}
 home = homes.get(user)
 if home is None or not (pathlib.Path(home) / ".ssh" / "authorized_keys").is_file():
-    print(f"{target}: Permission denied (publickey).", file=sys.stderr)
+    print(f"{target}: Permission denied (publickey).", file=log)
     sys.exit(255)
+if log is not sys.stderr:
+    print(f'Authenticated to {address} ([{address}]:22) using "publickey".', file=log)
+    log.close()
 env = {k: v for k, v in os.environ.items() if k.startswith("FAKE_")}
 env.update(HOME=home, USER=user, LOGNAME=user, FAKE_VM=str(vm), FAKE_USER_NAME=user, LANG="C.UTF-8",
            PATH=f"{os.environ['FAKE_VM_BIN']}:{os.environ['FAKE_BASE_PATH']}")
@@ -108,6 +125,7 @@ if sys.argv[1:3] == ["auth", "login"]:
 STUB_BOOTSTRAP = '''#!/usr/bin/env bash
 set -eu
 printf '%s %s\\n' "$(id -un)" "$*" >> "$FAKE_VM/bootstrap.log"
+[ -z "${FAKE_BOOTSTRAP_RC:-}" ] || exit "$FAKE_BOOTSTRAP_RC"
 mkdir -p "$HOME/.local/bin"
 cp "$FAKE_CLAUDE" "$HOME/.local/bin/claude"
 if [ "${1:-}" = --ref ] && [ -e "$HOME/peacockdb" ]; then
@@ -273,7 +291,8 @@ class Laptop:
                     "FAKE_SSH_LOG": str(self.ssh_log), "FAKE_GH_LOG": str(self.gh_log),
                     "FAKE_SSH_KEYGEN_LOG": str(self.keygen_log),
                     "FAKE_VMS": str(self.vms), "FAKE_VM_BIN": str(self.vm_bin),
-                    "FAKE_BASE_PATH": vm_path(), "FAKE_CLAUDE": str(tmp / "claude")}
+                    "FAKE_BASE_PATH": vm_path(), "FAKE_CLAUDE": str(tmp / "claude"),
+                    "PEACOCK_SSH_PAUSES": "0 0 0"}
         return self
 
     def __exit__(self, *exc):

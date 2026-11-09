@@ -25,3 +25,32 @@ plain build of the same Dockerfile from the repository's root, with no build arg
   docker.io/library/run-25.10:latest: pull access denied, repository does not exist or may require
   authorization`.
 - The plain images' tags were removed after the comparison.
+
+## ssh through the helper
+
+- `nebius.sh` has one ssh path, `vm_ssh_with <attempts>`, over `ssh_retry_up_to`: four for `ssh`,
+  one for `rsh`, so `rsh` keeps the host-key repair and is never retried itself. install-watch's
+  rsyncs use this script's `rsh` as their transport, with the options it was given.
+- The repair runs only when the attempt returned had not authenticated, which `ssh_retry_up_to`
+  reports through the caller's variable (a nameref, never a global). Grepping stderr alone would
+  also match the remote command's own stderr: a command that printed `Host key verification
+  failed` and exited 255 was re-keyed and run a second time. The helper's locals carry a `_sru_`
+  prefix: a caller's variable named like one would resolve to the local instead, and named like the
+  nameref itself would be circular.
+- `start`'s wait checks its deadline between tries only. A check just before the deadline passes,
+  then `sleep POLL` and one more full try: a CLI call, four attempts at `ConnectTimeout=15` and
+  35 s of pauses. So the wait can end up to about 105 s past `GPU_HOST_START_TIMEOUT`.
+- A soft `stop` on an unreachable VM now spends the probe's four attempts, about 95 s, before it
+  stops on the API's state.
+- Tests that pass on the code before this change, kept as guards on the rules the change must
+  not break: a changed host key repaired without a retry, `rsh` one attempt, a session that
+  authenticated not run twice. The wall-clock test goes red only once `vm_ssh` retries and the
+  wait still counts polls (measured: 17.8 s against its 15 s bound).
+- `gpu_host.py`'s `FAKE_NEBIUS_RSH_FAILS=<n>` counts every rsh the Host has made, across runs; a
+  later run's drop is asked for as the rsh count so far plus one.
+
+## Reshaped tests
+
+- `test_install_watch_sources.py::test_install_watch_ships_files_that_exist` took every rsync
+  argument under `scripts/` as a source. The transport, `-e`'s value, now names this tree's
+  `nebius.sh` too, so the test skips that value; it still requires every shipped source to exist.

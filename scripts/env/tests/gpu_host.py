@@ -4,12 +4,13 @@ The tree is a git clone of the scripts run-gpu.sh ships and reads: docker/, the 
 generator and a little committed testdata, with an untracked dataset that must never ship, and a
 staged cpp/install. Its fetch-sf40.sh is a stub that records its argv and stdin and makes each
 dataset's directory. `NEBIUS_SH` is a fake that records each call's argv and, for `ssh` and `rsh`,
-runs the command on the VM: bash in the VM user's home, with the VM's fakes first on PATH, the
-data directory as PEACOCK_DATA_DIR, and its own copy of /proc/driver/nvidia/params. `rsync`
-is the real one, through that rsh. On the VM, docker answers from a JSON world (images and their
-labels, containers, the driver), sudo records and runs its command, install writes /etc into the
-VM's root, and hostname names the machine. On dev, ssh and docker are fakes that fail loudly: no
-call may bypass nebius.sh.
+runs the command on the VM: bash in the VM user's home, with the VM's fakes first on PATH, the data
+directory as PEACOCK_DATA_DIR, and its own copy of /proc/driver/nvidia/params. Its `rsh` exits 255
+before running anything while the Host has made no more than FAKE_NEBIUS_RSH_FAILS rsh calls, as a
+dropped transport does. `rsync` is the real one, through that rsh. On the VM, docker answers from a
+JSON world (images and their labels, containers, the driver), sudo records and runs its command,
+install writes /etc into the VM's root, and hostname names the machine. On dev, ssh and docker are
+fakes that fail loudly: no call may bypass nebius.sh.
 """
 import json
 import os
@@ -23,7 +24,8 @@ from machine import KEYS, REPO, git, lib
 TREE_FILES = [
     "scripts/env/run-gpu.sh", "scripts/env/check-build-image.sh", "scripts/env/sf40.sha256", "scripts/lib/image-inputs.sh",
     "scripts/lib/data-inputs.sh", "scripts/lib/machine.sh", "scripts/lib/peacock-config.sh",
-    "scripts/lib/s3.sh", "scripts/lib/pinned.sh", "testdata/generate_testdata.sh", "cpp/CMakeLists.txt",
+    "scripts/lib/s3.sh", "scripts/lib/pinned.sh", "scripts/lib/ssh-retry.sh", "testdata/generate_testdata.sh",
+    "cpp/CMakeLists.txt",
 ]
 CUDF = "25.02"
 H100 = ["--instance-id", "computeinstance-e00e6yena4nzjgaym0", "--profile", "editor-eu"]
@@ -50,14 +52,23 @@ with open(os.environ["FAKE_NEBIUS_LOG"], "a") as f:
 if os.environ.get("FAKE_NEBIUS_RC"):
     print("nebius: refused by the test", file=sys.stderr)
     sys.exit(int(os.environ["FAKE_NEBIUS_RC"]))
-i = 0
-while i < len(a) and a[i] in ("--instance-id", "--profile"):
-    i += 2
+
+def verb_of(argv):
+    i = 0
+    while i < len(argv) and argv[i] in ("--instance-id", "--profile"):
+        i += 2
+    return i
+
+i = verb_of(a)
 verb, rest = a[i], a[i + 1:]
 if verb == "ssh":
     command = " ".join(rest)
 elif verb == "rsh":
     command = " ".join(rest[1:])
+    calls = [json.loads(ln) for ln in open(os.environ["FAKE_NEBIUS_LOG"])]
+    if sum(c[verb_of(c)] == "rsh" for c in calls) <= int(os.environ.get("FAKE_NEBIUS_RSH_FAILS", "0")):
+        print("ssh: connect to host 203.0.113.7 port 22: Connection timed out", file=sys.stderr)
+        sys.exit(255)
 else:
     sys.exit(0)
 env = {k: v for k, v in os.environ.items() if k.startswith("FAKE_")}
@@ -257,6 +268,7 @@ class Host:
             "FAKE_FETCH_LOG": str(self.fetch_log), "FAKE_HOST_HOME": str(self.home),
             "FAKE_HOST_PATH": f"{self.host_bin}:{os.environ['PATH']}", "FAKE_HOST_DATA": str(self.data),
             "FAKE_HOST_PARAMS": str(self.params), "FAKE_HOST_ROOT": str(self.root),
+            "PEACOCK_SSH_PAUSES": "0 0 0",
         }
         return self
 

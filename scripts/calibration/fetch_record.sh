@@ -14,6 +14,7 @@ set -euo pipefail
 SELF=$(realpath "${BASH_SOURCE[0]}")
 cd "$(dirname "$SELF")/../.."
 . scripts/lib/calibration-bucket.sh
+. scripts/lib/ssh-retry.sh
 
 die() { echo "$*" >&2; exit 1; }
 usage() { sed -n '2,${/^#/!q;p;}' "$SELF" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
@@ -47,7 +48,7 @@ partial=$dest.partial
 mkdir -p "$(dirname "$dest")"
 get=("$AWS" "${CALIBRATION_S3[@]}" s3 cp "s3://$CALIBRATION_BUCKET/$key" -)
 if [ -n "$SSH_HOST" ]; then
-  ssh "$SSH_HOST" "$(printf '%q ' "${get[@]}")" > "$partial" \
+  ssh_retry ssh "$SSH_HOST" "$(printf '%q ' "${get[@]}")" > "$partial" \
     || { rm -f "$partial"; die "fetching s3://$CALIBRATION_BUCKET/$key on $SSH_HOST failed (above)."; }
 else
   "${get[@]}" > "$partial" \

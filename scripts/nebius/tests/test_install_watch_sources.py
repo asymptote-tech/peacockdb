@@ -14,7 +14,9 @@ def test_install_watch_ships_files_that_exist():
     p = subprocess.run([str(SCRIPTS / "nebius.sh"), "install-watch"], env={**w.env(), "HOME": str(home)},
                        capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
     assert p.returncode == 0, (p.returncode, p.stderr)
-    ours = [a for c in w.read()["calls"] if c[0] == "rsync" for a in c[1:] if a.startswith(str(SCRIPTS))]
+    # Every argument but -e's value, the transport, which names this tree's nebius.sh too.
+    ours = [a for c in w.read()["calls"] if c[0] == "rsync"
+            for i, a in enumerate(c) if i > 0 and c[i - 1] != "-e" and a.startswith(str(SCRIPTS))]
     assert any(a.endswith("/idle_watch.py") for a in ours), ours
     missing = [a for a in ours if not pathlib.Path(a).exists()]
     assert not missing, missing

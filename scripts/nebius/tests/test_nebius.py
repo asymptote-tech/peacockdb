@@ -1,5 +1,5 @@
 """nebius.sh against fake nebius/ssh/ssh-keyscan: every exit code, and the host-key rule."""
-import pathlib, subprocess, sys
+import pathlib, subprocess, sys, time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from fakes import World  # noqa: E402
 from harness import main  # noqa: E402
@@ -122,6 +122,62 @@ def test_changed_key_refused_when_the_ip_moved_between_calls():
     assert "AAAAKEY1" in kh and "AAAAKEY2" not in kh, kh
     assert not any(c[0] == "ssh-keyscan" for c in w.read()["calls"])
     assert "host key replaced" not in (w.dir / "state" / "nebius.log").read_text()
+
+
+def test_ssh_retries_a_refused_connection():
+    w = World(state="RUNNING", ssh_refusals=2)
+    rc, _, err = run(w, "ssh", "true")
+    assert rc == 0, (rc, err)
+    assert len([c for c in w.read()["calls"] if c[0] == "ssh"]) == 3, w.read()["calls"]
+    assert "attempt 2 of 4 failed before authenticating" in err, err
+
+
+def test_a_changed_host_key_is_repaired_without_a_retry():
+    w = World(state="RUNNING")
+    run(w, "ssh", "true")
+    w.set(host_key="ssh-ed25519 AAAAKEY2", calls=[])
+    rc, _, err = run(w, "ssh", "true")
+    assert rc == 0, (rc, err)
+    order = [c[0] for c in w.read()["calls"] if c[0] != "nebius"]
+    assert order == ["ssh", "ssh-keyscan", "ssh"], order
+    assert "attempt" not in err, err
+
+
+def test_rsh_is_one_attempt_for_the_sync_around_it_to_retry():
+    w = World(state="RUNNING", ssh_refusals=1)
+    rc, _, err = run(w, "rsh", "nebius-gpu", "true")
+    ssh = [c for c in w.read()["calls"] if c[0] == "ssh"]
+    assert rc == 255 and len(ssh) == 1, (rc, ssh)
+    assert "attempt" not in err, err
+
+
+def test_a_command_that_prints_a_host_key_refusal_is_never_run_again():
+    # The text comes from the remote command, after ssh authenticated: no key is repaired.
+    for verb in (["ssh"], ["rsh", "nebius-gpu"]):
+        w = World(state="RUNNING")
+        run(w, "ssh", "true")
+        w.set(remote={"stderr": "Host key verification failed.", "rc": 255}, calls=[])
+        rc, _, err = run(w, *verb, "true")
+        assert rc == 255 and "Host key verification failed." in err, (verb, rc, err)
+        calls = [c[0] for c in w.read()["calls"] if c[0] != "nebius"]
+        assert calls == ["ssh"], (verb, calls)
+        assert "host key replaced" not in (w.dir / "state" / "nebius.log").read_text()
+
+
+def test_start_bounds_its_ssh_wait_by_the_wall_clock():
+    # Each wait is four attempts of a second; the bound is checked between waits, not counted.
+    w = World(state="STOPPED", ssh="down", ssh_seconds=1)
+    t0 = time.monotonic()
+    rc, _, err = run(w, "start", env={"GPU_HOST_START_TIMEOUT": "3"})
+    assert rc == 1, (rc, err)
+    assert time.monotonic() - t0 < 15, time.monotonic() - t0
+    assert w.read()["state"] == "STOPPED"
+
+
+def test_an_unknown_verb_prints_the_whole_usage():
+    rc, _, err = run(World(), "bogus")
+    assert rc == 64 and "nebius.sh rsh <host>" in err and "1 other; 64 usage." in err, (rc, err)
+    assert "NEVER" not in err, err
 
 
 def test_ssh_refused_when_api_does_not_vouch():

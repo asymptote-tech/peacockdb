@@ -317,6 +317,29 @@ def test_provision_runs_bootstrap_on_every_run():
         assert (lap.vms / "vm1.test" / "bootstrap.log").read_text() == "dev1 \n" * 2
 
 
+def test_provision_retries_a_refused_connection():
+    with Laptop() as lap:
+        lap.add_vm("vm1.test")
+        r = ok(lap.provision(TARGET, "--env", lap.received, "--user", "dev1", stdin=PAT + "\n",
+                             env={"FAKE_SSH_REFUSALS": "2"}))
+        assert (lap.ssh_log.parent / "ssh.log.refused").read_text() == "2"
+        assert "attempt 2 of 4 failed before authenticating" in r.stderr, r.stderr
+        # The root step's heredoc arrived whole after two refusals.
+        assert lap.vm_home("vm1.test", "dev1").is_dir()
+        assert "dev1" in lap.group_members("vm1.test", "docker")
+        assert (lap.vms / "vm1.test" / "bootstrap.log").read_text() == "dev1 \n"
+
+
+def test_provision_never_retries_a_session_that_authenticated():
+    with Laptop() as lap:
+        lap.add_vm("vm1.test")
+        r = lap.provision(TARGET, "--env", lap.received, "--user", "dev1", stdin=PAT + "\n",
+                          env={"FAKE_BOOTSTRAP_RC": "255"})
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        assert (lap.vms / "vm1.test" / "bootstrap.log").read_text() == "dev1 \n"
+        assert "attempt" not in r.stderr, r.stderr
+
+
 def test_provision_copies_the_named_gpu_key():
     with Laptop() as lap:
         key = lap.home / "keys" / "dev_ed25519"

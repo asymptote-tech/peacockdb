@@ -117,6 +117,7 @@ esac
 . "$root/scripts/lib/image-inputs.sh"
 . "$root/scripts/lib/data-inputs.sh"
 . "$root/scripts/lib/machine.sh"
+. "$root/scripts/lib/ssh-retry.sh"
 BUILD_REF=${PEACOCK_BUILD_IMAGE:-$MACHINE_IMAGE:$(image_inputs_tag "$root" build "$cudf")}
 RUN_REF=${PEACOCK_RUN_IMAGE:-ghcr.io/asymptote-tech/peacockdb-run:$(image_inputs_tag "$root" run "$cudf")}
 SHIP_PAUSE=${RUN_GPU_SHIP_PAUSE:-15}  # seconds, times the attempt; the tests set 0
@@ -147,16 +148,17 @@ on_vm() {
   vm "bash -c $(printf '%q' "$script") run-gpu.sh$args"
 }
 
-# Every rsync runs through `nebius.sh … rsh`, which drops rsync's host argument, `vm`.
+# Every rsync runs through `nebius.sh … rsh`, which drops rsync's host argument, `vm`. rsh is one
+# attempt; the sync is retried whole.
 to_vm() {  # to_vm <dest under ~> <rsync arguments and sources…>
   local dest=$1
   shift
-  rsync -a --partial --timeout=90 -e "${NEBIUS[*]} rsh" "$@" "vm:$dest"
+  sync_retry rsync -a --partial --timeout=90 -e "${NEBIUS[*]} rsh" "$@" "vm:$dest"
 }
 from_vm() {  # from_vm <source under ~> <local dest> [<rsync arguments…>]
   local src=$1 dest=$2
   shift 2
-  rsync -a --partial --timeout=90 -e "${NEBIUS[*]} rsh" "$@" "vm:$src" "$dest"
+  sync_retry rsync -a --partial --timeout=90 -e "${NEBIUS[*]} rsh" "$@" "vm:$src" "$dest"
 }
 
 # docker, for machine_image_checked and the label reads: the VM's. Nothing runs a container here.

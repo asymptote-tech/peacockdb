@@ -14,8 +14,10 @@
 #                                 with no ssh is exit 1, and a VM this call started is stopped
 #   nebius.sh stop [--force]    soft: refuse while a process is on the card, or, on a VM
 #                                 without one, while duckdb runs; --force: stop anyway
-#   nebius.sh ssh <cmd…>        run a command on the VM
-#   nebius.sh rsh <host> <cmd…> the same, for rsync -e (rsync's host argument is dropped)
+#   nebius.sh ssh <cmd…>        run a command on the VM; an ssh that fails before
+#                                 authenticating is tried again, four attempts in all
+#   nebius.sh rsh <host> <cmd…> one attempt, for rsync -e: the sync around it is what is retried
+#                                 (rsync's host argument is dropped)
 #   nebius.sh install-watch [--key-file <pem>]
 #                               install the idle watcher, root's one profile and the install file;
 #                                 --key-file embeds the PEM of a profile that keeps its key in one;
@@ -27,6 +29,8 @@
 # NEVER print, cat or grep a Nebius credential file (~/.nebius/config.yaml and friends).
 # One redaction attempt already leaked a private key into a transcript.
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib/ssh-retry.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/ssh-retry.sh"
 
 DEFAULT_ID=computeinstance-e00tnrse7ayntnzcyt
 INSTANCE_ID=$DEFAULT_ID
@@ -34,17 +38,17 @@ PROFILE=
 
 bad_option() { echo "nebius: $1" >&2; exit 64; }
 
-id_set=0 profile_set=0
+id_set=0 profile_set=0 GIVEN=()
 while :; do
   case ${1:-} in
     --instance-id)
       [ "$id_set" -eq 0 ] || bad_option "--instance-id given twice"
       [[ ${2:-} =~ ^computeinstance-[a-z0-9]+$ ]] || bad_option "--instance-id '${2:-}' is not a computeinstance id"
-      INSTANCE_ID=$2; id_set=1; shift 2;;
+      INSTANCE_ID=$2; id_set=1; GIVEN+=("$1" "$2"); shift 2;;
     --profile)
       [ "$profile_set" -eq 0 ] || bad_option "--profile given twice"
       [[ ${2:-} =~ ^[A-Za-z0-9_.-]+$ ]] || bad_option "--profile '${2:-}' is not a profile name"
-      PROFILE=$2; profile_set=1; shift 2;;
+      PROFILE=$2; profile_set=1; GIVEN+=("$1" "$2"); shift 2;;
     *) break;;
   esac
 done
@@ -146,24 +150,29 @@ trust_current_key() {
   else log "host key stored for $INSTANCE_ID at $ip: $new"; fi
 }
 
-# vm_ssh <cmd…>: one ssh to the VM at its current IP, repairing the stored key once if the
-# API vouches for the IP.
-vm_ssh() {
-  local ip err rc opts
+# vm_ssh_with <attempts> <cmd…>: one ssh to the VM at its current IP, through the helper, repairing
+# the stored key once if the API vouches for the IP. An rsync's transport is one attempt: the rsync
+# around it is what is retried, so retries never nest. Only a refusal before authenticating is
+# ssh's own: after it, that text on stderr is the remote command's, and the command may have run.
+vm_ssh_with() {
+  local attempts=$1 ip err rc opts authenticated
+  shift
   ip=$(current_ip)
   [ -n "$ip" ] || { echo "nebius: $INSTANCE_ID is not RUNNING; refusing to ssh" >&2; return 1; }
   mapfile -t opts < <(ssh_opts)
   grep -q "^$ALIAS " "$KNOWN_HOSTS" || trust_current_key "$ip" || return 1
   err=$(mktemp); rc=0
-  "$SSH" "${opts[@]}" "$USER_ON_VM@$ip" "$@" 2>"$err" || rc=$?
-  if [ "$rc" -eq 255 ] && grep -qE 'HOST IDENTIFICATION HAS CHANGED|Host key verification failed' "$err"; then
+  ssh_retry_up_to "$attempts" authenticated "$SSH" "${opts[@]}" "$USER_ON_VM@$ip" "$@" 2>"$err" || rc=$?
+  if [ "$rc" -eq 255 ] && [ "$authenticated" = 0 ] \
+    && grep -qE 'HOST IDENTIFICATION HAS CHANGED|Host key verification failed' "$err"; then
     rm -f "$err"
     [ "$(current_ip)" = "$ip" ] || { echo "nebius: IP moved during the call; retry" >&2; return 1; }
     trust_current_key "$ip" || return 1
-    "$SSH" "${opts[@]}" "$USER_ON_VM@$ip" "$@"; return $?
+    ssh_retry_up_to "$attempts" authenticated "$SSH" "${opts[@]}" "$USER_ON_VM@$ip" "$@"; return $?
   fi
   cat "$err" >&2; rm -f "$err"; return "$rc"
 }
+vm_ssh() { vm_ssh_with "$SSH_RETRY_ATTEMPTS" "$@"; }
 
 wait_for_state() {  # <wanted> <timeout seconds>
   local want=$1 limit=$2 waited=0 s
@@ -200,9 +209,10 @@ cmd_start() {
     rm -f "$err"; started=1
   fi
   wait_for_state RUNNING "$START_TIMEOUT" || exit 75
-  local waited=0
+  # Wall clock, not a count of polls: each vm_ssh may spend minutes in its own retries.
+  local deadline=$((SECONDS + START_TIMEOUT))
   until vm_ssh true 2>/dev/null; do
-    if [ "$waited" -ge "$START_TIMEOUT" ]; then
+    if [ "$SECONDS" -ge "$deadline" ]; then
       # Up but unreachable is a broken host, not a capacity problem: exit 1, never 75, or the
       # coordinator retries for hours against a paid VM. A VM this call started is stopped
       # again; one that was already running is someone else's.
@@ -212,7 +222,7 @@ cmd_start() {
       fi
       exit 1
     fi
-    sleep "$POLL"; waited=$((waited + POLL)); [ "$POLL" -eq 0 ] && waited=$((waited + 1))
+    sleep "$POLL"
   done
   log "up: $(cmd_status)"
 }
@@ -306,10 +316,11 @@ cmd_install_watch() {
 
   local here; here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   vm_ssh 'mkdir -p ~/peacock-gpu-idle'
-  local ip opts; ip=$(current_ip); mapfile -t opts < <(ssh_opts)
-  "$RSYNC" -a -e "$SSH ${opts[*]}" "$here/nebius/idle_watch.py" "$here/nebius/peacock-gpu-idle.service" \
-    "$here/nebius/peacock-gpu-idle.timer" "$USER_ON_VM@$ip:peacock-gpu-idle/"
-  "$RSYNC" -a -e "$SSH ${opts[*]}" "$install_dir/config.yaml" "$USER_ON_VM@$ip:peacock-gpu-idle/nebius-config.yaml"
+  # This script's rsh, with the options it was given, drops rsync's host argument, `vm`.
+  local rsh=("$here/nebius.sh" "${GIVEN[@]}" rsh)
+  sync_retry "$RSYNC" -a -e "${rsh[*]}" "$here/nebius/idle_watch.py" "$here/nebius/peacock-gpu-idle.service" \
+    "$here/nebius/peacock-gpu-idle.timer" vm:peacock-gpu-idle/
+  sync_retry "$RSYNC" -a -e "${rsh[*]}" "$install_dir/config.yaml" vm:peacock-gpu-idle/nebius-config.yaml
   # The install file goes first: a timer that ticks without it stops nebius-gpu.
   # shellcheck disable=SC2016  # the $(...) is meant to expand on the VM, not here
   vm_ssh "id=$INSTANCE_ID"'
@@ -346,7 +357,7 @@ case $verb in
   start) cmd_start;;
   stop) cmd_stop "$@";;
   ssh) vm_ssh "$@";;
-  rsh) shift; vm_ssh "$@";;
+  rsh) shift; vm_ssh_with 1 "$@";;
   install-watch) cmd_install_watch "$@";;
-  *) sed -n '2,25p' "$0" >&2; exit 64;;
+  *) sed -n '2,27p' "$0" >&2; exit 64;;
 esac

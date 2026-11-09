@@ -17,6 +17,8 @@
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$here/../lib/peacock-config.sh"
+# shellcheck source-path=SCRIPTDIR source=../lib/ssh-retry.sh
+. "$here/../lib/ssh-retry.sh"
 shopt -s inherit_errexit
 
 die() { echo "provision-vm.sh: $*" >&2; exit 2; }
@@ -105,7 +107,7 @@ if [ -n "${token:-}" ]; then
 fi
 
 ssh_opts=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
-on() { local who=$1; shift; ssh "${ssh_opts[@]}" -- "$who" "$@"; }
+on() { local who=$1; shift; ssh_retry ssh "${ssh_opts[@]}" -- "$who" "$@"; }
 # remote_test <command> — <command>'s status as the developer on the VM; an ssh failure stops the run.
 remote_test() {
   local rc=0
@@ -191,7 +193,7 @@ if [ -n "$target" ]; then
   if remote_test 'test -s "$HOME/.claude/.credentials.json"'; then
     echo "Claude Code is logged in on $dev"
   elif [ -t 0 ]; then
-    ssh "${ssh_opts[@]}" -t -- "$dev" "$login_cmd"
+    ssh_retry ssh "${ssh_opts[@]}" -t -- "$dev" "$login_cmd"
   else
     echo "Claude Code is not logged in on $dev: run ssh -t $dev '$login_cmd'" >&2
   fi

@@ -6,6 +6,10 @@ world = {
   "start_to": "RUNNING",      # the state `start` leads to
   "states_after_start": [],   # states `get` reports before start_to, one per call
   "ssh": "ok",                # ok | down | changed
+  "ssh_refusals": 0,          # the next n ssh calls are refused before authenticating
+  "ssh_seconds": 0,           # how long each ssh call takes
+  "rsync_255": 0,             # the next n rsync calls exit 255, as when their transport drops
+  "remote": None,             # {"stderr": text, "rc": n}: the remote command, once authenticated
   "host_key": "ssh-ed25519 AAAAKEY1",
   "card": "",                 # what nvidia-smi --query-compute-apps prints
   "no_gpu": False,            # a CPU VM: nvidia-smi is absent (exit 127); a probe that checks first prints cpu_busy
@@ -31,7 +35,9 @@ service account and public key id. World.env() names an empty config for install
 
 The fake nebius and ssh-keyscan read their stdin to the end, as a CLI that reads stdin would:
 a caller that does not give them /dev/null loses the bytes meant for the remote command. The
-fake ssh echoes its stdin back when the remote command is `cat`. The fake rsync only records.
+fake ssh echoes its stdin back when the remote command is `cat`. Its own lines go to its `-E` log
+when it has one, with ssh's `Authenticated to` line once the key is accepted; `-G` prints the
+`loglevel` and is not a call. The fake rsync only records, and exits as `rsync_255` says.
 """
 import json, os, pathlib, stat, sys, tempfile
 
@@ -101,19 +107,33 @@ save(); print("fake nebius: unhandled " + " ".join(a), file=sys.stderr); sys.exi
 '''
 
 SSH = r'''#!/usr/bin/env python3
-import json, os, sys
-w_path = os.environ["FAKE_WORLD"]; w = json.load(open(w_path)); w["calls"].append(["ssh"] + sys.argv[1:])
-json.dump(w, open(w_path, "w"))
+import json, os, sys, time
 args = sys.argv[1:]
-kh = next(a.split("=", 1)[1] for i, a in enumerate(args) if a.startswith("UserKnownHostsFile="))
-if w["ssh"] == "down":
-    print("ssh: connect to host: Connection timed out", file=sys.stderr); sys.exit(255)
+if args[0] == "-G":
+    levels = [a.split("=", 1)[1] for a in args if a.startswith("LogLevel=")]
+    print("loglevel " + (levels[0] if levels else "INFO"))
+    sys.exit(0)
+w_path = os.environ["FAKE_WORLD"]; w = json.load(open(w_path)); w["calls"].append(["ssh"] + args)
+refused = w["ssh_refusals"] > 0
+w["ssh_refusals"] -= refused
+json.dump(w, open(w_path, "w"))
+time.sleep(w["ssh_seconds"])
+at = next(i for i, a in enumerate(args) if "@" in a and not a.startswith("-"))
+opts, ip = args[:at], args[at].split("@", 1)[1]
+log = open(opts[opts.index("-E") + 1], "a") if "-E" in opts else sys.stderr
+kh = next(a.split("=", 1)[1] for a in opts if a.startswith("UserKnownHostsFile="))
+if w["ssh"] == "down" or refused:
+    print(f"ssh: connect to host {ip} port 22: Connection timed out", file=log); sys.exit(255)
 stored = open(kh).read() if os.path.exists(kh) else ""
 if w["host_key"] not in stored:
-    print("@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\nHost key verification failed.", file=sys.stderr)
+    print("@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\nHost key verification failed.", file=log)
     sys.exit(255)
-at = next(i for i, a in enumerate(args) if "@" in a and not a.startswith("-"))
+if log is not sys.stderr:
+    print(f'Authenticated to {ip} ([{ip}]:22) using "publickey".', file=log)
+    log.close()
 cmd = " ".join(args[at + 1:])
+if w["remote"]:
+    print(w["remote"]["stderr"], file=sys.stderr); sys.exit(w["remote"]["rc"])
 if "nvidia-smi" in cmd and not w["no_gpu"]:
     print(w["card"], end="")
 elif "nvidia-smi" in cmd:
@@ -143,11 +163,17 @@ print(sys.argv[-1] + " " + w["host_key"])
 RSYNC = r'''#!/usr/bin/env python3
 import json, os, sys
 w_path = os.environ["FAKE_WORLD"]; w = json.load(open(w_path)); w["calls"].append(["rsync"] + sys.argv[1:])
+dropped = w["rsync_255"] > 0
+w["rsync_255"] -= dropped
 json.dump(w, open(w_path, "w"))
+if dropped:
+    print("rsync: connection unexpectedly closed (0 bytes received so far) [sender]", file=sys.stderr)
+    sys.exit(255)
 '''
 
 DEFAULT = {"exists": True, "state": "STOPPED", "ip": "203.0.113.7", "start_error": "",
            "start_to": "RUNNING", "states_after_start": [], "ssh": "ok",
+           "ssh_refusals": 0, "ssh_seconds": 0, "rsync_255": 0, "remote": None,
            "host_key": "ssh-ed25519 AAAAKEY1", "card": "", "no_gpu": False, "cpu_busy": "",
            "stop_error": "", "get_error": "",
            "hang": [], "ip_sequence": [], "root_profile": "ok",
@@ -184,4 +210,4 @@ class World:
                 "GPU_HOST_RSYNC": str(self.dir / "rsync"),
                 "GPU_HOST_NEBIUS_CONFIG": str(self.dir / "nebius-config.yaml"),
                 "GPU_HOST_STATE_DIR": str(self.dir / "state"), "GPU_HOST_POLL": "0",
-                "GPU_HOST_START_TIMEOUT": "5", "GPU_HOST_STOP_TIMEOUT": "5"}
+                "GPU_HOST_START_TIMEOUT": "5", "GPU_HOST_STOP_TIMEOUT": "5", "PEACOCK_SSH_PAUSES": "0 0 0"}

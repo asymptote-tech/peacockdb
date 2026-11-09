@@ -89,6 +89,36 @@ def test_install_watch_ships_one_profile_only():
     assert not any((w.dir / "tmp").iterdir()), list((w.dir / "tmp").iterdir())
 
 
+def test_install_watch_retries_an_rsync_that_exits_255():
+    w, home = setup(rsync_255=1)
+    rc, out, err = install(w, home, "install-watch")
+    assert rc == 0, (rc, err)
+    kit = [c for c in calls(w, "rsync") if any(a.endswith("idle_watch.py") for a in c)]
+    config = [c for c in calls(w, "rsync") if c[-1].endswith("nebius-config.yaml")]
+    assert len(kit) == 2 and len(config) == 1, calls(w, "rsync")
+    assert "attempt 1 of 4 exited 255" in err, err
+
+
+def test_install_watch_syncs_through_nebius_sh_rsh():
+    for given, words in (([], []), (["--instance-id", H100, "--profile", "editor-eu"],
+                                    ["--instance-id", H100, "--profile", "editor-eu"])):
+        w, home = setup(profiles=["default", "editor-eu"])
+        rc, out, err = install(w, home, *given, "install-watch")
+        assert rc == 0, (given, rc, err)
+        rsyncs = calls(w, "rsync")
+        assert len(rsyncs) == 2, rsyncs
+        for c in rsyncs:
+            assert c[c.index("-e") + 1] == " ".join([SCRIPT, *words, "rsh"]), c
+            assert c[-1].startswith("vm:peacock-gpu-idle/"), c
+        # The transport works as rsync would run it: <transport> <host> <command>.
+        w.set(calls=[])
+        transport = rsyncs[0][rsyncs[0].index("-e") + 1].split()
+        p = subprocess.run([*transport, "vm", "true"], env={**w.env(), "HOME": str(home)}, capture_output=True,
+                           text=True, timeout=60, stdin=subprocess.DEVNULL)
+        assert p.returncode == 0, (given, p.returncode, p.stderr)
+        assert len(calls(w, "ssh")) == 1, calls(w, "ssh")
+
+
 def test_install_watch_removes_its_temp_dir_on_failure():
     w, home = setup(root_profile="broken")
     rc, out, err = install(w, home, "install-watch")

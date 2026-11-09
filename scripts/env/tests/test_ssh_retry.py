@@ -153,6 +153,50 @@ def test_a_host_key_refusal_is_not_retried():
             assert own_lines(err) == log, err
 
 
+def up_to(box, attempts, name, *args):
+    """ssh_retry_up_to <attempts> <name> ssh <args>, the caller's <name> local preset to 7: (the run,
+    the value it was left with)."""
+    r = box.call(f'f() {{ local {name}=7 rc_=0; ssh_retry_up_to {attempts} {name} "$@" || rc_=$?; '
+                 f'echo "value=${name}"; return "$rc_"; }}; f', "ssh", *args)
+    return r, r.stdout.decode().splitlines()[-1]
+
+
+# The names the helper's locals had before their prefix: without it, a caller's variable named like
+# a local would resolve to that local.
+NAMES = ("authenticated", "rc", "log", "n", "ssh", "level", "clash", "max", "attempts")
+
+
+def test_the_caller_learns_whether_the_returned_attempt_authenticated():
+    cases = (([refusal(), {"log": [AUTHENTICATED, "Connection to vm closed by remote host."], "rc": 255}],
+              ("vm", "true"), 255, "1"),
+             ([{"log": [AUTHENTICATED], "rc": 0}], ("vm", "true"), 0, "1"),
+             ([refusal()] * 4, ("vm", "true"), 255, "0"),
+             ([{"log": ["Host key verification failed."], "rc": 255}], ("vm", "true"), 255, "0"),
+             ([{"log": [], "rc": 255}], ("vm", "true"), 255, "0"),
+             ([refusal()], ("-q", "vm", "true"), 2, "0"))
+    for name in NAMES:
+        for attempts, args, rc, value in cases:
+            with tempfile.TemporaryDirectory() as tmp:
+                r, line = up_to(Box(tmp, attempts), 4, name, *args)
+                assert (r.returncode, line) == (rc, f"value={value}"), (name, attempts, r.returncode, line, r.stderr)
+
+
+def test_ssh_retry_up_to_bounds_the_attempts_and_names_its_bound():
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Box(tmp, [refusal()] * 4)
+        r, line = up_to(box, 2, "auth", "vm", "true")
+        err = r.stderr.decode()
+        assert (r.returncode, line) == (255, "value=0"), (r.returncode, line, err)
+        assert len(box.calls()) == 2, box.calls()
+        assert retry_lines(err) == [retry_line(1, REFUSED).replace("of 4", "of 2")], err
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Box(tmp, [refusal()] * 4)
+        r, line = up_to(box, 1, "auth", "vm", "true")
+        err = r.stderr.decode()
+        assert (r.returncode, line, len(box.calls())) == (255, "value=0", 1), (r.returncode, line, box.calls())
+        assert retry_lines(err) == [] and own_lines(err) == [REFUSED], err
+
+
 def test_a_flag_that_hides_the_log_or_shares_the_connection_is_refused():
     for args, flag in ((["-q", "vm", "true"], "-q"), (["-E", "mine.log", "vm", "true"], "-E"),
                        (["-S", "ctl", "vm", "true"], "-S"), (["-y", "vm", "true"], "-y"),
