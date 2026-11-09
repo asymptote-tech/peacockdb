@@ -693,14 +693,15 @@ jobs:
       # (build-test.md, "Images"); images.yml's run job runs test_run_tests.py. on_runner are
       # stdlib only and need what the image cannot give the runner's uid: a locale that sorts
       # unlike C, en_US.UTF-8 (#309: test_fetch_sf40.py, test_image.py), or a user name, which
-      # bootstrap-vm.sh and provision-vm.sh read as the VM's or laptop's own user. Both named, and
-      # a missing one is an error, as the exec-model step's elsewhere list is.
+      # bootstrap-vm.sh and provision-vm.sh read as the VM's or laptop's own user, and real ssh
+      # needs (test_ssh_retry.py). Both named, and a missing one is an error, as the exec-model
+      # step's elsewhere list is.
       - name: Image and run script tests (Python)
         run: |
           set -euo pipefail
           shopt -s nullglob
           needs_docker=(test_image_any_user.py test_run_image.py test_run_tests.py)
-          on_runner=(test_fetch_sf40.py test_image.py test_bootstrap.py test_provision.py)
+          on_runner=(test_fetch_sf40.py test_image.py test_bootstrap.py test_provision.py test_ssh_retry.py)
           for n in "${needs_docker[@]}" "${on_runner[@]}"; do
             [ -f "scripts/env/tests/$n" ] || { echo "scripts/env/tests/$n is missing; is it still named here?"; exit 1; }
           done

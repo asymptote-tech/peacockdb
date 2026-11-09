@@ -8,7 +8,7 @@ Tests, CI, hosts, testdata etc
 - [#178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault](#t178)
 - [#176 (CI coverage one-way) the CI coverage guard checks one direction only](#t176)
 - [#306 (no_sort ties by position) a `no_sort` comparison pairs rows by position, so tied rows in another order fail](#t306)
-- [#309 (no en_US in build image) the build image has no en_US.UTF-8 locale and no name for a foreign uid, so four script test files cannot run in it](#t309)
+- [#309 (no en_US in build image) the build image has no en_US.UTF-8 locale and no name for a foreign uid, so five script test files cannot run in it](#t309)
 - [#310 (nebius-gpu fills with images) `gpu-tests` keeps every image and sf1 set it pulls, so nebius-gpu's disk runs out](#t310)
 
 <a id="t178"></a>
@@ -64,7 +64,7 @@ Both rows are `wrong #306` in the H100's `cases.csv` until the oracle accepts a 
 tied rows. The fix needs the sort keys, which the oracle does not hold today.
 
 <a id="t309"></a>
-### #309 (no en_US in build image) the build image has no en_US.UTF-8 locale and no name for a foreign uid, so four script test files cannot run in it
+### #309 (no en_US in build image) the build image has no en_US.UTF-8 locale and no name for a foreign uid, so five script test files cannot run in it
 Two tests need a locale that sorts unlike C, and fail without one.
 `test_fetch_sf40.py::test_fetch_aggregate_is_in_the_c_locales_order` proves `fetch-sf40.sh` checks
 an sf40 set in C order under en_US. `test_image.py::test_the_inputs_are_the_same_in_every_locale`
@@ -72,10 +72,11 @@ proves an image's label is the same in every locale. In the build image `locale 
 `C.utf8` and `POSIX`, and there are no locale sources to build one. So the cost-report job runs
 both files on the runner, its `on_runner` list.
 
-`test_bootstrap.py` and `test_provision.py` need a user name (`id -un`). In the image the runner's
-uid 1001 has none: only uid 1000, `peacock`, does. So they run on the runner too, and any
-developer whose uid is not 1000 hits the same. The fix is a passwd entry made at run time for the
-caller's uid; it too changes the build image's inputs.
+`test_bootstrap.py` and `test_provision.py` need a user name (`id -un`), and `test_ssh_retry.py`
+runs the real ssh, which refuses a uid with no name. In the image the runner's uid 1001 has none:
+only uid 1000, `peacock`, does. So they run on the runner too, and any developer whose uid is not
+1000 hits the same. The fix is a passwd entry made at run time for the caller's uid; it too
+changes the build image's inputs.
 
 The fix: the `locales` package and `en_US.UTF-8` generated in `docker/build.Dockerfile`, then the
 files join the in-image loop and their `RUNNER_SIDE` entry in `ci_images.rs` goes. It changes the
