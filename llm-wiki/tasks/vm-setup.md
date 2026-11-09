@@ -48,17 +48,19 @@ Nebius GPU VM through `run-gpu.sh`. Each step has a gap:
    sharing off (`ControlPath=none`), so every call authenticates for itself. It retries only an
    exit 255 whose log has no `Authenticated to` line: the remote command cannot have started. A
    255 after that line is the command's own or a dropped session, and is returned, never retried. A
-   host-key refusal is not retried either; `nebius.sh` repairs it. Four attempts, 5, 10 and 20 s
+   host-key refusal is not retried either; `nebius.sh` repairs it, only when the attempt had not
+   authenticated: after that the same text is the command's own. Four attempts, 5, 10 and 20 s
    apart, each named on stderr. After the last one, ssh's own lines reach stderr as they would
    without `-E`. A retry's stdin reaches the remote whole: on a refused connection ssh reads none of
    it (measured).
    - Every ssh the scripts make goes through it, shad-gpu's aside: `provision-vm.sh` (`on`,
      `remote_test`, the login), `nebius.sh`'s `vm_ssh`, and `fetch_record.sh --ssh`. `run-gpu.sh`,
      `check-build-image.sh`, `bench-each.sh` and `watch.sh` reach it through `nebius.sh`.
-   - An rsync's transport (`nebius.sh rsh`) is a plain ssh, not retried itself. A sync is safe to
-     run again whole, so `to_vm`, `from_vm` and `install-watch`'s rsyncs are retried, within the
-     same bound, on 255 and on 30, rsync's own I/O timeout, which their `--timeout=90` reaches before
-     ssh notices a silently dead route. Ship's streams and `nebius-sync.sh` keep their own retries.
+   - An rsync's transport (`nebius.sh rsh`) is one attempt through the helper, never retried
+     itself, so its host-key repair follows the same rule. A sync is safe to run again whole, so
+     `to_vm`, `from_vm` and `install-watch`'s rsyncs are retried, within the same bound, on 255 and
+     on 30, rsync's own I/O timeout, which their `--timeout=90` reaches before ssh notices a
+     silently dead route. Ship's streams and `nebius-sync.sh` keep their own retries.
    - `nebius.sh start`'s wait for ssh is a retry loop of its own. It keeps `GPU_HOST_START_TIMEOUT`
      as a wall-clock bound, with the helper's retries inside it.
    - Tested over a fake ssh that writes the log, and over the real ssh against a closed local port:

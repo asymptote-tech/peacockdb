@@ -219,29 +219,39 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
 ### Task 4: every ssh the scripts make goes through the helper
 
 **Files:**
+- Modify: `scripts/lib/ssh-retry.sh` (`ssh_retry_up_to`, below; `ssh_retry` on top of it)
 - Modify: `scripts/env/provision-vm.sh` (`on`, `remote_test`, the login's `ssh -t`, the
   `--new-pat` loop through `on`), `scripts/nebius.sh` (`vm_ssh` both calls; `cmd_start`'s ssh
-  wait; install-watch's two rsyncs through `sync_retry`), `scripts/env/run-gpu.sh` (`to_vm`,
-  `from_vm` through `sync_retry`), `scripts/calibration/fetch_record.sh` (`--ssh`)
+  wait; install-watch's two rsyncs through `sync_retry`, their transport `nebius.sh rsh`),
+  `scripts/env/run-gpu.sh` (`to_vm`, `from_vm` through `sync_retry`),
+  `scripts/calibration/fetch_record.sh` (`--ssh`)
 - Modify fakes: `scripts/nebius/tests/fakes.py` (SSH: its own lines go to `-E` when given; an
   authenticated path writes `Authenticated to <ip> ([<ip>]:22) using "publickey".`; world
   `ssh_refusals: n` refuses the first n calls before authenticating, `ssh_seconds` sleeps per
-  call; RSYNC: world `rsync_255: n`; `World.env()` sets `PEACOCK_SSH_PAUSES="0 0 0"`),
+  call; `remote: {stderr, rc}` is what the command does once authenticated; RSYNC: world
+  `rsync_255: n`; `World.env()` sets `PEACOCK_SSH_PAUSES="0 0 0"`),
   `scripts/env/tests/laptop.py` (FAKE_SSH the same; every fake ssh answers `-G` with
   `loglevel <its -o LogLevel=, else INFO>` and does not count it as an attempt, `FAKE_SSH_REFUSALS=<n>` counted in a file),
   `scripts/env/tests/gpu_host.py` (FAKE_NEBIUS: `rsh` exits 255 the first `FAKE_NEBIUS_RSH_FAILS`
   times; `Host.env` sets the pauses to 0)
 - Create: `scripts/env/tests/test_run_gpu_vm.py`
-- Test: `test_provision.py`, `scripts/nebius/tests/test_nebius.py`, `test_install_watch.py`,
+- Test: `scripts/env/tests/test_ssh_retry.py`, `test_provision.py`,
+  `scripts/nebius/tests/test_nebius.py`, `test_install_watch.py`,
   `scripts/calibration/tests/test_fetch.py`
 - Docs: `build-test.md` "The scripts" (ssh retried; `start` bounded by wall clock), "A fresh VM"
 
 **Interfaces:**
 - Consumes: Task 3's `ssh_retry`, `sync_retry`. nebius.sh passes `$SSH` (`GPU_HOST_SSH`) as
-  `<ssh>`; its host-key repair still greps the helper's stderr, so it keeps working.
-- Produces: `nebius.sh rsh`, an rsync's transport, runs plain ssh, not `ssh_retry`: the sync
-  around it is retried whole by `sync_retry`, so a pre-auth outage costs at most four attempts,
-  not four inside each of four.
+  `<ssh>`; its host-key repair greps the helper's stderr and repairs only when the attempt
+  returned had not authenticated.
+- Produces: `ssh_retry_up_to <attempts> <var> <ssh> <ssh argument>…` in `ssh-retry.sh`: at most
+  `<attempts>` attempts; sets the caller's variable named `<var>` (`local -n`) to 1 if the
+  attempt returned authenticated, else 0, on every path. No global carries it. The retry line
+  reads `attempt <n> of <attempts>`. `ssh_retry <ssh> <arg>…` is `ssh_retry_up_to 4` with a
+  variable nobody reads.
+- Produces: `nebius.sh rsh`, an rsync's transport, is one attempt (`ssh_retry_up_to 1`), never
+  retried: the sync around it is retried whole by `sync_retry`, so a pre-auth outage costs at
+  most four attempts, not four inside each of four.
 - Produces: `cmd_start` waits for ssh until `SECONDS` passes a deadline
   `GPU_HOST_START_TIMEOUT` seconds after the wait began, the helper's retries inside it; the
   `waited += POLL` counter goes.
