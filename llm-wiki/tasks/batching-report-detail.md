@@ -202,3 +202,12 @@ Branch `ENS-batching-report`, forked from `ENS-query-fuser` at `413366c4` on 202
 
 | VM | start (local) | stop (local) | hours |
 |---|---|---|---|
+
+## Report rebase (2026-11-09)
+
+The human's report rebase (board note on `ENS-containers-only`, `c023bcd7`): rebased onto
+`ENS-query-fuser` at `fc4decfb` (`git rebase --onto origin/ENS-query-fuser 413366c4`), clean.
+Old tip `325b1825`. Verification: regenerate `testdata/benchmark-report.html`
+(`the_benchmark_report_matches_the_trees` with `UPDATE_CANONICAL=1`), then the rust-only lib
+tests `prototypes::fuser::report test_support::benchmark_report` and that test without the
+variable. No review round, no CI wait; `done` once green and pushed.
