@@ -176,13 +176,15 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   line beginning `Authenticated to ` and none holding `Host key verification failed` or
   `REMOTE HOST IDENTIFICATION HAS CHANGED`. At most 4 attempts, pauses from
   `${PEACOCK_SSH_PAUSES:-5 10 20}` seconds. Each retry is one stderr line:
-  `ssh: attempt <n> of 4 did not connect (<the log's last line>); again in <s> s`. After the
+  `ssh: attempt <n> of 4 failed before authenticating (<the log's last line, less its CR>); again in <s> s`. After the
   attempt that is returned, its log goes to stderr less the lines `LogLevel=VERBOSE` adds, those
   beginning `Authenticated to `, `Transferred: ` or `Bytes per second: ` (measured on OpenSSH
   9.6: a refused connection's log is the plain stderr line; a session adds exactly these three).
   stdin is the caller's, never read between attempts.
-- Produces `sync_retry <command>…` → its exit: re-run whole on exit 255 alone, same pauses,
-  stderr `<command's name>: attempt <n> of 4 exited 255; again in <s> s`.
+- Produces `sync_retry <command>…` → its exit: re-run whole on exit 255 (ssh's) or 30 (rsync's
+  own I/O timeout, which `to_vm`'s and `from_vm`'s `--timeout=90` reach before ssh's ServerAlive
+  bound on a silently dead route), same pauses and bound, stderr `<command's name>: attempt <n>
+  of 4 exited <rc>; again in <s> s`.
 
 - [ ] **Step 1: failing tests**, a fake `ssh` on PATH driven by a JSON list of attempts
   (`log` lines written to the `-E` file, `rc`, `stdout`, `read_stdin`), `PEACOCK_SSH_PAUSES="0 0 0"`
@@ -225,7 +227,8 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   authenticated path writes `Authenticated to <ip> ([<ip>]:22) using "publickey".`; world
   `ssh_refusals: n` refuses the first n calls before authenticating, `ssh_seconds` sleeps per
   call; RSYNC: world `rsync_255: n`; `World.env()` sets `PEACOCK_SSH_PAUSES="0 0 0"`),
-  `scripts/env/tests/laptop.py` (FAKE_SSH the same, `FAKE_SSH_REFUSALS=<n>` counted in a file),
+  `scripts/env/tests/laptop.py` (FAKE_SSH the same; every fake ssh answers `-G` with
+  `loglevel <its -o LogLevel=, else INFO>` and does not count it as an attempt, `FAKE_SSH_REFUSALS=<n>` counted in a file),
   `scripts/env/tests/gpu_host.py` (FAKE_NEBIUS: `rsh` exits 255 the first `FAKE_NEBIUS_RSH_FAILS`
   times; `Host.env` sets the pauses to 0)
 - Create: `scripts/env/tests/test_run_gpu_vm.py`
@@ -236,6 +239,9 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
 **Interfaces:**
 - Consumes: Task 3's `ssh_retry`, `sync_retry`. nebius.sh passes `$SSH` (`GPU_HOST_SSH`) as
   `<ssh>`; its host-key repair still greps the helper's stderr, so it keeps working.
+- Produces: `nebius.sh rsh`, an rsync's transport, runs plain ssh, not `ssh_retry`: the sync
+  around it is retried whole by `sync_retry`, so a pre-auth outage costs at most four attempts,
+  not four inside each of four.
 - Produces: `cmd_start` waits for ssh until `SECONDS` passes a deadline
   `GPU_HOST_START_TIMEOUT` seconds after the wait began, the helper's retries inside it; the
   `waited += POLL` counter goes.

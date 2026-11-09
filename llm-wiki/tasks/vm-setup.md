@@ -55,9 +55,10 @@ Nebius GPU VM through `run-gpu.sh`. Each step has a gap:
    - Every ssh the scripts make goes through it, shad-gpu's aside: `provision-vm.sh` (`on`,
      `remote_test`, the login), `nebius.sh`'s `vm_ssh`, and `fetch_record.sh --ssh`. `run-gpu.sh`,
      `check-build-image.sh`, `bench-each.sh` and `watch.sh` reach it through `nebius.sh`.
-   - An rsync's transport is such an ssh (`nebius.sh rsh`). A sync is safe to run again whole, so
-     `to_vm`, `from_vm` and `install-watch`'s rsyncs are retried on 255 within the same bound. Ship's
-     streams and `nebius-sync.sh` keep their own retries.
+   - An rsync's transport (`nebius.sh rsh`) is a plain ssh, not retried itself. A sync is safe to
+     run again whole, so `to_vm`, `from_vm` and `install-watch`'s rsyncs are retried, within the
+     same bound, on 255 and on 30, rsync's own I/O timeout, which their `--timeout=90` reaches before
+     ssh notices a silently dead route. Ship's streams and `nebius-sync.sh` keep their own retries.
    - `nebius.sh start`'s wait for ssh is a retry loop of its own. It keeps `GPU_HOST_START_TIMEOUT`
      as a wall-clock bound, with the helper's retries inside it.
    - Tested over a fake ssh that writes the log, and over the real ssh against a closed local port:
