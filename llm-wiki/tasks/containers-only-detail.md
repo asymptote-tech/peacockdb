@@ -1442,3 +1442,11 @@ list: clean, and the image removed.
 - 2026-11-08T06:10:16Z: signoff written; board `completeness approved`.
 - Final device run: hard stop of all three VMs, then `pipeline.yml` dispatched 2026-11-08T06:10:24Z at `ecc27e12`: run 42453649934. A restart that finds it unfinished dispatches it again.
 - 2026-11-08T06:38:06Z: run 42453649934 green, every job, GPU Tests included; PR #203's runs green (42453632261 at `4c373121`, the last code commit). All three VMs hard-stopped. Board `done`.
+
+## Report rebase (2026-11-09)
+
+The human's report rebase: rebased onto the rebased `ENS-tp4-sized` (`20c31566`) with `git
+rebase --onto ENS-tp4-sized 9058709c`, clean; old tip `c023bcd7`. batching-report (`20156351`)
+and tp4-sized (`20c31566`) were rebased, verified and pushed first, each `done` again.
+Verification as for them: the page regenerated, `prototypes::fuser::report
+test_support::benchmark_report`, and the check.
