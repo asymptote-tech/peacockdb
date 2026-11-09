@@ -361,3 +361,12 @@ nothing.
 | nebius-h100 | 2026-11-06 23:40 UTC | 2026-11-07 01:58 UTC | 2.30 |
 | nebius-h100 | 2026-11-07 02:16 UTC | 2026-11-07 09:54 UTC | 7.63 |
 | nebius-h100, task total | | | 16.43 |
+
+## Report rebase (2026-11-09)
+
+The human's report rebase (board note on `ENS-containers-only`, `c023bcd7`): rebased onto the
+rebased `ENS-batching-report` (`20156351`) with `git rebase --onto ENS-batching-report 325b1825`;
+old tip `a647a223`. One conflict, `build-test.md`'s rust-only case counts: query-fuser's report
+commit added one `--lib` test (1212) and this task two goldens (66), so the line was resolved to
+3732 cases; the verifying developer confirms the counts. Verification as for batching-report: the
+page regenerated, `prototypes::fuser::report test_support::benchmark_report`, and the check.
