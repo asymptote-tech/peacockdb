@@ -117,6 +117,48 @@ becomes visible to a running chain only when a rebase brings it across — which
 makes the control file load-bearing rather than a convenience: `rebase needed(...)` written
 on master is a record for the human and the helper, and the coordinator cannot see it.
 
+## Writing reports
+
+This section binds the coordinator, the helper and the analyst. It covers any report under
+`llm-wiki/reports/` that you write. When you dispatch a subagent to write one, pass this section
+in its brief. `reports/comet-gpu.md` (chain M) is the worked example. Its first version opened
+with the verdict, and the human was lost at its first sentence: "Every band straddles 2×."
+
+The reader is the human. They know the systems in general, but not the task's model, terms or
+measurements. The test: they read from top to bottom and never open an artifact to follow the
+argument.
+
+- **Build the concepts before you use them.** Use this order: the question and the bar; what is
+  compared; the workload; how the numbers are produced, with each formula explained term by term;
+  the uncertainty and the decision rule; the evidence; the results; the verdict last. Each
+  section uses only the terms defined above it.
+- **Define each term in bold at its first use, then never vary it.** One word has one meaning,
+  and there are no synonyms. When a term takes a common word ("layout", "cut"), use another word
+  for the general sense. Prefer a plain name to an invented one: "range", not "band"; "decision
+  case", not "headline cell". Input names from code stay, with a plain explanation at first use.
+  End with a glossary that points to each definition.
+- **Explain each table before it**: what one row is, what each column measures, and the unit.
+  State a notation once, before its first use, for example "value [low-high]".
+- **Say what each number is.** Name its case, baseline, layout and size, and tag it measured,
+  published or modelled. An estimate never reads as a fact, and a condition in the source never
+  becomes an unconditional claim.
+- **Appendices hold what the argument does not need**: versions, configuration changes, VM hours
+  and failures, full input and sensitivity tables, follow-up experiments, sources. The test for
+  each detail: does the verdict need it?
+- **Write close to ASD-STE100.** Sentences have 25 words or fewer (20 in procedures). A
+  paragraph has one topic and six sentences or fewer, topic sentence first. Use active voice,
+  present tense for the model and the systems, and past tense for what was measured. No filler or
+  promotional words ("crucial", "key", "robust", "seamless", "leverage", "notably",
+  "additionally"). No em dashes for emphasis, no bold label on every list item, and no opinion
+  that the evidence does not carry.
+- **Clock times are in the host's local zone, with the zone named.** Dates without a time stay
+  as they are. Links inside the repo are relative.
+- **Check the report before you call it done.** First check it mechanically; a short script is
+  enough. Every number must trace to a source file. Every link must resolve. No term may appear
+  before its definition, and no retired term may remain. Then dispatch one fresh subagent to read
+  it against the sources. It looks for numbers attached to the wrong case, concepts out of order
+  and words with two meanings. Fix every finding, or record why it stands.
+
 ## Coordinator
 
 You drive one chain until nothing in it can progress. You are replaceable: the board is the
