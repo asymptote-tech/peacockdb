@@ -211,15 +211,15 @@ per-consumer limits and an optional concurrency cap.
 Production (its code under `src/prototypes/`): fuse the first 3/10/20/all queries into one DAG
 sharing scans, with mergeability and pipelining hints and a memory cap; run them on the H100.
 
-### 8. [`batching-report.md`](batching-report.md) — closes no ticket — state: rebase needed(done) — PR #201
+### 8. [`batching-report.md`](batching-report.md) — closes no ticket — state: done — PR #201
 
 `llm-wiki/reports/query-batching.md`: fused vs unfused vs DuckDB per batch size.
 
-### 9. [`tp4-sized.md`](tp4-sized.md) — closes no ticket — state: rebase needed(done) — PR #202
+### 9. [`tp4-sized.md`](tp4-sized.md) — closes no ticket — state: done — PR #202
 
 The same query set at sf40 tp4_sized on the H100, unfused, and its sums added to the report.
 
-### 10. [`containers-only.md`](containers-only.md) — closes [#129](../archive/archived-tickets.md#t129) (part a) — state: rebase needed(done) — PR #203
+### 10. [`containers-only.md`](containers-only.md) — closes [#129](../archive/archived-tickets.md#t129) (part a) — state: done — PR #203
 
 Retire the non-container paths: CI in the build images (25.02, and a CI-only 25.10), the L40S's `gpu-tests` through `run-gpu.sh`,
 local and verda builds through the image, the conda install and init scripts deleted, one path in

@@ -1450,3 +1450,4 @@ rebase --onto ENS-tp4-sized 9058709c`, clean; old tip `c023bcd7`. batching-repor
 and tp4-sized (`20c31566`) were rebased, verified and pushed first, each `done` again.
 Verification as for them: the page regenerated, `prototypes::fuser::report
 test_support::benchmark_report`, and the check.
+Verified 2026-11-09 (through the build image): regen left the page unchanged; lib tests 25 passed; the check passed. Pushed; `done`; the report rebase is complete.
