@@ -370,3 +370,4 @@ old tip `a647a223`. One conflict, `build-test.md`'s rust-only case counts: query
 commit added one `--lib` test (1212) and this task two goldens (66), so the line was resolved to
 3732 cases; the verifying developer confirms the counts. Verification as for batching-report: the
 page regenerated, `prototypes::fuser::report test_support::benchmark_report`, and the check.
+Verified 2026-11-09: regen left the page unchanged; lib tests 25 passed; the check passed; counts confirmed 1212/2451/66/3 = 3732. Pushed; `done`.
