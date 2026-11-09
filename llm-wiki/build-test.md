@@ -623,15 +623,18 @@ record are not timed; an unknown key beneath a node and a trailer key held twice
 |---|---|--:|
 
 the page over temp trees: a timed section's load, execute, total and peak, the total linked to its
-`== ` line; an `h200/`-shaped section's load derived and its peak `—`; a load without the
-pinned cache, its `pinned_cache` off or absent, marked `unpinned`; a failure's and a marker's
-reason, and the device list's `skipped` note over both; a `wrong` row's `wrong answer #NN`; two
-devices side by side, a case one lacks `—`; a directory with no mode file is no column; rows in
-the main list's order, then by name, modes in `MODES` order; text escaped; the same page twice,
+`== ` line; an `h200/`-shaped section's load derived, its Modes table without peak columns and
+its all-unpinned loads named once above it; a load without the pinned cache, its `pinned_cache`
+off or absent, marked `unpinned`, per cell where a table mixes the two; a failure's and a
+marker's reason, and the device list's `skipped` note over both, standing in a Modes table's
+total; a `wrong` row's `wrong answer #NN`; h200 under Modes only, collapsed, without the queries it
+has nothing for; a directory with no mode file is no table; rows in the main list's order, then
+by name, a query without tp1_single in the Modes table only, modes in `MODES` order; text
+escaped; the same page twice,
 with no temp path in it; a later task's extra table under its heading; a file holding one query
 twice refused, naming both lines; a temp tree's name taken once per process, so parallel tests
-never share one; `section_href`'s line; a DuckDB tree a column of its own after the devices, its
-time on each mode's row linked to its line, a time not warm saying its verdict, `failed` and `—`,
+never share one; `section_href`'s line; a DuckDB tree a column of its own after the devices, last in each Modes
+table too, its time linked to its line, a time not warm saying its verdict, `failed` and `—`,
 and its version, threads, host and `SELECT 1` floor named in the intro, with what one time holds
 
 | DuckDB results reader | [test_support::duckdb_results::tests](../peacockdb-core/src/test_support/duckdb_results/tests.rs) | 9 |
@@ -3116,9 +3119,16 @@ in Python, held to it only by its `--check`): a field a section lacks reads as `
 a derived value, and `tree_load_us()` gives an old section's load. A failed case's section is its
 record instead (above).
 
-**The page**, `testdata/benchmark-report.html`, is committed: every device tree side by side. One
-row per (dataset, query, mode) that some tree has a section for, a table per (dataset, sf), in the
-main list's order; four columns per device, by name. The test takes that order from the registry,
+**The page**, `testdata/benchmark-report.html`, is committed. Per (dataset, sf), a main table at
+tp1_single: one row per query in the main list's order, four columns per device by name, every
+device but `MODES_ONLY` (h200, whose tree predates the pinned cache and the peak), then DuckDB; a
+query no such device has a cell for is left out. Below it, a collapsed `<details>` "Modes, <ds>
+sf<sf>": one table per device with a section in the group, each measure (load, execute, total,
+peak) a column group with one sub-column per mode the device has, in `MODES` order, then DuckDB.
+A Modes table leaves out a query whose every cell is `—`, the peak group where no cell has a
+peak, and, where every load in it is unpinned, the per-cell `unpinned` marks, saying so once above
+the table instead; a failure or marker stands in the total, the other measures `—`. Each table
+scrolls sideways rather than widening the page. The test takes the row order from the registry,
 which writes the list; it never reads the list's text. A timed section shows load, execute, total
 (each in ms, the total `device_us` linked to the section) and `peak_bytes` in GiB, labelled the
 accountant's peak, a lower bound on device memory. An `h200/` section's load is `tree_load_us()`
@@ -3127,7 +3137,7 @@ is absent: its rounds did not read pinned memory. Every `h200/` load is, since t
 the cache. A failure shows `failed: <reason>`, a marker `skipped: <reason>`; where the
 device's `cases.csv` has a `skipped` row for the query, its note is shown instead, and a `wrong`
 row adds `wrong answer #NN`. Any other cell is `—`. After the devices, one column per DuckDB tree
-(below), `warm (ms)`: on every mode's row of a query its file holds, `ms_2nd_min` with one decimal,
+(below), `warm (ms)`: on every row of a query its file holds, `ms_2nd_min` with one decimal,
 linked to its line, or `failed`; else `—`. A time whose `warm` verdict is not `yes` adds
 `not warm: <verdict>`. The intro says what one DuckDB time is, a CLI process's wall time, and
 names each DuckDB file's `duckdb`, `threads`, `host` and floor (`floor_ms`). Last, one
