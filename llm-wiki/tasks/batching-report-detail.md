@@ -211,3 +211,4 @@ Old tip `325b1825`. Verification: regenerate `testdata/benchmark-report.html`
 (`the_benchmark_report_matches_the_trees` with `UPDATE_CANONICAL=1`), then the rust-only lib
 tests `prototypes::fuser::report test_support::benchmark_report` and that test without the
 variable. No review round, no CI wait; `done` once green and pushed.
+Verified 2026-11-09: regen left the page unchanged; lib tests 25 passed; the check passed. Pushed; `done`.
