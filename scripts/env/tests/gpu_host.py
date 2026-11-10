@@ -8,7 +8,8 @@ runs the command on the VM: bash in the VM user's home, with the VM's fakes firs
 directory as PEACOCK_DATA_DIR, and its own copy of /proc/driver/nvidia/params. Its `rsh` exits 255
 before running anything while the Host has made no more than FAKE_NEBIUS_RSH_FAILS rsh calls, as a
 dropped transport does. `rsync` is the real one, through that rsh. On the VM, docker answers from a
-JSON world (images and their labels, containers, the driver), sudo records and runs its command,
+JSON world (images and their labels, containers, the driver), and reads a run's binds as machine.py's
+docker does, refusing one into the VM user's home; sudo records and runs its command,
 install writes /etc into the VM's root, and hostname names the machine. On dev, ssh and docker are
 fakes that fail loudly: no call may bypass nebius.sh.
 """
@@ -19,7 +20,7 @@ import shutil
 import subprocess
 import tempfile
 
-from machine import KEYS, REPO, git, lib
+from machine import KEYS, REPO, RUN_OPTIONS, git, lib
 
 TREE_FILES = [
     "scripts/env/run-gpu.sh", "scripts/env/check-build-image.sh", "scripts/env/sf40.sha256", "scripts/lib/image-inputs.sh",
@@ -79,6 +80,7 @@ sys.exit(subprocess.run(["bash", "-c", command], env=env, cwd=os.environ["FAKE_H
 
 FAKE_DOCKER = r'''#!/usr/bin/env python3
 import fcntl, json, os, pathlib, sys
+''' + RUN_OPTIONS + r'''
 a = sys.argv[1:]
 with open(os.environ["FAKE_DOCKER_LOG"], "a") as f:
     f.write(json.dumps(a) + "\n")
@@ -122,6 +124,8 @@ if a[0] == "ps":
     if name in w["containers"]:
         print(w["containers"][name]["state"])
     sys.exit(0)
+if a[0] == "run":
+    binds, _ = run_options(a)
 if a[0] == "run" and "-d" in a:
     name = flag("--name")
     if name in w["containers"]:
@@ -140,7 +144,7 @@ if a[0] == "inspect":
     sys.exit(0)
 if a[0] == "run":
     gen = [c for c in a if c.endswith("/generate_testdata.sh")]
-    stage = pathlib.Path(gen[0]).parent
+    stage = pathlib.Path(host_path(binds, gen[0])).parent
     bench = a[a.index("--bench") + 1]
     (stage / f"{bench}.sf1").mkdir()
     (stage / f"{bench}.sf1" / "generated").write_text(bench)

@@ -133,6 +133,26 @@ plain build of the same Dockerfile from the repository's root, with no build arg
 - `test_a_missing_config_is_refused_naming_nebius_profiles` also pins an unknown verb beside an
   absent config to 64. Measured red with the config check moved above the verb check.
 
+## Container paths
+
+- The fakes' docker (`machine.py`'s `RUN_OPTIONS`, spliced into `gpu_host.py`'s too) refuses, exit
+  126, a bind's `dst` or a `-w` under the fake docker's `HOME`, which stands for the image's
+  `/home/peacock`. The fake machine's clone lies under its home, so with the steps at host paths
+  every whole bootstrap run went red (11 tests), not only the two the plan names. On the GPU fake
+  the stage lies outside the VM user's home, so `prepare` stayed green there and only the new
+  test's argv assertions went red.
+- The generator's output is found through the bind that holds `/peacock/stage/generate_testdata.sh`
+  (the innermost, should binds nest); a path in no bind fails the fake.
+- `test_a_tree_under_the_image_home_is_taken_for_uid_1000` passes on the code before this change,
+  kept as a guard: a refusal of every uid but one, or of any tree under the home, fails it. The
+  refusal test also runs a home the tree's path only begins with (`/home/peacockdb` against
+  `/home/peacock`), which a prefix match without the slash would refuse.
+- `build-test.sh` holds the worktree's git dir to the same rule as the tree: a worktree outside
+  the image's home whose main clone lies in it would pass a check of the tree alone, and every git
+  call in the container would then fail on its unreachable `.git`. Measured red before (exit 0).
+- The fakes read `-v` binds as well as `--mount` ones, so run-gpu.sh's device runs are held to the
+  same refusal; a `-v` source that is missing is not refused, as docker makes it.
+
 ## Reshaped tests
 
 - `test_install_watch_sources.py::test_install_watch_ships_files_that_exist` took every rsync
@@ -160,3 +180,7 @@ plain build of the same Dockerfile from the repository's root, with no build arg
   is `~/.config/peacock/nebius.yaml`, so it writes that, with `~/.nebius/config.yaml` at mode 000.
   `test_install_watch_ships_one_profile_only` held every rsync argument clear of `~/.nebius`; it
   holds them clear of the whole HOME, which holds both.
+- `test_bootstrap.py::test_bootstrap_fetches_the_registry_with_the_clone_read_only` held the clone's
+  bind to its own path (`dst=<clone>`). The clone is now mounted at `/peacock/tree`, so the test
+  holds it to `dst=/peacock/tree,readonly` and `-w /peacock/tree`; it still requires the clone
+  read-only, the registry at the image's, and the caller's uid.

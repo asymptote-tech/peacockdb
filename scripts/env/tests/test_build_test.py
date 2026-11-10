@@ -93,13 +93,17 @@ if name in os.environ.get("FAKE_CARGO_ZERO", "").split():
 print("running 1 test\ntest x ... ok\n\ntest result: ok. 1 passed; 0 failed")
 sys.exit(101 if name in os.environ.get("FAKE_CARGO_FAILS", "").split() else 0)
 '''
+# `id -u` as another uid would answer.
+FAKE_ID = '#!/bin/sh\nif [ "$1" = -u ]; then echo {uid}; else exec /usr/bin/id "$@"; fi\n'
+
 
 # What the environment of the caller must not leak into a run that does not name it.
 SCRUBBED = ("CARGO_TARGET_DIR", "PEACOCK_IN_IMAGE", "PEACOCK_CUDF", "PEACOCK_BUILD_IMAGE", "RUNNER_TEMP",
             "RUSTFLAGS", "CMAKE_GENERATOR", "LDFLAGS", "LD_LIBRARY_PATH", "PCK_TEST_FILTER", "PCK_SHARD",
             "UPDATE_CANONICAL", "PEACOCK_NO_FETCH", "RUST_TEST_THREADS", "CARGO_BUILD_JOBS", "GCC_VERSION",
             "PCK_UPDATE_SECTIONS", "PEACOCK_REWRITE_RECIPE_BYTES", "COST_FILTER", "PCK_GPU_RESULT_VERSION",
-            "PEACOCK_CARGO_REGISTRY", "PEACOCK_CCACHE_DIR", "XDG_CACHE_HOME", "AWS_SECRET_ACCESS_KEY")
+            "PEACOCK_CARGO_REGISTRY", "PEACOCK_CCACHE_DIR", "XDG_CACHE_HOME", "AWS_SECRET_ACCESS_KEY",
+            "PEACOCK_IMAGE_HOME")
 
 
 def git(repo, *args):
@@ -371,6 +375,30 @@ def test_a_leftover_container_is_refused():
         ok(t.run("--rust-only", "--build", env={"FAKE_DOCKER_PS": alive}))
 
 
+def test_refuses_a_tree_under_the_image_home_for_another_uid():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        write(t.bin / "id", FAKE_ID.format(uid=1001), 0o755)
+        home = str(t.root.parent)
+        r = t.run("--rust-only", "--build", env={"PEACOCK_IMAGE_HOME": home})
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert home in r.stderr and "uid 1001" in r.stderr and "uid 1000's" in r.stderr, r.stderr
+        assert t.docker() == [] and t.lines("image-ref.log") == [], (t.docker(), t.lines("image-ref.log"))
+        assert not (t.root / ".home-img").exists() and not t.cache.exists()
+        # A home the tree's path only begins with, such as /home/peacockdb's /home/peacock, holds no tree.
+        ok(t.run("--rust-only", "--build", env={"PEACOCK_IMAGE_HOME": str(t.root)[:-1]}))
+
+
+def test_a_tree_under_the_image_home_is_taken_for_uid_1000():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        write(t.bin / "id", FAKE_ID.format(uid=1000), 0o755)
+        ok(t.run("--rust-only", "--build", env={"PEACOCK_IMAGE_HOME": str(t.root.parent)}))
+        argv = t.the_docker_run()
+        assert values(argv, "--user") == [f"1000:{os.getgid()}"], argv
+        assert values(argv, "-w") == [str(t.root)] and f"{t.root}:{t.root}" in values(argv, "-v"), argv
+
+
 def test_target_dir_is_per_worktree_and_version():
     with tempfile.TemporaryDirectory() as tmp:
         t = Tree(tmp)
@@ -414,6 +442,20 @@ def test_worktree_mounts_its_git_dir():
         mounts = values(t.runs()[-1], "-v")
         assert f"{common}:{common}" in mounts and f"{t.root}:{t.root}" in mounts, mounts
         assert values(t.runs()[-1], "-w") == [str(t.root)]
+
+
+def test_refuses_a_worktree_whose_git_dir_is_under_the_image_home_for_another_uid():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = pathlib.Path(tmp).resolve() / "home"
+        main_tree = Tree(home)
+        wt = pathlib.Path(tmp) / "wt"
+        git(main_tree.root, "worktree", "add", "-q", str(wt))
+        t = Tree(tmp, root=wt)
+        write(t.bin / "id", FAKE_ID.format(uid=1001), 0o755)
+        r = t.run("--rust-only", "--build", env={"PEACOCK_IMAGE_HOME": str(home)})
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert f"{main_tree.root}/.git" in r.stderr and "uid 1001" in r.stderr, r.stderr
+        assert t.docker() == [] and t.lines("image-ref.log") == [], (t.docker(), t.lines("image-ref.log"))
 
 
 def test_pass_env_never_puts_a_value_in_argv():

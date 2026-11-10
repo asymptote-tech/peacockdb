@@ -1,13 +1,15 @@
 """A fake CPU VM for bootstrap-vm.sh's tests: a home, a clone of the scripts, and fakes on PATH.
 
-The machine user's home holds a Claude Code install and login and a git identity; `~/peacockdb`
-is a git clone holding the scripts under test and the image inputs. The docker CLI is a fake that
-records its argv and answers from a JSON world, which holds the image's label. It refuses a bind
-whose source is missing, as docker does. A `docker run` of `generate_testdata.sh` makes the
-dataset directory it would have made; it and `cargo fetch` take the world's `seconds`, and
-`cargo fetch` records whether two ran at once. cuDF's origin is a local repository of two commits,
-named by the clone's .gitmodules; the clone pins the first, its own `third_party/cudf` an empty
-directory, as a fresh clone leaves it. The machine has a machine-wide data directory, setgid.
+The machine user's home holds a Claude Code install and login and a git identity; `~/peacockdb` is
+a git clone holding the scripts under test and the image inputs. The docker CLI is a fake that
+records its argv and answers from a JSON world, which holds the image's label. It refuses a
+`--mount` whose source is missing, as docker does, and a bind's container path or a `-w` under the
+home, as the image refuses its own home to another uid. A `docker run` of `generate_testdata.sh`
+makes the dataset directory it would have made, at the host path of the bind that holds the script;
+it and `cargo fetch` take the world's `seconds`, and `cargo fetch` records whether two ran at once.
+cuDF's origin is a local repository of two commits, named by the clone's .gitmodules; the clone
+pins the first, its own `third_party/cudf` an empty directory, as a fresh clone leaves it. The
+machine has a machine-wide data directory, setgid.
 """
 import json
 import os
@@ -29,8 +31,51 @@ UNPUBLISHED = ['Error response from daemon: failed to resolve reference "{ref}":
                "Error response from daemon: manifest for {ref} not found: manifest unknown: manifest unknown"]
 NO_HOST = 'Error response from daemon: Get "https://ghcr.io/v2/": dial tcp: lookup ghcr.io: no such host'
 
+# A fake docker's reading of a `docker run`'s options, shared by the fakes here and in gpu_host.py.
+RUN_OPTIONS = r'''
+def run_options(a):
+    """`docker run`'s binds, container path to host path, by --mount or -v, and the index of its
+    image. Refuses, exit 126, a bind's dst or a -w under HOME, as the image refuses its /home/peacock
+    (mode 750, uid 1000) to another uid; and a --mount whose source is missing, exit 125, as docker
+    does."""
+    binds, paths, i = {}, [], 1
+    while a[i].startswith("-"):
+        if a[i] in ("--rm", "-d", "--init"):
+            i += 1
+            continue
+        if a[i] == "--mount":
+            kv = dict(p.split("=", 1) if "=" in p else (p, True) for p in a[i + 1].split(","))
+            if not os.path.exists(kv["src"]):
+                print(f"docker: invalid mount config: bind source path does not exist: {kv['src']}", file=sys.stderr)
+                sys.exit(125)
+            binds[kv["dst"]] = kv["src"]
+            paths.append(kv["dst"])
+        if a[i] == "-v":
+            src, dst = a[i + 1].split(":")[:2]
+            binds[dst] = src
+            paths.append(dst)
+        if a[i] == "-w":
+            paths.append(a[i + 1])
+        i += 2
+    home = os.environ["HOME"].rstrip("/") + "/"
+    for p in paths:
+        if (p.rstrip("/") + "/").startswith(home):
+            print(f"docker: error during container init: {p}: permission denied", file=sys.stderr)
+            sys.exit(126)
+    return binds, i
+
+def host_path(binds, path):
+    """`path` in the container as the host holds it, through the innermost bind that holds it."""
+    held = [d for d in binds if path == d or path.startswith(d.rstrip("/") + "/")]
+    if not held:
+        sys.exit(f"fake docker: {path} is in no bind")
+    dst = max(held, key=len)
+    return binds[dst] + path[len(dst):]
+'''
+
 FAKE_DOCKER = r'''#!/usr/bin/env python3
 import fcntl, json, os, pathlib, sys, time
+''' + RUN_OPTIONS + r'''
 a = sys.argv[1:]
 with open(os.environ["FAKE_DOCKER_LOG"], "a") as f:
     f.write(json.dumps(a) + "\n")
@@ -54,16 +99,7 @@ if a[:2] == ["image", "inspect"] and "peacockdb.inputs" in a[a.index("--format")
     print(w["label"] if w["label"] is not None else "<no value>")
     sys.exit(0)
 if a[0] == "run":
-    i = 1
-    while i < len(a) and a[i].startswith("-"):
-        if a[i] == "--rm":
-            i += 1; continue
-        if a[i] == "--mount":
-            kv = dict(p.split("=", 1) if "=" in p else (p, True) for p in a[i + 1].split(","))
-            if not os.path.exists(kv["src"]):
-                print(f"docker: invalid mount config: bind source path does not exist: {kv['src']}", file=sys.stderr)
-                sys.exit(125)
-        i += 2
+    binds, i = run_options(a)
     cmd = a[i + 1:]
     if cmd[:2] == ["bash", "-c"] and cmd[2].startswith("umask 002 &&"):
         os.umask(0o002)
@@ -77,7 +113,7 @@ if a[0] == "run":
         sys.exit(0)
     gen = [c for c in cmd if c.endswith("/generate_testdata.sh")]
     if gen:
-        stage = pathlib.Path(gen[0]).parent
+        stage = pathlib.Path(host_path(binds, gen[0])).parent
         bench = cmd[cmd.index("--bench") + 1]
         time.sleep(w["seconds"])
         (stage / f"{bench}.sf1").mkdir()

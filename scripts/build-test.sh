@@ -9,7 +9,9 @@
 # $PEACOCK_BUILD_IMAGE, else in the image `scripts/env/image-ref.sh build <v>` finds, either refused
 # unless its peacockdb.inputs label is this tree's for <v>: docker run as
 # the caller's uid, the tree at its own path, cargo's target in <tree>/target-img-<v>, HOME in
-# <tree>/.home-img, the cargo registry and ccache under ~/.cache/peacock. Inside it:
+# <tree>/.home-img, the cargo registry and ccache under ~/.cache/peacock. A tree or a worktree's git
+# dir under the image's home, /home/peacock, is refused for a uid other than 1000, which cannot
+# enter it. Inside it:
 #
 #   -- <command...>  runs the command; its exit is the script's
 #   (cpu, default)   --build: the C++ library and its tests into cpp/build, then every Rust target
@@ -31,8 +33,8 @@
 # are terminals and this is no background job of its terminal. HUP, INT or TERM kills it, one that
 # comes before docker has created it too. One left by a build-test.sh that is gone is refused.
 #
-# Exit 0; 1 a build or a test failed; 2 bad input, or a refused image, target dir, cpp/build or
-# leftover container; 129, 130 or 143 interrupted. Outside the image, any other is the container's.
+# Exit 0; 1 a build or a test failed; 2 bad input, or a refused image, tree, target dir, cpp/build
+# or leftover container; 129, 130 or 143 interrupted. Outside the image, any other is the container's.
 set -euo pipefail
 
 usage() { sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
@@ -102,6 +104,19 @@ fi
 
 # ---- outside the image: run this script again inside it --------------------------------------
 if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
+  # The tree, and a worktree's git dir, which lies in its main clone's, keep their own paths in the
+  # container: cpp/build's CMake cache and compile_commands.json, which host tools read, name the
+  # tree. PEACOCK_IMAGE_HOME is for the tests.
+  common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)
+  image_home=${PEACOCK_IMAGE_HOME:-/home/peacock}
+  if [ "$(id -u)" != 1000 ]; then
+    for path in "$root" "$common"; do
+      case "$path/" in
+        "$image_home"/*)
+          die "$path lies under $image_home, the build image's home: mode 750, uid 1000's, so uid $(id -u) cannot reach it in the container. Use a clone outside $image_home" ;;
+      esac
+    done
+  fi
   # Per worktree, because a build script bakes CARGO_MANIFEST_DIR into what it builds.
   target=${CARGO_TARGET_DIR:-$root/target-img-$cudf}
   case "$target/" in
@@ -132,8 +147,6 @@ if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
   stat=$(< "/proc/$$/stat")
   read -r _ _ pgrp _ _ tpgid _ <<< "${stat##*) }"
   if [ -t 0 ] && [ -t 1 ] && { [ "$tpgid" = -1 ] || [ "$tpgid" = "$pgrp" ]; }; then args+=(-it); fi
-  # A worktree's git dir lies in its main clone's.
-  common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)
   case "$common/" in "$root"/*) ;; *) args+=(-v "$common:$common") ;; esac
   args+=(-w "$root" -e PEACOCK_IN_IMAGE=1 -e "PEACOCK_CUDF=$cudf" -e "HOME=$root/.home-img"
          -e "CARGO_TARGET_DIR=$target" -v "$registry:/opt/rust/cargo/registry" -v "$ccache:/tmp/ccache")

@@ -324,9 +324,22 @@ def test_bootstrap_fetches_the_registry_with_the_clone_read_only():
         [fetch] = [c for c in m.docker_calls() if c[0] == "run" and "cargo" in c]
         registry = m.home / ".cache" / "peacock" / "cargo-registry"
         assert fetch[-3:] == ["cargo", "fetch", "--locked"], fetch
-        assert f"type=bind,src={m.clone},dst={m.clone},readonly" in fetch, fetch
+        assert f"type=bind,src={m.clone},dst=/peacock/tree,readonly" in fetch, fetch
+        assert fetch[fetch.index("-w") + 1] == "/peacock/tree", fetch
         assert f"type=bind,src={registry},dst=/opt/rust/cargo/registry" in fetch, fetch
         assert fetch[fetch.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}", fetch
+
+
+def test_the_generator_runs_at_a_container_path():
+    with Machine() as m:
+        bootstrap_whole(m)
+        stage = m.data_dir / f"{data_hash(m)}.partial"
+        runs = generator_runs(m)
+        assert len(runs) == 2, runs
+        for run in runs:
+            assert f"type=bind,src={stage},dst=/peacock/stage" in run, run
+            assert run[run.index("-w") + 1] == "/peacock/stage", run
+            assert "/peacock/stage/generate_testdata.sh" in run, run
 
 
 def test_bootstrap_generates_sf1_by_generator_inputs_once():

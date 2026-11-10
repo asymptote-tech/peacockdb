@@ -17,6 +17,10 @@ MACHINE_DATA=${PEACOCK_DATA_DIR:-/var/lib/peacock}
 MACHINE_REGISTRY=$HOME/.cache/peacock/cargo-registry
 # Where the build image's cargo keeps downloaded crates (CARGO_HOME=/opt/rust/cargo).
 IMAGE_REGISTRY=/opt/rust/cargo/registry
+# Where a step's container sees the tree and the stage: a host path can cross the image's
+# /home/peacock, mode 750, which only uid 1000 enters.
+MACHINE_TREE=/peacock/tree
+MACHINE_STAGE=/peacock/stage
 
 # machine_cudf_gitlink <tree> — the third_party/cudf commit <tree>'s index pins.
 machine_cudf_gitlink() { git -C "$1" ls-files -s third_party/cudf | awk '$1 == 160000 { print $2 }'; }
@@ -119,8 +123,8 @@ machine_cargo_fetch() {
   exec {lock}> "$MACHINE_REGISTRY.lock"
   flock "$lock"
   docker run --rm --user "$MACHINE_USER" \
-    --mount "type=bind,src=$2,dst=$2,readonly" --mount "type=bind,src=$MACHINE_REGISTRY,dst=$IMAGE_REGISTRY" \
-    -w "$2" "$1" cargo fetch --locked
+    --mount "type=bind,src=$2,dst=$MACHINE_TREE,readonly" --mount "type=bind,src=$MACHINE_REGISTRY,dst=$IMAGE_REGISTRY" \
+    -w "$MACHINE_TREE" "$1" cargo fetch --locked
   exec {lock}>&-
 }
 
@@ -143,8 +147,8 @@ machine_data_set() {
     for entry in "${DATA_SETS[@]}"; do
       read -r -a words <<< "$entry"
       docker run --rm --user "$MACHINE_USER" --network none -e PEACOCK_NO_FETCH=1 \
-        --mount "type=bind,src=$stage,dst=$stage" -w "$stage" "$ref" \
-        bash -c 'umask 002 && exec "$@"' bash "$stage/generate_testdata.sh" "${words[@]:1}"
+        --mount "type=bind,src=$stage,dst=$MACHINE_STAGE" -w "$MACHINE_STAGE" "$ref" \
+        bash -c 'umask 002 && exec "$@"' bash "$MACHINE_STAGE/generate_testdata.sh" "${words[@]:1}"
       if [ ! -d "$stage/${words[0]}" ]; then
         echo "${0##*/}: the generator made no ${words[0]} in $stage" >&2
         return 2
