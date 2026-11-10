@@ -817,7 +817,9 @@ pushed, and must before any CI run on the branch is read or any VM pulls an imag
 
 Needs: Task 15; dev's `~/.config/peacock/nebius.yaml`, made on dev with
 `scripts/env/nebius-profiles.sh` before this task (from this branch on, `nebius.sh` on dev reads
-it); nebius-gpu, the L40S; the sandbox off; an actor in `GPU_ALLOWED_ACTORS`.
+it); nebius-gpu's login user accepting dev's `~/.config/peacock/gpu_ed25519.pub`, the key
+`nebius.sh` offers from this branch on, in place of ssh's default ones; nebius-gpu, the L40S; the
+sandbox off; an actor in `GPU_ALLOWED_ACTORS`.
 
 - [ ] **Step 1:** `test -f ~/.config/peacock/nebius.yaml`, then `scripts/nebius.sh status` →
   exit 0. In the `/build` tree: `scripts/build-test.sh --gpu --build --no-release-bench`.
