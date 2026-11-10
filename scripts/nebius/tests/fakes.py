@@ -23,6 +23,7 @@ world = {
   "active_profile": "default",
   "profile_list": None,       # printed by `profile list` instead of the profiles, for an odd shape
   "profile_config": {...},    # what `config get <key>` prints for any profile; `config unset` clears
+  "profile_key_paths": {},    # {profile: path}: that profile's key path, in place of profile_config's
   "uptime": "99999",          # what `cut -d. -f1 /proc/uptime` prints on the VM
   "watch_log": "",            # the watcher's last log line, what `tail -1 /var/log/peacock-gpu-idle.log` prints
   "calls": []                 # appended by every fake: argv lists
@@ -31,7 +32,9 @@ world = {
 The fake profile commands answer as CLI 0.12.289 does (new-hosts-detail.md, Task 4): `profile
 list` prints names, the active one with " [default]"; deleting the active profile is refused;
 `profile update` with a key prompts, and so fails without a tty, unless it has the endpoint,
-service account and public key id. World.env() names an empty config for install-watch to copy.
+service account and public key id. `version` prints 0.12.293. Each profile, config or version call
+prints FAKE-KEY-MATERIAL on stderr, and on stdout too when its answer is not used, so a caller that
+passes the CLI's output on is caught. World.env() names an empty config for install-watch to copy.
 
 The fake nebius and ssh-keyscan read their stdin to the end, as a CLI that reads stdin would:
 a caller that does not give them /dev/null loses the bytes meant for the remote command. The
@@ -71,13 +74,21 @@ if a[:3] == ["compute", "instance", "stop"]:
     if w["stop_error"]:
         save(); print(w["stop_error"], file=sys.stderr); sys.exit(1)
     w["state"] = "STOPPED"; save(); sys.exit(0)
-cmd, i = [], 0
+cmd, i, profile = [], 0, None
 while i < len(a):  # the command words, without the global flags install-watch adds
-    if a[i] in ("-c", "-p", "--profile"): i += 2; continue
+    if a[i] in ("-p", "--profile"): profile = a[i + 1]
+    if a[i] in ("-c", "--config", "-p", "--profile"): i += 2; continue
     if a[i] != "--no-check-update": cmd.append(a[i])
     i += 1
+profile = profile or w["active_profile"]
 def fail(text, rc):
     save(); print(text, file=sys.stderr); sys.exit(rc)
+if cmd[:1] in (["profile"], ["config"], ["version"]):
+    print("FAKE-KEY-MATERIAL", file=sys.stderr)
+    if cmd[:2] not in (["profile", "list"], ["profile", "active"], ["config", "get"], ["version"]):
+        print("FAKE-KEY-MATERIAL")
+if cmd == ["version"]:
+    save(); print("0.12.293"); sys.exit(0)
 if cmd[:2] == ["profile", "active"]:
     save(); print(w["active_profile"]); sys.exit(0)
 if cmd[:2] == ["profile", "list"]:
@@ -99,6 +110,11 @@ if cmd[:2] in (["profile", "activate"], ["profile", "delete"], ["profile", "upda
     else:
         w["active_profile"] = name
     save(); sys.exit(0)
+paths = w["profile_key_paths"]
+if cmd == ["config", "get", "private-key-file-path"] and profile in paths:
+    save(); print(paths[profile]); sys.exit(0)
+if cmd == ["config", "unset", "private-key-file-path"] and profile in paths:
+    paths[profile] = ""; save(); sys.exit(0)
 if cmd[:2] == ["config", "get"] and cmd[2:3]:
     save(); print(w["profile_config"].get(cmd[2], "")); sys.exit(0)
 if cmd[:2] == ["config", "unset"] and cmd[2:3]:
@@ -180,6 +196,7 @@ DEFAULT = {"exists": True, "state": "STOPPED", "ip": "203.0.113.7", "start_error
            "profiles": ["default"], "active_profile": "default", "profile_list": None,
            "profile_config": {"endpoint": "api.nebius.cloud", "service-account-id": "serviceaccount-fake",
                               "public-key-id": "publickey-fake", "private-key-file-path": ""},
+           "profile_key_paths": {},
            "uptime": "99999", "watch_log": "",
            "calls": []}
 

@@ -242,21 +242,21 @@ def test_help_needs_no_sed():
         assert "set -euo" not in r.stdout and not any(ln.startswith("#") for ln in r.stdout.splitlines()), r.stdout
 
 
-def test_provision_needs_bash_4_4():
-    with Laptop() as lap:
-        lines = (lap.clone / "scripts" / "env" / "provision-vm.sh").read_text().splitlines()
-    at = next(i for i, ln in enumerate(lines) if "BASH_VERSINFO" in ln)
-    first_source = next(i for i, ln in enumerate(lines) if ln.startswith((". ", "source ")))
-    assert at + 1 < first_source, "the bash check follows a source"
-    assert not any(ln.startswith(("shopt", "set ")) for ln in lines[:at]), lines[:at]
-    check = "\n".join(lines[at:at + 2]).replace("BASH_VERSINFO", "V").replace("$BASH_VERSION", "$VS")
-    for version, ok in (("3 2", False), ("4 3", False), ("4 4", True), ("5 0", True)):
-        r = subprocess.run(["bash", "-c", f"V=({version}); VS='{version}'\n{check}\necho passed", "provision-vm.sh"],
-                           capture_output=True, text=True, timeout=30)
-        assert ("passed" in r.stdout) is ok, (version, r.returncode, r.stdout, r.stderr)
-        if not ok:
-            assert r.returncode == 2 and r.stderr.startswith("provision-vm.sh: ") and "brew install bash" in r.stderr, r
-            assert len(r.stderr.strip().splitlines()) == 1, r.stderr
+def test_the_laptop_scripts_need_bash_4_4():
+    for name in ("provision-vm.sh", "nebius-profiles.sh"):
+        lines = (pathlib.Path(__file__).resolve().parents[1] / name).read_text().splitlines()
+        at = next(i for i, ln in enumerate(lines) if "BASH_VERSINFO" in ln)
+        first_source = next(i for i, ln in enumerate(lines) if ln.startswith((". ", "source ")))
+        assert at + 1 < first_source, (name, "the bash check follows a source")
+        assert not any(ln.startswith(("shopt", "set ")) for ln in lines[:at]), (name, lines[:at])
+        check = "\n".join(lines[at:at + 2]).replace("BASH_VERSINFO", "V").replace("$BASH_VERSION", "$VS")
+        for version, ok in (("3 2", False), ("4 3", False), ("4 4", True), ("5 0", True)):
+            r = subprocess.run(["bash", "-c", f"V=({version}); VS='{version}'\n{check}\necho passed", name],
+                               capture_output=True, text=True, timeout=30)
+            assert ("passed" in r.stdout) is ok, (name, version, r.returncode, r.stdout, r.stderr)
+            if not ok:
+                assert r.returncode == 2 and r.stderr.startswith(f"{name}: ") and "brew install bash" in r.stderr, r
+                assert len(r.stderr.strip().splitlines()) == 1, r.stderr
 
 
 

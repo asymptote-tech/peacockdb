@@ -685,7 +685,7 @@ jobs:
           done
           shellcheck -x scripts/nebius.sh scripts/nebius-sync.sh scripts/nebius/check-actor.sh \
             scripts/nebius/watch.sh scripts/build-test.sh scripts/env/run-gpu.sh \
-            scripts/env/image-ref.sh scripts/env/stage-install.sh || status=1
+            scripts/env/image-ref.sh scripts/env/stage-install.sh scripts/env/nebius-profiles.sh || status=1
           exit "$status"
 
       # The image, image-ref, build-test and run-gpu scripts, against fake docker, ssh and aws.

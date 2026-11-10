@@ -20,8 +20,8 @@
 #                                 (rsync's host argument is dropped)
 #   nebius.sh install-watch [--key-file <pem>]
 #                               install the idle watcher, root's one profile and the install file;
-#                                 --key-file embeds the PEM of a profile that keeps its key in one;
-#                                 a profile that embeds its key already refuses it
+#                                 a profile's key path gets the file it names embedded, or the PEM
+#                                 --key-file names; beside an embedded key --key-file is refused
 #
 # Exit codes: 0 done; 2 busy, soft stop refused; 75 no capacity, retry later; 69 instance gone;
 # 1 other; 64 usage.
@@ -31,6 +31,8 @@
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib/ssh-retry.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/ssh-retry.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/peacock-config.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/peacock-config.sh"
 
 DEFAULT_ID=computeinstance-e00tnrse7ayntnzcyt
 INSTANCE_ID=$DEFAULT_ID
@@ -256,63 +258,45 @@ cmd_stop() {
 
 install_fail() { log "install-watch FAILED: $1"; exit 1; }
 
-# tcli <args…>: the CLI on install-watch's temp copy of the config. These calls stay local
-# (--skip-auth on the update), and their output never reaches a log: it can hold a key.
-tcli() { timeout "$CLI_TIMEOUT" "$NEBIUS" -c "$install_dir/config.yaml" --no-check-update "$@" </dev/null; }
+# bounded_nebius <args…>: the CLI, bounded as cli() is, without its --profile: install-watch asks
+# it the active profile of NEBIUS_CONFIG, and the cut makes its calls with it on a temp copy. Those
+# stay local (--skip-auth on the update), and their output never reaches a log.
+bounded_nebius() { timeout "$CLI_TIMEOUT" "$NEBIUS" "$@"; }
 
-# profile_names <keep>: `profile list` on stdin (CLI 0.12: a name per line, the active one with
-# " [default]") -> the names other than <keep>. Any other shape exits 1 and echoes nothing.
-profile_names() {
-  python3 -c '
-import re, sys
-keep, names = sys.argv[1], []
-for line in sys.stdin.read().splitlines():
-    m = re.fullmatch(r"([A-Za-z0-9_.-]+)( \[default\])?", line)
-    if not m or (m.group(2) and m.group(1) != keep): sys.exit(1)
-    names.append(m.group(1))
-if keep not in names: sys.exit(1)
-print("\n".join(n for n in names if n != keep))' "$1"
+# active_profile: NEBIUS_CONFIG's active profile, or a failure when it has none or the answer is
+# not a profile name. The name is logged and read as <name>[=<pem>], and an answer of another shape
+# may be anything, so it is not traced under set -x either.
+active_profile() {
+  local -
+  set +x
+  local a
+  a=$(peacock_nebius_on bounded_nebius "$NEBIUS_CONFIG" profile active 2>/dev/null) || return 1
+  [[ "$a" =~ ^[A-Za-z0-9_.-]+$ ]] || return 1
+  printf '%s\n' "$a"
 }
 
-# The VM gets one profile, self-contained, as root's only one. It is cut down on dev in a temp
-# copy, so no other profile or key reaches the VM even for a moment. The config and the PEM are
-# copied, never read here: only the CLI reads them (build-test.md, "Credential files").
+# The VM gets one profile, self-contained, as root's only one. It is cut on dev from a temp copy,
+# so no other profile or key reaches the VM even for a moment. The config and the PEM are copied,
+# never read here: only the CLI reads them (build-test.md, "Credential files").
 cmd_install_watch() {
-  local key='' p path endpoint sa pk others
+  local key='' p why
   case "$#:${1:-}" in
     0:) ;;
     2:--key-file) key=$2;;
     *) bad_option "install-watch takes only --key-file <pem>";;
   esac
   [ -z "$key" ] || [ -f "$key" ] || install_fail "--key-file $key: no such file"
+  # bash runs EXIT on HUP, INT and TERM too, so the copy, which holds every profile, never stays.
   install_dir=$(mktemp -d); trap 'rm -rf "$install_dir"' EXIT
-  install -m 600 "$NEBIUS_CONFIG" "$install_dir/config.yaml"
   p=$PROFILE
-  [ -n "$p" ] || p=$(tcli profile active 2>/dev/null) || install_fail "no active profile in $NEBIUS_CONFIG"
-  path=$(tcli -p "$p" config get private-key-file-path 2>/dev/null) || install_fail "no profile $p in $NEBIUS_CONFIG"
-  # A profile with no key path embeds its key already; another --key-file would replace a working key.
-  [ -z "$key" ] || [ -n "$path" ] || install_fail "profile $p embeds its key; run install-watch without --key-file"
-  if [ -n "$key" ]; then
-    # update prompts for these three unless given them, and keeps the path beside the embedded key.
-    endpoint=$(tcli -p "$p" config get endpoint 2>/dev/null) || install_fail "cannot read profile $p's endpoint"
-    sa=$(tcli -p "$p" config get service-account-id 2>/dev/null) || install_fail "cannot read profile $p's ids"
-    pk=$(tcli -p "$p" config get public-key-id 2>/dev/null) || install_fail "cannot read profile $p's ids"
-    tcli profile update "$p" --skip-auth --endpoint "$endpoint" --service-account-id "$sa" \
-      --public-key-id "$pk" --private-key-file "$key" >/dev/null 2>&1 || install_fail "cannot embed --key-file into profile $p"
-    tcli -p "$p" config unset private-key-file-path >/dev/null 2>&1 || install_fail "cannot drop profile $p's key path"
-  elif [ -n "$path" ]; then
-    install_fail "profile $p reads its key from a file on this machine; pass that file as --key-file"
+  [ -n "$p" ] || p=$(active_profile) || install_fail "the active profile of $NEBIUS_CONFIG is missing or not a profile name; it is not shown"
+  # The cut's stderr is its refusal alone: every CLI call in it drops its own.
+  if ! peacock_nebius_cut bounded_nebius "$NEBIUS_CONFIG" "$(mktemp "$install_dir/config.yaml.XXXXXX")" \
+      "$install_dir/config.yaml" "$p" "$p${key:+=$key}" 2>"$install_dir/refusal"; then
+    why=$(<"$install_dir/refusal")
+    install_fail "$NEBIUS cannot cut profile $p alone out of $NEBIUS_CONFIG${key:+ with --key-file $key}: ${why#"${0##*/}: "}"
   fi
-  # The CLI refuses to delete the active profile, so activate first.
-  tcli profile activate "$p" >/dev/null 2>&1 || install_fail "cannot activate profile $p"
-  others=$(tcli profile list 2>/dev/null | profile_names "$p") ||
-    install_fail "profile list of $NEBIUS_CONFIG has an unexpected shape"
-  local n count=0
-  for n in $others; do
-    tcli profile delete "$n" >/dev/null 2>&1 || install_fail "cannot delete profile $n from the copy"
-    count=$((count + 1))
-  done
-  log "install-watch: profile $p goes to the VM alone; $count other(s) left out"
+  log "install-watch: profile $p goes to the VM alone; $PEACOCK_NEBIUS_LEFT_OUT other(s) left out"
 
   local here; here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   vm_ssh 'mkdir -p ~/peacock-gpu-idle'

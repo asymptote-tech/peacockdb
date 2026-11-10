@@ -63,8 +63,64 @@ plain build of the same Dockerfile from the repository's root, with no build arg
   `machine_image_checked` sets its own. Measured: a TERM, a HUP, and a SIGINT to the process group
   (Ctrl-C) each run it. A SIGINT to bash alone waits for the foreground child.
 
+## The two-profile cut
+
+- `peacock_nebius_cut` reads `profile list` once, on the copy, before any change, and deletes the
+  names from that list: update and activate do not change the set.
+- The caller makes the copy and removes it on exit: the copy holds every profile until the end.
+  bash 5.2 runs an EXIT trap on HUP, INT and TERM (measured: TERM, HUP and INT to the process
+  group while the fake sleeps in `update`), so no signal trap is set; dropping the EXIT trap fails
+  `test_a_signal_mid_cut_leaves_only_what_was_there`, dropping the TERM trap it once had did not.
+- A TERM or HUP to bash alone leaves the CLI running, and a CLI that writes the config by its path
+  afterwards recreated a copy beside `nebius.yaml` (measured red: `nebius.yaml.plT3Ji`). So the
+  copy is `nebius.yaml` in `mktemp -d ~/.config/peacock/nebius-cut.XXXXXX`, removed whole: a late
+  write then finds no directory, unless the CLI makes one, which is unknown for the real CLI. The fake's slow call reads its config before it sleeps and writes
+  it after, and logs its pid, so the test waits for that CLI to end before it looks.
+  install-watch's copy is in its temp dir, which its EXIT trap removes the same way.
+- install-watch refuses an active profile whose name is not `--profile`'s shape, without showing
+  it: `p` is logged and read as `<name>[=<pem>]`. `active_profile` asks and checks with tracing
+  off, so `bash -x nebius.sh install-watch` does not trace the raw answer (measured red before).
+  A missing active profile and a bad-shaped one are one refusal.
+- The cut makes the copy empty under `umask 077` and then `cp`s onto it, which keeps the file's
+  mode: a plain `cp` gave the copy the source's mode less the umask (measured 644) until the final
+  `chmod`. In the cut rather than in `nebius-profiles.sh`, so install-watch's copy is 600 too.
+- `peacock_nebius_profiles` and `peacock_nebius_version` turn tracing off for themselves
+  (`local -; set +x`): under `bash -x` the parser's `[[ =~ ]]` traced each raw `profile list` line.
+  `version`'s answer is used only in a shape like `0.12.293`, else `unknown`; the image's CLI
+  prints exactly `0.12.293` (run under a temp HOME with no config).
+- A failed `profile list` and one of another shape are one refusal, naming the CLI's version. The
+  CLI's stderr is dropped there too: it can echo the config.
+- `nebius_cli.py` prints FAKE-KEY-MATERIAL on stderr for every call, and on stdout too for one
+  whose answer is not used (`update`, `activate`, `delete`, `unset`, an unknown profile); on
+  `profile list`'s stdout it would fail the parser on every run. `fakes.py`'s nebius does the same
+  for its profile, config and version calls. Measured red: dropping `profile list`'s stderr
+  redirect (8 tests), the check's `config get` one (2), `activate`'s output redirect (the late
+  refusal test), install-watch's `profile active` one (its no-`--profile` test).
+- `FAKE_NEBIUS_SLOW=<verb>` and `FAKE_NEBIUS_FAIL=<verb>` drive the signal and late-refusal tests.
+  A failing `mv` is not tested: making it fail (a read-only directory) also stops the copy's
+  removal, so the test could not hold to "nothing left".
+- `peacock_nebius_config_checked` is here, with five tests in `test_nebius_profiles.py`, so
+  `provision-vm.sh` has only to call it.
+- install-watch asks `profile active` of `NEBIUS_CONFIG` itself, through `--config`: `cli()` names
+  no config yet, and the CLI's default may be another file than `GPU_HOST_NEBIUS_CONFIG`.
+- install-watch catches the cut's stderr, its refusal alone, and puts it in its one failure line,
+  to stderr and `nebius.log`, beside the CLI's path, the profile and any `--key-file`.
+- `nebius-profiles.sh` runs on a laptop, so it carries `provision-vm.sh`'s bash 4.4 guard. CI's
+  shellcheck line names it.
+
 ## Reshaped tests
 
 - `test_install_watch_sources.py::test_install_watch_ships_files_that_exist` took every rsync
   argument under `scripts/` as a source. The transport, `-e`'s value, now names this tree's
   `nebius.sh` too, so the test skips that value; it still requires every shipped source to exist.
+- `test_install_watch.py::test_install_watch_keeps_one_profile` held every profile call to `-c`
+  naming a file called `config.yaml`. The cut names its copy with `--config`, as
+  `config.yaml.XXXXXX` beside the file it becomes, so the test holds each call to `--config`
+  naming a file under the test's temp dir; it still requires no call on the source.
+- `test_install_watch_refuses_a_key_path_profile_without_a_key_file` is two:
+  `test_install_watch_embeds_the_pem_a_key_path_names` and
+  `test_install_watch_refuses_a_key_path_naming_no_file`. Such a profile now gets the file its path
+  names embedded, and only a path naming no file is refused, before any ssh or rsync.
+- `test_provision.py::test_provision_needs_bash_4_4` is `test_the_laptop_scripts_need_bash_4_4`: the
+  same checks over `nebius-profiles.sh` too, each script read from the tree rather than the fake
+  laptop's clone, which holds only `provision-vm.sh`.
