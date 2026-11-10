@@ -23,6 +23,8 @@ SECRETS = [KEYS["AWS_ACCESS_KEY_ID"], KEYS["AWS_SECRET_ACCESS_KEY"]]
 # What CI's image-ref.sh prints: a published image by digest.
 GIVEN_RUN = "ghcr.io/asymptote-tech/peacockdb-run@sha256:" + "ab" * 32
 GIVEN_BUILD = "ghcr.io/asymptote-tech/peacockdb-build@sha256:" + "cd" * 32
+# The run image's ID in gpu_host.py's world: what a device run is given.
+RUN_ID = "sha256:run1"
 
 
 def ok(r):
@@ -142,7 +144,7 @@ def test_prepare_readies_the_vm():
         pulled = [a[-1] for a in h.docker_calls() if a[0] == "pull"]
         assert set(pulled) == {h.run_ref, h.build_ref}, pulled
         cudf = h.home / "peacock" / "cudf-25.02"
-        assert (cudf / "lib" / "libcudf.so").read_text() == h.run_ref
+        assert (cudf / "lib" / "libcudf.so").read_text() == RUN_ID
         assert (cudf / ".image-id").read_text().strip() == "sha256:run1"
         assert not any("update-initramfs" in ln or "apt-get" in ln for ln in h.host_lines()), h.host_lines()
         nothing_bypassed(h)
@@ -155,7 +157,7 @@ def test_prepare_pulls_the_given_images():
         ok(h.gpu("prepare", env={"PEACOCK_RUN_IMAGE": GIVEN_RUN, "PEACOCK_BUILD_IMAGE": GIVEN_BUILD}))
         pulled = [a[-1] for a in h.docker_calls() if a[0] == "pull"]
         assert sorted(pulled) == sorted([GIVEN_RUN, GIVEN_BUILD]), pulled
-        assert (h.home / "peacock/cudf-25.02/lib/libcudf.so").read_text() == GIVEN_RUN
+        assert (h.home / "peacock/cudf-25.02/lib/libcudf.so").read_text() == RUN_ID
         generated = [a for a in h.docker_calls() if a[0] == "run" and "-d" not in a]
         assert generated and all(GIVEN_BUILD in a for a in generated), generated
 
@@ -282,7 +284,7 @@ def test_prepare_names_a_pull_that_failed_otherwise():
 
 def test_prepare_refuses_old_driver():
     with Host() as h:
-        h.world(driver="530.30.02")
+        h.world(cards=[["530.30.02", "8.9"]])
         refused(h.gpu("prepare"), 3, "530.30.02", DRIVER_MINIMUM)
         assert h.fetches() == []
 
@@ -517,7 +519,7 @@ def test_every_ship_rsync_compresses_resumes_and_checksums():
 def test_run_refuses_old_driver():
     with Host() as h:
         prepared(h)
-        h.world(driver="530.30.02")
+        h.world(cards=[["530.30.02", "8.9"]])
         calls = len(h.nebius_calls())
         refused(h.gpu("run", "list"), 3, "530.30.02", DRIVER_MINIMUM)
         assert "rsh" not in h.verbs()[calls:] and h.docker_runs() == []
@@ -568,7 +570,7 @@ def test_run_passes_the_machines_hostname():
         assert a[a.index("--name") + 1] == "peacock-chain-l"
         assert "--gpus" in a and a[a.index("--gpus") + 1] == "all"
         assert a[a.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
-        assert a[-2:] == [h.run_ref, "list"], a
+        assert a[-2:] == [RUN_ID, "list"], a
 
 
 def test_run_mounts_the_data_dir_at_its_own_path():
@@ -660,7 +662,7 @@ def test_run_uses_the_given_run_image():
         ok(h.gpu("ship"))
         ok(h.gpu("run", "list", env=env))
         a = h.docker_runs()[0]
-        assert a[-2:] == [GIVEN_RUN, "list"], a
+        assert a[-2:] == [RUN_ID, "list"], a
         inspected = {a[-1] for a in h.docker_calls() if a[:2] == ["image", "inspect"]}
         assert h.run_ref not in inspected and GIVEN_RUN in inspected, inspected
 
@@ -744,7 +746,7 @@ def test_run_names_a_staged_binary():
         envs = [a[i + 1] for i, x in enumerate(a) if x == "-e"]
         assert envs == ["LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib", "PEACOCK_TESTDATA_DIR=/peacock/testdata",
                         "PEACOCK_BENCH_RESUME=1"], envs
-        assert a[a.index(h.run_ref):] == [h.run_ref, "--nocapture", "--test-threads=1", "--exact", FIRST3], a
+        assert a[a.index(RUN_ID):] == [RUN_ID, "--nocapture", "--test-threads=1", "--exact", FIRST3], a
         assert not {"list", "filter", "bench"} & set(a), a
         assert a[a.index("--hostname") + 1] == HOSTNAME and a[a.index("--name") + 1] == "peacock-chain-l"
         mounts = [a[i + 1] for i, x in enumerate(a) if x == "-v"]
@@ -757,7 +759,7 @@ def test_run_staged_narrows_by_the_filter():
         staged_fused(h)
         ok(h.gpu("run", FUSED, env={"PCK_TEST_FILTER": "tpcds"}))
         a = h.docker_runs()[0]
-        assert a[a.index(h.run_ref):] == [h.run_ref, "--nocapture", "--test-threads=1", "tpcds"], a
+        assert a[a.index(RUN_ID):] == [RUN_ID, "--nocapture", "--test-threads=1", "tpcds"], a
         assert "PCK_TEST_FILTER=tpcds" in [a[i + 1] for i, x in enumerate(a) if x == "-e"], a
 
 

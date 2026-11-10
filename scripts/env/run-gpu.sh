@@ -39,13 +39,15 @@
 # silently. run-gpu.sh never starts or stops the VM: the caller does, with nebius.sh. <i> is this
 # tree's directory name by default, <v> 25.02. prepare and run use the images of this tree's inputs,
 # by their inputs tag (scripts/lib/image-inputs.sh), or PEACOCK_RUN_IMAGE and PEACOCK_BUILD_IMAGE
-# when set (CI's scripts/env/image-ref.sh refs), checked alike.
+# when set (CI's scripts/env/image-ref.sh refs), checked alike. A run is given the run image by the
+# ID read with its labels, so a tag moved since is not run.
 #
 # Exit 0; 1 the run failed, or a ship stream gave up; 2 bad input (nebius.sh's 64 too), a stale
-# image, one not published (the images.yml dispatch named), a run in progress, or a step missing
-# (prepare, ship); a pull that failed otherwise, docker's; 3 the VM's driver is older than the
-# run image needs; 4 restart the VM (nebius.sh stop --force, start), then prepare again; 5 status:
-# the run goes on; else nebius.sh's (75, 69). status: 0 exited 0, 1 exited non-zero, 2 none.
+# image, one not published (the images.yml dispatch named), a run in progress, a step missing
+# (prepare, ship), or a driver query that fails or lists no GPU; a pull that failed otherwise,
+# docker's; 3 a card below compute capability 8.0, or one whose driver is older than the run image
+# needs; 4 restart the VM (nebius.sh stop --force, start), then prepare again; 5 status: the run
+# goes on; else nebius.sh's (75, 69). status: 0 exited 0, 1 exited non-zero, 2 none.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -165,19 +167,59 @@ from_vm() {  # from_vm <source under ~> <local dest> [<rsync arguments…>]
 # shellcheck disable=SC2032  # vm_docker's `sudo docker` runs the VM's binary, never this
 docker() { on_vm vm_docker_run "$@"; }
 
-# driver_checked: refuses, exit 3, a VM whose driver is older than the run image's
-# peacockdb.driver-minimum, naming both.
-driver_checked() {
-  local need have rc=0
-  need=$(docker image inspect --format '{{index .Config.Labels "peacockdb.driver-minimum"}}' "$RUN_REF") || rc=$?
+# run_image_read: sets RUN_ID to the ID of the image RUN_REF names on the VM, and RUN_MINIMUM and
+# RUN_MINIMUM_PTX to its two driver labels, all from one read, so a tag moved since is never run.
+# Refuses, exit 2, an image missing a label or built from other inputs than this tree.
+run_image_read() {
+  local labels=(peacockdb.inputs peacockdb.driver-minimum peacockdb.driver-minimum-ptx) fmt='{{.Id}}' out
+  local values=() i rc=0
+  for i in "${labels[@]}"; do fmt+="{{\"\\n\"}}{{index .Config.Labels \"$i\"}}"; done
+  out=$(docker image inspect --format "$fmt" "$RUN_REF") || rc=$?
   [ "$rc" -ne 1 ] || die "no $RUN_REF on the VM: run prepare first"
   [ "$rc" -eq 0 ] || exit "$rc"
-  if [ -z "$need" ] || [ "$need" = "<no value>" ]; then die "$RUN_REF has no peacockdb.driver-minimum label"; fi
-  have=$(vm "nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1")
-  if [ -z "$have" ] || [ "$(printf '%s\n' "$need" "$have" | sort -V | head -1)" != "$need" ]; then
-    echo "run-gpu.sh: the VM's driver ${have:-(none: nvidia-smi answered nothing)} is older than $need, the oldest $RUN_REF runs on" >&2
-    exit 3
-  fi
+  # $(…) drops the lines of empty labels at the end, so each is read with a default.
+  mapfile -t values <<< "$out"
+  machine_image_inputs_checked "${values[1]:-}" "$RUN_REF" "$root" "$cudf" run
+  for i in 2 3; do
+    if [ -z "${values[i]:-}" ] || [ "${values[i]}" = "<no value>" ]; then
+      die "$RUN_REF has no ${labels[i - 1]} label: publish it again with scripts/env/image.sh"
+    fi
+  done
+  RUN_ID=${values[0]} RUN_MINIMUM=${values[2]} RUN_MINIMUM_PTX=${values[3]}
+}
+
+version_below() { [ "$1" != "$2" ] && [ "$(printf '%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]; }
+
+# cards_checked: refuses, exit 3, a card below compute capability 8.0, which the run image's
+# binaries do not run on, or one whose driver is older than RUN_MINIMUM. A card past 9.x
+# JIT-compiles the image's PTX, so its driver is held to RUN_MINIMUM_PTX as well.
+cards_checked() {
+  local answer rc=0 line driver cap major need why
+  # Both streams: a missing nvidia-smi is bash's `command not found`, on stderr.
+  answer=$(vm "nvidia-smi --query-gpu=driver_version,compute_cap --format=csv,noheader 2>&1") || rc=$?
+  case $rc in
+    0) ;;
+    69|75) exit "$rc" ;;  # nebius.sh's: the VM, not its card
+    *) die "the driver query on the VM failed (exit $rc): ${answer:-no output}" ;;
+  esac
+  [ -n "$answer" ] || die "nvidia-smi on the VM lists no GPU"
+  while IFS= read -r line; do
+    [[ "$line" =~ ^([0-9]+(\.[0-9]+)+),\ (([0-9]+)\.[0-9]+)$ ]] \
+      || die "nvidia-smi on the VM answered '$line', not a card's driver version and compute capability"
+    driver=${BASH_REMATCH[1]} cap=${BASH_REMATCH[3]} major=${BASH_REMATCH[4]}
+    if [ "$major" -lt 8 ]; then
+      echo "run-gpu.sh: a card on the VM has compute capability $cap; $RUN_REF runs on 8.0 and later" >&2
+      exit 3
+    fi
+    need=$RUN_MINIMUM why="the oldest $RUN_REF runs on"
+    if [ "$major" -ne 8 ] && [ "$major" -ne 9 ] && version_below "$need" "$RUN_MINIMUM_PTX"; then
+      need=$RUN_MINIMUM_PTX why="the oldest that JIT-compiles $RUN_REF's PTX for a card of compute capability $cap"
+    fi
+    if version_below "$driver" "$need"; then
+      echo "run-gpu.sh: a card's driver on the VM is $driver, older than $need, $why" >&2
+      exit 3
+    fi
+  done <<< "$answer"
 }
 
 # --- the VM's side: sent by on_vm, never run here --------------------------------------------------
@@ -278,28 +320,27 @@ vm_data_set() {
   echo "==> sf1: $DATA_SET"
 }
 
-# vm_cudf <run image> <v>: the image's /opt/cudf as ~/peacock/cudf-<v>/, stamped with the image's
-# id; kept while the stamp is the image's.
+# vm_cudf <run image ID> <v>: the image's /opt/cudf as ~/peacock/cudf-<v>/, stamped with the ID;
+# kept while the stamp is the ID.
 vm_cudf() {
-  local ref=$1 dst=$HOME/peacock/cudf-$2 id cid lock
+  local id=$1 dst=$HOME/peacock/cudf-$2 cid lock
   vm_docker
-  id=$(docker image inspect --format '{{.Id}}' "$ref")
   mkdir -p "$HOME/peacock"
   exec {lock}< "$HOME/peacock"
   flock "$lock"
   if [ -f "$dst/.image-id" ] && [ "$(cat "$dst/.image-id")" = "$id" ]; then
-    echo "==> $dst: $ref's /opt/cudf, already"
+    echo "==> $dst: the run image's /opt/cudf ($id), already"
     return 0
   fi
   rm -rf "$dst.partial"
   mkdir "$dst.partial"
-  cid=$(docker create "$ref")
+  cid=$(docker create "$id")
   docker cp "$cid:/opt/cudf/." "$dst.partial/"
   docker rm "$cid" > /dev/null
   echo "$id" > "$dst.partial/.image-id"
   rm -rf "$dst"
   mv "$dst.partial" "$dst"
-  echo "==> $dst: $ref's /opt/cudf"
+  echo "==> $dst: the run image's /opt/cudf ($id)"
 }
 
 # vm_ship_ready <i> [?]<dataset>:<path under the data dir>…: refuses while a run is in progress, or
@@ -323,10 +364,10 @@ vm_ship_ready() {
   done
 }
 
-# vm_run <i> <run image> <mode> <detach> [<NAME=value>…]: run-tests.sh <mode> as peacock-<i>;
+# vm_run <i> <run image ID> <mode> <detach> [<NAME=value>…]: run-tests.sh <mode> as peacock-<i>;
 # returns 0, 2 as the run did, else 1. Detached (1), returns once it is up, and vm_status judges it.
 vm_run() {
-  local dir=$1 ref=$2 mode=$3 detach=$4 base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock}
+  local dir=$1 image=$2 mode=$3 detach=$4 base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock}
   local name=peacock-$1 envs=() pair code
   shift 4
   for pair in "$@"; do envs+=(-e "$pair"); done
@@ -336,7 +377,7 @@ vm_run() {
   mkdir -p "$base/logs"
   docker run -d --name "$name" --label "peacock.log=$mode" --gpus all --user "$(id -u):$(id -g)" \
     --hostname "$(hostname)" -v "$base/cpp/install:/peacock/install:ro" -v "$base/testdata:/peacock/testdata" \
-    -v "$data:$data:ro" "${envs[@]}" "$ref" "$mode" > /dev/null
+    -v "$data:$data:ro" "${envs[@]}" "$image" "$mode" > /dev/null
   if [ "$detach" -eq 1 ]; then
     echo "==> $name: run-tests.sh $mode, detached; run-gpu.sh … status says how it goes"
     return 0
@@ -347,11 +388,11 @@ vm_run() {
   case $code in 0|2) return "$code" ;; *) return 1 ;; esac
 }
 
-# vm_run_staged <i> <run image> <name> <NAME=value>… -- <argument>…: the install's
+# vm_run_staged <i> <run image ID> <name> <NAME=value>… -- <argument>…: the install's
 # rust-benchmarks/<name> as peacock-<i>'s entrypoint in the run image, with the run's mounts;
 # refuses, exit 2, a name staged there as no executable. Returns 0, else 1, as run-tests.sh judges.
 vm_run_staged() {
-  local dir=$1 ref=$2 name=$3 base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock}
+  local dir=$1 image=$2 name=$3 base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock}
   local container=peacock-$1 entry=/peacock/install/rust-benchmarks/$3 envs=() code log
   shift 3
   while [ "$1" != -- ]; do envs+=(-e "$1"); shift; done
@@ -365,7 +406,7 @@ vm_run_staged() {
   docker run -d --name "$container" --label "peacock.log=$name" --gpus all --user "$(id -u):$(id -g)" \
     --hostname "$(hostname)" -v "$base/cpp/install:/peacock/install:ro" -v "$base/testdata:/peacock/testdata" -v "$data:$data:ro" \
     -e LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib -e PEACOCK_TESTDATA_DIR=/peacock/testdata \
-    "${envs[@]}" --entrypoint "$entry" "$ref" "$@" > /dev/null
+    "${envs[@]}" --entrypoint "$entry" "$image" "$@" > /dev/null
   docker logs -f "$container" 2>&1 | tee "$log"
   code=$(docker wait "$container")
   docker rm "$container" > /dev/null
@@ -414,11 +455,12 @@ cmd_prepare() {
   [ "$no_sf40" -eq 1 ] || on_vm vm_nsight
   machine_image_checked "$BUILD_REF" "$root" "$cudf"
   machine_image_checked "$RUN_REF" "$root" "$cudf" run
-  driver_checked
+  run_image_read
+  cards_checked
   on_vm vm_data_set "$dir" "$BUILD_REF"
   if [ "$no_sf40" -eq 0 ]; then
     vm "cd ~/peacock/$dir && scripts/env/fetch-sf40.sh --env - ${SF40_SETS[*]}" "$PEACOCK_ENV"
-    on_vm vm_cudf "$RUN_REF" "$cudf"
+    on_vm vm_cudf "$RUN_ID" "$cudf"
   fi
   echo "==> prepare: the VM is ready for $RUN_REF"
 }
@@ -478,11 +520,10 @@ cmd_ship() {
 
 cmd_run() {
   local envs=()
-  # driver_checked first: it refuses a VM without the run image as "run prepare first" (exit 2).
-  driver_checked
   # The VM's run image as prepare left it: no pull, so a run never takes an image prepare did not
   # check, and a tree whose image inputs moved since is refused.
-  machine_image_label_checked "$RUN_REF" "$root" "$cudf" run
+  run_image_read
+  cards_checked
   [ -z "${PCK_TEST_FILTER:-}" ] || envs+=("PCK_TEST_FILTER=$PCK_TEST_FILTER")
   [ -z "${PEACOCK_BENCH_RESUME:-}" ] || envs+=("PEACOCK_BENCH_RESUME=$PEACOCK_BENCH_RESUME")
   # The engine's two measurement switches (architecture.md, "cuDF options"): the cache's size and
@@ -491,19 +532,19 @@ cmd_run() {
   [ -z "${PEACOCK_SCAN_READER:-}" ] || envs+=("PEACOCK_SCAN_READER=$PEACOCK_SCAN_READER")
   [ -z "${PEACOCK_BENCH_CASE_TIMEOUT_S:-}" ] || envs+=("PEACOCK_BENCH_CASE_TIMEOUT_S=$PEACOCK_BENCH_CASE_TIMEOUT_S")
   [ -z "${PCK_WRITE_GPU_RESULT:-}" ] || envs+=("PCK_WRITE_GPU_RESULT=$PCK_WRITE_GPU_RESULT")
-  on_vm vm_run "$dir" "$RUN_REF" "$mode" "$detach" "${envs[@]}"
+  on_vm vm_run "$dir" "$RUN_ID" "$mode" "$detach" "${envs[@]}"
 }
 
 cmd_status() { on_vm vm_status "$dir"; }
 
 cmd_run_staged() {
   local envs=() args=(--nocapture --test-threads=1)
-  driver_checked
-  machine_image_label_checked "$RUN_REF" "$root" "$cudf" run
+  run_image_read
+  cards_checked
   [ -z "${PCK_TEST_FILTER:-}" ] || envs+=("PCK_TEST_FILTER=$PCK_TEST_FILTER")
   [ -z "${PEACOCK_BENCH_RESUME:-}" ] || envs+=("PEACOCK_BENCH_RESUME=$PEACOCK_BENCH_RESUME")
   if [ -n "$exact" ]; then args+=(--exact "$exact"); elif [ -n "${PCK_TEST_FILTER:-}" ]; then args+=("$PCK_TEST_FILTER"); fi
-  on_vm vm_run_staged "$dir" "$RUN_REF" "$staged" "${envs[@]}" -- "${args[@]}"
+  on_vm vm_run_staged "$dir" "$RUN_ID" "$staged" "${envs[@]}" -- "${args[@]}"
 }
 
 cmd_pull() {

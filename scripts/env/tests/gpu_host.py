@@ -8,10 +8,10 @@ runs the command on the VM: bash in the VM user's home, with the VM's fakes firs
 directory as PEACOCK_DATA_DIR, and its own copy of /proc/driver/nvidia/params. Its `rsh` exits 255
 before running anything while the Host has made no more than FAKE_NEBIUS_RSH_FAILS rsh calls, as a
 dropped transport does. `rsync` is the real one, through that rsh. On the VM, docker answers from a
-JSON world (images and their labels, containers, the driver), and reads a run's binds as machine.py's
-docker does, refusing one into the VM user's home; sudo records and runs its command,
-install writes /etc into the VM's root, and hostname names the machine. On dev, ssh and docker are
-fakes that fail loudly: no call may bypass nebius.sh.
+JSON world (images and their labels, containers), and reads a run's binds as machine.py's docker
+does, refusing one into the VM user's home; nvidia-smi answers its one query from the world's cards;
+sudo records and runs its command, install writes /etc into the VM's root, and hostname names the
+machine. On dev, ssh and docker are fakes that fail loudly: no call may bypass nebius.sh.
 """
 import json
 import os
@@ -34,6 +34,7 @@ L40S = ["--instance-id", "computeinstance-e00tnrse7ayntnzcyt"]
 CPU_VM = ["--instance-id", "computeinstance-e01t2mm4265y8x88ey", "--profile", "eu-west1"]
 HOSTNAME = "h100-test-node"
 DRIVER_MINIMUM = "535.104.05"
+DRIVER_MINIMUM_PTX = "575.51.03"
 
 STUB_FETCH = r'''#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -50,7 +51,8 @@ import json, os, subprocess, sys
 a = sys.argv[1:]
 with open(os.environ["FAKE_NEBIUS_LOG"], "a") as f:
     f.write(json.dumps(a) + "\n")
-if os.environ.get("FAKE_NEBIUS_RC"):
+# FAKE_NEBIUS_RC_ON narrows the refusal to the calls whose argv holds that text.
+if os.environ.get("FAKE_NEBIUS_RC") and os.environ.get("FAKE_NEBIUS_RC_ON", "") in " ".join(a):
     print("nebius: refused by the test", file=sys.stderr)
     sys.exit(int(os.environ["FAKE_NEBIUS_RC"]))
 
@@ -79,7 +81,7 @@ sys.exit(subprocess.run(["bash", "-c", command], env=env, cwd=os.environ["FAKE_H
 '''
 
 FAKE_DOCKER = r'''#!/usr/bin/env python3
-import fcntl, json, os, pathlib, sys
+import fcntl, json, os, pathlib, re, sys
 ''' + RUN_OPTIONS + r'''
 a = sys.argv[1:]
 with open(os.environ["FAKE_DOCKER_LOG"], "a") as f:
@@ -113,11 +115,25 @@ if a[:2] == ["image", "inspect"]:
         print(f"Error: No such image: {a[-1]}", file=sys.stderr)
         sys.exit(1)
     fmt = flag("--format")
-    if ".Id" in fmt:
-        print(image["id"])
-    else:
-        label = fmt.split('"')[1]
-        print(image["labels"].get(label, "<no value>"))
+
+    def field(m):
+        label = re.fullmatch(r'index \.Config\.Labels "([^"]+)"', m.group(1))
+        if label:
+            return image["labels"].get(label.group(1), "<no value>")
+        if m.group(1) in (".Id", '"\\n"'):
+            return image["id"] if m.group(1) == ".Id" else "\n"
+        # A code nothing maps: 1 is "No such image", and 64 reads as nebius.sh's usage refusal.
+        print(f"fake docker: no answer for the format {fmt}", file=sys.stderr)
+        sys.exit(99)
+
+    print(re.sub(r"\{\{(.*?)\}\}", field, fmt))
+    # moves: {ref: [n, image]}, the tag another pull moves right after its nth read from now.
+    move = w.get("moves", {}).get(a[-1])
+    if move:
+        move[0] -= 1
+        if move[0] == 0:
+            w["images"][a[-1]] = w["moves"].pop(a[-1])[1]
+        save()
     sys.exit(0)
 if a[0] == "ps":
     name = flag("--filter").split("=", 1)[1].strip("^$")
@@ -176,8 +192,19 @@ sys.exit(f"fake docker: no answer for {a}")
 
 HOST_BIN = {
     "docker": FAKE_DOCKER,
-    "nvidia-smi": '#!/usr/bin/env python3\nimport json, os\n'
-                  'print(json.load(open(os.environ["FAKE_DOCKER_WORLD"]))["driver"])\n',
+    # One line a card; a card given as a string is printed as it is. World smi_fails: [code, text],
+    # printed on stdout as nvidia-smi prints its own failures.
+    "nvidia-smi": r'''#!/usr/bin/env python3
+import json, os, sys
+if sys.argv[1:] != ["--query-gpu=driver_version,compute_cap", "--format=csv,noheader"]:
+    sys.exit(f"fake nvidia-smi: no answer for {sys.argv[1:]}")
+w = json.load(open(os.environ["FAKE_DOCKER_WORLD"]))
+if w.get("smi_fails"):
+    print(w["smi_fails"][1])
+    sys.exit(w["smi_fails"][0])
+for card in w["cards"]:
+    print(card if isinstance(card, str) else ", ".join(card))
+''',
     "hostname": f'#!/bin/sh\necho {HOSTNAME}\n',
     "sudo": '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_HOST_LOG"\nexec "$@"\n',
     "install": r'''#!/usr/bin/env python3
@@ -258,10 +285,11 @@ class Host:
             "images": {
                 self.run_ref: {"id": "sha256:run1",
                                "labels": {"peacockdb.inputs": label(self.tree, "run"),
-                                          "peacockdb.driver-minimum": DRIVER_MINIMUM}},
+                                          "peacockdb.driver-minimum": DRIVER_MINIMUM,
+                                          "peacockdb.driver-minimum-ptx": DRIVER_MINIMUM_PTX}},
                 self.build_ref: {"id": "sha256:build1", "labels": {"peacockdb.inputs": label(self.tree, "build")}},
             },
-            "containers": {}, "driver": "550.54.15", "runtimes": ["nvidia", "runc"],
+            "containers": {}, "cards": [["550.54.15", "8.9"]], "runtimes": ["nvidia", "runc"],
             "run_code": 0, "run_output": "==> run-tests.sh list: green\n",
         }))
         self.env = {

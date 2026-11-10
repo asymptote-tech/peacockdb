@@ -153,6 +153,55 @@ plain build of the same Dockerfile from the repository's root, with no build arg
 - The fakes read `-v` binds as well as `--mount` ones, so run-gpu.sh's device runs are held to the
   same refusal; a `-v` source that is missing is not refused, as docker makes it.
 
+## The run image by its ID
+
+- `run_image_read` reads the ID and three labels with one `--format`, a line each. `$(…)` drops
+  the trailing lines of empty labels, so the fields are read with a default: an empty PTX label,
+  the last field, left `values[3]` unset and `set -u` killed the script (measured red).
+- The inputs comparison is `machine_image_inputs_checked`, over a label already read;
+  `machine_image_label_checked` is that over its own inspect. `prepare` keeps
+  `machine_image_checked` for its pull's messages, so it compares the run image's inputs twice:
+  once after the pull, once in `run_image_read`.
+- `vm_cudf` takes the ID too, so its create and its stamp are of the image whose labels were read.
+  It read `.Id` from the ref and then created from the ref, two reads with sf1 and sf40 between
+  them and the check.
+- The fake docker moves a tag right after its nth read from then on (world `moves`). That is how
+  `test_run_runs_the_image_id_its_labels_were_read_from` goes red on the code before: its second
+  read of the ref found the moved tag's inputs and refused the run. In
+  `test_prepare_copies_cudf_from_the_image_id_it_read` the tag moves after prepare's second read
+  (the pull's label check, then `run_image_read`), so a later read of the ref sees the moved one
+  (measured red, on the `.image-id` assertion).
+- `cards_checked` takes the query's stdout and stderr as its answer: a missing nvidia-smi is bash's
+  `command not found`, exit 127, on stderr, which `$(…)` alone would leave out of the refusal
+  (measured red without `2>&1`: the shell's text was on stderr, not on the refusal's line). The fake
+  prints its failures (no devices, exit 6; no driver, 9; a driver/library mismatch, 18) on stdout. A
+  failure is exit 2, "the driver query on the VM failed (exit N): <answer>": the code can also be
+  `nebius.sh`'s 1 or ssh's 255, a VM gone between the image read and the query, so the refusal
+  does not blame nvidia-smi. A bare `$(…)` had
+  ended the script with nvidia-smi's own code and nothing said, which run-gpu.sh's callers read as
+  its own codes (2 bad input, 4 restart). An empty answer with exit 0 is "lists no GPU", exit 2.
+- `nebius.sh`'s 69 and 75 at that query are passed on, as at every other call; nvidia-smi has
+  neither code. `test_nebius_sh_s_own_exit_at_the_driver_query_passes_on` passes on the code
+  before, kept as a guard: dying on every failure turns it red (measured). The fake nebius's
+  `FAKE_NEBIUS_RC_ON` narrows its refusal to the calls whose argv holds that text.
+- `test_a_card_is_held_to_the_higher_of_the_two_minima` (26.02's labels: 575.57.08 above the PTX's
+  575.51.03) passes on the code it was written against, so its red was measured on two mutations:
+  the PTX minimum always taken past 9.x, and the minimum hard-coded as 25.02's. Both went red.
+- The fake docker exits 99 on a `--format` it cannot render, a code nothing maps: 1 is "No such
+  image", and 64, through `vm()`, reads as `nebius.sh` refusing its options.
+- The fake `nvidia-smi` answers the one query and fails any other, so the new tests went red only
+  in their setup at first. Their own red was measured with the fake briefly answering the old
+  query too: each failed on its own assertion.
+- Ported from `4e785104`'s `test_gpu.py`: `test_run_refuses_old_driver` as
+  `test_every_card_s_driver_is_held_to_the_minimum` (its `--cudf 26.02` half dropped: the minimum
+  is now the image's label, not a pin read by version);
+  `test_a_card_past_compute_capability_9_needs_the_driver_that_compiles_its_ptx` as
+  `test_a_card_past_9_needs_the_driver_that_compiles_its_ptx` and
+  `test_a_card_below_compute_capability_8_is_refused`, which is exit 3 here, 2 there;
+  `test_a_driver_answer_that_is_no_version_is_refused` under its name;
+  `test_the_image_run_is_the_one_whose_label_was_read` as
+  `test_run_runs_the_image_id_its_labels_were_read_from`.
+
 ## Reshaped tests
 
 - `test_install_watch_sources.py::test_install_watch_ships_files_that_exist` took every rsync
@@ -184,3 +233,15 @@ plain build of the same Dockerfile from the repository's root, with no build arg
   bind to its own path (`dst=<clone>`). The clone is now mounted at `/peacock/tree`, so the test
   holds it to `dst=/peacock/tree,readonly` and `-w /peacock/tree`; it still requires the clone
   read-only, the registry at the image's, and the caller's uid.
+- `test_run_gpu.py`'s `test_run_passes_the_machines_hostname`, `test_run_uses_the_given_run_image`,
+  `test_run_names_a_staged_binary` and `test_run_staged_narrows_by_the_filter` held the device
+  run's image to the ref (`h.run_ref`, `GIVEN_RUN`). A run is now given the image's ID, so each holds
+  it to `sha256:run1`, the world's ID for that ref; they still require the mode or the binary's
+  arguments right after it.
+- `test_prepare_readies_the_vm` and `test_prepare_pulls_the_given_images` held the copied
+  `libcudf.so` to the ref the fake's `create` was given (`h.run_ref`, `GIVEN_RUN`). The copy is now
+  made from the ID read with the labels, so each holds it to that image's ID, `sha256:run1`; they
+  still require the copy to be of the image prepare checked.
+- `test_prepare_refuses_old_driver` and `test_run_refuses_old_driver` set the world's `driver`;
+  the fake `nvidia-smi` answers from `cards`, so each sets one card at that driver, compute
+  capability 8.9. The assertions are unchanged.
