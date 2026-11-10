@@ -2,8 +2,9 @@
 
 Run from a clone on the fake machine of `machine.py`, with a fake sudo and curl that record their
 argv, so a refusal can be checked to come before anything is installed, and nothing is downloaded.
-A whole run has curl serve a stand-in gh tarball, which the clone's pin then names, and finds
-Claude Code and superpowers at their pins; sudo runs nothing.
+A whole run has curl serve a stand-in gh tarball and nebius binary, which the clone's pins then
+name, and finds Claude Code and superpowers at their pins; sudo runs nothing. No PATH here holds
+the host's nebius; a test that wants one installs its own.
 """
 import hashlib
 import json
@@ -24,15 +25,22 @@ from machine import FAKE_ROOT_ID, NO_HOST, UNPUBLISHED, Machine, git, lib, path_
 FAKE_SUDO = '#!/bin/sh\nprintf "%s\\n" "sudo $*" >> "$FAKE_SUDO_LOG"\nexit "${FAKE_SUDO_STATUS:-1}"\n'
 FAKE_CURL = '#!/bin/sh\nprintf "%s\\n" "curl $*" >> "$FAKE_SUDO_LOG"\nexit 22\n'
 GH_TARBALL = b"a stand-in gh tarball"
-# curl writing GH_TARBALL to its -o, and failing a download to stdout (the Claude Code installer).
+NEBIUS_BINARY = b"a stand-in nebius binary"
+# curl writing the nebius binary to its -o for a URL of Nebius's, unless FAKE_NEBIUS_MISSING, the
+# gh tarball for any other, and failing a download to stdout (the Claude Code installer).
 SERVING_CURL = r'''#!/bin/sh
 printf "%s\n" "curl $*" >> "$FAKE_SUDO_LOG"
+body=$FAKE_GH_TARBALL
+for a in "$@"; do
+  case "$a" in *artifacts.nebius.cloud*) [ -z "$FAKE_NEBIUS_MISSING" ] || exit 22; body=$FAKE_NEBIUS_BINARY ;; esac
+done
 while [ $# -gt 0 ]; do
-  if [ "$1" = -o ]; then printf %s "$FAKE_GH_TARBALL" > "$2"; exit 0; fi
+  if [ "$1" = -o ]; then printf %s "$body" > "$2"; exit 0; fi
   shift
 done
 exit 22
 '''
+NEBIUS_INSTALL = re.compile(r"^sudo install -m 755 \S+ /usr/local/bin/nebius$", re.M)
 
 
 def bootstrap(m, *args, **env):
@@ -49,12 +57,16 @@ def pin(m, name):
                 if ln.startswith(name + "="))
 
 
+def set_pin(m, name, value):
+    pins = m.clone / "docker" / "pins.env"
+    pins.write_text("".join(f"{name}={value}\n" if ln.startswith(name + "=") else ln + "\n"
+                            for ln in pins.read_text().splitlines()))
+
+
 def whole_run_env(m):
     """Readies `m` for a whole run of bootstrap-vm.sh; returns the environment it runs with."""
-    pins = m.clone / "docker" / "pins.env"
-    sha = hashlib.sha256(GH_TARBALL).hexdigest()
-    pins.write_text("".join(f"GH_SHA256={sha}\n" if ln.startswith("GH_SHA256=") else ln + "\n"
-                            for ln in pins.read_text().splitlines()))
+    set_pin(m, "GH_SHA256", hashlib.sha256(GH_TARBALL).hexdigest())
+    set_pin(m, "NEBIUS_SHA256", hashlib.sha256(NEBIUS_BINARY).hexdigest())
     m.world(label=m.label("25.02"))
     record = m.home / ".claude" / "plugins" / "installed_plugins.json"
     record.parent.mkdir(parents=True, exist_ok=True)
@@ -62,8 +74,15 @@ def whole_run_env(m):
         {"version": pin(m, "SUPERPOWERS_VERSION"), "gitCommitSha": pin(m, "SUPERPOWERS_SHA")}]}}))
     m.install("sudo", FAKE_SUDO)
     m.install("curl", SERVING_CURL)
+    tmpdir = m.home.parent / "tmpdir"
+    tmpdir.mkdir(exist_ok=True)
     return {"FAKE_SUDO_LOG": str(m.home.parent / "sudo.log"), "FAKE_SUDO_STATUS": "0",
-            "FAKE_GH_TARBALL": GH_TARBALL.decode()}
+            "FAKE_GH_TARBALL": GH_TARBALL.decode(), "FAKE_NEBIUS_BINARY": NEBIUS_BINARY.decode(),
+            "TMPDIR": str(tmpdir)}
+
+
+def nebius_url(m):
+    return f"https://artifacts.nebius.cloud/cli/release/{pin(m, 'NEBIUS_VERSION')}/linux/x86_64/nebius"
 
 
 def bootstrap_whole(m):
@@ -122,7 +141,7 @@ def test_bootstrap_takes_the_ref_the_clone_is_on():
 
 def test_bootstrap_updates_the_package_lists_once_before_any_install():
     with Machine() as m:
-        system = path_without(m.home.parent, {"docker", "sudo", "curl", "gh"})
+        system = path_without(m.home.parent, {"docker", "sudo", "curl", "gh", "nebius"})
         m.bin.joinpath("docker").unlink()
         r, log = bootstrap(m, FAKE_SUDO_STATUS="0", PATH=f"{m.bin}:{system}")
         apt = [line for line in log.splitlines() if line.startswith("sudo apt-get")]
@@ -174,6 +193,65 @@ def test_bootstrap_names_no_launcher():
         r, _ = bootstrap(m)
         assert r.returncode == 2 and "instance" not in r.stderr, r.stderr
         assert scripts_named(r.stderr) == set(), r.stderr
+
+
+def test_bootstrap_installs_the_pinned_nebius_cli():
+    """With none on PATH, and with one of another version."""
+    for installed in [None, "0.12.1"]:
+        with Machine() as m:
+            env = whole_run_env(m)
+            if installed:
+                m.install("nebius", f"#!/bin/sh\necho {installed}\n")
+            r = m.run("bootstrap-vm.sh", env=env)
+            assert r.returncode == 0, (installed, r.returncode, r.stderr)
+            log = (m.home.parent / "sudo.log").read_text()
+            assert f" {nebius_url(m)}\n" in log, (installed, log)
+            assert len(NEBIUS_INSTALL.findall(log)) == 1, (installed, log)
+            assert list((m.home.parent / "tmpdir").iterdir()) == [], (installed, log)
+
+
+def test_bootstrap_refuses_a_nebius_cli_of_another_sha():
+    with Machine() as m:
+        env = whole_run_env(m)
+        set_pin(m, "NEBIUS_SHA256", hashlib.sha256(b"another build").hexdigest())
+        m.world(label=m.label("25.02"))
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2 and "bootstrap-vm.sh: " in r.stderr, (r.returncode, r.stderr)
+        assert "NEBIUS_SHA256" in r.stderr and nebius_url(m) in r.stderr, r.stderr
+        log = (m.home.parent / "sudo.log").read_text()
+        assert not NEBIUS_INSTALL.search(log), log
+        assert list((m.home.parent / "tmpdir").iterdir()) == [], log
+        assert [c for c in m.docker_calls() if c[0] == "run"] == [], m.docker_calls()
+
+
+def test_bootstrap_names_a_nebius_cli_it_cannot_download():
+    with Machine() as m:
+        r = m.run("bootstrap-vm.sh", env={**whole_run_env(m), "FAKE_NEBIUS_MISSING": "1"})
+        assert r.returncode == 2 and f"cannot download {nebius_url(m)}" in r.stderr, (r.returncode, r.stderr)
+        log = (m.home.parent / "sudo.log").read_text()
+        assert not NEBIUS_INSTALL.search(log), log
+        assert list((m.home.parent / "tmpdir").iterdir()) == [], log
+
+
+def test_bootstrap_leaves_no_download_when_the_nebius_install_fails():
+    with Machine() as m:
+        env = whole_run_env(m)
+        m.install("sudo", FAKE_SUDO.replace('exit "${FAKE_SUDO_STATUS:-1}"',
+                                            '[ "$1" != install ] || exit 1; exit "${FAKE_SUDO_STATUS:-1}"'))
+        r = m.run("bootstrap-vm.sh", env=env)
+        log = (m.home.parent / "sudo.log").read_text()
+        assert r.returncode != 0 and NEBIUS_INSTALL.search(log), (r.returncode, r.stderr, log)
+        assert list((m.home.parent / "tmpdir").iterdir()) == [], log
+
+
+def test_bootstrap_skips_the_nebius_cli_at_its_pin():
+    with Machine() as m:
+        env = whole_run_env(m)
+        m.install("nebius", f"#!/bin/sh\n[ \"$*\" = version ] && echo {pin(m, 'NEBIUS_VERSION')}\n")
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 0, (r.returncode, r.stderr)
+        log = (m.home.parent / "sudo.log").read_text()
+        assert "artifacts.nebius.cloud" not in log and "/usr/local/bin/nebius" not in log, log
 
 
 def test_bootstrap_refuses_an_image_of_other_inputs():

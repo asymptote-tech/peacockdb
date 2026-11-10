@@ -4,11 +4,11 @@
 #   bootstrap-vm.sh [--ref <branch>] [--cudf <v>]
 #
 # Run as the machine user, with sudo; provision-vm.sh runs it so. Installs what is missing: Docker,
-# and gh and Claude Code with the superpowers plugin at docker/pins.env's versions; makes the data
-# directory the machine's users share; clones the repository into ~/peacockdb at <ref>, master by
-# default, and the third_party/cudf it pins. In the build image of cuDF <v> (25.02 by default) and
-# of the clone's inputs, by its inputs tag, it fills cargo's registry and generates sf1. A step
-# already done is skipped.
+# and gh, nebius and Claude Code with the superpowers plugin at docker/pins.env's versions; makes
+# the data directory the machine's users share; clones the repository into ~/peacockdb at <ref>,
+# master by default, and the third_party/cudf it pins. In the build image of cuDF <v> (25.02 by
+# default) and of the clone's inputs, by its inputs tag, it fills cargo's registry and generates
+# sf1. A step already done is skipped.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -38,7 +38,7 @@ if [ -n "$ref" ] && [ -e "$clone" ]; then
   [ "$on_branch" = "$ref" ] \
     || die "$clone is on ${on_branch:-a detached HEAD}, not $ref: --ref names the branch the clone is or will be on"
 fi
-command -v sudo > /dev/null || die "no sudo: Docker, gh and the base tools are installed with it"
+command -v sudo > /dev/null || die "no sudo: Docker, gh, nebius and the base tools are installed with it"
 
 packages=()
 for tool in git curl python3 flock; do
@@ -85,6 +85,21 @@ if [ "$(/usr/local/bin/gh --version 2> /dev/null | awk 'NR == 1 { print $3 }')" 
   echo "$gh_sha  $tarball" | sha256sum -c --quiet -
   sudo tar -xzf "$tarball" -C /usr/local --strip-components=1 --no-same-owner "gh_${gh_version}_linux_amd64/bin/gh"
   rm -f "$tarball"
+fi
+
+# nebius from the URL the build image takes; nebius.sh finds it on PATH.
+nebius_version=$(pin NEBIUS_VERSION)
+nebius_sha=$(pin NEBIUS_SHA256)
+if [ "$(nebius version 2> /dev/null)" != "$nebius_version" ]; then
+  url=https://artifacts.nebius.cloud/cli/release/$nebius_version/linux/x86_64/nebius
+  binary=$(mktemp)
+  # Every way out, an interrupt included, removes the download; the script has no EXIT trap of its own.
+  trap 'rm -f "$binary"' EXIT
+  curl -fsSL --retry 3 -o "$binary" "$url" || die "cannot download $url"
+  echo "$nebius_sha  $binary" | sha256sum -c --status - || die "$url is not docker/pins.env's NEBIUS_SHA256"
+  sudo install -m 755 "$binary" /usr/local/bin/nebius
+  rm -f "$binary"
+  trap - EXIT
 fi
 
 # Claude Code stays at its pin: it never updates itself.

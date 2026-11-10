@@ -49,6 +49,20 @@ plain build of the same Dockerfile from the repository's root, with no build arg
 - `gpu_host.py`'s `FAKE_NEBIUS_RSH_FAILS=<n>` counts every rsh the Host has made, across runs; a
   later run's drop is asked for as the rsh count so far plus one.
 
+## The nebius CLI on a VM
+
+- A machine that runs `test_bootstrap.py` may have `nebius` on PATH: a VM bootstrapped already, or
+  the build image (0.12.293). So the fake machine's PATH leaves it out (`path_without`). In the
+  image, with that line reverted, the install and the wrong-sha tests fail: the run skips the
+  install. CI runs the file on the runner (`pipeline.yml`'s `on_runner`).
+- `path_without` makes its directory with `mkdtemp`, so the machine's call and a test's own call
+  share one temp dir.
+- The skip test passes on the code before this change, kept as a guard: an install that ignores
+  the version on PATH fails it.
+- The download is removed by an EXIT trap, cleared once the binary is installed, before
+  `machine_image_checked` sets its own. Measured: a TERM, a HUP, and a SIGINT to the process group
+  (Ctrl-C) each run it. A SIGINT to bash alone waits for the foreground child.
+
 ## Reshaped tests
 
 - `test_install_watch_sources.py::test_install_watch_ships_files_that_exist` took every rsync

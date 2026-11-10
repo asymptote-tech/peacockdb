@@ -129,7 +129,9 @@ class Machine:
         self.docker_log.touch()
         self.world_path.write_text(json.dumps({"label": self.label("25.02"), "seconds": 0, "fetching": 0,
                                                "fetch_overlap": False}))
-        self.env = {"PATH": f"{self.bin}:{os.environ['PATH']}", "HOME": str(self.home), "LANG": "C.UTF-8",
+        # The fake is a fresh VM, without nebius, whatever the host running the tests has (the build
+        # image has the pinned one).
+        self.env = {"PATH": f"{self.bin}:{path_without(tmp, {'nebius'})}", "HOME": str(self.home), "LANG": "C.UTF-8",
                     "FAKE_DOCKER_LOG": str(self.docker_log), "FAKE_DOCKER_WORLD": str(self.world_path),
                     "PEACOCK_DATA_DIR": str(self.data_dir)}
         return self
@@ -202,8 +204,7 @@ class Machine:
 
 def path_without(tmp, names):
     """A PATH directory linking every command on PATH but `names`, as on a machine without them."""
-    out = pathlib.Path(tmp) / "system-bin"
-    out.mkdir()
+    out = pathlib.Path(tempfile.mkdtemp(prefix="system-bin-", dir=tmp))
     for d in os.environ["PATH"].split(os.pathsep):
         if not os.path.isdir(d):
             continue
