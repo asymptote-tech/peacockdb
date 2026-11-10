@@ -324,7 +324,8 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   - `PEACOCK_NEBIUS_CONFIG=$PEACOCK_CONFIG/nebius.yaml`; `PEACOCK_NEBIUS_PROFILES=(editor-eu eu-west1)`,
     the first the active one.
   - `peacock_nebius_cli`: sets `PEACOCK_NEBIUS` to `nebius` on PATH, else `~/.nebius/bin/nebius`;
-    else refuses naming `curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | bash`.
+    else refuses naming `curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | bash`
+    on a laptop and `scripts/env/bootstrap-vm.sh` on a VM.
   - `peacock_nebius_profiles`: `profile list` on stdin → the names, one a line, in order; returns
     1 printing nothing on a line that is not `<name>` or `<name> [default]`, or a second
     `[default]`. Bash alone (a laptop's tools).
@@ -409,7 +410,10 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   `NEBIUS_CONFIG=${GPU_HOST_NEBIUS_CONFIG:-$PEACOCK_NEBIUS_CONFIG}`; a missing file → exit 1
   before any call, stderr naming `scripts/env/nebius-profiles.sh`; `cli()` passes
   `--config "$NEBIUS_CONFIG"`; `ssh_opts` adds `-i "$PEACOCK_GPU_KEY"` when `GPU_HOST_KEY` is
-  unset and that file exists.
+  unset and that file exists. The CLI is `NEBIUS` when set, else `peacock_nebius_cli`'s answer,
+  PATH first, else `~/.nebius/bin`: the line that puts `~/.nebius/bin` ahead of PATH goes, so a VM
+  runs the pinned `/usr/local/bin/nebius` that bootstrap installs. Its refusal is exit 1 before
+  any call, as a missing config is: nebius.sh's 2 is "busy".
 - Produces in provision-vm.sh: in "What this machine must hold", `peacock_nebius_cli` and
   `peacock_nebius_config_checked "$PEACOCK_NEBIUS" "$PEACOCK_NEBIUS_CONFIG"`; the secrets' stage
   gains `nebius.yaml` (a `cp`, never read); the remote stops appending `GPU_SSH_KEY_FILE`.
@@ -431,7 +435,9 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
     `test_the_default_config_is_peacock_s` (no `GPU_HOST_NEBIUS_CONFIG`, a temp HOME holding
     `.config/peacock/nebius.yaml` and `.nebius/config.yaml` at 000 → `status` exit 0, calls name the
     first); `test_the_peacock_gpu_key_is_the_identity_without_gpu_host_key`;
-    `test_gpu_host_key_wins_over_the_peacock_key`.
+    `test_gpu_host_key_wins_over_the_peacock_key`; with `NEBIUS` unset and a temp HOME:
+    `test_a_cli_on_path_wins_over_the_nebius_bin_one`, `test_the_nebius_bin_cli_without_one_on_path`,
+    `test_no_cli_is_1_naming_the_installer` (no call, stderr names both fixes).
   - `test_watch_workflow.py::test_action_names_the_config_it_makes`.
 - [ ] **Step 2: run** → FAIL on those.
 - [ ] **Step 3: implement.**
