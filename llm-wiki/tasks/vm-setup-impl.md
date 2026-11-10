@@ -436,8 +436,8 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
     `.config/peacock/nebius.yaml` and `.nebius/config.yaml` at 000 → `status` exit 0, calls name the
     first); `test_the_peacock_gpu_key_is_the_identity_without_gpu_host_key`;
     `test_gpu_host_key_wins_over_the_peacock_key`; with `NEBIUS` unset and a temp HOME:
-    `test_a_cli_on_path_wins_over_the_nebius_bin_one`, `test_the_nebius_bin_cli_without_one_on_path`,
-    `test_no_cli_is_1_naming_the_installer` (no call, stderr names both fixes).
+    `test_a_cli_on_path_wins_over_the_nebius_bin_one`,
+    `test_the_nebius_bin_cli_without_one_on_path`, `test_no_cli_is_1_naming_the_installer` (no call, stderr names both fixes).
   - `test_watch_workflow.py::test_action_names_the_config_it_makes`.
 - [ ] **Step 2: run** → FAIL on those.
 - [ ] **Step 3: implement.**
