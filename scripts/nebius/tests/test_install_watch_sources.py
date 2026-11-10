@@ -9,9 +9,7 @@ SCRIPTS = pathlib.Path(__file__).resolve().parents[2]
 
 def test_install_watch_ships_files_that_exist():
     w = World(state="RUNNING")
-    home = w.dir / "home"  # never the real one: install-watch names ~/.nebius/config.yaml
-    home.mkdir()
-    p = subprocess.run([str(SCRIPTS / "nebius.sh"), "install-watch"], env={**w.env(), "HOME": str(home)},
+    p = subprocess.run([str(SCRIPTS / "nebius.sh"), "install-watch"], env=w.env(),
                        capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
     assert p.returncode == 0, (p.returncode, p.stderr)
     # Every argument but -e's value, the transport, which names this tree's nebius.sh too.

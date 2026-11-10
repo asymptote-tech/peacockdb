@@ -52,6 +52,7 @@ runs:
           --service-account-id "$SA_ID" --public-key-id "$PK_ID" \
           --private-key-file "$RUNNER_TEMP/nebius/sa.pem" --parent-id "$PROJECT_ID" </dev/null
         rm -f "$RUNNER_TEMP/nebius/sa.pem"
+        echo "GPU_HOST_NEBIUS_CONFIG=$HOME/.nebius/config.yaml" >> "$GITHUB_ENV"
         install -d -m 700 ~/.ssh
         printf '%s\n' "$SSH_KEY" > ~/.ssh/nebius_gpu; chmod 600 ~/.ssh/nebius_gpu
         echo "GPU_HOST_KEY=$HOME/.ssh/nebius_gpu" >> "$GITHUB_ENV"

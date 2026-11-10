@@ -58,11 +58,11 @@ Starting a chain, and everything else the human does: `llm-wiki/README.md`.
   subject near its verb. These three are read under pressure by an agent looking for a single
   fact, and a long sentence hides the fact in the middle of itself.
 - **Every commit keeps code, code comments, and llm-wiki content in agreement.**
-- **Never open a Nebius credential file.** `~/.nebius/config.yaml`, `~/.nebius/credentials.yaml`
-  and any `*.pem` under `~/.nebius/`, on any host, the VM's copy included: no `cat`, `grep`,
-  `sed`, Read, or redaction attempt. A redaction leaked a service account's private key into a
-  transcript on 2026-10-14. Reach the cloud through `scripts/nebius.sh`; learn the CLI from
-  `nebius … --help`.
+- **Never open a Nebius credential file.** `~/.nebius/config.yaml`, `~/.nebius/credentials.yaml`,
+  any `*.pem` under `~/.nebius/`, and `~/.config/peacock/nebius.yaml`, on the laptop and on a VM,
+  on any host, the VM's copy in `/root/.nebius/` included: no `cat`, `grep`, `sed`, Read, or
+  redaction attempt. A redaction leaked a service account's private key into a transcript on
+  2026-10-14. Reach the cloud through `scripts/nebius.sh`; learn the CLI from `nebius … --help`.
 
 ## Board protocol
 

@@ -108,6 +108,31 @@ plain build of the same Dockerfile from the repository's root, with no build arg
 - `nebius-profiles.sh` runs on a laptop, so it carries `provision-vm.sh`'s bash 4.4 guard. CI's
   shellcheck line names it.
 
+## What the VM holds
+
+- `nebius.sh` checks its verb, then the config, then the CLI, before its state dir or any call: a
+  usage error stays 64 whatever is missing, and a missing config or CLI is 1, never
+  `peacock-config.sh`'s 2, which `nebius.sh` means as "busy".
+- `cli()` puts `--config` after the command words, beside `--profile`: `fakes.py`'s nebius reads
+  `compute instance …` from the front of its argv.
+- `NEBIUS`, when set, is taken as given; `test_absent_cli_is_1_not_69` holds an unknown one to 1.
+- `World.env()` names a HOME under the world: `nebius.sh` now reads `~/.config/peacock/` when
+  nothing else is named, and a test must not take the machine's own GPU key.
+- The CLI lookup tests build their PATH from links to every command but `nebius`: the build image
+  has `/usr/local/bin/nebius`. `test_the_nebius_bin_cli_without_one_on_path` and
+  `test_gpu_host_key_wins_over_the_peacock_key` pass on the code before this change, kept as
+  guards: dropping the fallback or adding both keys fails them.
+- The action's test runs its `run:` block over a curl that installs nothing and a CLI that writes
+  `~/.nebius/config.yaml` and exits 9 on `--config`: the file `GITHUB_ENV` names is the one the
+  CLI made with no config named.
+- A laptop's `peacock.env` without a final newline now reaches the VM as it is: nothing is
+  appended to it there.
+- `nebius.sh`'s `-i ~/.config/peacock/gpu_ed25519` holds on dev too: with `-i`, ssh offers none of
+  its default key files, only that key, an agent's and `~/.ssh/config`'s `IdentityFile` lines. So
+  the GPU VMs' login user must accept `gpu_ed25519.pub`; `GPU_HOST_KEY` names another key.
+- `test_a_missing_config_is_refused_naming_nebius_profiles` also pins an unknown verb beside an
+  absent config to 64. Measured red with the config check moved above the verb check.
+
 ## Reshaped tests
 
 - `test_install_watch_sources.py::test_install_watch_ships_files_that_exist` took every rsync
@@ -124,3 +149,14 @@ plain build of the same Dockerfile from the repository's root, with no build arg
 - `test_provision.py::test_provision_needs_bash_4_4` is `test_the_laptop_scripts_need_bash_4_4`: the
   same checks over `nebius-profiles.sh` too, each script read from the tree rather than the fake
   laptop's clone, which holds only `provision-vm.sh`.
+- `test_provision.py::refused` held the laptop's `~/.config/peacock/` to the GPU key pair alone; it
+  holds it to that and `nebius.yaml`, which every fake laptop now has. It still requires no ssh and
+  nothing new kept.
+- `test_provision_readies_a_vm`, `test_provision_normalises_the_env_file` and
+  `test_provision_copies_the_named_gpu_key` expected a `GPU_SSH_KEY_FILE` line appended to the VM's
+  `peacock.env`. Each now holds the VM's file to the laptop's bytes; the first also holds the VM's
+  `nebius.yaml` to mode 600.
+- `test_install_watch.py`'s `setup` wrote the default source as `~/.nebius/config.yaml`; the default
+  is `~/.config/peacock/nebius.yaml`, so it writes that, with `~/.nebius/config.yaml` at mode 000.
+  `test_install_watch_ships_one_profile_only` held every rsync argument clear of `~/.nebius`; it
+  holds them clear of the whole HOME, which holds both.

@@ -158,6 +158,34 @@ def test_action_profile_input_defaults_to_ci():
         assert "${{" not in body, body
 
 
+def test_action_names_the_config_it_makes():
+    # The action's body, run over a curl that installs nothing and a CLI that, given no --config,
+    # writes the CLI's own default, ~/.nebius/config.yaml: GITHUB_ENV must name that file.
+    [body] = [run_block(s) for s in steps(ACTION.read_text())]
+    with tempfile.TemporaryDirectory() as d:
+        d = pathlib.Path(d)
+        home, stubs, temp = d / "home", d / "stubs", d / "runner-temp"
+        for path, text in ((stubs / "curl", "#!/bin/sh\n"),
+                           (home / ".nebius/bin/nebius",
+                            '#!/bin/sh\nfor a; do [ "$a" != --config ] || exit 9; done\n'
+                            'echo profile > "$HOME/.nebius/config.yaml"\n')):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+            path.chmod(0o755)
+        temp.mkdir()
+        github_env, github_path = d / "env", d / "path"
+        p = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=30,
+                           env={"PATH": f"{stubs}:{os.environ['PATH']}", "HOME": str(home),
+                                "RUNNER_TEMP": str(temp), "GITHUB_ENV": str(github_env),
+                                "GITHUB_PATH": str(github_path), "SA_ID": "s", "PK_ID": "k", "PROJECT_ID": "p",
+                                "PRIVATE_KEY": "pem", "SSH_KEY": "key", "PROFILE": "ci"})
+        assert p.returncode == 0, (p.returncode, p.stderr)
+        named = [ln.split("=", 1)[1] for ln in github_env.read_text().splitlines()
+                 if ln.startswith("GPU_HOST_NEBIUS_CONFIG=")]
+        assert named == [str(home / ".nebius" / "config.yaml")], github_env.read_text()
+        assert pathlib.Path(named[0]).read_text() == "profile\n"
+
+
 def secrets_step(env):
     body = run_block(step(WORKFLOW.read_text(), "secrets"))
     with tempfile.TemporaryDirectory() as d:

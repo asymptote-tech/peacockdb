@@ -34,7 +34,8 @@ list` prints names, the active one with " [default]"; deleting the active profil
 `profile update` with a key prompts, and so fails without a tty, unless it has the endpoint,
 service account and public key id. `version` prints 0.12.293. Each profile, config or version call
 prints FAKE-KEY-MATERIAL on stderr, and on stdout too when its answer is not used, so a caller that
-passes the CLI's output on is caught. World.env() names an empty config for install-watch to copy.
+passes the CLI's output on is caught. World.env() names an empty config for install-watch to copy,
+and a HOME under the world, not made: nebius.sh reads ~/.config/peacock/ when nothing else is named.
 
 The fake nebius and ssh-keyscan read their stdin to the end, as a CLI that reads stdin would:
 a caller that does not give them /dev/null loses the bytes meant for the remote command. The
@@ -222,7 +223,8 @@ class World:
         w = self.read(); w.update(kv); self.write(w)
 
     def env(self):
-        return {**os.environ, "FAKE_WORLD": str(self.path), "NEBIUS": str(self.dir / "nebius"),
+        return {**os.environ, "HOME": str(self.dir / "home"), "FAKE_WORLD": str(self.path),
+                "NEBIUS": str(self.dir / "nebius"),
                 "GPU_HOST_SSH": str(self.dir / "ssh"), "GPU_HOST_KEYSCAN": str(self.dir / "ssh-keyscan"),
                 "GPU_HOST_RSYNC": str(self.dir / "rsync"),
                 "GPU_HOST_NEBIUS_CONFIG": str(self.dir / "nebius-config.yaml"),

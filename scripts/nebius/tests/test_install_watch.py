@@ -1,8 +1,9 @@
 """install-watch on any of the three VMs: one self-contained profile, made on dev from a copy of
 the caller's config, and the install file that names the watcher's instance and kind.
 
-Each test's HOME holds an empty ~/.nebius/config.yaml and a k.pem holding FAKE. The fake nebius
-never reads either; a FAKE in any argv or output means the script read the key."""
+Each test's HOME holds an empty ~/.config/peacock/nebius.yaml, ~/.nebius/config.yaml at mode 000,
+and a k.pem holding FAKE. The fake nebius reads none; a FAKE in any argv or output means the script
+read the key."""
 import pathlib, re, subprocess, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from fakes import World  # noqa: E402
@@ -16,15 +17,18 @@ CPU = "computeinstance-e01t2mm4265y8x88ey"
 def setup(**over):
     w = World(state="RUNNING", **over)
     home = w.dir / "home"
-    (home / ".nebius").mkdir(parents=True)
+    (home / ".config" / "peacock").mkdir(parents=True)
+    (home / ".config" / "peacock" / "nebius.yaml").write_text("")
+    (home / ".nebius").mkdir()
     (home / ".nebius" / "config.yaml").write_text("")
+    (home / ".nebius" / "config.yaml").chmod(0)
     (home / "k.pem").write_text("FAKE")
     (w.dir / "tmp").mkdir()
     return w, home
 
 
 def install(w, home, *args, shell=()):
-    # The real default source, ~/.nebius/config.yaml under the fake HOME; temp dirs under the world.
+    # The real default source, ~/.config/peacock/nebius.yaml under the fake HOME; temp dirs under the world.
     env = {**w.env(), "HOME": str(home), "TMPDIR": str(w.dir / "tmp")}
     del env["GPU_HOST_NEBIUS_CONFIG"]
     p = subprocess.run([*shell, SCRIPT, *args], env=env, capture_output=True, text=True, timeout=60,
@@ -114,7 +118,7 @@ def test_install_watch_ships_one_profile_only():
     assert source.name == "config.yaml" and w.dir / "tmp" in source.parents, source
     for c in calls(w, "rsync"):
         for a in c[1:]:
-            assert str(home / ".nebius") not in a and not a.endswith(".pem"), c
+            assert str(home) not in a and not a.endswith(".pem"), c
     assert not any((w.dir / "tmp").iterdir()), list((w.dir / "tmp").iterdir())
 
 

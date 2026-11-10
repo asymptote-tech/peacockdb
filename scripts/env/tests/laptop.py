@@ -14,7 +14,9 @@ clone's bootstrap-vm.sh is a stub that records its user and arguments, exits FAK
 it is set, installs a fake claude, whose login needs a terminal, into ~/.local/bin, which is not on
 ssh's PATH, and makes an empty clone on the --ref branch; like the real one, it refuses a --ref
 other than the branch an existing clone is on, naming both. The laptop holds a GPU key pair where
-provision-vm.sh looks by default, and ssh-keygen is a fake that records any call.
+provision-vm.sh looks by default, and ssh-keygen is a fake that records any call. Its nebius is
+`nebius_cli.py`'s fake, first on PATH, logging to <tmp>/nebius.log; `~/.config/peacock/nebius.yaml`
+holds editor-eu, active, and eu-west1, both keys embedded; `~/.nebius/config.yaml` is mode 000.
 """
 import json
 import os
@@ -25,6 +27,7 @@ import subprocess
 import tempfile
 
 from machine import KEYS, REPO, git
+from nebius_cli import install_cli, nebius_config
 
 LAPTOP_FILES = ["scripts/env/provision-vm.sh", "scripts/lib/peacock-config.sh", "scripts/lib/ssh-retry.sh"]
 ORIGIN = "git@github.com:asymptote-tech/peacockdb.git"
@@ -142,6 +145,9 @@ if [ "${1:-}" = --ref ]; then ref=$2; fi
 
 FAKE_SSH_KEYGEN = '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_SSH_KEYGEN_LOG"\nexit 1\n'
 GPU_KEY_NAMES = {"gpu_ed25519", "gpu_ed25519.pub"}
+# What every laptop holds in ~/.config/peacock before provision-vm.sh runs.
+HELD_NAMES = GPU_KEY_NAMES | {"nebius.yaml"}
+EMBEDDED = {"key_path": None}
 
 
 def make_key(path, comment):
@@ -282,14 +288,20 @@ class Laptop:
             for name, text in files.items():
                 (d / name).write_text(text)
                 (d / name).chmod(0o755)
+        install_cli(self.bin)
+        self.nebius_yaml = nebius_config(self.config / "nebius.yaml", "editor-eu",
+                                         {"editor-eu": EMBEDDED, "eu-west1": EMBEDDED})
+        own = nebius_config(self.home / ".nebius" / "config.yaml", "old", {"old": EMBEDDED, "editor-eu": EMBEDDED})
+        own.chmod(0)
         (tmp / "claude").write_text(FAKE_CLAUDE)
         (tmp / "claude").chmod(0o755)
         self.ssh_log, self.gh_log, self.keygen_log = tmp / "ssh.log", tmp / "gh.log", tmp / "ssh-keygen.log"
+        self.nebius_log = tmp / "nebius.log"
         self.received = tmp / "received.env"
         self.write_env(KEYS)
         self.env = {"PATH": f"{self.bin}:{os.environ['PATH']}", "HOME": str(self.home), "LANG": "C.UTF-8",
                     "FAKE_SSH_LOG": str(self.ssh_log), "FAKE_GH_LOG": str(self.gh_log),
-                    "FAKE_SSH_KEYGEN_LOG": str(self.keygen_log),
+                    "FAKE_SSH_KEYGEN_LOG": str(self.keygen_log), "FAKE_NEBIUS_LOG": str(self.nebius_log),
                     "FAKE_VMS": str(self.vms), "FAKE_VM_BIN": str(self.vm_bin),
                     "FAKE_BASE_PATH": vm_path(), "FAKE_CLAUDE": str(tmp / "claude"),
                     "PEACOCK_SSH_PAUSES": "0 0 0"}
@@ -336,6 +348,9 @@ class Laptop:
 
     def gh_calls(self):
         return [json.loads(ln) for ln in self.gh_log.read_text().splitlines()] if self.gh_log.exists() else []
+
+    def nebius_calls(self):
+        return [json.loads(ln) for ln in self.nebius_log.read_text().splitlines()] if self.nebius_log.exists() else []
 
     def vm_home(self, address, user):
         return self.vms / address / "home" / user

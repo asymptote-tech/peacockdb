@@ -23,10 +23,14 @@
 #                                 a profile's key path gets the file it names embedded, or the PEM
 #                                 --key-file names; beside an embedded key --key-file is refused
 #
+# Every CLI call names its config, GPU_HOST_NEBIUS_CONFIG, else ~/.config/peacock/nebius.yaml. The
+# CLI is NEBIUS, else nebius on PATH, else ~/.nebius/bin's; no config or no CLI is exit 1. The ssh
+# key is GPU_HOST_KEY, else ~/.config/peacock/gpu_ed25519 when it exists.
+#
 # Exit codes: 0 done; 2 busy, soft stop refused; 75 no capacity, retry later; 69 instance gone;
 # 1 other; 64 usage.
 #
-# NEVER print, cat or grep a Nebius credential file (~/.nebius/config.yaml and friends).
+# NEVER print, cat or grep a Nebius credential file (~/.nebius/config.yaml, nebius.yaml, …).
 # One redaction attempt already leaked a private key into a transcript.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib/ssh-retry.sh
@@ -57,29 +61,37 @@ done
 # One alias per instance in the one known-hosts file, so one VM's new key never touches another's.
 if [ "$INSTANCE_ID" = "$DEFAULT_ID" ]; then ALIAS=nebius-gpu; else ALIAS=nebius-$INSTANCE_ID; fi
 
-NEBIUS=${NEBIUS:-nebius}
 SSH=${GPU_HOST_SSH:-ssh}
 KEYSCAN=${GPU_HOST_KEYSCAN:-ssh-keyscan}
 RSYNC=${GPU_HOST_RSYNC:-rsync}
 USER_ON_VM=${GPU_HOST_USER:-dmitry}
 STATE_DIR=${GPU_HOST_STATE_DIR:-$HOME/.config/peacock/nebius}
-NEBIUS_CONFIG=${GPU_HOST_NEBIUS_CONFIG:-$HOME/.nebius/config.yaml}
+NEBIUS_CONFIG=${GPU_HOST_NEBIUS_CONFIG:-$PEACOCK_NEBIUS_CONFIG}
 POLL=${GPU_HOST_POLL:-10}
 START_TIMEOUT=${GPU_HOST_START_TIMEOUT:-900}
 STOP_TIMEOUT=${GPU_HOST_STOP_TIMEOUT:-600}
 CLI_TIMEOUT=${GPU_HOST_CLI_TIMEOUT:-120}
 KNOWN_HOSTS=$STATE_DIR/known_hosts
 LOG=$STATE_DIR/nebius.log
-[ -x "$HOME/.nebius/bin/nebius" ] && PATH=$HOME/.nebius/bin:$PATH
+
+verb=${1:-}; shift || true
+case $verb in
+  status|ip|start|stop|ssh|rsh|install-watch) ;;
+  *) sed -n '2,31p' "$0" >&2; exit 64;;
+esac
+# Exit 1, not peacock-config.sh's 2: here 2 is "busy".
+[ -f "$NEBIUS_CONFIG" ] \
+  || { echo "nebius: no $NEBIUS_CONFIG: make it with scripts/env/nebius-profiles.sh" >&2; exit 1; }
+if [ -z "${NEBIUS:-}" ]; then peacock_nebius_cli || exit 1; NEBIUS=$PEACOCK_NEBIUS; fi
 mkdir -p "$STATE_DIR"; touch "$KNOWN_HOSTS"
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$LOG" >&2; }
 
-# cli <args…>: the Nebius CLI, bounded, with --profile when one was given. A hung API call must
-# not hold the caller (and a paid VM) past GPU_HOST_CLI_TIMEOUT; timeout(1) exits 124 then. Its
-# stdin is /dev/null: stdin belongs to the remote command (`nebius.sh ssh … < patch`, rsync's -e
-# transport).
-cli() { timeout "$CLI_TIMEOUT" "$NEBIUS" "$@" ${PROFILE:+--profile "$PROFILE"} </dev/null; }
+# cli <args…>: the Nebius CLI on NEBIUS_CONFIG, bounded, with --profile when one was given. A hung
+# API call must not hold the caller (and a paid VM) past GPU_HOST_CLI_TIMEOUT; timeout(1) exits 124
+# then. Its stdin is /dev/null: stdin belongs to the remote command (`nebius.sh ssh … < patch`,
+# rsync's -e transport).
+cli() { timeout "$CLI_TIMEOUT" "$NEBIUS" "$@" --config "$NEBIUS_CONFIG" ${PROFILE:+--profile "$PROFILE"} </dev/null; }
 
 # classify_error <stderr text> <cli rc> [code for a timeout, default 1] -> exit code.
 # Only the CLI's own error codes decide 69 and 75; a bare "not found" (a missing binary, a
@@ -135,8 +147,9 @@ ssh_opts() {
   printf '%s\n' -o "HostKeyAlias=$ALIAS" -o "UserKnownHostsFile=$KNOWN_HOSTS" \
     -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=15 \
     -o ServerAliveInterval=30 -o ServerAliveCountMax=4
-  [ -n "${GPU_HOST_KEY:-}" ] && printf '%s\n' -i "$GPU_HOST_KEY"
-  return 0
+  if [ -n "${GPU_HOST_KEY:-}" ]; then printf '%s\n' -i "$GPU_HOST_KEY"
+  elif [ -f "$PEACOCK_GPU_KEY" ]; then printf '%s\n' -i "$PEACOCK_GPU_KEY"
+  fi
 }
 
 # trust_current_key <ip>: the API says <ip> is this instance's, so its key is the one we
@@ -334,7 +347,6 @@ cmd_install_watch() {
   log "install-watch: watcher installed, root's profile reaches the API"
 }
 
-verb=${1:-}; shift || true
 case $verb in
   status) cmd_status;;
   ip) ip=$(current_ip); [ -n "$ip" ] || exit 1; echo "$ip";;
@@ -343,5 +355,4 @@ case $verb in
   ssh) vm_ssh "$@";;
   rsh) shift; vm_ssh_with 1 "$@";;
   install-watch) cmd_install_watch "$@";;
-  *) sed -n '2,27p' "$0" >&2; exit 64;;
 esac
