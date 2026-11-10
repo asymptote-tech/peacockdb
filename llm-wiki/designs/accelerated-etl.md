@@ -26,7 +26,7 @@ each:
 - a GPU VM with one H100, 16 vCPUs and 200 GB of RAM, which ran the peacockdb engine.
 
 Both ran TPC-H and TPC-DS queries, with the data already in RAM
-([our evals](https://htmlpreview.github.io/?https://github.com/asymptote-tech/peacockdb/blob/ENS-tp4-sized/testdata/benchmark-report.html)).
+([our evals](https://htmlpreview.github.io/?https://github.com/asymptote-tech/peacockdb/blob/ENS-sirius-bench/testdata/benchmark-report.html)).
 The H100 VM ran the queries in 10% to 20% less time. At the same hourly price, that is a 10% to
 20% cost saving.
 
@@ -50,7 +50,7 @@ can load a piece of a table once and use it for every query that reads it. This 
 transfers, decompression and decoding.
 
 A naive
-[prototype](https://htmlpreview.github.io/?https://github.com/asymptote-tech/peacockdb/blob/ENS-tp4-sized/testdata/benchmark-report.html#fused-h100-80gb-hbm3-tpcds-sf40)
+[prototype](https://htmlpreview.github.io/?https://github.com/asymptote-tech/peacockdb/blob/ENS-sirius-bench/testdata/benchmark-report.html#fused-h100-80gb-hbm3-tpcds-sf40)
 ran 79 TPC-DS queries as one fused query. It cut data loading time by 30%, compared with one query
 at a time. In this prototype, most large tables were still read almost once per mention in the
 query text. A fused query that is optimized for the limited GPU memory (VRAM) should do much better.
