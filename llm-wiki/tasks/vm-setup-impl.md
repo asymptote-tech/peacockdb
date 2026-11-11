@@ -632,7 +632,7 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
 **Files:**
 - Modify: `scripts/env/run-gpu.sh`, `.gitignore` (`/.run-gpu-tree`)
 - Create: `scripts/env/tests/test_run_gpu_records.py`
-- Docs: `build-test.md` "The scripts" (`--dir`, the tree's id, `PEACOCK_TREE_ID`)
+- Docs: `build-test.md` "The H100's device run" (`--dir`, the tree's id, `PEACOCK_TREE_ID`)
 
 **Interfaces:**
 - Produces `tree_id_read`: `$PEACOCK_TREE_ID` when set (`[A-Za-z0-9._-]+`, no file read or
@@ -649,8 +649,8 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
 - [ ] **Step 1: failing tests:** `test_a_tree_records_its_id_and_its_dir_on_the_vm`;
   `test_a_copied_tree_is_refused_its_record_before_any_vm_call` (no nebius call; stderr names
   `.run-gpu-tree` and `--dir`); `test_another_tree_s_call_is_refused_before_it_ships_runs_pulls_or_clears`
-  (a second tree of the same name: `ship`, `run list`, `pull`, `pull --clear`, `cancel` each exit 2
-  naming `--dir`, no rsync of the dir, no device run, nothing removed);
+  (a second tree of the same name: `ship`, `run list`, `pull`, `cancel`, and `pull --clear` from
+  Task 12, each exit 2 naming `--dir`, no rsync of the dir, no device run, nothing removed);
   `test_a_dir_made_before_tree_is_claimed_by_the_first_tree`;
   `test_a_fixed_tree_id_owns_its_dir_and_writes_no_record` (`PEACOCK_TREE_ID=ci --dir ci` from two
   fresh trees → both accepted, no `.run-gpu-tree`); `test_status_and_follow_claim_nothing`.

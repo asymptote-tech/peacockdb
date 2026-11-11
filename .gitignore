@@ -8,6 +8,9 @@ target-cudf*/
 # tree: docker run ... -e CARGO_TARGET_DIR=$PWD/target-img-<v> -e HOME=$PWD/.home-img.
 /target-img-*/
 /.home-img/
+# run-gpu.sh's id for this tree and its path (llm-wiki/build-test.md, "The H100's device run"), and
+# the temp file it is linked from.
+/.run-gpu-tree*
 
 # CMake / C++ build artifacts
 cpp/build/

@@ -48,13 +48,20 @@
 # every user of the VM (PEACOCK_CARD_LOCK), and holds it while its container lives. Ctrl-C, a TERM or
 # a dropped ssh ends the following alone; follow takes it up again.
 #
+# ~/peacock/<i>/ is one tree's: its .tree holds the id of the tree that made it, or of the first to
+# reach a dir made before .tree, and every other tree's prepare, ship, run, pull and cancel is
+# refused before it touches the dir; status and follow claim nothing. A tree's id is made at its
+# first claim and kept in its git-ignored .run-gpu-tree with the tree's path, so a copied or moved
+# tree is refused it before any call. PEACOCK_TREE_ID, when set, is the id instead, and no file is
+# read or written: for a checkout made anew on every run, as CI's is.
+#
 # Exit 0; 1 the run failed or ended with no status, a ship stream gave up, or ssh dropped while
 # following; 2 bad input (nebius.sh's 64 too), a stale image, one not published (the images.yml
-# dispatch named), a run in progress, a step missing (prepare, ship), or a driver query that fails or
-# lists no GPU; a pull that failed otherwise, docker's; 3 a card below compute capability 8.0, or one
-# whose driver is older than the run image needs; 4 restart the VM (nebius.sh stop --force, start),
-# then prepare again; 5 status: the run goes on; 130 or 143 a run or follow interrupted, the run
-# going on; else nebius.sh's (75, 69).
+# dispatch named), a run in progress, a step missing (prepare, ship), a driver query that fails or
+# lists no GPU, another tree's dir, or a copied tree's .run-gpu-tree; a pull that failed otherwise,
+# docker's; 3 a card below compute capability 8.0, or one whose driver is older than the run image
+# needs; 4 restart the VM (nebius.sh stop --force, start), then prepare again; 5 status: the run goes
+# on; 130 or 143 a run or follow interrupted, the run going on; else nebius.sh's (75, 69).
 # status: 0 exited 0, 1 exited non-zero or ended without a status, 2 none. follow: as run, 2 no run.
 # cancel: 0, or 1 when the run ended with no status or its container stays.
 set -euo pipefail
@@ -123,6 +130,32 @@ esac
 [ -f "$root/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda has no cudf-$cudf.spec"
 [ -n "$instance" ] \
   || die "name the VM with --instance-id, nebius-gpu's too: without it nebius.sh picks nebius-gpu silently"
+
+# The tree's id, which a VM dir keeps as its owner's (the usage above): PEACOCK_TREE_ID, else
+# .run-gpu-tree's, made by tree_claimed.
+TREE_RECORD=$root/.run-gpu-tree
+tree_path=$(cd "$root" && pwd -P)
+
+# tree_id_read: sets TREE_ID, empty while the tree has no record. Refuses, exit 2, a record made for
+# another path.
+tree_id_read() {
+  local lines=()
+  if [ -n "${PEACOCK_TREE_ID+set}" ]; then
+    [[ "$PEACOCK_TREE_ID" =~ ^[A-Za-z0-9._-]+$ ]] \
+      || die "PEACOCK_TREE_ID=$PEACOCK_TREE_ID: a tree's id is letters, digits, '.', '_' and '-'"
+    TREE_ID=$PEACOCK_TREE_ID
+    return 0
+  fi
+  TREE_ID=""
+  [ -f "$TREE_RECORD" ] || return 0
+  mapfile -t lines < "$TREE_RECORD"
+  [ "${lines[1]:-}" = "$tree_path" ] \
+    || die ".run-gpu-tree was written for ${lines[1]:-no path}, not this tree: a copy or a moved tree" \
+           "needs an id of its own: remove .run-gpu-tree, then name a dir of its own with --dir <name>"
+  [[ "${lines[0]:-}" =~ ^[0-9a-f]{32}$ ]] || die "$TREE_RECORD holds no id: remove it"
+  TREE_ID=${lines[0]}
+}
+tree_id_read
 
 . "$root/scripts/lib/peacock-config.sh"
 . "$root/scripts/lib/image-inputs.sh"
@@ -260,7 +293,47 @@ cards_checked() {
   done <<< "$answer"
 }
 
+# tree_claimed: the dir on the VM made or claimed for this tree, or refused, exit 2, as another's;
+# the first VM step of every verb that writes there. The record is made first, by a link, so a call
+# killed between the two never leaves a dir claimed by an id the tree has lost, and two calls at once
+# keep one id.
+tree_claimed() {
+  local tmp
+  if [ -z "$TREE_ID" ]; then
+    tmp=$(mktemp "$TREE_RECORD.XXXXXX")
+    printf '%s\n%s\n' "$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')" "$tree_path" > "$tmp"
+    ln "$tmp" "$TREE_RECORD" 2> /dev/null || true
+    rm -f "$tmp"
+    tree_id_read
+    # The link fails on a name taken by another call's record, and also on a dangling link or a
+    # directory there, or a filesystem without hard links: then there is still no record.
+    [ -n "$TREE_ID" ] || die "could not make $TREE_RECORD: remove what is there, or set PEACOCK_TREE_ID"
+  fi
+  on_vm vm_tree_claimed "$dir" "$TREE_ID"
+}
+
 # --- the VM's side: sent by on_vm, never run here --------------------------------------------------
+
+# vm_tree_claimed <i> <tree id>: ~/peacock/<i> made, with .tree holding <tree id>; one with no .tree,
+# made before a dir kept its tree, claimed; one whose .tree is another id refused, exit 2, as is an
+# empty id. .tree is made whole by a link, so a call at the same moment never reads it half-written.
+vm_tree_claimed() {
+  local base=$HOME/peacock/$1 old=0
+  [ -n "$2" ] || { echo "run-gpu.sh: no tree id to claim ~/peacock/$1 with" >&2; exit 2; }
+  [ ! -d "$base" ] || [ -f "$base/.tree" ] || old=1
+  mkdir -p "$base"
+  if [ ! -f "$base/.tree" ]; then
+    printf '%s\n' "$2" > "$base/.tree.$$"
+    if ln "$base/.tree.$$" "$base/.tree" 2> /dev/null && [ "$old" -eq 1 ]; then
+      echo "==> ~/peacock/$1: claimed for this tree; it was made before a dir kept its tree's id"
+    fi
+    rm -f "$base/.tree.$$"
+  fi
+  [ "$(cat "$base/.tree")" = "$2" ] || {
+    echo "run-gpu.sh: ~/peacock/$1 on the VM is another tree's: name a dir of your own with --dir <name>" >&2
+    exit 2
+  }
+}
 
 # vm_docker: docker through sudo while the docker group the user joined is not yet in effect.
 # shellcheck disable=SC2033  # `sudo docker` is the binary, as meant
@@ -708,7 +781,7 @@ cmd_prepare() {
     [ -f "$PEACOCK_ENV" ] || die "no $PEACOCK_ENV: the storage keys (llm-wiki/build-test.md, \"The env file\")"
     peacock_env_has_storage "$PEACOCK_ENV"
   fi
-  vm "mkdir -p ~/peacock/$dir"
+  tree_claimed
   (cd "$root" && to_vm "peacock/$dir/" -R "${KIT[@]}")
   on_vm vm_system
   [ "$no_sf40" -eq 1 ] || on_vm vm_nsight
@@ -760,6 +833,7 @@ cmd_ship() {
     links+=("$ds:$(data_inputs "$root")/$ds")
   done
   for ds in "${SF40_SETS[@]}"; do links+=("?$ds:$ds"); done
+  tree_claimed
   on_vm vm_ship_ready "$dir" "${links[@]}"
   SHIP_LOGS=$(mktemp -d)
   trap 'rm -rf "$SHIP_LOGS"' EXIT
@@ -779,6 +853,7 @@ cmd_ship() {
 
 cmd_run() {
   local envs=()
+  tree_claimed
   # The VM's run image as prepare left it: no pull, so a run never takes an image prepare did not
   # check, and a tree whose image inputs moved since is refused.
   run_image_read
@@ -800,10 +875,14 @@ cmd_run() {
 
 cmd_status() { on_vm vm_status "$dir"; }
 cmd_follow() { following vm_follow "$dir"; }
-cmd_cancel() { on_vm vm_cancel "$dir"; }
+cmd_cancel() {
+  tree_claimed
+  on_vm vm_cancel "$dir"
+}
 
 cmd_run_staged() {
   local envs=() args=(--nocapture --test-threads=1)
+  tree_claimed
   run_image_read
   cards_checked
   [ -z "${PCK_TEST_FILTER:-}" ] || envs+=("PCK_TEST_FILTER=$PCK_TEST_FILTER")
@@ -814,6 +893,7 @@ cmd_run_staged() {
 
 cmd_pull() {
   local logs=${XDG_CACHE_HOME:-$HOME/.cache}/peacock/run-gpu/$dir
+  tree_claimed
   on_vm vm_pull_ready "$dir"
   mkdir -p "$root/testdata/benchmark-results" "$root/testdata/calibration" "$logs"
   # --update: a file edited here since it was shipped stays as it is.

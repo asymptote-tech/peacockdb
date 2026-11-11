@@ -9,6 +9,7 @@ Branch `ENS-vm-setup`, forked from `ENS-containers-only` at `7aeec989`; its PR t
 - 2026-11-09: Task 2 on dev, below. Dev's docker keeps the branch's 25.02 build and run images
   (inputs tags below) for Tasks 13, 14 and 16.
 - Task 10: the runner, `follow`, `cancel`, `--init` and the card lock; below.
+- Task 11: one tree per VM dir; below.
 
 ## Plain builds
 
@@ -303,6 +304,58 @@ plain build of the same Dockerfile from the repository's root, with no build arg
   on. bench-each counts the case red and moves on; the next case's `run bench` is refused, exit 2,
   because the run still goes, and bench-each stops with "run-gpu.sh exited 2". Its rework in Task 12
   should follow the going run (or wait for it) before the next case.
+- `pull --clear` claims the dir before anything: `tree_claimed` already comes first in `cmd_pull`.
+  Add `("pull", "--clear")` to the verbs `test_another_tree_s_call_is_refused_before_it_ships_runs_pulls_or_clears`
+  and `test_a_copied_tree_is_refused_its_record_before_any_vm_call` refuse, and to the first one's
+  check that nothing in the dir was touched.
+
+### For Task 13
+
+- If any `gpu-tests` run reached nebius-gpu after Task 11 and before Task 13, `~/peacock/ci/.tree`
+  holds a random id and refuses `PEACOCK_TREE_ID=ci`, exit 2, naming `--dir`. Recovery, once, by hand
+  with the VM up: `scripts/nebius.sh --instance-id computeinstance-e00tnrse7ayntnzcyt ssh 'rm
+  ~/peacock/ci/.tree'`. The next call with `PEACOCK_TREE_ID=ci` claims the dir as one made before
+  `.tree`, and says so.
+
+## One tree per VM dir
+
+- The tree's record is made on dev before the VM's claim, not after it succeeds. A call killed
+  between a claim and a later write would leave the dir claimed by an id the tree no longer has.
+  So a refused claim leaves the record; it is the tree's id all the same, and its next call with
+  `--dir <name>` uses it. The earlier branch's "a refused name is not recorded" is dropped for this.
+- Both the record and `.tree` are written whole to a temp file and linked into place (`ln`, which
+  fails on an existing name). The plan's `set -C` makes the file empty and then writes it, so a call
+  at the same moment could read it empty and take the dir as another tree's. Two first calls at once
+  keep one id. No test races them.
+- The claim is a call of its own, one ssh more per verb, rather than folded into each verb's first
+  VM function: `run`'s first VM step is the image read, so a claim in `vm_run` would come after it.
+- `status` and `follow` read the record, so a copied tree is refused them before any call, as every
+  verb is. They make nothing, on dev or the VM, and a second tree may read another's run with them.
+- `cancel` claims: a second clone of the same name must not cancel the first's run. Like every
+  claiming verb it makes a missing dir, with its `.tree`.
+- `PEACOCK_TREE_ID` set but empty is refused, not taken as unset: an expression in CI that expands
+  empty would otherwise make a record in each fresh checkout and claim the dir by a random id.
+- A claim of a dir from before `.tree` is said once on stdout, `claimed for this tree`.
+- Until Task 13, CI's `gpu-tests` names no `PEACOCK_TREE_ID`: its first run claims `~/peacock/ci/` by
+  a random id, and the next run's fresh checkout is refused. The job runs only on a push to master or
+  a dispatch, and Task 13 comes before the merge. A dir once claimed stays claimed: a `gpu-tests` run
+  between the two leaves `~/peacock/ci/.tree` holding a random id, which refuses Task 13's
+  `PEACOCK_TREE_ID=ci` too ("### For Task 13").
+- A record that cannot be made (`.run-gpu-tree` a dangling link or a directory, or a filesystem
+  without hard links) is refused, exit 2, before any VM call; the link's failure alone cannot tell
+  it from another call's record. The VM refuses an empty id too, rather than write an empty `.tree`
+  that every such tree would share. Temp files of the record are `/.run-gpu-tree*` in `.gitignore`.
+- The plan puts the docs in build-test.md's "The scripts"; `run-gpu.sh` is described in "The H100's
+  device run", so the bullet is there, with the exit table's row 2.
+- Red before the change: all six (`0 passed, 6 failed`). `test_status_and_follow_claim_nothing` fails
+  only at its last line, the dir's `.tree`: what it guards is something not done. Each guard was
+  then turned red by a change to the script: `status` claiming; `cancel` claiming nothing; `run`
+  claiming after its run; an empty `PEACOCK_TREE_ID` taken as unset; the record's path unchecked.
+- Second round, red before the fixes: `test_a_record_that_cannot_be_made_is_refused_before_any_vm_call`
+  (the claim went out with an empty id; only the missing `prepare` stopped `ship`), and
+  `test_the_vm_refuses_an_empty_tree_id` with the VM's check removed. `ship` added to the other
+  tree's calls beside the owner's going run went red with `ship`'s claim moved after
+  `vm_ship_ready`, which re-points the owner's dataset links.
 
 ## Reshaped tests
 
@@ -408,3 +461,23 @@ From `4e785104`'s `test_gpu.py` and `test_gpu_locks.py`, for the runner (Task 10
   (`test_a_second_install_waits_and_says_so`,
   `test_a_second_user_s_first_prepare_joins_the_group_before_it_holds`); the power cases, which are
   `nebius.sh`'s here.
+
+From `4e785104`'s `test_gpu_records.py`, for one tree per dir (Task 11):
+
+- `test_a_tree_records_its_instance_and_later_commands_take_it` as
+  `test_a_tree_records_its_id_and_its_dir_on_the_vm`. The record holds an id and the tree's path,
+  not a dir: `--dir` names the dir on each call. So later calls keep one id, in a second dir too. Its
+  half that each call names the record on stdout is dropped: there is no recorded name to say.
+- `test_a_copied_tree_is_refused_the_record_it_carries` as
+  `test_a_copied_tree_is_refused_its_record_before_any_vm_call`, over every verb, `status` and
+  `follow` included.
+- `test_a_second_tree_under_a_taken_name_is_refused_on_the_host` as
+  `test_another_tree_s_call_is_refused_before_it_ships_runs_pulls_or_clears`, with a going run of the
+  owner's that the other tree's `cancel` and `run` leave alone. Its `pull --clear` is Task 12's; its
+  "a refused name is not recorded" is dropped (above, "One tree per VM dir").
+- Dropped, no such design here: `test_an_instance_other_than_the_tree_s_record_is_refused_before_any_ssh`
+  (the record names no dir); `test_an_instance_and_a_tree_outside_one_never_share_a_dir` and
+  `test_an_instance_neither_reads_nor_writes_the_tree_s_record` (no instance mode; a fixed
+  `PEACOCK_TREE_ID` is the nearest, and `test_a_fixed_tree_id_owns_its_dir_and_writes_no_record` holds
+  it to no file read or written, and to a dir of its own against a tree's id).
+- The bench, record and pull cases are Task 12's.
