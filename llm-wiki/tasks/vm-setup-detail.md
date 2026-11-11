@@ -11,6 +11,7 @@ Branch `ENS-vm-setup`, forked from `ENS-containers-only` at `7aeec989`; its PR t
 - Task 10: the runner, `follow`, `cancel`, `--init` and the card lock; below.
 - Task 11: one tree per VM dir; below.
 - Task 12: records and logs under a stamp, ship's stamp, `pull`, `pull --clear`, bench-each; below.
+- Task 13: CI's `gpu-tests` names a fixed tree id and cleans up with `cancel`; below.
 
 ## Plain builds
 
@@ -429,6 +430,53 @@ plain build of the same Dockerfile from the repository's root, with no build arg
   fake run-gpu.sh gains `conflict`: the next pull exits 1 naming a `gpu-result.txt`, after it has
   brought the records home and cleared them, as the real one does.
 
+## CI's gpu-tests: a fixed tree id and cancel
+
+- `PEACOCK_TREE_ID: ci` is in the job's `env:`, not a step's: `prepare`, `ship`, `run` and `cancel`
+  all claim `~/peacock/ci/`, and a step without it would claim by a random id. No other line of the
+  job may name it: a step's `env:`, an inline assignment, an `unset` or a `$GITHUB_ENV` line would
+  give some calls another id.
+- `cancel` claims first, with the same id, then ends the run. Its bounds in the cleanup, read from
+  the code: a stopped VM is exit 1 after `current_ip`'s one CLI call (`GPU_HOST_CLI_TIMEOUT`, 120
+  s); an unreachable one after ssh-retry's four attempts (`ConnectTimeout=15`, pauses 5, 10, 20 s);
+  a session that dies after authenticating by `ServerAliveInterval=30` times 4; a going list by the
+  runner's `docker stop -t 30`. Unbounded only on the VM: `vm_locked`'s wait for `run/lock` held by
+  another call on the dir (CI's calls are one job at a time), and a docker that hangs.
+- The step has no `timeout-minutes`: one would cut the soft stop along with the cancel. In a job
+  that ran its course the job's 150-minute limit bounds the cleanup; in a cancelled job the bound is
+  GitHub's short grace for `always()` steps after a cancel, not that limit. A limit, if one is ever
+  wanted, goes as `timeout <s>` on the cancel alone; the guard reads past `timeout`.
+- A `.tree` holding a random id ("### For Task 13") refuses `prepare`, the first claiming call, exit
+  2: the job goes red there, `ship` and `run` are skipped, and it starts no run. The cleanup's
+  `cancel` is refused the same way, echoed, and the soft stop is refused only if another party's run
+  holds the card.
+- The guard adds checks to the plan's list. The cancel is the last command before the first `||` of
+  its line, and what follows that `||` is only `echo`, `true` or `:`: the job's shell is `bash -e`,
+  and a failed cancel, or `|| exit 1`, `|| false`, `|| { …; exit 1; }` after it, would end the step
+  before the soft stop. No `nebius.sh stop` comes before it, since a going run's card lock refuses
+  the soft stop. The plan's `${{` check is the literal-id check (the set `run-gpu.sh` takes), and a
+  cancel naming another dir is refused by the every-call `--dir` rule: with a branch of its own,
+  removing either turned nothing red.
+- The cleanup's `if:` comment said the VM had no lock; since Task 10 the soft stop counts the card's
+  lock as busy, and the comment says so. So did build-test.md's "Contention is accepted" line, now
+  that a hard stop alone can kill another's run.
+- `gpu-tests` never pulls or clears, so since the runner (Task 10) `~/peacock/ci/logs/` keeps one
+  `list-<stamp>.log` per run, where it kept one `list.log` before. build-test.md's "### Disk" says
+  they are safe to remove; nothing prunes them.
+- Red before the change: `0 passed; 1 failed`, naming no cancel and no `PEACOCK_TREE_ID`. Each rule
+  then went red alone when disabled: the `always()` condition, the `||`, the cancel as the last
+  command before it, the stop's order, the literal id, the every-call `--dir`, the containers named,
+  and every cancel line read rather than the first. Second round, red before: the seven new refused
+  cases (`|| exit 1`, `|| false`, `|| { echo …; exit 1; }`; a step's id over the job's, an inline
+  id, `unset`, a `$GITHUB_ENV` line), the first of them `accepted`; with the `||` tail check off the
+  three `||` cases are accepted, and with the other-lines check off the four id cases.
+- `test_run_gpu.py::test_run_gpu_runs_cis_sequence_on_nebius_gpu` passed as soon as it took
+  `PEACOCK_TREE_ID=ci` and the cleanup's `cancel`: the behaviour is Tasks 10 and 11's. Without the
+  id on `prepare`, or on `cancel` alone, it fails, exit 2, "another tree's".
+- The workflow: parsed with Python's yaml (the job's `env:` is `{'PEACOCK_TREE_ID': 'ci'}`); the
+  cleanup's `run:` passes `bash -n`, and under `bash --noprofile --norc -eo pipefail`, the job's
+  shell, with a cancel failing 1 and a stop failing 2, both are echoed and the step exits 0.
+
 ## Reshaped tests
 
 - `test_install_watch_sources.py::test_install_watch_ships_files_that_exist` took every rsync
@@ -506,6 +554,18 @@ plain build of the same Dockerfile from the repository's root, with no build arg
   holds no record of either kind left on either side. The rest is unchanged.
 - `test_bench_each_sets_aside_a_record_a_killed_run_left` also leaves a `records-<stamp>.tsv` of a run
   whose pull never came; both are set aside before the first case, each as attempt 1 of its case.
+- `ci_gpu.rs::the_gpu_job_owns_its_dir_and_removes_its_container` is
+  `the_gpu_job_owns_its_dir_and_cancels_its_run`. It required a cleanup step running `docker rm -f
+  peacock-<dir>` under an `if:` that starts `always()`; it requires `run-gpu.sh … --dir <dir>
+  cancel` there, forgiven by `||` and `echo`, `true` or `:` alone, before any stop, and a literal
+  `PEACOCK_TREE_ID` in the job's `env:` and on no other line of the job. Its no-`if`, `success()`,
+  commented-out and no-cleanup cases now hold the cancel. The `--dir` rules and "any `docker
+  rm|kill|stop` names `peacock-<dir>` alone" are kept, with their cases beside the cancel; "a second
+  docker rm" is dropped, the "another container" case once no rm is required.
+- `test_run_gpu.py::test_run_gpu_runs_cis_sequence_on_nebius_gpu` modelled CI as three calls with no
+  tree id. Each call now takes `PEACOCK_TREE_ID=ci`, a fourth, `cancel`, finds the run ended (exit
+  0), the VM dir's `.tree` holds `ci`, and no `.run-gpu-tree` is made in the checkout. The dir,
+  container and install assertions are unchanged.
 
 ## Ported and dropped cases
 

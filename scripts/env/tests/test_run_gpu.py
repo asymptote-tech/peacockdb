@@ -80,12 +80,19 @@ def test_run_gpu_without_an_instance_id_is_refused():
 
 def test_run_gpu_runs_cis_sequence_on_nebius_gpu():
     """gpu-tests' calls, against the L40S, named by its id with no profile, the install relative, in
-    ~/peacock/ci/ as container peacock-ci: never the dir and container of a clone named peacockdb."""
+    ~/peacock/ci/ as container peacock-ci: never the dir and container of a clone named peacockdb.
+    The job's fixed tree id claims the dir and leaves no record in the checkout; its cleanup's cancel
+    finds the run ended."""
+    ci = {"PEACOCK_TREE_ID": "ci"}
     with Host() as h:
-        ok(h.gpu(*L40S, "--dir", "ci", "prepare", "--no-sf40", vm=None))
-        ok(h.gpu(*L40S, "--dir", "ci", "ship", "--install", "cpp/install", vm=None))
-        r = ok(h.gpu(*L40S, "--dir", "ci", "run", "list", vm=None))
+        ok(h.gpu(*L40S, "--dir", "ci", "prepare", "--no-sf40", env=ci, vm=None))
+        ok(h.gpu(*L40S, "--dir", "ci", "ship", "--install", "cpp/install", env=ci, vm=None))
+        r = ok(h.gpu(*L40S, "--dir", "ci", "run", "list", env=ci, vm=None))
         assert "run-tests.sh list: green" in r.stdout, r.stdout
+        r = ok(h.gpu(*L40S, "--dir", "ci", "cancel", env=ci, vm=None))
+        assert "no run of ci goes on the VM" in r.stdout, r.stdout
+        assert (h.vm_dir("ci") / ".tree").read_text() == "ci\n"
+        assert not (h.tree / ".run-gpu-tree").exists()
         for a in h.nebius_calls():
             assert a[:2] == L40S and a[2] in ("ssh", "rsh"), a
         assert (h.vm_dir("ci") / "cpp/install/lib/libpeacock_gpu.so").read_text() == "staged"
