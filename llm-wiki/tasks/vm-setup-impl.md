@@ -684,31 +684,36 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   `records.tsv`, the goldens' `gpu-result*.txt`, and `logs/`, whose home is
   `~/.cache/peacock/run-gpu/<i>/`.
 - Produces in `ship`: once every stream is done, `vm_shipped <i>` takes on stdin the testdata
-  stream's paths that lie in the pulled set and writes `~/peacock/<i>/.shipped` whole, through a
-  temp file: `<sha256>  <path under ~/peacock/<i>/>` of the VM's copy of each. A failed ship
-  leaves the stamp before it. The stamp is content, not a time: rsync gives a shipped file dev's
-  mtime, and a file a run wrote before a ship was never shipped.
+  stream's paths that lie in the pulled set and sets their lines of `~/peacock/<i>/.shipped`
+  through a temp file moved into place: `<sha256>  <path under ~/peacock/<i>/>` of the VM's copy of
+  each; the lines of files this ship did not send stay, so a file removed from git is not pulled
+  back. A failed ship leaves the stamp before it. The stamp is content, not a time: rsync gives a
+  shipped file dev's mtime, and a file a run wrote before a ship was never shipped.
 - Produces `pull [--clear]`: `--clear` while the dir's run goes → exit 2 naming `follow`, before
-  any transfer. `vm_pull_list <i>` prints `<sha256> <stamped sha256, or -> <path>` for each file
-  of the pulled set whose sha256 is not its `.shipped` line's. A file whose sha is the stamped one
-  is the copy the stamp names (shipped, or brought home by a pull), and is skipped without a word
+  any transfer. `vm_pull_list <i>` prints `<sha256> <stamped sha256, or -> <path>` for each file of
+  the pulled set whose sha256 is not its `.shipped` line's. A file whose sha is the stamped one is
+  the copy the stamp names (shipped, or brought home by a pull), and is skipped without a word
   whatever its local time. The listed files come to a temp dir (`from_vm … --files-from`), then
   each: no local copy → moved in; the local bytes the VM's → nothing; the local bytes the stamped
   ones (unchanged here) → replaced; else the local copy stays, stderr `run-gpu.sh: pull: kept
   <path>: it changed here and on the VM`, and the exit is 1 once the rest is home. A local
-  `records-*.tsv` that differs from the VM's is never replaced, stamped or not. Then
-  `vm_stamped <i>` takes on stdin `<sha256>  <path>` of each listed file now the same on both
-  sides and, under `run/lock`, sets its `.shipped` line (making the file when there is none), so a
-  later run's change to a file pulled home is taken, not named: bench-each's next section in the
-  same `<mode>.benchmark.txt`. A dir with no `.shipped` (shipped before this branch) lists every
-  file with `-`. With `--clear`, then: `<sha256> <path under ~/peacock/<i>/>`
-  for each pulled record and log, of its local copy, on ssh's stdin to `vm_cleared <i>`, which under
-  `run/lock` removes each file of that sha, names each it keeps, and never touches `records.tsv`.
+  `records-<stamp>.tsv` (`records-[0-9]*.tsv`: `create_nsys_profile.sh`'s `records-metrics.tsv`
+  follows the ordinary rule) that differs from the VM's is never replaced, stamped or not. Then
+  `vm_stamped <i>` takes on stdin `<sha256>  <path>` of each listed file now the same on both sides
+  and, under `run/lock`, sets its `.shipped` line (making the file when there is none), so a later
+  run's change to a file pulled home is taken, not named: bench-each's next section in the same
+  `<mode>.benchmark.txt`. A dir with no `.shipped` (shipped before this branch) lists every file
+  with `-`. With `--clear`, then: `<sha256> <path under ~/peacock/<i>/>` for each pulled record and
+  log (the VM lists them in the pull's first call), of its local copy, on ssh's stdin to
+  `vm_cleared <i>`, which under `run/lock` removes each file of that sha and its `.shipped` line,
+  names each it keeps, and never touches `records.tsv`. The going check of `--clear` is made under
+  `run/lock`.
 - Produces in bench-each.sh: no ssh for records. Before the loop, and per case after `run bench`:
-  `run-gpu.sh pull --clear`, then each `testdata/calibration/records-*.tsv` new since before the
-  pull set aside as today (`<dir>/<ds>-<q>-<mode>.<attempt>.tsv` by its last row's case; one with
-  no row removed). Exits as today; a pull's non-zero stops it with that exit (1: a file changed
-  here and on the VM, which the pull named).
+  `run-gpu.sh pull --clear`, then each `testdata/calibration/records-[0-9]*.tsv` new since before
+  the pull set aside (a non-zero pull's too, before its exit is acted on) as today
+  (`<dir>/<ds>-<q>-<mode>.<attempt>.tsv` by its last row's case; one with no row removed). Exits as
+  today; a pull's non-zero stops it with that exit (1: a file changed here and on the VM, which the
+  pull named).
 
 - [ ] **Step 1: failing tests** (`test_run_gpu_records.py`): `test_each_run_logs_under_its_stamp`;
   `test_each_bench_run_keeps_its_own_record` (two benches → two `records-<stamp>.tsv`, the second
@@ -749,10 +754,12 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
 - [ ] **Step 2: run** `test_run_gpu_records.py`, `test_bench_each.py` → FAIL on those.
 - [ ] **Step 3: implement.**
 - [ ] **Step 4: run** `test_run_gpu*.py`, `test_bench_each.py` → `0 failed`.
-- [ ] **Step 5: the file's length.** `wc -l scripts/env/run-gpu.sh` above 1000 → move the
-  "the VM's side" section whole to `scripts/env/run-gpu-vm.sh` (`# shellcheck shell=bash`, sourced
-  by run-gpu.sh, its functions still sent as text by `on_vm`; `gpu_host.TREE_FILES` gains it), a
-  move with no other change; run Step 4 again.
+- [ ] **Step 5: the file's length.** `wc -l scripts/env/run-gpu.sh` above 1000 → move the "the VM's
+  side" section whole to `scripts/env/run-gpu-vm.sh` (`# shellcheck shell=bash`, sourced by
+  run-gpu.sh, its functions still sent as text by `on_vm`; `gpu_host.TREE_FILES` gains it; CI's
+  shellcheck list names it, since `-x` reads a sourced file for definitions only), a move with no
+  other change but two shellcheck directives the file needs linted alone (SC2164 file-wide: no
+  `set -e` of its own; SC2032 on `vm_docker`); run Step 4 again.
 - [ ] **Step 6: report a checkpoint** `vm-setup: each run keeps its log and record under its stamp; pull skips what ship stamped, keeps a file changed on both sides, and clears what is home`.
 
 ### Task 13: CI's `gpu-tests` names a fixed tree and cleans up with `cancel`

@@ -10,6 +10,7 @@ Branch `ENS-vm-setup`, forked from `ENS-containers-only` at `7aeec989`; its PR t
   (inputs tags below) for Tasks 13, 14 and 16.
 - Task 10: the runner, `follow`, `cancel`, `--init` and the card lock; below.
 - Task 11: one tree per VM dir; below.
+- Task 12: records and logs under a stamp, ship's stamp, `pull`, `pull --clear`, bench-each; below.
 
 ## Plain builds
 
@@ -357,6 +358,77 @@ plain build of the same Dockerfile from the repository's root, with no build arg
   tree's calls beside the owner's going run went red with `ship`'s claim moved after
   `vm_ship_ready`, which re-points the owner's dataset links.
 
+## Records, ship's stamp and pull
+
+- `.shipped` is merged, not replaced: `ship` sets the lines of what it sent and keeps the others,
+  through `vm_stamped`, the same writer as a pull's. Replaced whole, a committed file deleted from
+  git since the last ship (its VM copy stays: the testdata stream has no `--delete`) would lose its
+  line, be listed with `-`, and come back into the tree as new. The plan's "writes `.shipped` whole,
+  through a temp file" is read as atomic.
+- The plan's `records-*.tsv` also matches `create_nsys_profile.sh`'s `calibration/records-metrics.tsv`,
+  which the metrics pass writes on the VM and leaves there. A run's record is
+  `records-<stamp>.tsv`, so `pull --clear`, pull's never-replace rule and bench-each's set-aside take
+  `records-[0-9]*.tsv`. Without that, bench-each would set the metrics pass's rows aside as a case's
+  record and they would reach the join. Red before: `test_bench_each_sets_aside_no_record_but_a_run_s`
+  and the metrics lines of `test_pull_clear_removes_what_came_home_and_keeps_the_rest`.
+- `--clear` asks the VM which records and logs it holds (`vm_clearable`, printed by
+  `vm_pull_ready`, so no extra ssh), and sends the sha256 of only those copies home. Hashing every
+  local log would grow with the cache, which nothing clears, and bench-each pulls once per case.
+- `vm_pull_ready` takes `run/lock` first, then refuses `--clear` while a run goes, then makes the
+  pulled dirs. Two earlier orders were wrong. Making the dirs first changed the dir before the
+  refusal (the snapshot in `test_pull_clear_is_refused_while_a_run_goes`). Checking for a going run
+  before taking the lock let a run that held `run/lock` while it started pass the check; its log,
+  listed once the lock came, unchanged between the transfer and the clear (a run waiting for the
+  card), was then removed while the runner wrote to it
+  (`test_pull_clear_is_refused_by_a_run_that_starts_while_it_waits`, red: `removed 1`). Under the
+  lock a run is either going or not yet started, and one started after the list is taken writes
+  only names the list never held: its own log, and `records.tsv`. A `records.tsv` is kept under
+  its stamp only while no run goes, so a plain `pull` beside a run leaves the run's record alone.
+- `pull --clear` drops the `.shipped` line of each file it removes: otherwise the file grows two
+  lines per bench-each case, for logs and records gone from the VM.
+- `status` and `follow` of a run whose log `pull --clear` removed (every bench-each case ends with
+  one) said `exited 0` and then failed on `tail`/`cat`, exit 1. They now say the log was cleared
+  and where pull keeps it, and exit as the run's status (`vm_log_shown`).
+- bench-each sets aside the records a pull brought before it acts on the pull's exit. A pull that
+  kept another file changed on both sides (a `gpu-result.txt`) exits 1 with the case's record home
+  and the VM's cleared; stopping first left that record in the tree, and the rerun counted it as
+  there before and never set it aside, so the case's segment never reached the join.
+- `vm_records_kept` takes the state's stamp whenever there is a state and no run goes. A
+  `records-<that stamp>.tsv` already there would be overwritten, but a runner moves its record only
+  after its container is gone, so a `records.tsv` with the same stamp beside it cannot arise.
+- pull hashes the copy that came, not the listed sha256: a run may change the file between the list
+  and the transfer, and the stamp must name the bytes now home.
+- `in_pulled_set` is one predicate for both sides: dev filters the shipped paths with it, and it is
+  sent to the VM among the helpers for `vm_pull_list`.
+- bench-each, note (b) above: after `run bench` exits 1, `status` 5 means the run goes on, and
+  `follow` takes it up until it ends; its exit is the case's. Without it the next `pull --clear` is
+  refused and bench-each stops with 2. The fake run-gpu.sh's `drop` behaviour; red before as the
+  verbs sequence.
+- Step 5's split: `run-gpu.sh` reached 1084 lines, so the VM's side, whole, is
+  `scripts/env/run-gpu-vm.sh` (589 lines; run-gpu.sh 520). It is sourced as
+  `. "$root/scripts/env/run-gpu-vm.sh"`: shellcheck resolves `$root` from the repo root, as for the
+  libraries, and `$here` not at all. `-x` follows the source for definitions only; a warning planted
+  in the sourced file is not reported through `run-gpu.sh`, so CI's list names `run-gpu-vm.sh` too.
+  Linted alone it has no `set -e`, so the file disables SC2164 with the reason, and `vm_docker`'s
+  directive gains SC2032, which the dev side's `docker()` directive covered before. The only other
+  edit is `on_vm`'s comment, "a function below" now "a function of run-gpu-vm.sh".
+- Red before the change, `7 passed, 19 failed` over the records file: the 18 new tests but
+  `test_each_run_logs_under_its_stamp`, which passed at red as noted above (logs were already
+  stamped), and the two Task 11 tests with `pull --clear`. Also 6 of 15 bench-each tests, and the
+  reshaped `test_pull_brings_the_results_the_record_and_the_log_home`. Some plan cases pass on rsync's
+  `--update` with the plan's mtime alone, so each also takes the mtime that `--update` gets wrong:
+  `test_pull_skips_a_shipped_file_a_checkout_touched` an hour on (passes on `--update`) and 2001
+  (red); `test_pull_says_nothing_of_an_unchanged_identical_file` a local mtime of 2001, which
+  `--update`'s transfer reset; `test_pull_takes_each_section_a_run_adds_to_a_shipped_file` a local
+  mtime an hour on, as a checkout after the ship leaves it.
+- Second round, red before the fixes: `test_pull_clear_is_refused_by_a_run_that_starts_while_it_waits`
+  (exit 0, the going run's log removed), `test_status_and_follow_of_a_run_whose_log_was_cleared`
+  (exit 1, `tail: cannot open`), the `.shipped` assertion added to
+  `test_pull_clear_removes_what_came_home_and_keeps_the_rest`, and
+  `test_bench_each_sets_aside_the_record_of_a_pull_that_kept_a_file` (no record in `<dir>`). The
+  fake run-gpu.sh gains `conflict`: the next pull exits 1 naming a `gpu-result.txt`, after it has
+  brought the records home and cleared them, as the real one does.
+
 ## Reshaped tests
 
 - `test_install_watch_sources.py::test_install_watch_ships_files_that_exist` took every rsync
@@ -413,7 +485,27 @@ plain build of the same Dockerfile from the repository's root, with no build arg
   the run's code is now set before it is let go, and a second run gives `exited 0`. The log it reads
   is `logs/filter-<stamp>.log`, no longer `logs/filter.log`.
 - `test_pull_brings_the_results_the_record_and_the_log_home` read `bench.log` at home; it reads the
-  one `bench-<stamp>.log`.
+  one `bench-<stamp>.log`. Task 12: it held the pulled `calibration/records.tsv` to exist; a record no
+  run holds is kept under its run's stamp first, so it holds the one `records-<stamp>.tsv`, the bench
+  run's stamp.
+- `test_run_gpu_records.py::test_the_vm_refuses_an_empty_tree_id` read `vm_tree_claimed` from
+  `run-gpu.sh`; the function is now in `run-gpu-vm.sh`, so it goes through `vm_function`, which reads
+  both. The call and the assertions are unchanged.
+- `test_a_copied_tree_is_refused_its_record_before_any_vm_call` and
+  `test_another_tree_s_call_is_refused_before_it_ships_runs_pulls_or_clears` gain `("pull", "--clear")`.
+- `test_bench_each.py`'s fake run-gpu.sh: a run's record ends as `records-<stamp>.tsv`, as the runner
+  keeps it; `pull` keeps a `records.tsv` no run holds, never replaces a local record that differs, and
+  with `--clear` removes each VM record whose copy home is the same; `status` and `follow` answer a
+  run left going by a `drop`.
+- `test_bench_each_runs_one_process_per_query` held the calls to `run bench, pull` four times; it is
+  `pull --clear` first, then `run bench, pull --clear` four times.
+- `test_bench_each_passes_dir_to_run_gpu_alone` held every nebius.sh call to name `peacock/other/`:
+  those were the record checks over ssh, which are gone. It holds every nebius.sh call to no `--dir`,
+  every run-gpu.sh call to `--dir other`, and the results to land in `other`'s VM dir.
+- `test_bench_each_moves_each_record_aside` held the VM's and the tree's `records.tsv` absent; it
+  holds no record of either kind left on either side. The rest is unchanged.
+- `test_bench_each_sets_aside_a_record_a_killed_run_left` also leaves a `records-<stamp>.tsv` of a run
+  whose pull never came; both are set aside before the first case, each as attempt 1 of its case.
 
 ## Ported and dropped cases
 
@@ -481,3 +573,32 @@ From `4e785104`'s `test_gpu_records.py`, for one tree per dir (Task 11):
   `PEACOCK_TREE_ID` is the nearest, and `test_a_fixed_tree_id_owns_its_dir_and_writes_no_record` holds
   it to no file read or written, and to a dir of its own against a tree's id).
 - The bench, record and pull cases are Task 12's.
+
+From `4e785104`'s `test_gpu_records.py`, for records and pull (Task 12):
+
+- `test_each_bench_run_keeps_its_own_record`, under its name. Its second half, a local edit with an
+  old mtime named exit 1, is the stamp's opposite here: the VM's copy is unchanged since the pull,
+  so the edit is kept without a word. Being named once the VM's copy changes is
+  `test_pull_never_replaces_a_local_record_that_differs`.
+- `test_a_killed_bench_s_record_comes_home`, under its name: the runner killed `-9`, the container it
+  left removed by `cancel`, the record home under the run's stamp, not `-interrupted`, and the next
+  bench not refused.
+- `test_pull_clear_removes_the_host_s_records_that_are_home_and_keeps_the_rest` as
+  `test_pull_clear_removes_what_came_home_and_keeps_the_rest`, logs included. A kept record is named
+  by pull's line on stderr and the clear's `kept` line on stdout; a removal is counted, not named.
+- `test_pull_clear_is_refused_while_the_instance_s_run_goes` as
+  `test_pull_clear_is_refused_while_a_run_goes`, naming `follow`; a plain `pull` beside the run added.
+- `test_the_host_s_clear_keeps_records_tsv_and_what_did_not_come_home` as
+  `test_the_vm_s_clear_keeps_records_tsv_and_what_did_not_come_home`, over `vm_cleared` alone, logs
+  included. `records.tsv` stays because no clear lists it, so no `kept records.tsv` line.
+  `records.tsv` is not in `test_pull_clear_removes_what_came_home_and_keeps_the_rest`, as the plan
+  has it: with no run going, the pull keeps it under the last run's stamp before any clear, and with
+  a run going the clear is refused, so only the VM function meets one.
+- `test_pull_brings_the_results_home_and_keeps_a_newer_local_file` as
+  `test_pull_brings_the_results_home_and_keeps_an_edit_made_here`, reshaped to the stamp.
+- Dropped: `test_the_host_s_clear_is_refused_while_the_instance_s_run_goes`. The refusal is the
+  pull's, under `run/lock`, before any transfer, and the list of what may be cleared is taken under
+  the same lock. A run started after that writes only names the list never held (its own log,
+  `records.tsv`), and `vm_cleared` removes only listed files whose copy home has the same sha256, so
+  a clear beside it takes nothing of it. The case of a run being started as the pull comes is
+  `test_pull_clear_is_refused_by_a_run_that_starts_while_it_waits`.

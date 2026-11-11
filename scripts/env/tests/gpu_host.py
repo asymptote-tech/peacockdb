@@ -11,8 +11,9 @@ dropped transport does. `rsync` is the real one, through that rsh. On the VM, do
 JSON world (images and their labels, containers), and reads a run's binds as machine.py's docker
 does, refusing one into the VM user's home. A device run (`--gpus`) is attached: its container runs
 in the world, prints the world's run_output, and holds while the file FAKE_HOLD names exists, then
-ends with run_code; `docker stop` ends it with 143 and `docker rm -f` with 137. A second device run
-while one is on the card fails, as two pools on one card do. nvidia-smi answers its one query from
+ends with run_code; `docker stop` ends it with 143 and `docker rm -f` with 137. With run_record, it
+first writes those rows to its calibration record, as a bench does. A second device run while one is
+on the card fails, as two pools on one card do. nvidia-smi answers its one query from
 the world's cards; sudo records and runs its command, install writes /etc into the VM's root, and
 hostname names the machine. On dev, ssh and docker are fakes that fail loudly: no call may bypass
 nebius.sh. The card lock is PEACOCK_CARD_LOCK, under the test's temp dir, shared by every VM user.
@@ -31,8 +32,8 @@ import time
 from machine import KEYS, REPO, RUN_OPTIONS, git, lib
 
 TREE_FILES = [
-    "scripts/env/run-gpu.sh", "scripts/env/check-build-image.sh", "scripts/env/sf40.sha256", "scripts/lib/image-inputs.sh",
-    "scripts/lib/data-inputs.sh", "scripts/lib/machine.sh", "scripts/lib/peacock-config.sh",
+    "scripts/env/run-gpu.sh", "scripts/env/run-gpu-vm.sh", "scripts/env/check-build-image.sh", "scripts/env/sf40.sha256",
+    "scripts/lib/image-inputs.sh", "scripts/lib/data-inputs.sh", "scripts/lib/machine.sh", "scripts/lib/peacock-config.sh",
     "scripts/lib/s3.sh", "scripts/lib/pinned.sh", "scripts/lib/ssh-retry.sh", "testdata/generate_testdata.sh",
     "cpp/CMakeLists.txt",
 ]
@@ -196,6 +197,16 @@ if a[0] == "run" and "--gpus" in a:
         print(f"fake docker: {w['on_card']} is on the card: two pools on one card fail each other", file=sys.stderr)
         sys.exit(125)
     labels = dict(a[i + 1].split("=", 1) for i, x in enumerate(a) if x == "--label")
+    # run_record: rows the run adds to its calibration record, as a bench does; refused, exit 2, while
+    # the record holds rows, as run-tests.sh refuses an earlier run's.
+    if w.get("run_record") is not None:
+        record = pathlib.Path(host_path(binds, "/peacock/testdata/calibration/records.tsv"))
+        if record.exists() and record.stat().st_size:
+            print("run-tests.sh: testdata/calibration/records.tsv holds an earlier run's rows", file=sys.stderr)
+            sys.exit(2)
+        record.parent.mkdir(parents=True, exist_ok=True)
+        with open(record, "a") as f:
+            f.write(w["run_record"])
     print(w["run_output"], end="", flush=True)  # in the log before the world says it runs
     w["containers"][name] = {"state": "running", "code": None, "pid": os.getpid(), "labels": labels}
     w["on_card"] = name

@@ -10,18 +10,21 @@
 # and with --within only a query holding an `ok` or `wrong` row there (scripts/calibration/
 # device_cases.py reads it): a section already in this tree's device tree is kept, timed or failed.
 # Else `run-gpu.sh … run bench` with PCK_TEST_FILTER=bench_<ds>_sf<sf>_<q>_<mode>,
-# PEACOCK_BENCH_RESUME=1, PEACOCK_BENCH_CASE_TIMEOUT_S=<s> and PCK_WRITE_GPU_RESULT=1; then `pull`,
-# and the pulled testdata/calibration/records.tsv moved to <dir>/<ds>-<q>-<mode>.<attempt>.tsv and
-# removed on the VM, <attempt> one past the highest already there. Before each run, a record a killed
-# run left on the VM is pulled and set aside under its last row's case. The device tree is the one
-# the first measured case's pull wrote into or, when the run kept the case's section (measured on
-# this VM before), the one whose section names the VM's host; its slug is kept in <dir>/device.
+# PEACOCK_BENCH_RESUME=1, PEACOCK_BENCH_CASE_TIMEOUT_S=<s> and PCK_WRITE_GPU_RESULT=1, followed
+# again while it goes on after a dropped ssh; then `pull --clear`, and each
+# testdata/calibration/records-<stamp>.tsv it brought, the run's own or one a killed run left, moved
+# to <dir>/<ds>-<q>-<mode>.<attempt>.tsv by its last row's case, <attempt> one past the highest
+# already there; one with no row is removed. The same pull comes first, before any case. The device
+# tree is the one the first measured case's pull wrote into or, when the run kept the case's section
+# (measured on this VM before), the one whose section names the VM's host; its slug is kept in
+# <dir>/device.
 # --instance-id and --profile go to every run-gpu.sh and scripts/nebius.sh call, --dir to
 # run-gpu.sh alone. --instance-id is required, as run-gpu.sh requires it: without it nebius.sh means
 # nebius-gpu, which runs no sf40. The VM is the caller's to start and stop.
 #
-# Exit 0 every case has its section; 1 one has none (a run died before writing it: rerun); 2 bad
-# input; else the run-gpu.sh exit that stopped it (75, 69: the VM; 3, 4: run-gpu.sh's).
+# Exit 0 every case has its section; 1 one has none (a run died before writing it: rerun), or a pull
+# kept a file changed here and on the VM, which it named, the records it brought set aside first; 2
+# bad input; else the run-gpu.sh exit that stopped it (75, 69: the VM; 3, 4: run-gpu.sh's).
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -76,44 +79,50 @@ done <<< "$lines"
 
 mkdir -p "$records"
 results=$root/testdata/benchmark-results
-record=$root/testdata/calibration/records.tsv
-host_record="~/peacock/$dir/testdata/calibration/records.tsv"
 slug=$(cat "$records/device" 2>/dev/null || true)
 
-# set_aside: the pulled record to <records>/<ds>-<q>-<mode>.<attempt>.tsv by its last row's case,
-# and the VM's copy removed, since run-tests.sh refuses a record holding rows. One with no row is
-# no case's, and is removed on both sides.
+# set_aside <record>: to <records>/<ds>-<q>-<mode>.<attempt>.tsv by its last row's case. One with no
+# row is no case's, and is removed.
 set_aside() {
-  local name attempt n
+  local record=$1 name="" attempt n
   if [ -s "$record" ]; then
     name=$(awk -F'\t' '/^#/ { next } !names { for (i = 1; i <= NF; i++) at[$i] = i; names = 1; next }
                        { q = $at["query"]; m = $at["mode"]; gsub("-", "_", q); gsub("-", "_", m)
                          last = $at["dataset"] "-" q "-" m } END { print last }' "$record")
-    if [ -n "$name" ]; then
-      attempt=0
-      for n in "$records/$name".*.tsv; do
-        [ -e "$n" ] || continue
-        n=${n%.tsv}; n=${n##*.}
-        [ "$n" -le "$attempt" ] || attempt=$n
-      done
-      mv "$record" "$records/$name.$((attempt + 1)).tsv"
-      echo "==> record set aside: $records/$name.$((attempt + 1)).tsv"
-    fi
   fi
-  rm -f "$record"
-  vm "rm -f $host_record"
+  if [ -z "$name" ]; then
+    rm "$record"
+    return 0
+  fi
+  attempt=0
+  for n in "$records/$name".*.tsv; do
+    [ -e "$n" ] || continue
+    n=${n%.tsv}; n=${n##*.}
+    [ "$n" -le "$attempt" ] || attempt=$n
+  done
+  mv "$record" "$records/$name.$((attempt + 1)).tsv"
+  echo "==> record set aside: $records/$name.$((attempt + 1)).tsv"
 }
 
-vm() {
-  local rc=0
-  "${NEBIUS[@]}" ssh "$1" || rc=$?
-  [ "$rc" -eq 0 ] || { echo "bench-each.sh: ${NEBIUS[*]} ssh $1 exited $rc" >&2; exit "$rc"; }
+# The tree's run records, oldest first: records-<stamp>.tsv. records-metrics.tsv is no case's.
+records_here() {
+  local r
+  for r in "$root"/testdata/calibration/records-[0-9]*.tsv; do
+    if [ -e "$r" ]; then echo "$r"; fi
+  done
 }
 
-pull() {
-  local rc=0
-  "${RUN_GPU[@]}" pull || rc=$?
-  [ "$rc" -eq 0 ] || { echo "bench-each.sh: run-gpu.sh pull exited $rc" >&2; exit "$rc"; }
+# pulled: `pull --clear`, then each record it brought set aside. Its VM copy went with the clear, so
+# the next bench's run-tests.sh finds no record holding rows. A pull that kept a file changed on both
+# sides exits 1 with the rest home and cleared, the records too: they are set aside before it stops.
+pulled() {
+  local rc=0 before r
+  before=$(records_here)
+  "${RUN_GPU[@]}" pull --clear || rc=$?
+  while IFS= read -r r; do
+    if ! grep -qxF "$r" <<< "$before"; then set_aside "$r"; fi
+  done < <(records_here)
+  [ "$rc" -eq 0 ] || { echo "bench-each.sh: run-gpu.sh pull --clear exited $rc" >&2; exit "$rc"; }
 }
 
 # has_section <slug> <ds> <sf> <query>: the device tree holds the case's section.
@@ -153,28 +162,28 @@ learn() {
 }
 
 vm_host=""
-[ ! -s "$record" ] || set_aside
+pulled
 for entry in "${selected[@]}"; do
   read -r ds sf query <<< "$entry"
   if [ -n "$slug" ] && has_section "$slug" "$ds" "$sf" "$query"; then
     echo "==> $ds $query $mode: kept, $slug's section is in the tree"
     continue
   fi
-  rc=0
-  left=$("${NEBIUS[@]}" ssh "if test -s $host_record; then echo left; else echo none; fi") || rc=$?
-  [ "$rc" -eq 0 ] || { echo "bench-each.sh: asking the VM for a record a killed run left exited $rc" >&2; exit "$rc"; }
-  if [ "$left" = left ]; then
-    pull
-    set_aside
-  fi
   before=$(holders "$ds" "$sf" "$query")
   start=$(date +%s) rc=0
   PCK_TEST_FILTER=bench_${ds}_sf${sf}_${query}_${mode} PEACOCK_BENCH_RESUME=1 \
     PEACOCK_BENCH_CASE_TIMEOUT_S=$timeout PCK_WRITE_GPU_RESULT=1 "${RUN_GPU[@]}" run bench || rc=$?
+  # 1 is also a dropped ssh, the run going on: followed to its end, or the next case's run is refused.
+  while [ "$rc" -eq 1 ]; do
+    st=0
+    "${RUN_GPU[@]}" status > /dev/null || st=$?
+    [ "$st" -eq 5 ] || break
+    rc=0
+    "${RUN_GPU[@]}" follow || rc=$?
+  done
   echo "==> $ds $query $mode: run-gpu.sh exited $rc after $(( $(date +%s) - start )) s"
   case $rc in 0|1) ;; *) echo "bench-each.sh: stopped at $ds $query $mode: run-gpu.sh exited $rc" >&2; exit "$rc" ;; esac
-  pull
-  set_aside
+  pulled
   if [ -z "$slug" ]; then
     new=$(comm -13 <(sort <<< "$before") <(sort <<< "$(holders "$ds" "$sf" "$query")") | awk '{ print $2 }')
     if [ "$(grep -c . <<< "$new")" -eq 1 ]; then

@@ -817,7 +817,8 @@ def test_pull_brings_the_results_the_record_and_the_log_home():
         r = ok(h.gpu("pull"))
         home = h.tree / "testdata"
         assert (home / "benchmark-results/h100/tpch.sf40/tp1_single.benchmark.txt").read_text() == f"host={HOSTNAME}\n"
-        assert (home / "calibration/records.tsv").is_file()
+        stamp = (h.vm_dir() / "run/state").read_text().split()[3]
+        assert [p.name for p in (home / "calibration").glob("records*.tsv")] == [f"records-{stamp}.tsv"]
         logs = h.laptop / ".cache/peacock/run-gpu/chain-l"
         assert ["bench: green" in f.read_text() for f in logs.glob("bench-*.log")] == [True]
         assert str(logs) in r.stdout
