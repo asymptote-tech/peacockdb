@@ -539,40 +539,52 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
 - Docs: `build-test.md` "The scripts" and "The H100's device run" (verbs, the runner, the lock)
 
 **Interfaces:**
-- Produces in `peacock-config.sh`: `PEACOCK_CARD_LOCK=${PEACOCK_CARD_LOCK:-/run/lock/peacock-card.lock}`
-  (the tests' knob; the dev side passes the value to the VM as an argument) and
-  `peacock_card_take <lock>`: makes the file mode 666 when missing (umask 000), opens it on fd
-  `PEACOCK_CARD_FD`, and when it is held prints `waiting for the card: another run holds <lock>`
-  and waits in the background, so a TERM trap runs at once; returns once held.
-- Produces, per VM dir `~/peacock/<i>/`: `run/state` = `<runner pid> <boot id> <what> <stamp>`
-  (`<what>` the mode or the staged name; boot id `/proc/sys/kernel/random/boot_id`;
-  stamp `date -u +%Y%m%dT%H%M%S.%3NZ`); `run/status` = `<stamp> <code>`; `run/lock`, flocked
-  around a run's start; `logs/<what>-<stamp>.log`. A run *goes* while the state's boot id is this
-  boot's and `kill -0 <pid>` holds.
+- Produces in `peacock-config.sh`:
+  `PEACOCK_CARD_LOCK=${PEACOCK_CARD_LOCK:-/run/lock/peacock-card.lock}` (the tests' knob; the dev
+  side passes the value to the VM as an argument) and `peacock_card_take <lock>`: makes the file
+  mode 666 when missing (umask 000), opens it read-only on fd `PEACOCK_CARD_FD` (returns 1, said,
+  when it can neither make nor open it; the run fails), and when it is held prints `waiting for the
+  card: another run holds <lock>` and waits in the background, so a TERM trap runs at once; returns
+  once held.
+- Produces, per VM dir `~/peacock/<i>/`: `run/state` = `<runner pid> <boot id> <what> <stamp>
+  <start time>` (`<what>` the mode or the staged name; boot id `/proc/sys/kernel/random/boot_id`;
+  stamp `date -u +%Y%m%dT%H%M%S.%3NZ`); `run/status` = `<stamp> <code>`; `run/lock`, flocked around
+  a run's start; `logs/<what>-<stamp>.log`. A run *goes* while the state's boot id is this boot's,
+  `/proc/<pid>/stat` exists and its start time (field 22) is the state's.
 - Produces `vm_run`: under `run/lock`, `vm_idle` (exit 2 while the dir's run goes, naming
-  `run-gpu.sh … follow`; exit 2 for a container `peacock-<i>` with no runner, naming `cancel`),
-  then the state, then `setsid nohup bash -c '<runner text>' … </dev/null >/dev/null 2>&1 &` (every
-  fd redirected: the session's pipes must close), then `vm_follow`, or with `--detach` return 0
-  naming `follow` and `status`.
-- Produces `vm_runner <i> <image id> <what> <stamp> <lock> <docker run argument>…`: output to the
-  log; `peacock_card_take`; `docker run --init --name peacock-<i> --gpus all …` attached, in the
-  background; then `docker rm peacock-<i>`; a staged binary judged as `vm_run_staged` judges now;
-  `run/status`. Its TERM trap: `run-gpu.sh: cancelled` in the log, the card wait given up or
-  `docker stop -t 30 peacock-<i>` until the client ends, `docker rm -f`, then the status.
+  `run-gpu.sh … follow`; exit 2 for a running container `peacock-<i>` with no runner, naming
+  `cancel`; an ended one is removed), then `setsid nohup bash -c '<runner text>' … </dev/null
+  >/dev/null 2>&1 &` (every fd redirected: the session's pipes must close), `run/lock` let go only
+  once the runner has written the state, then `vm_follow`, or with `--detach` return 0 naming
+  `follow` and `status`.
+- Produces `vm_runner <i> <what> <stamp> <lock> <docker run argument>…` (the arguments after
+  `--gpus all`, image ID included): output to the log; its TERM trap, then `run/state`;
+  `peacock_card_take`; `docker run --init --name peacock-<i> --label peacock.dir=<VM dir> --gpus
+  all …` attached, in the background; then `docker rm peacock-<i>`; a staged binary judged as
+  `vm_run_staged` judges now; `run/status`. The trap only sets a flag; each TERM cuts the wait in
+  progress, and the flag then gives `run-gpu.sh: cancelled` in the log, the card wait given up or
+  `docker stop -t 30 peacock-<i>` until the client ends, `docker rm -f` of this dir's container,
+  then the status; a client that ended by itself keeps its status.
 - Produces `follow` (`vm_follow <i>`): `tail -n +1 --pid=<runner> -f <log>`, then exit as `run`
   exits for that stamp's status (0 and 2 as is, else 1); no state → exit 2 naming `status`; no
   status → exit 1 "ended with no status". An attached `run`'s or `follow`'s ssh lost (255) or an
   INT/TERM on dev → stderr names `run-gpu.sh … follow`; exit 1, or 130/143.
-- Produces `cancel` (`vm_cancel <i>`): a going runner gets TERM and is waited for → `cancelled the
-  <what> run started <stamp> (exit <code>)`, or `… ended by itself …`; no runner but a container
-  `peacock-<i>` → removed, said; else `no run of <i> goes`. Exit 0; 1 when the run ended with no
-  status or the container stays.
+- Produces `cancel` (`vm_cancel <i>`): under `run/lock`, a going runner gets TERM every 0.2 s until
+  it ends → `cancelled the <what> run started <stamp> (exit <code>)`, or `… ended by itself …`; no
+  runner but a container `peacock-<i>` → removed, said; else `no run of <i> goes`. Exit 0; 1 when
+  the run ended with no status or the container stays.
 - Produces `status`: first line `none` (2), `waiting` (5: the runner goes, no container yet),
   `running` (5), `exited <code>` (0 or 1), `ended without a status` (1); then the log's last 40.
 - Produces: `create_nsys_profile.sh`'s `remote_pass` heredoc carries `$(declare -f
   peacock_card_take)` and takes the lock before `nsys profile`, held to the end of the pass.
-  `nebius.sh stop`'s probe prints `card lock <lock> held` when the file exists and
-  `flock -n <lock> true` fails → busy, exit 2.
+  `nebius.sh stop`'s probe prints `card lock <lock> held` when the file exists and a read-only
+  `flock -n` on it fails (never an open with `O_CREAT`: under `fs.protected_regular` that fails on
+  another user's file in `/run/lock`) → busy, exit 2.
+- A container `peacock-<i>` is this dir's when its `peacock.dir` label is the dir's path, or it has
+  none: two users' dirs of one name share the container name, never each other's containers. An
+  ended one of another dir refuses a run, exit 2 naming that dir, and is kept (`ship` goes on); the
+  runner, holding the card, refuses any other dir's, status 2; every `docker rm` is of this dir's
+  alone.
 
 - [ ] **Step 1: failing tests** (`test_run_gpu_runs.py`):
   - `test_a_run_outlives_its_session_and_is_followed`: an attached held `run list`; its process

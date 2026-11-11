@@ -73,6 +73,22 @@ def test_force_stop_while_busy():
     assert rc == 0 and w.read()["state"] == "STOPPED"
 
 
+def test_soft_stop_refused_while_the_card_lock_is_held():
+    # The holder may have nothing on the card yet: a run whose container is still starting, a capture.
+    w = World(state="RUNNING", card_lock="held")
+    rc, _, err = run(w, "stop")
+    assert rc == 2 and w.read()["state"] == "RUNNING", (rc, err)
+    assert "card lock /run/lock/peacock-card.lock held" in err, err
+    rc, _, err = run(w, "stop", "--force")
+    assert rc == 0 and w.read()["state"] == "STOPPED", (rc, err)
+
+
+def test_soft_stop_stops_on_another_user_s_free_card_lock():
+    w = World(state="RUNNING", card_lock="another's")
+    rc, _, err = run(w, "stop")
+    assert rc == 0 and w.read()["state"] == "STOPPED", (rc, err)
+
+
 def test_soft_stop_unreachable_host_stops():
     w = World(state="RUNNING", ssh="down")
     rc, _, _ = run(w, "stop")

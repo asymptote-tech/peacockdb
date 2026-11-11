@@ -12,8 +12,8 @@
 #   nebius.sh ip                the IP, or exit 1 when not RUNNING
 #   nebius.sh start             start, wait for RUNNING and for ssh (idempotent); RUNNING
 #                                 with no ssh is exit 1, and a VM this call started is stopped
-#   nebius.sh stop [--force]    soft: refuse while a process is on the card, or, on a VM
-#                                 without one, while duckdb runs; --force: stop anyway
+#   nebius.sh stop [--force]    soft: refuse while the card has a process or its lock is held,
+#                                 or, on a VM without one, while duckdb runs; --force: stop anyway
 #   nebius.sh ssh <cmd…>        run a command on the VM; an ssh that fails before
 #                                 authenticating is tried again, four attempts in all
 #   nebius.sh rsh <host> <cmd…> one attempt, for rsync -e: the sync around it is what is retried
@@ -243,15 +243,18 @@ cmd_start() {
 }
 
 cmd_stop() {
-  local force=0 s busy
+  local force=0 s busy lock
   [ "${1:-}" = --force ] && force=1
   s=$(state)
   case $s in STOPPED|STOPPING) log "stop: already $s"; return 0;; esac
   [ "$s" = STARTING ] && { wait_for_state RUNNING "$START_TIMEOUT" || true; }
   if [ "$force" -eq 0 ]; then
     # The card's apps on a GPU VM; a VM without nvidia-smi (the CPU VM) has no card, and there a
-    # DuckDB run is the work a stop would cut short. A failing probe reads as unreachable.
-    busy=$(vm_ssh 'if command -v nvidia-smi >/dev/null; then nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader; else pgrep -a -x duckdb || true; fi' 2>/dev/null) \
+    # DuckDB run is the work a stop would cut short. A held card lock is a run or a capture, maybe
+    # with nothing on the card yet; it is opened read-only, as another user's file in sticky
+    # /run/lock refuses an open that may create it. A failing probe reads as unreachable.
+    lock=$(printf '%q' "$PEACOCK_CARD_LOCK")
+    busy=$(vm_ssh 'if command -v nvidia-smi >/dev/null; then nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader; else pgrep -a -x duckdb || true; fi;'" if [ -e $lock ] && ! flock -n 9 9< $lock; then echo 'card lock $lock held'; fi" 2>/dev/null) \
       || busy="?unreachable"
     if [ "$busy" = "?unreachable" ]; then log "stop: host unreachable over ssh; stopping on the API's state"
     elif [ -n "$busy" ]; then log "stop: busy: $(tr '\n' ';' <<<"$busy") — not stopping"; exit 2

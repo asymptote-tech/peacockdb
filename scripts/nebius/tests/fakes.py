@@ -14,6 +14,9 @@ world = {
   "card": "",                 # what nvidia-smi --query-compute-apps prints
   "no_gpu": False,            # a CPU VM: nvidia-smi is absent (exit 127); a probe that checks first prints cpu_busy
   "cpu_busy": "",             # what the probe's `pgrep -a -x duckdb` prints on a CPU VM
+  "card_lock": "",            # held | another's | "": the card lock as the probe's flock finds it. another's:
+                              # free, but made by another user, so an open that may create it is refused
+                              # (fs.protected_regular=2 in sticky /run/lock) and reads as held
   "stop_error": "",           # stderr text and rc 1 on `stop`
   "get_error": "",            # stderr text and rc 1 on `get`
   "hang": [],                 # verbs ("get", "start", "stop") that sleep 5 s before answering
@@ -124,7 +127,7 @@ save(); print("fake nebius: unhandled " + " ".join(a), file=sys.stderr); sys.exi
 '''
 
 SSH = r'''#!/usr/bin/env python3
-import json, os, sys, time
+import json, os, re, sys, time
 args = sys.argv[1:]
 if args[0] == "-G":
     levels = [a.split("=", 1)[1] for a in args if a.startswith("LogLevel=")]
@@ -158,6 +161,10 @@ elif "nvidia-smi" in cmd:
     if "command -v nvidia-smi" not in cmd:
         print("bash: line 1: nvidia-smi: command not found", file=sys.stderr); sys.exit(127)
     print(w["cpu_busy"], end="")
+read_only = re.search(r"flock -n 9 9< (\S+);", cmd)
+creating = re.search(r"flock -n (/\S+) true", cmd)
+if (read_only and w["card_lock"] == "held") or (creating and w["card_lock"] in ("held", "another's")):
+    print(f"card lock {(read_only or creating).group(1)} held")
 if cmd.strip() == "cat":
     sys.stdout.write(sys.stdin.read())
 if "/proc/uptime" in cmd:
@@ -191,7 +198,7 @@ if dropped:
 DEFAULT = {"exists": True, "state": "STOPPED", "ip": "203.0.113.7", "start_error": "",
            "start_to": "RUNNING", "states_after_start": [], "ssh": "ok",
            "ssh_refusals": 0, "ssh_seconds": 0, "rsync_255": 0, "remote": None,
-           "host_key": "ssh-ed25519 AAAAKEY1", "card": "", "no_gpu": False, "cpu_busy": "",
+           "host_key": "ssh-ed25519 AAAAKEY1", "card": "", "no_gpu": False, "cpu_busy": "", "card_lock": "",
            "stop_error": "", "get_error": "",
            "hang": [], "ip_sequence": [], "root_profile": "ok",
            "profiles": ["default"], "active_profile": "default", "profile_list": None,

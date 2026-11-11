@@ -8,6 +8,7 @@ Branch `ENS-vm-setup`, forked from `ENS-containers-only` at `7aeec989`; its PR t
 - 2026-11-09: spec, plan and board entry committed (`fed95745`); Task 1 committed (`ad19c967`).
 - 2026-11-09: Task 2 on dev, below. Dev's docker keeps the branch's 25.02 build and run images
   (inputs tags below) for Tasks 13, 14 and 16.
+- Task 10: the runner, `follow`, `cancel`, `--init` and the card lock; below.
 
 ## Plain builds
 
@@ -202,6 +203,107 @@ plain build of the same Dockerfile from the repository's root, with no build arg
   `test_the_image_run_is_the_one_whose_label_was_read` as
   `test_run_runs_the_image_id_its_labels_were_read_from`.
 
+## The runner
+
+- The plan's runner signature carried an `<image id>`; the runner takes the whole `docker run`
+  argument list after `--gpus all` instead (options, image, command), since a mode run and a staged
+  binary put different things after the image. `vm_started` adds the mounts, user, hostname and the
+  `peacock.dir` label to both.
+- Container names are global to the VM's docker, and two users' dirs of one name (both clones named
+  `peacockdb`) run containers of one name. So each container is labelled `peacock.dir=<its dir>`, and
+  `vm_idle`, `status` and `cancel` take a `peacock-<i>` as this dir's only when the label is its path,
+  or absent (a container from before the label). Without it a second user's `run` refused on the
+  first user's going container, naming `cancel`, which would then have removed it. The card lock
+  serialises the two runs, so the names never collide while both run.
+- Another dir's container of this name that its run left behind (ended, or running with its runner
+  killed) is refused, exit 2, naming its dir, and kept: `vm_name_free` refuses an ended one at a
+  run's start (not `ship`'s, which runs no container: `vm_idle` alone holds ship),
+  and the runner, once it holds the card, refuses any it finds, since that dir's live runner would
+  have removed its own before letting the card go. Every `docker rm` of the runner, `vm_idle` and
+  `cancel` is held to this dir's label. A refusal rather than a per-user name: `peacock-<i>` is what
+  CI's cleanup and its guard name, and a leftover of another user's is that user's to remove. An
+  ended container of the other dir in the instant between its client's end and its runner's `rm` is
+  refused too; the call can be run again.
+- Known limit: a runner and its client both killed `-9` leave the container running without the
+  card lock, so another dir's run may join it on the card. This dir's next run refuses it (naming
+  `cancel`), and another user's of the same name refuses it as above; a run of another name does not
+  see it.
+- `vm_idle` refuses a container with no runner only while it runs. One that ended is cleared, as
+  `vm_not_running` did: a VM restart leaves the container exited (no `--rm`), and Review Focus 1
+  needs `run` to start there. The ported container test uses a running one.
+- `vm_started` closes `run/lock` on the runner's command line and again before it returns: the
+  runner inherits every fd, and an attached call goes on to follow, so either holding it would block
+  the next `run` until the run ended instead of refusing it. A call that waits for `run/lock` says so.
+- The runner writes `run/state` itself, `<pid> <boot id> <what> <stamp> <start time>`, right after
+  its TERM trap, and `vm_started` lets `run/lock` go only once that state is there. `cancel` takes
+  `run/lock`, so it never finds a runner whose trap is not set yet: before, a cancel right after
+  `run --detach` killed the runner by TERM's default action, with no status (measured red, through
+  a slow first `docker info` in the runner). The start time is `/proc/<pid>/stat`'s field 22; with
+  the boot id it tells the runner from a process that took its pid (measured red: a live `sleep`
+  under a dead runner's state read as `waiting`).
+- The runner's TERM trap only sets a flag, and `cancel` sends TERM every 0.2 s until the runner
+  ends. Each TERM cuts short the wait in hand (the card's, the client's), and the flag decides what
+  comes next, so a TERM at any point lands, the waiter's start and the client's included, and a
+  client that ends by itself as the cancel comes keeps its status and, a staged binary's, its
+  verdict. The client's exit goes to `run/exit` from a subshell, as the earlier branch did.
+- `peacock_card_take`'s waiter shares the open file description, so the lock stays held after the
+  waiter exits; its pid is in `PEACOCK_CARD_WAITER` for the runner to kill. It makes the file only
+  when it is missing, and opens it read-only: on the VMs (Ubuntu, `fs.protected_regular=2`) an open
+  with `O_CREAT` of another user's file in sticky `/run/lock` fails with EACCES, which `flock -n
+  <file> true` hit in `nebius.sh stop`'s probe and read as held for every user but the file's maker.
+  Two users making it at once: the loser's create is refused, and the file is there. A lock it
+  cannot make or open is said in the log and is exit 1, never a run without it. Another uid's file
+  cannot be made unprivileged, so the probe's red is the fake ssh's: it answers a create-open of
+  `another's` free lock as held, as the kernel refuses it. `peacock_card_take`'s race has no test.
+- `following` runs the VM call in the background and waits: bash runs a trap only once a
+  foreground child ends, so a TERM to run-gpu.sh alone waited for the run's end (measured red). The
+  job is started under `set -m`, turned off right after, so it leads a process group of its own,
+  and the trap kills that group: a tree gathered with `pgrep` and then killed misses a process
+  forked in between, such as ssh-retry's next attempt. Measured: no job notice is printed, `wait`
+  gives the job's own code, and a killed group's `wait` 143. No test can catch that fork's window;
+  the pid-only and group TERM tests bound the exit.
+- `gpu_host.py`'s `__exit__` kills a runner's group only when the state's pid has the state's start
+  time, so a pid another process took is never killed.
+- `follow` tails with `-s 0.2`: `tail --pid` checks the pid at its sleep interval, 1 s by default,
+  which every attached run then waited out.
+- The fake docker's device run releases the world's lock while it holds and re-reads the world
+  every 0.05 s; every world write, the tests' included, is a whole-file replace under that lock,
+  since the fake `nvidia-smi` and the tests read without it. A held run gives up after 60 s.
+- The fake `docker ps` renders `{{.State}}` and `{{.Label "…"}}`; it printed the state alone at
+  first, which read every container as another dir's (four tests red after the change, root cause).
+- `test_follow_and_status_with_no_run_name_status` passed on the code before at first: its
+  "unknown verb follow" message listed `status`. It now also requires `no run`.
+- `create_nsys_profile.sh` sources `peacock-config.sh` for `peacock_card_take` and the lock path,
+  sent to the host as text and as a `%q` literal: the fake rsh, like ssh, forwards no environment.
+- Red before the change: `test_run_gpu_runs.py` 20 of 21 (the 21st as above), `test_nebius.py`'s
+  new test, and the four reshaped `test_run_gpu.py` tests.
+- Second round, red before the fixes: `test_a_term_to_run_gpu_sh_alone_ends_the_following`,
+  `test_a_runner_pid_another_process_took_is_not_going`,
+  `test_a_cancel_as_the_runner_starts_still_cancels`,
+  `test_another_dir_s_container_of_this_name_refuses_a_run_and_is_kept`, the `run/lock` message in
+  `test_a_run_waits_while_its_dir_s_run_is_being_started`, and
+  `test_soft_stop_stops_on_another_user_s_free_card_lock`. Third round:
+  `test_ship_beside_another_dir_s_ended_container_of_this_name_ships_and_keeps_it` red before; the
+  restart test writes the test process's real start time, so only the boot id differs, and went red
+  (`running`, exit 5) with the boot-id check removed. `test_cancel_leaves_other_dirs_alone` now
+  has the other user's container of this name on the card; it passed before, and went red with
+  `vm_cancel`'s label check removed, as the other-dir test did with the runner's. The ship refusal
+  added to `test_a_container_of_the_dir_still_on_the_vm_refuses_a_new_run` passed before: it restores
+  an assertion the reshape dropped.
+- The fake docker prints a device run's output before the world says it runs, so a test that waits
+  for `running` and reads `status` finds the output in the log. `info_delays` slows each next
+  `docker info` in turn; the dev side's image read makes the first.
+
+### For Task 12
+
+- Logs are already `logs/<what>-<stamp>.log`, and `test_pull_brings_the_results_the_record_and_the_log_home`
+  is already reshaped to `bench-<stamp>.log`, so `test_each_run_logs_under_its_stamp` passes at its
+  red step.
+- `bench-each.sh` (near its line 175): a dropped ssh during `run bench` now exits 1 with the run going
+  on. bench-each counts the case red and moves on; the next case's `run bench` is refused, exit 2,
+  because the run still goes, and bench-each stops with "run-gpu.sh exited 2". Its rework in Task 12
+  should follow the going run (or wait for it) before the next case.
+
 ## Reshaped tests
 
 - `test_install_watch_sources.py::test_install_watch_ships_files_that_exist` took every rsync
@@ -245,3 +347,64 @@ plain build of the same Dockerfile from the repository's root, with no build arg
 - `test_prepare_refuses_old_driver` and `test_run_refuses_old_driver` set the world's `driver`;
   the fake `nvidia-smi` answers from `cards`, so each sets one card at that driver, compute
   capability 8.9. The assertions are unchanged.
+- `test_run_gpu.py`'s `docker_runs()` (in `gpu_host.py`) meant a `docker run -d`; device runs are now
+  attached under the runner, so it means a run with `--gpus`. `test_prepare_pulls_the_given_images`
+  found the generator's run as one without `-d`; it is the one without `--gpus`.
+- `test_run_refuses_a_run_in_progress` put a running container in the world; that is now a
+  container no runner holds, refused naming `cancel` (`test_run_gpu_runs.py`). It starts a held run
+  instead and holds `run` and `ship` to exit 2 naming `follow`, still with one device run.
+- `test_detached_run_returns_while_running` set `run_state=running`; it holds the run with the
+  hold file. It still requires the detach to return naming `status` (now `follow` too) and the run to
+  be refused while the container runs, naming `follow` instead of the container.
+- `test_status_reports_running_then_exit` changed the world's exit code under a running container;
+  the run's code is now set before it is let go, and a second run gives `exited 0`. The log it reads
+  is `logs/filter-<stamp>.log`, no longer `logs/filter.log`.
+- `test_pull_brings_the_results_the_record_and_the_log_home` read `bench.log` at home; it reads the
+  one `bench-<stamp>.log`.
+
+## Ported and dropped cases
+
+From `4e785104`'s `test_gpu.py` and `test_gpu_locks.py`, for the runner (Task 10):
+
+- `test_one_device_run_at_a_time_per_host` as `test_one_card_lock_for_every_dir_and_user`: a second
+  dir and a second user, whose dir has the first one's name, wait; the fake docker fails a second
+  device run on the card, so three green runs show they took turns.
+- `test_a_dropped_session_leaves_one_run_that_a_rerun_follows` as
+  `test_a_run_outlives_its_session_and_is_followed`: a rerun is refused naming `follow` rather than
+  following, and `follow` follows. Its moved-tag half is Task 9's.
+- `test_cancel_stops_the_instance_s_run_and_keeps_its_record` as
+  `test_cancel_stops_the_run_and_keeps_what_an_ended_run_keeps`; the record half is Task 12's.
+- `test_cancel_stops_a_container_its_client_is_still_making`, under its name (world `create_delay`).
+- `test_cancel_removes_a_container_a_killed_runner_left`, under its name: a runner really killed, and
+  a container that vanishes as `rm` comes (world `vanish_on_rm`).
+- `test_cancel_leaves_other_instances_and_users_alone` as `test_cancel_leaves_other_dirs_alone`.
+- `test_cancel_ends_a_run_still_waiting_for_the_card`, under its name.
+- `test_a_run_that_ends_before_it_is_followed_gives_its_status`, under its name: the run's log and
+  its code. Its mismatch half (another mode, environment or changed binaries) is dropped: `follow`
+  here takes no mode, so it follows whatever run the dir has.
+- `test_a_container_of_the_instance_still_on_the_host_refuses_a_new_run` as
+  `test_a_container_of_the_dir_still_on_the_vm_refuses_a_new_run`, naming `cancel`.
+- `test_the_shared_files_stay_group_writable` as `test_the_card_lock_is_mode_666`: the one shared
+  file here is the lock, and it is open to every user rather than to a group.
+- `test_a_run_whose_instance_is_busy_is_neither_started_nor_followed` as
+  `test_a_run_waits_while_its_dir_s_run_is_being_started`: `run/lock` is held only around a start,
+  so a second call waits for it rather than being refused, and starts once it is let go.
+- Dropped, no such design here: the activity hold and its heartbeat
+  (`test_a_hold_whose_caller_falls_silent_lets_go`,
+  `test_a_command_longer_than_the_hold_s_timeout_keeps_it_by_its_heartbeat`,
+  `test_a_gpu_sh_killed_alone_lets_go_of_its_hold`, `test_a_hold_lost_mid_command_is_named`,
+  `test_a_hold_that_lapses_while_the_command_works_is_named`,
+  `test_a_command_neither_waits_for_nor_leaves_its_heartbeat_s_sleep`,
+  `test_the_portable_timeout_says_124_and_passes_the_command_s_own_status`); the ship's rsync servers
+  holding the instance (`test_a_run_during_a_ship_is_busy`,
+  `test_a_ship_killed_alone_keeps_its_locks_while_the_host_s_rsync_server_writes`,
+  `test_a_half_open_ship_server_has_the_hold_s_timeout_and_holds_the_instance_until_it_ends`,
+  `test_a_pull_s_server_of_the_instance_holds_no_ship`,
+  `test_an_instance_s_hold_waits_on_no_server_of_another_instance`,
+  `test_each_of_ship_s_two_servers_holds_the_instance_s_hold`,
+  `test_ship_refuses_while_a_run_goes_on_and_changed_binaries_are_not_followed`'s binaries half);
+  the lock held by no live run (`test_a_lock_held_without_a_live_unfinished_run_is_busy`: `run/lock`
+  is a flock, let go with its holder); the install lock and the group join
+  (`test_a_second_install_waits_and_says_so`,
+  `test_a_second_user_s_first_prepare_joins_the_group_before_it_holds`); the power cases, which are
+  `nebius.sh`'s here.

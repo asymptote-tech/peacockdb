@@ -15,7 +15,7 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
-from gpu_host import DRIVER_MINIMUM, H100, HOSTNAME, L40S, Host, label, log_lines  # noqa: E402
+from gpu_host import DRIVER_MINIMUM, H100, HOSTNAME, L40S, Host, label, log_lines, until  # noqa: E402
 from machine import KEYS, NO_HOST, REPO, UNPUBLISHED, lib  # noqa: E402
 
 VERBS = [("prepare",), ("ship",), ("run", "list"), ("pull",)]
@@ -158,7 +158,7 @@ def test_prepare_pulls_the_given_images():
         pulled = [a[-1] for a in h.docker_calls() if a[0] == "pull"]
         assert sorted(pulled) == sorted([GIVEN_RUN, GIVEN_BUILD]), pulled
         assert (h.home / "peacock/cudf-25.02/lib/libcudf.so").read_text() == RUN_ID
-        generated = [a for a in h.docker_calls() if a[0] == "run" and "-d" not in a]
+        generated = [a for a in h.docker_calls() if a[0] == "run" and "--gpus" not in a]
         assert generated and all(GIVEN_BUILD in a for a in generated), generated
 
 
@@ -631,10 +631,11 @@ def test_run_refuses_a_run_in_progress():
     with Host() as h:
         prepared(h)
         ok(h.gpu("ship"))
-        h.world(containers={"peacock-chain-l": {"state": "running", "code": 0}})
-        refused(h.gpu("run", "list"), 2, "peacock-chain-l")
-        refused(h.gpu("ship"), 2, "peacock-chain-l")
-        assert h.docker_runs() == []
+        h.hold.touch()
+        ok(h.gpu("run", "--detach", "list"))
+        refused(h.gpu("run", "list"), 2, "follow")
+        refused(h.gpu("ship"), 2, "follow")
+        assert len(h.docker_runs()) == 1
 
 
 def test_run_clears_a_finished_container_and_reports_its_exit():
@@ -671,12 +672,11 @@ def test_detached_run_returns_while_running():
     with Host() as h:
         prepared(h)
         ok(h.gpu("ship"))
-        h.world(run_state="running")
+        h.hold.touch()
         r = ok(h.gpu("run", "--detach", "list"))
-        assert "status" in r.stdout, r.stdout
-        assert not any(a[0] in ("wait", "logs") for a in h.docker_calls()), h.docker_calls()
-        assert h.world()["containers"]["peacock-chain-l"]["state"] == "running"
-        refused(h.gpu("run", "list"), 2, "peacock-chain-l")
+        assert "status" in r.stdout and "follow" in r.stdout, r.stdout
+        until(lambda: h.world()["containers"].get("peacock-chain-l", {}).get("state") == "running", "it runs")
+        refused(h.gpu("run", "list"), 2, "follow")
 
 
 def test_status_reports_running_then_exit():
@@ -685,20 +685,22 @@ def test_status_reports_running_then_exit():
         ok(h.gpu("ship"))
         r = h.gpu("status")
         assert r.returncode == 2 and r.stdout.splitlines()[0] == "none", (r.returncode, r.stdout, r.stderr)
-        h.world(run_state="running", run_output="".join(f"line {i}\n" for i in range(100)))
+        h.world(run_output="".join(f"line {i}\n" for i in range(100)), run_code=1)
+        h.hold.touch()
         ok(h.gpu("run", "--detach", "filter", env={"PCK_TEST_FILTER": "q6"}))
+        until(lambda: h.world()["containers"].get("peacock-chain-l", {}).get("state") == "running", "it runs")
         r = h.gpu("status")
         assert r.returncode == 5, (r.returncode, r.stdout, r.stderr)
         lines = r.stdout.splitlines()
         assert lines[0] == "running" and lines[1:] == [f"line {i}" for i in range(60, 100)], lines
-        w = h.world()
-        w["containers"]["peacock-chain-l"].update(state="exited", code=1)
-        h.world(containers=w["containers"])
+        h.hold.unlink()
+        until(lambda: h.gpu("status").returncode != 5, "it ended")
         r = h.gpu("status")
         assert r.returncode == 1 and r.stdout.splitlines()[0] == "exited 1", (r.returncode, r.stdout)
-        assert (h.vm_dir() / "logs/filter.log").read_text().splitlines()[-1] == "line 99"
-        w["containers"]["peacock-chain-l"].update(code=0)
-        h.world(containers=w["containers"])
+        assert [f.read_text().splitlines()[-1] for f in (h.vm_dir() / "logs").glob("filter-*.log")] == ["line 99"]
+        h.world(run_code=0)
+        ok(h.gpu("run", "--detach", "filter"))
+        until(lambda: h.gpu("status").returncode != 5, "it ended")
         r = ok(h.gpu("status"))
         assert r.stdout.splitlines()[0] == "exited 0" and r.stdout.splitlines()[-1] == "line 99", r.stdout
 
@@ -817,7 +819,7 @@ def test_pull_brings_the_results_the_record_and_the_log_home():
         assert (home / "benchmark-results/h100/tpch.sf40/tp1_single.benchmark.txt").read_text() == f"host={HOSTNAME}\n"
         assert (home / "calibration/records.tsv").is_file()
         logs = h.laptop / ".cache/peacock/run-gpu/chain-l"
-        assert "bench: green" in (logs / "bench.log").read_text()
+        assert ["bench: green" in f.read_text() for f in logs.glob("bench-*.log")] == [True]
         assert str(logs) in r.stdout
 
 
@@ -895,7 +897,8 @@ def nsys_tree(tmp, bench_text=FAKE_BENCH, calls=STUB_CALLS):
     """A tree holding create_nsys_profile.sh, a VM directory holding a benchmark binary, and the
     env that reaches the VM through a fake rsh alone."""
     tree = tmp / "tree"
-    for rel in ("scripts/create_nsys_profile.sh", "scripts/lib/shadgpu-env.sh", "scripts/lib/calibration-bucket.sh",
+    for rel in ("scripts/create_nsys_profile.sh", "scripts/lib/shadgpu-env.sh", "scripts/lib/peacock-config.sh",
+                "scripts/lib/calibration-bucket.sh",
                 "scripts/lib/stage-cargo.sh", "scripts/lib/bench-cases.sh", "scripts/calibration/device_cases.py",
                 "scripts/calibration/record.py", "scripts/calibration/nvtx_names.py",
                 "peacockdb-core/tests/common/corpus_benchmark_cases.inc"):
@@ -923,7 +926,8 @@ def nsys_tree(tmp, bench_text=FAKE_BENCH, calls=STUB_CALLS):
     env = {**os.environ, "PATH": f"{tmp / 'dev-bin'}:{os.environ['PATH']}",
            "FAKE_HOST_PATH": f"{tmp / 'host-bin'}:{os.environ['PATH']}", "FAKE_RSH_LOG": str(tmp / "rsh.log"),
            "FAKE_DEV_LOG": str(tmp / "ssh.log"), "FAKE_BENCH_LOG": str(tmp / "bench.log"),
-           "FAKE_HBM_LOG": str(tmp / "hbm.log"), "CARGO_TARGET_DIR": str(tmp / "target")}
+           "FAKE_HBM_LOG": str(tmp / "hbm.log"), "CARGO_TARGET_DIR": str(tmp / "target"),
+           "PEACOCK_CARD_LOCK": str(tmp / "peacock-card.lock")}
     env.pop("PCK_TEST_FILTER", None)
     return tree, vm, env
 

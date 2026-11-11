@@ -9,16 +9,24 @@ directory as PEACOCK_DATA_DIR, and its own copy of /proc/driver/nvidia/params. I
 before running anything while the Host has made no more than FAKE_NEBIUS_RSH_FAILS rsh calls, as a
 dropped transport does. `rsync` is the real one, through that rsh. On the VM, docker answers from a
 JSON world (images and their labels, containers), and reads a run's binds as machine.py's docker
-does, refusing one into the VM user's home; nvidia-smi answers its one query from the world's cards;
-sudo records and runs its command, install writes /etc into the VM's root, and hostname names the
-machine. On dev, ssh and docker are fakes that fail loudly: no call may bypass nebius.sh.
+does, refusing one into the VM user's home. A device run (`--gpus`) is attached: its container runs
+in the world, prints the world's run_output, and holds while the file FAKE_HOLD names exists, then
+ends with run_code; `docker stop` ends it with 143 and `docker rm -f` with 137. A second device run
+while one is on the card fails, as two pools on one card do. nvidia-smi answers its one query from
+the world's cards; sudo records and runs its command, install writes /etc into the VM's root, and
+hostname names the machine. On dev, ssh and docker are fakes that fail loudly: no call may bypass
+nebius.sh. The card lock is PEACOCK_CARD_LOCK, under the test's temp dir, shared by every VM user.
 """
+import copy
+import fcntl
 import json
 import os
 import pathlib
+import signal
 import shutil
 import subprocess
 import tempfile
+import time
 
 from machine import KEYS, REPO, RUN_OPTIONS, git, lib
 
@@ -81,7 +89,7 @@ sys.exit(subprocess.run(["bash", "-c", command], env=env, cwd=os.environ["FAKE_H
 '''
 
 FAKE_DOCKER = r'''#!/usr/bin/env python3
-import fcntl, json, os, pathlib, re, sys
+import fcntl, json, os, pathlib, re, sys, time
 ''' + RUN_OPTIONS + r'''
 a = sys.argv[1:]
 with open(os.environ["FAKE_DOCKER_LOG"], "a") as f:
@@ -92,12 +100,34 @@ fcntl.flock(lock, fcntl.LOCK_EX)
 w = json.load(open(path))
 
 def save():
-    json.dump(w, open(path, "w"))
+    # Whole or not at all: nvidia-smi and the tests read the world without the lock.
+    json.dump(w, open(path + ".new", "w"))
+    os.replace(path + ".new", path)
+
+def relocked(seconds):
+    """The world let go for <seconds>, then taken and read again."""
+    global w
+    fcntl.flock(lock, fcntl.LOCK_UN)
+    time.sleep(seconds)
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    w = json.load(open(path))
 
 def flag(name):
     return a[a.index(name) + 1]
 
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except (TypeError, ProcessLookupError):
+        return False
+
+# info_delays: seconds each next `docker info` takes, in turn.
 if a[0] == "info":
+    if w.get("info_delays"):
+        delay = w["info_delays"].pop(0)
+        save()
+        relocked(delay)
     if "--format" in a:
         print(json.dumps({r: {} for r in w["runtimes"]}))
     sys.exit(0)
@@ -138,25 +168,62 @@ if a[:2] == ["image", "inspect"]:
 if a[0] == "ps":
     name = flag("--filter").split("=", 1)[1].strip("^$")
     if name in w["containers"]:
-        print(w["containers"][name]["state"])
+        c = w["containers"][name]
+
+        def field(m):
+            label = re.fullmatch(r'\.Label "([^"]+)"', m.group(1))
+            if m.group(1) == ".State":
+                return c["state"]
+            if label:
+                return c.get("labels", {}).get(label.group(1), "")
+            print(f"fake docker: no answer for the format {flag('--format')}", file=sys.stderr)
+            sys.exit(99)
+
+        print(re.sub(r"\{\{(.*?)\}\}", field, flag("--format")))
     sys.exit(0)
 if a[0] == "run":
     binds, _ = run_options(a)
-if a[0] == "run" and "-d" in a:
+# A device run, attached. create_delay: the client still making the container, before it exists.
+if a[0] == "run" and "--gpus" in a:
     name = flag("--name")
+    if w.get("create_delay"):
+        relocked(w["create_delay"])
     if name in w["containers"]:
         print(f"docker: Error response from daemon: Conflict. The container name /{name} is already in use",
               file=sys.stderr)
         sys.exit(125)
+    if w.get("on_card"):
+        print(f"fake docker: {w['on_card']} is on the card: two pools on one card fail each other", file=sys.stderr)
+        sys.exit(125)
     labels = dict(a[i + 1].split("=", 1) for i, x in enumerate(a) if x == "--label")
-    w["containers"][name] = {"state": w.get("run_state", "exited"), "code": w["run_code"], "labels": labels}
+    print(w["run_output"], end="", flush=True)  # in the log before the world says it runs
+    w["containers"][name] = {"state": "running", "code": None, "pid": os.getpid(), "labels": labels}
+    w["on_card"] = name
     save()
-    print("f00dfeed" * 8)
-    sys.exit(0)
-if a[0] == "inspect":
-    c = w["containers"][a[-1]]
-    fmt = flag("--format")
-    print(c["code"] if "ExitCode" in fmt else c.get("labels", {}).get(fmt.split('"')[1], "<no value>"))
+    held = time.time() + 60  # a test that never lets go fails rather than hangs
+    while True:
+        c = w["containers"].get(name)
+        if c is None or c.get("stop") or not os.path.exists(os.environ["FAKE_HOLD"]) or time.time() > held:
+            break
+        relocked(0.05)
+    code = 137 if c is None else 143 if c.get("stop") else w["run_code"]
+    if c is not None:
+        w["containers"][name] = {"state": "exited", "code": code, "labels": labels}
+    w["on_card"] = None
+    save()
+    sys.exit(code)
+# `docker stop -t <s> <name>`: back once the container has ended.
+if a[0] == "stop":
+    name = a[-1]
+    if name not in w["containers"]:
+        print(f"Error response from daemon: No such container: {name}", file=sys.stderr)
+        sys.exit(1)
+    if w["containers"][name]["state"] == "running":
+        w["containers"][name]["stop"] = True
+        save()
+        while name in w["containers"] and w["containers"][name]["state"] == "running":
+            relocked(0.05)
+    print(name)
     sys.exit(0)
 if a[0] == "run":
     gen = [c for c in a if c.endswith("/generate_testdata.sh")]
@@ -165,16 +232,23 @@ if a[0] == "run":
     (stage / f"{bench}.sf1").mkdir()
     (stage / f"{bench}.sf1" / "generated").write_text(bench)
     sys.exit(0)
-if a[0] == "logs":
-    lines = w["run_output"].splitlines(keepends=True)
-    print("".join(lines[-int(flag("--tail")):] if "--tail" in a else lines), end="")
-    sys.exit(0)
-if a[0] == "wait":
-    print(w["containers"][a[-1]]["code"])
-    sys.exit(0)
+# `docker rm [-f] <name>`: a running one only with -f, which kills it. vanish_on_rm: the container
+# ended and went between the caller's look and its rm.
 if a[0] == "rm":
-    w["containers"].pop(a[-1], None)
+    c = w["containers"].get(a[-1])
+    if c is None or w.get("vanish_on_rm"):
+        w["containers"].pop(a[-1], None)
+        save()
+        print(f"Error response from daemon: No such container: {a[-1]}", file=sys.stderr)
+        sys.exit(1)
+    if c["state"] == "running" and "-f" not in a:
+        print(f"Error response from daemon: cannot remove container {a[-1]}: container is running", file=sys.stderr)
+        sys.exit(1)
+    del w["containers"][a[-1]]
+    if w.get("on_card") == a[-1] and not alive(c.get("pid")):
+        w["on_card"] = None  # its client was killed with its runner: nothing else lets the card go
     save()
+    print(a[-1])
     sys.exit(0)
 if a[0] == "create":
     cid = f"c{len(w['containers'])}"
@@ -245,6 +319,29 @@ def inputs_ref(tree, kind):
                                                              f'image_inputs_tag "{tree}" {kind} {CUDF}')
 
 
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def started_at(pid):
+    """The process's start time, field 22 of /proc/<pid>/stat, as run/state keeps it; None when gone."""
+    try:
+        return open(f"/proc/{pid}/stat").read().rsplit(") ", 1)[1].split()[19]
+    except FileNotFoundError:
+        return None
+
+
+def until(condition, what, seconds=30):
+    deadline = time.time() + seconds
+    while not condition():
+        assert time.time() < deadline, f"never: {what}"
+        time.sleep(0.05)
+
+
 def log_lines(path):
     return [json.loads(ln) for ln in path.read_text().splitlines()] if path.exists() else []
 
@@ -300,12 +397,46 @@ class Host:
             "FAKE_FETCH_LOG": str(self.fetch_log), "FAKE_HOST_HOME": str(self.home),
             "FAKE_HOST_PATH": f"{self.host_bin}:{os.environ['PATH']}", "FAKE_HOST_DATA": str(self.data),
             "FAKE_HOST_PARAMS": str(self.params), "FAKE_HOST_ROOT": str(self.root),
+            "FAKE_HOLD": str(tmp / "hold"), "PEACOCK_CARD_LOCK": str(tmp / "vm" / "run-lock" / "peacock-card.lock"),
             "PEACOCK_SSH_PAUSES": "0 0 0",
         }
+        (tmp / "vm" / "run-lock").mkdir()
+        self.hold, self.card_lock = tmp / "hold", pathlib.Path(self.env["PEACOCK_CARD_LOCK"])
+        self.background = []
         return self
 
     def __exit__(self, *exc):
+        """Kills what a test left going: its background run-gpu.sh calls, and every runner a run/state
+        names, with its process group (its docker client, its wait for the card): a pid of this boot
+        whose start time is the state's, never another process that took it."""
+        for p in self.background:
+            if p.poll() is None:
+                os.killpg(p.pid, signal.SIGKILL)
+            p.communicate()
+        boot = pathlib.Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        runners = []
+        for state in (pathlib.Path(self.tmp.name) / "vm" / "home").glob("*/peacock/*/run/state"):
+            fields = state.read_text().split()
+            pid, boot_id, start = fields[0], fields[1], fields[4] if len(fields) > 4 else None
+            if boot_id == boot and start is not None and started_at(int(pid)) == start:
+                runners.append(int(pid))
+                try:
+                    os.killpg(int(pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        deadline = time.time() + 10
+        while any(alive(pid) for pid in runners) and time.time() < deadline:
+            time.sleep(0.05)
         self.tmp.cleanup()
+
+    def second_user(self):
+        """Another user of the same VM: a home of its own, the same world, data directory and card
+        lock. Its runners are killed with the Host's."""
+        other = copy.copy(self)
+        other.home = self.home.parent / "second"
+        other.home.mkdir(exist_ok=True)
+        other.env = {**self.env, "FAKE_HOST_HOME": str(other.home)}
+        return other
 
     def make_tree(self):
         t = self.tree
@@ -348,6 +479,16 @@ class Host:
         return subprocess.run(cmd, env={**self.env, **(env or {})}, stdin=subprocess.DEVNULL, capture_output=True,
                               text=True, timeout=120, cwd=self.tree)
 
+    def gpu_going(self, *args, env=None, vm=H100):
+        """run-gpu.sh <args> in the background, in a session of its own, as a terminal runs it."""
+        if vm and "--instance-id" not in args:
+            args = (*vm, *args)
+        cmd = [str(self.tree / "scripts" / "env" / "run-gpu.sh"), *map(str, args)]
+        p = subprocess.Popen(cmd, env={**self.env, **(env or {})}, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, cwd=self.tree, start_new_session=True)
+        self.background.append(p)
+        return p
+
     def script(self, rel, *args, env=None):
         """The tree's script <rel> with the fakes, as `gpu` runs run-gpu.sh."""
         cmd = [str(self.tree / rel), *map(str, args)]
@@ -355,9 +496,14 @@ class Host:
                               text=True, timeout=120, cwd=self.tree)
 
     def world(self, **changes):
-        w = json.loads(self.world_path.read_text())
-        w.update(changes)
-        self.world_path.write_text(json.dumps(w))
+        """The world, with <changes> made under the fake docker's lock: a runner's docker may be at it."""
+        with open(f"{self.world_path}.lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            w = json.loads(self.world_path.read_text())
+            if changes:
+                w.update(changes)
+                pathlib.Path(f"{self.world_path}.new").write_text(json.dumps(w))
+                os.replace(f"{self.world_path}.new", self.world_path)
         return w
 
     def nebius_calls(self):
@@ -377,7 +523,8 @@ class Host:
         return log_lines(self.docker_log)
 
     def docker_runs(self):
-        return [a for a in self.docker_calls() if a[:1] == ["run"] and "-d" in a]
+        """The device runs: each `docker run` with `--gpus`."""
+        return [a for a in self.docker_calls() if a[:1] == ["run"] and "--gpus" in a]
 
     def host_lines(self):
         return self.host_log.read_text().splitlines() if self.host_log.exists() else []

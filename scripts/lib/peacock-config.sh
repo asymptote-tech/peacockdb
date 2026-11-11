@@ -2,8 +2,9 @@
 #
 # ~/.config/peacock/, on a person's own machine (the laptop) and on a VM (llm-wiki/build-test.md,
 # "CPU VMs"): the storage keys, the person's PAT and GPU key, their two Nebius profiles, and the
-# VMs this laptop provisioned. A function that refuses prints one line to stderr and returns 2; it
-# is called as a statement, so set -e stops the caller.
+# VMs this laptop provisioned. And the card lock every user of a GPU VM takes. A function that
+# refuses prints one line to stderr and returns 2; it is called as a statement, so set -e stops the
+# caller.
 
 PEACOCK_CONFIG=$HOME/.config/peacock
 PEACOCK_ENV=$PEACOCK_CONFIG/peacock.env
@@ -15,6 +16,9 @@ PEACOCK_NEBIUS_CONFIG=$PEACOCK_CONFIG/nebius.yaml
 PEACOCK_NEBIUS_PROFILES=(editor-eu eu-west1)
 # What peacock.env holds on a laptop, and must hold on a VM.
 PEACOCK_STORAGE_KEYS=(AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_ENDPOINT_URL AWS_REGION)
+# On a GPU VM, held by whatever has the card: a run-gpu.sh run while its container lives, a capture
+# while it profiles. Two pools on one card fail each other. Its path is the caller's to pass.
+PEACOCK_CARD_LOCK=${PEACOCK_CARD_LOCK:-/run/lock/peacock-card.lock}
 
 peacock_refuse() { echo "${0##*/}: $*" >&2; return 2; }
 
@@ -210,4 +214,24 @@ peacock_nebius_config_checked() {
       || { peacock_refuse "cannot read profile $p's key path in $file"; return; }
     [ -z "$path" ] || { peacock_refuse "profile $p in $file reads its key from a file: make it again with scripts/env/nebius-profiles.sh"; return; }
   done
+}
+
+# peacock_card_take <lock> — holds <lock> on fd PEACOCK_CARD_FD while this process lives; made mode
+# 666 when missing, so every user of the VM takes it whatever their group. While another holds it,
+# says so and waits in a background flock, its pid in PEACOCK_CARD_WAITER, so a TERM trap runs at
+# once; the wait's status is then returned. The lock is on the file's open description, which the
+# waiter shares: it stays held after. 1, said, when the lock cannot be made or opened.
+peacock_card_take() {
+  # Opened read-only, never to create: in sticky /run/lock, fs.protected_regular refuses an open
+  # that may create a file another user owns. Two users making it at once: the loser's is refused.
+  if ! { [ -e "$1" ] || (umask 000 && : >> "$1") 2> /dev/null || [ -e "$1" ]; } \
+     || ! exec {PEACOCK_CARD_FD}< "$1"; then
+    echo "cannot open the card lock $1"
+    return 1
+  fi
+  if flock -n "$PEACOCK_CARD_FD"; then return 0; fi
+  echo "waiting for the card: another run holds $1"
+  flock "$PEACOCK_CARD_FD" &
+  PEACOCK_CARD_WAITER=$!
+  wait "$PEACOCK_CARD_WAITER"
 }

@@ -17,10 +17,10 @@
 #                                testdata to ~/peacock/<i>/ on the VM, the datasets linked in; four
 #                                rsync streams at once, each retried
 #   run [--detach] <list|filter|bench>
-#                              the run image's run-tests.sh <mode> as container peacock-<i>, its
-#                                log followed, or, with --detach, left running; PCK_TEST_FILTER,
-#                                PEACOCK_BENCH_RESUME, PEACOCK_BENCH_CASE_TIMEOUT_S and
-#                                PCK_WRITE_GPU_RESULT pass on when set
+#                              the run image's run-tests.sh <mode> as container peacock-<i>, held by
+#                                a runner on the VM that outlives the session, its log followed, or,
+#                                with --detach, not; PCK_TEST_FILTER, PEACOCK_BENCH_RESUME,
+#                                PEACOCK_BENCH_CASE_TIMEOUT_S and PCK_WRITE_GPU_RESULT pass on when set
 #   run <name> [--exact <test>]
 #                              a binary staged in the install's rust-benchmarks/ (stage-install.sh's
 #                                prototype_fused_benchmarks), run in the unchanged run image as its
@@ -28,8 +28,12 @@
 #                                --test-threads=1, and <test> or PCK_TEST_FILTER as the filter;
 #                                PEACOCK_BENCH_RESUME passes on when set. Judged as run-tests.sh
 #                                judges: a failed exit, a segfault or `running 0 tests` is exit 1
-#   status                     peacock-<i>: `running`, `exited <code>` or `none`, then the last 40
-#                                lines of its log; an ended run's log is kept for pull
+#   follow                     the dir's run's log from its start, then live; its exit the run's
+#   cancel                     ends the dir's run: its wait for the card given up, or its container
+#                                stopped and removed; a container no runner holds removed
+#   status                     the dir's run: `none`, `waiting` for the card, `running`, `exited
+#                                <code>` or `ended without a status`, then the last 40 lines of its
+#                                log, which ~/peacock/<i>/logs/<mode or name>-<stamp>.log keeps for pull
 #   pull                       testdata/benchmark-results/, testdata/calibration/ and the device's
 #                                answers (testdata/goldens/*/gpu-result*.txt) into this tree, and
 #                                the runs' logs into ~/.cache/peacock/run-gpu/<i>/
@@ -40,14 +44,19 @@
 # tree's directory name by default, <v> 25.02. prepare and run use the images of this tree's inputs,
 # by their inputs tag (scripts/lib/image-inputs.sh), or PEACOCK_RUN_IMAGE and PEACOCK_BUILD_IMAGE
 # when set (CI's scripts/env/image-ref.sh refs), checked alike. A run is given the run image by the
-# ID read with its labels, so a tag moved since is not run.
+# ID read with its labels, so a tag moved since is not run. A run waits for the card's lock, one for
+# every user of the VM (PEACOCK_CARD_LOCK), and holds it while its container lives. Ctrl-C, a TERM or
+# a dropped ssh ends the following alone; follow takes it up again.
 #
-# Exit 0; 1 the run failed, or a ship stream gave up; 2 bad input (nebius.sh's 64 too), a stale
-# image, one not published (the images.yml dispatch named), a run in progress, a step missing
-# (prepare, ship), or a driver query that fails or lists no GPU; a pull that failed otherwise,
-# docker's; 3 a card below compute capability 8.0, or one whose driver is older than the run image
-# needs; 4 restart the VM (nebius.sh stop --force, start), then prepare again; 5 status: the run
-# goes on; else nebius.sh's (75, 69). status: 0 exited 0, 1 exited non-zero, 2 none.
+# Exit 0; 1 the run failed or ended with no status, a ship stream gave up, or ssh dropped while
+# following; 2 bad input (nebius.sh's 64 too), a stale image, one not published (the images.yml
+# dispatch named), a run in progress, a step missing (prepare, ship), or a driver query that fails or
+# lists no GPU; a pull that failed otherwise, docker's; 3 a card below compute capability 8.0, or one
+# whose driver is older than the run image needs; 4 restart the VM (nebius.sh stop --force, start),
+# then prepare again; 5 status: the run goes on; 130 or 143 a run or follow interrupted, the run
+# going on; else nebius.sh's (75, 69).
+# status: 0 exited 0, 1 exited non-zero or ended without a status, 2 none. follow: as run, 2 no run.
+# cancel: 0, or 1 when the run ended with no status or its container stays.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -72,7 +81,7 @@ done
 verb=${1:-}
 shift || true
 case $verb in
-  pull|status) [ $# -eq 0 ] || die "$verb takes no argument: $*" ;;
+  pull|status|follow|cancel) [ $# -eq 0 ] || die "$verb takes no argument: $*" ;;
   prepare)
     while [ $# -gt 0 ]; do
       case $1 in
@@ -106,7 +115,7 @@ case $verb in
         [ -z "$exact" ] || [ -z "${PCK_TEST_FILTER:-}" ] \
           || die "--exact $exact and PCK_TEST_FILTER=$PCK_TEST_FILTER both name the tests: give one" ;;
     esac ;;
-  *) die "unknown verb ${verb:-(none)}: prepare, ship, run, status or pull" ;;
+  *) die "unknown verb ${verb:-(none)}: prepare, ship, run, follow, cancel, status or pull" ;;
 esac
 # Not cudf-*: ~/peacock/cudf-<v>/ is the run image's prefix.
 [[ "$dir" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$dir" != cudf-* ]] \
@@ -140,12 +149,16 @@ vm() {
   return "$rc"
 }
 
+# What every function on_vm sends runs with: the helpers, and what starts a runner.
+VM_HELPERS=(vm_docker vm_state vm_started_at vm_status_code vm_container vm_name_free vm_name_taken vm_idle
+            vm_locked vm_started vm_follow vm_runner vm_runner_ended vm_staged_judged peacock_card_take)
+
 # on_vm <function> <arg…>: a function below, sent as text and run on the VM under bash, with
-# set -euo pipefail and the helpers every one of them uses.
+# set -euo pipefail and the helpers.
 on_vm() {
   local fn=$1 script args=""
   shift
-  script="set -euo pipefail; $(declare -f vm_docker vm_not_running "$fn"); $fn \"\$@\""
+  script="set -euo pipefail; $(declare -f "${VM_HELPERS[@]}" "$fn"); $fn \"\$@\""
   [ $# -eq 0 ] || args=$(printf ' %q' "$@")
   vm "bash -c $(printf '%q' "$script") run-gpu.sh$args"
 }
@@ -161,6 +174,31 @@ from_vm() {  # from_vm <source under ~> <local dest> [<rsync arguments…>]
   local src=$1 dest=$2
   shift 2
   sync_retry rsync -a --partial --timeout=90 -e "${NEBIUS[*]} rsh" "$@" "vm:$src" "$dest"
+}
+
+# following <function> <arg…>: on_vm of a call that follows a run. Ctrl-C, a TERM or a dropped ssh
+# (255) end the following alone, saying how to take it up again; the run goes on. The call runs in
+# the background: bash runs a trap only once a foreground child ends, and a TERM may come to this
+# script alone. It runs in a process group of its own (set -m), which the trap kills whole, a process
+# it forks meanwhile included.
+following() {
+  local rc=0
+  trap 'followed_no_more 130' INT
+  trap 'followed_no_more 143' TERM
+  set -m
+  on_vm "$@" &
+  follower=$!
+  set +m
+  wait "$follower" || rc=$?
+  trap - INT TERM
+  [ "$rc" -ne 255 ] || followed_no_more 1
+  return "$rc"
+}
+followed_no_more() {
+  if [ -n "${follower:-}" ]; then kill -TERM -- "-$follower" 2> /dev/null || true; fi
+  echo "run-gpu.sh: no longer following; the run goes on, on the VM:" \
+       "scripts/env/run-gpu.sh ${NEBIUS[*]:1} --dir $dir follow follows it" >&2
+  exit "$1"
 }
 
 # docker, for machine_image_checked and the label reads: the VM's. Nothing runs a container here.
@@ -232,15 +270,91 @@ vm_docker() {
 
 vm_docker_run() { vm_docker; docker "$@"; }
 
-# vm_not_running <i>: refuses, exit 2, while container peacock-<i> runs; clears one that ended.
-vm_not_running() {
-  local name=peacock-$1 state
-  state=$(docker ps -a --filter "name=^$name\$" --format '{{.State}}')
+# A dir's run, in ~/peacock/<i>/: run/state, `<runner pid> <boot id> <what> <stamp> <start time>`,
+# <what> the mode or the staged binary's name, written by the runner; its log,
+# logs/<what>-<stamp>.log; run/status, `<stamp> <code>`, once it ended; run/lock, held around a
+# run's start and a cancel.
+
+# vm_state <i>: reads run/state into the caller's pid, boot, what, stamp and start, and going: 1 while
+# the runner lives, else 0. The boot id and the start time tell it from another process the pid went
+# to, after a restart or within one boot. 1 with no state.
+vm_state() {
+  local file=$HOME/peacock/$1/run/state
+  [ -f "$file" ] || return 1
+  read -r pid boot what stamp start < "$file"
+  going=0
+  if [ "$boot" = "$(cat /proc/sys/kernel/random/boot_id)" ] && [ -n "$start" ] \
+     && [ "$(vm_started_at "$pid")" = "$start" ]; then
+    going=1
+  fi
+}
+
+# vm_started_at <pid>: the process's start time, in clock ticks since boot (/proc/<pid>/stat's field
+# 22); nothing when there is no such process. Its name, field 2, may hold spaces, so fields are
+# counted from its closing parenthesis.
+vm_started_at() {
+  local stat fields
+  stat=$(cat "/proc/$1/stat" 2> /dev/null) || return 0
+  read -ra fields <<< "${stat##*) }"
+  echo "${fields[19]}"
+}
+
+# vm_status_code <i> <stamp>: the code the run of <stamp> ended with, when it has one.
+vm_status_code() {
+  local file=$HOME/peacock/$1/run/status st code
+  [ -f "$file" ] || return 0
+  read -r st code < "$file"
+  if [ "$st" = "$2" ]; then echo "$code"; fi
+}
+
+# vm_container <i>: `<state> <dir>` of container peacock-<i>, nothing with none. Docker's names are
+# the VM's, so another user's dir of the same name runs a container of this name: <dir> is its
+# peacock.dir label, this dir with none (a container from before the label).
+vm_container() {
+  local line
+  line=$(docker ps -a --filter "name=^peacock-$1\$" --format '{{.State}} {{.Label "peacock.dir"}}')
+  [ -n "$line" ] || return 0
+  line=${line% }
+  if [ "${line#* }" = "$line" ]; then line+=" $HOME/peacock/$1"; fi
+  echo "$line"
+}
+
+# vm_idle <i>: refuses, exit 2, while the dir's run goes, or while its container runs held by no
+# runner (one killed); clears its container that ended, as a VM restart leaves it. Another dir's
+# container of its name is vm_name_free's.
+vm_idle() {
+  local pid boot what stamp start going state owner
+  if vm_state "$1" && [ "$going" -eq 1 ]; then
+    echo "run-gpu.sh: the $what run started $stamp goes on in ~/peacock/$1 on the VM:" \
+         "run-gpu.sh … follow follows it, … cancel ends it" >&2
+    exit 2
+  fi
+  read -r state owner <<< "$(vm_container "$1")"
+  if [ -z "$state" ] || [ "$owner" != "$HOME/peacock/$1" ]; then return 0; fi
   case $state in
-    "") ;;
-    running|restarting|paused) echo "run-gpu.sh: $name is $state on the VM: a run is in progress" >&2; exit 2 ;;
-    *) docker rm "$name" > /dev/null ;;
+    running|restarting|paused)
+      echo "run-gpu.sh: peacock-$1 is $state on the VM, held by no run: run-gpu.sh … cancel removes it" >&2
+      exit 2 ;;
+    *) docker rm "peacock-$1" > /dev/null ;;
   esac
+}
+
+# vm_name_free <i>: refuses, exit 2, a run while another dir's container of its name stays after its
+# run ended: the name is docker's, the VM's. One that runs is let be: the card lock orders the two
+# runs, and that run's runner removes it.
+vm_name_free() {
+  local state owner
+  read -r state owner <<< "$(vm_container "$1")"
+  if [ -n "$state" ] && [ "$owner" != "$HOME/peacock/$1" ]; then
+    case $state in running|restarting|paused) return 0 ;; esac
+    vm_name_taken "$1" "$owner" >&2
+    exit 2
+  fi
+}
+
+vm_name_taken() {
+  echo "run-gpu.sh: container peacock-$1 on the VM is $2's, which no run holds: its owner's" \
+       "run-gpu.sh … cancel removes it; or name a dir of your own with --dir"
 }
 
 # vm_system: what the VM needs before any image: tools, Docker and the NVIDIA Container Toolkit,
@@ -350,7 +464,7 @@ vm_cudf() {
 vm_ship_ready() {
   local base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock} pair target name
   vm_docker
-  vm_not_running "$1"
+  vm_idle "$1"
   shift
   for pair in "$@"; do
     target=$data/${pair#*:}
@@ -364,75 +478,220 @@ vm_ship_ready() {
   done
 }
 
-# vm_run <i> <run image ID> <mode> <detach> [<NAME=value>…]: run-tests.sh <mode> as peacock-<i>;
-# returns 0, 2 as the run did, else 1. Detached (1), returns once it is up, and vm_status judges it.
-vm_run() {
-  local dir=$1 image=$2 mode=$3 detach=$4 base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock}
-  local name=peacock-$1 envs=() pair code
-  shift 4
-  for pair in "$@"; do envs+=(-e "$pair"); done
+# vm_started <i> <what> <card lock> <docker run argument>…: under run/lock, once the dir is idle, a
+# runner of <what> with the run's mounts, user and hostname and these arguments, detached from this
+# session, and its log, empty. run/lock is let go once the runner wrote its state, its TERM trap set,
+# so a cancel never finds a runner it cannot stop.
+vm_started() {
+  local dir=$1 what=$2 lock=$3 base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock} stamp runner
+  shift 3
   vm_docker
-  vm_not_running "$dir"
+  mkdir -p "$base/run" "$base/logs"
+  vm_locked "$dir"
+  vm_idle "$dir"
+  vm_name_free "$dir"
+  stamp=$(date -u +%Y%m%dT%H%M%S.%3NZ)
+  : > "$base/logs/$what-$stamp.log"
+  runner="set -euo pipefail; $(declare -f vm_docker vm_container vm_started_at peacock_card_take vm_runner \
+    vm_runner_ended vm_staged_judged vm_name_taken); vm_runner \"\$@\""
+  # Every fd redirected: the session's pipes close when this call ends, and run/lock is let go.
+  setsid nohup bash -c "$runner" run-gpu.sh "$dir" "$what" "$stamp" "$lock" \
+    --user "$(id -u):$(id -g)" --hostname "$(hostname)" --label "peacock.dir=$base" \
+    -v "$base/cpp/install:/peacock/install:ro" -v "$base/testdata:/peacock/testdata" -v "$data:$data:ro" \
+    "$@" < /dev/null > /dev/null 2>&1 {VM_LOCK_FD}>&- &
+  while [ "$(cut -d' ' -f4 "$base/run/state" 2> /dev/null)" != "$stamp" ]; do
+    kill -0 "$!" 2> /dev/null || { echo "run-gpu.sh: the runner of $what ended before it started; its log is $base/logs/$what-$stamp.log" >&2; exit 1; }
+    sleep 0.05
+  done
+  exec {VM_LOCK_FD}>&-
+}
+
+# vm_locked <i>: run/lock taken on fd VM_LOCK_FD; a wait for it is said.
+vm_locked() {
+  exec {VM_LOCK_FD}> "$HOME/peacock/$1/run/lock"
+  if ! flock -n "$VM_LOCK_FD"; then
+    echo "run-gpu.sh: waiting for ~/peacock/$1/run/lock: another call starts or cancels a run there" >&2
+    flock "$VM_LOCK_FD"
+  fi
+}
+
+# vm_runner <i> <what> <stamp> <card lock> <docker run argument>…: the run, detached: its output to
+# its log; the card's lock, waited for and held while the container lives; the container removed;
+# a staged binary judged; then its status. --init: run-tests.sh as PID 1 would ignore docker stop.
+# cancel sends TERM until this process ends: each one cuts short the wait in hand, and the flag
+# says what to do next, so a TERM at any point lands. The status is the client's, so a TERM that
+# comes as the run ends keeps the run's own.
+vm_runner() {
+  local dir=$1 what=$2 stamp=$3 lock=$4 base=$HOME/peacock/$1 name=peacock-$1 cancelled=0 stopped=0 child=""
+  local code="" rc=0 state owner
+  shift 4
+  exec >> "$base/logs/$what-$stamp.log" 2>&1
+  rm -f "$base/run/exit"
+  trap 'cancelled=1' TERM
+  echo "$$ $(cat /proc/sys/kernel/random/boot_id) $what $stamp $(vm_started_at $$)" > "$base/run/state.new"
+  mv "$base/run/state.new" "$base/run/state"
+  vm_docker
+  if [ "$cancelled" -eq 0 ]; then peacock_card_take "$lock" || rc=$?; fi
+  if [ "$cancelled" -eq 1 ]; then
+    kill "${PEACOCK_CARD_WAITER:-}" 2> /dev/null || true
+  elif [ "$rc" -ne 0 ]; then
+    code=1
+  else
+    # This dir's ended container was cleared at the start, a running one refused. One here now is
+    # another dir's that its runner, dead, left behind: the card lock is ours.
+    read -r state owner <<< "$(vm_container "$dir")"
+    if [ -n "$state" ]; then
+      vm_name_taken "$dir" "$owner"
+      code=2
+    else
+      ( rc=0; docker run --init --name "$name" --gpus all "$@" || rc=$?; echo "$rc" > "$base/run/exit" ) &
+      child=$!
+      while kill -0 "$child" 2> /dev/null; do
+        if [ "$cancelled" -eq 0 ]; then
+          wait "$child" || true
+        else
+          stopped=1  # the client may still be making the container: stopped until the client ends
+          docker stop -t 30 "$name" > /dev/null 2>&1 || true
+          sleep 0.2
+        fi
+      done
+    fi
+  fi
+  trap '' TERM
+  if [ -z "$code" ]; then code=$(cat "$base/run/exit" 2> /dev/null) || code=143; fi
+  read -r state owner <<< "$(vm_container "$dir")"
+  if [ -n "$state" ] && [ "$owner" = "$base" ]; then docker rm -f "$name" > /dev/null 2>&1 || true; fi
+  if [ "$cancelled" -eq 1 ] && { [ -z "$child" ] || [ "$stopped" -eq 1 ]; }; then
+    echo "run-gpu.sh: cancelled"
+  elif [ -n "$child" ]; then
+    case $what in list|filter|bench) ;; *) vm_staged_judged ;; esac
+  fi
+  vm_runner_ended
+}
+
+vm_runner_ended() {
+  echo "$stamp $code" > "$base/run/status.new"
+  mv "$base/run/status.new" "$base/run/status"
+}
+
+# vm_staged_judged: a staged binary's code, as run-tests.sh judges: a failed exit, a segfault or
+# `running 0 tests` in its log is 1.
+vm_staged_judged() {
+  local log=$base/logs/$what-$stamp.log
+  if [ "$code" -ne 0 ]; then
+    echo "run-gpu.sh: $what exited $code"
+    code=1
+  elif grep -qE 'Segmentation fault|core dumped' "$log"; then
+    echo "run-gpu.sh: $what: a segfault in its log"
+    code=1
+  elif grep -qE '^running 0 tests' "$log"; then
+    echo "run-gpu.sh: $what ran 0 tests"
+    code=1
+  fi
+}
+
+# vm_follow <i>: the dir's run's log from its first line, live while the run goes; then exits as run
+# exits for its status: 0 and 2 as they are, else 1. No run is 2, none with a status 1.
+vm_follow() {
+  local base=$HOME/peacock/$1 pid boot what stamp start going code log
+  vm_state "$1" || { echo "run-gpu.sh: no run in ~/peacock/$1 on the VM to follow: run-gpu.sh … status" >&2; exit 2; }
+  log=$base/logs/$what-$stamp.log
+  if [ "$going" -eq 1 ]; then tail -n +1 -s 0.2 --pid="$pid" -f "$log"; else cat "$log"; fi
+  code=$(vm_status_code "$1" "$stamp")
+  if [ -z "$code" ]; then
+    echo "run-gpu.sh: the $what run started $stamp ended with no status: its runner was killed, or the VM restarted" >&2
+    exit 1
+  fi
+  case $code in 0|2) exit "$code" ;; *) exit 1 ;; esac
+}
+
+# vm_run <i> <run image ID> <mode> <detach> <card lock> [<NAME=value>…]: run-tests.sh <mode> as
+# peacock-<i>, followed; detached (1), returns once its runner is started.
+vm_run() {
+  local dir=$1 image=$2 mode=$3 detach=$4 lock=$5 base=$HOME/peacock/$1 envs=() pair
+  shift 5
+  for pair in "$@"; do envs+=(-e "$pair"); done
   [ -f "$base/cpp/install/lib/libpeacock_gpu.so" ] || { echo "run-gpu.sh: no install in $base: ship first" >&2; exit 2; }
-  mkdir -p "$base/logs"
-  docker run -d --name "$name" --label "peacock.log=$mode" --gpus all --user "$(id -u):$(id -g)" \
-    --hostname "$(hostname)" -v "$base/cpp/install:/peacock/install:ro" -v "$base/testdata:/peacock/testdata" \
-    -v "$data:$data:ro" "${envs[@]}" "$image" "$mode" > /dev/null
+  vm_started "$dir" "$mode" "$lock" "${envs[@]}" "$image" "$mode"
   if [ "$detach" -eq 1 ]; then
-    echo "==> $name: run-tests.sh $mode, detached; run-gpu.sh … status says how it goes"
+    echo "==> peacock-$dir: run-tests.sh $mode, detached; run-gpu.sh … status says how it goes, … follow follows it"
     return 0
   fi
-  docker logs -f "$name" 2>&1 | tee "$base/logs/$mode.log"
-  code=$(docker wait "$name")
-  docker rm "$name" > /dev/null
-  case $code in 0|2) return "$code" ;; *) return 1 ;; esac
+  vm_follow "$dir"
 }
 
-# vm_run_staged <i> <run image ID> <name> <NAME=value>… -- <argument>…: the install's
-# rust-benchmarks/<name> as peacock-<i>'s entrypoint in the run image, with the run's mounts;
-# refuses, exit 2, a name staged there as no executable. Returns 0, else 1, as run-tests.sh judges.
+# vm_run_staged <i> <run image ID> <name> <card lock> <NAME=value>… -- <argument>…: the install's
+# rust-benchmarks/<name> as peacock-<i>'s entrypoint in the run image, followed; refuses, exit 2, a
+# name staged there as no executable.
 vm_run_staged() {
-  local dir=$1 image=$2 name=$3 base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock}
-  local container=peacock-$1 entry=/peacock/install/rust-benchmarks/$3 envs=() code log
-  shift 3
+  local dir=$1 image=$2 name=$3 lock=$4 base=$HOME/peacock/$1 envs=()
+  shift 4
   while [ "$1" != -- ]; do envs+=(-e "$1"); shift; done
   shift
-  vm_docker
-  vm_not_running "$dir"
   [ -x "$base/cpp/install/rust-benchmarks/$name" ] \
     || { echo "run-gpu.sh: no executable $base/cpp/install/rust-benchmarks/$name: stage and ship it first" >&2; exit 2; }
-  mkdir -p "$base/logs"
-  log=$base/logs/$name.log
-  docker run -d --name "$container" --label "peacock.log=$name" --gpus all --user "$(id -u):$(id -g)" \
-    --hostname "$(hostname)" -v "$base/cpp/install:/peacock/install:ro" -v "$base/testdata:/peacock/testdata" -v "$data:$data:ro" \
-    -e LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib -e PEACOCK_TESTDATA_DIR=/peacock/testdata \
-    "${envs[@]}" --entrypoint "$entry" "$image" "$@" > /dev/null
-  docker logs -f "$container" 2>&1 | tee "$log"
-  code=$(docker wait "$container")
-  docker rm "$container" > /dev/null
-  if [ "$code" -ne 0 ]; then echo "run-gpu.sh: $name exited $code" >&2; return 1; fi
-  if grep -qE 'Segmentation fault|core dumped' "$log"; then echo "run-gpu.sh: $name: a segfault in its log" >&2; return 1; fi
-  if grep -qE '^running 0 tests' "$log"; then echo "run-gpu.sh: $name ran 0 tests" >&2; return 1; fi
+  vm_started "$dir" "$name" "$lock" -e LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib \
+    -e PEACOCK_TESTDATA_DIR=/peacock/testdata "${envs[@]}" --entrypoint "/peacock/install/rust-benchmarks/$name" \
+    "$image" "$@"
+  vm_follow "$dir"
 }
 
-# vm_status <i>: peacock-<i>'s state and the last 40 lines of its log; returns 5 while it runs, 2
-# when there is none, else 0 or 1 as it exited. An ended run's whole log goes to
-# ~/peacock/<i>/logs/<its peacock.log label>.log, where pull finds it; the next run clears it.
+# vm_status <i>: the dir's run, a line, then the last 40 lines of its log; returns 2 with no run, 5
+# while it waits for the card or runs, 0 or 1 as it exited, 1 with no status.
 vm_status() {
-  local name=peacock-$1 log=$HOME/peacock/$1/logs state code
+  local base=$HOME/peacock/$1 pid boot what stamp start going code log
   vm_docker
-  state=$(docker ps -a --filter "name=^$name\$" --format '{{.State}}')
-  case $state in
-    "") echo none; return 2 ;;
-    running|restarting|paused) echo running; docker logs --tail 40 "$name" 2>&1; return 5 ;;
-  esac
-  code=$(docker inspect --format '{{.State.ExitCode}}' "$name")
-  mkdir -p "$log"
-  log=$log/$(docker inspect --format '{{index .Config.Labels "peacock.log"}}' "$name").log
-  docker logs "$name" > "$log" 2>&1
+  vm_state "$1" || { echo none; return 2; }
+  log=$base/logs/$what-$stamp.log
+  code=$(vm_status_code "$1" "$stamp")
+  if [ -z "$code" ] && [ "$going" -eq 1 ]; then
+    read -r state owner <<< "$(vm_container "$1")"
+    if [ -n "$state" ] && [ "$owner" = "$base" ]; then echo running; else echo waiting; fi
+    tail -n 40 "$log"
+    return 5
+  fi
+  if [ -z "$code" ]; then
+    echo "ended without a status"
+    tail -n 40 "$log"
+    return 1
+  fi
   echo "exited $code"
   tail -n 40 "$log"
   [ "$code" -eq 0 ] || return 1
+}
+
+# vm_cancel <i>: TERM to the dir's runner, and its end awaited; with none, a container of the dir no
+# runner holds removed. Under run/lock, so no run starts meanwhile. 1 when the run ended with no
+# status, or the container stays.
+vm_cancel() {
+  local base=$HOME/peacock/$1 pid boot what stamp start going code state owner
+  vm_docker
+  if [ -d "$base/run" ]; then vm_locked "$1"; fi
+  if vm_state "$1" && [ "$going" -eq 1 ]; then
+    while kill -TERM "$pid" 2> /dev/null; do sleep 0.2; done
+    code=$(vm_status_code "$1" "$stamp")
+    if [ -z "$code" ]; then
+      echo "run-gpu.sh: the $what run started $stamp ended with no status; its log is $base/logs/$what-$stamp.log" >&2
+      exit 1
+    fi
+    if grep -q 'run-gpu.sh: cancelled$' "$base/logs/$what-$stamp.log"; then
+      echo "cancelled the $what run of $1 started $stamp (exit $code)"
+    else
+      echo "the $what run of $1 started $stamp ended by itself (exit $code) before the cancel"
+    fi
+    return 0
+  fi
+  read -r state owner <<< "$(vm_container "$1")"
+  if [ -n "$state" ] && [ "$owner" = "$base" ]; then
+    docker rm -f "peacock-$1" > /dev/null 2>&1 || true
+    if [ -n "$(vm_container "$1")" ]; then
+      echo "run-gpu.sh: peacock-$1 is still on the VM: docker could not remove it" >&2
+      exit 1
+    fi
+    echo "removed peacock-$1, which no run held"
+    return 0
+  fi
+  echo "no run of $1 goes on the VM"
 }
 
 # vm_pull_ready <i>: refuses, exit 2, before anything was shipped; makes what pull reads.
@@ -532,10 +791,16 @@ cmd_run() {
   [ -z "${PEACOCK_SCAN_READER:-}" ] || envs+=("PEACOCK_SCAN_READER=$PEACOCK_SCAN_READER")
   [ -z "${PEACOCK_BENCH_CASE_TIMEOUT_S:-}" ] || envs+=("PEACOCK_BENCH_CASE_TIMEOUT_S=$PEACOCK_BENCH_CASE_TIMEOUT_S")
   [ -z "${PCK_WRITE_GPU_RESULT:-}" ] || envs+=("PCK_WRITE_GPU_RESULT=$PCK_WRITE_GPU_RESULT")
-  on_vm vm_run "$dir" "$RUN_ID" "$mode" "$detach" "${envs[@]}"
+  if [ "$detach" -eq 1 ]; then
+    on_vm vm_run "$dir" "$RUN_ID" "$mode" 1 "$PEACOCK_CARD_LOCK" "${envs[@]}"
+  else
+    following vm_run "$dir" "$RUN_ID" "$mode" 0 "$PEACOCK_CARD_LOCK" "${envs[@]}"
+  fi
 }
 
 cmd_status() { on_vm vm_status "$dir"; }
+cmd_follow() { following vm_follow "$dir"; }
+cmd_cancel() { on_vm vm_cancel "$dir"; }
 
 cmd_run_staged() {
   local envs=() args=(--nocapture --test-threads=1)
@@ -544,7 +809,7 @@ cmd_run_staged() {
   [ -z "${PCK_TEST_FILTER:-}" ] || envs+=("PCK_TEST_FILTER=$PCK_TEST_FILTER")
   [ -z "${PEACOCK_BENCH_RESUME:-}" ] || envs+=("PEACOCK_BENCH_RESUME=$PEACOCK_BENCH_RESUME")
   if [ -n "$exact" ]; then args+=(--exact "$exact"); elif [ -n "${PCK_TEST_FILTER:-}" ]; then args+=("$PCK_TEST_FILTER"); fi
-  on_vm vm_run_staged "$dir" "$RUN_ID" "$staged" "${envs[@]}" -- "${args[@]}"
+  following vm_run_staged "$dir" "$RUN_ID" "$staged" "$PEACOCK_CARD_LOCK" "${envs[@]}" -- "${args[@]}"
 }
 
 cmd_pull() {
