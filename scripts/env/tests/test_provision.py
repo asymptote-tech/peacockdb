@@ -408,9 +408,65 @@ def refused_for(lap, *names, env=None):
 
 
 def test_provision_refuses_a_missing_nebius_yaml_naming_nebius_profiles():
+    # No ~/.nebius/config.yaml either, so there is nothing to cut it from.
     with Laptop() as lap:
         lap.nebius_yaml.unlink()
+        (lap.home / ".nebius" / "config.yaml").unlink()
         refused_for(lap, "nebius.yaml", "scripts/env/nebius-profiles.sh")
+
+
+def own_config(lap, profiles):
+    """No nebius.yaml, and a readable ~/.nebius/config.yaml holding `profiles`, old the active one."""
+    lap.nebius_yaml.unlink()
+    own = lap.home / ".nebius" / "config.yaml"
+    own.unlink()
+    nebius_config(own, "old", profiles)
+
+
+def test_a_missing_nebius_yaml_is_cut_before_anything_is_written():
+    with Laptop() as lap:
+        pem = lap.home / ".nebius" / "eu-west1-sa.pem"
+        pem.write_text("FAKE-KEY-MATERIAL\n")
+        own_config(lap, {"editor-eu": EMBEDDED, "eu-west1": {"key_path": str(pem)}, "old": EMBEDDED})
+        r = readied(lap)
+        assert f"{lap.nebius_yaml}: editor-eu (active), eu-west1; 1 other profiles left out" in r.stderr, r.stderr
+        assert mode(lap.nebius_yaml) == 0o600, oct(mode(lap.nebius_yaml))
+        listed = subprocess.run([str(lap.bin / "nebius"), "--config", str(lap.nebius_yaml), "profile", "list"],
+                                env={**lap.env, "FAKE_NEBIUS_LOG": ""}, capture_output=True, text=True,
+                                timeout=60, check=True).stdout
+        assert listed == "editor-eu [default]\neu-west1\n", listed
+        configs = [argv[argv.index("--config") + 1] for argv in lap.nebius_calls()]
+        first_check = configs.index(str(lap.nebius_yaml))
+        assert first_check > 0 and all(c != str(lap.nebius_yaml) for c in configs[:first_check]), configs
+        assert all(c == str(lap.nebius_yaml) for c in configs[first_check:]), configs
+        assert not any(p.name.startswith("nebius-cut.") for p in lap.config.iterdir()), list(lap.config.iterdir())
+        shipped = lap.vm_home("vm1.test", "dev1") / ".config" / "peacock" / "nebius.yaml"
+        assert sha256(shipped) == sha256(lap.nebius_yaml)
+
+
+def test_a_bad_argument_cuts_nothing():
+    # A bad flag, and a missing env file, which is checked before the cut.
+    for args, named in ((("--bogus",), "--bogus"), ((), "peacock.env")):
+        with Laptop() as lap:
+            own_config(lap, {"editor-eu": EMBEDDED, "eu-west1": EMBEDDED})
+            lap.add_vm("vm1.test")
+            r = lap.provision(TARGET, *args, stdin=PAT + "\n")
+            assert r.returncode == 2 and named in r.stderr, (args, r.returncode, r.stderr)
+            assert {p.name for p in lap.config.iterdir()} == GPU_KEY_NAMES, (args, list(lap.config.iterdir()))
+            assert lap.nebius_calls() == [] and lap.ssh_calls() == [], (args, lap.nebius_calls())
+
+
+def test_a_nebius_yaml_cut_that_fails_is_refused_before_any_ssh():
+    with Laptop() as lap:
+        own_config(lap, {"editor-eu": EMBEDDED, "old": EMBEDDED})
+        lap.add_vm("vm1.test")
+        r = quiet(lap.provision(TARGET, "--env", lap.received, stdin=PAT + "\n"))
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert len(r.stderr.strip().splitlines()) == 1, r.stderr
+        assert r.stderr.startswith("nebius-profiles.sh: ") and "eu-west1" in r.stderr, r.stderr
+        assert lap.ssh_calls() == [], lap.ssh_calls()
+        assert {p.name for p in lap.config.iterdir()} == GPU_KEY_NAMES, list(lap.config.iterdir())
+        assert not (lap.vms / "vm1.test" / "home" / "dev1").exists()
 
 
 def test_provision_refuses_a_nebius_yaml_with_another_profile():
@@ -431,6 +487,15 @@ def test_provision_refuses_a_profile_that_reads_its_key_from_a_file():
         pem.write_text("FAKE-KEY-MATERIAL\n")
         nebius_config(lap.nebius_yaml, "editor-eu", {"editor-eu": EMBEDDED, "eu-west1": {"key_path": str(pem)}})
         refused_for(lap, "eu-west1", "nebius-profiles.sh")
+
+
+def test_provision_refuses_a_federation_profile_naming_the_recipe():
+    for name in ("editor-eu", "eu-west1"):
+        with Laptop() as lap:
+            profiles = {"editor-eu": EMBEDDED, "eu-west1": EMBEDDED}
+            profiles[name] = {"key_path": None, "kind": "federation"}
+            nebius_config(lap.nebius_yaml, "editor-eu", profiles)
+            refused_for(lap, name, "service account", "The human's one-time setup")
 
 
 def test_provision_refuses_without_a_nebius_cli_naming_the_installer():

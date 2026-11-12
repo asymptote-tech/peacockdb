@@ -1,8 +1,10 @@
 """nebius.sh against fake nebius/ssh/ssh-keyscan: every exit code, and the host-key rule."""
-import os, pathlib, subprocess, sys, tempfile, time
+import os, pathlib, signal, stat, subprocess, sys, tempfile, time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from fakes import World  # noqa: E402
 from harness import main  # noqa: E402
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "env" / "tests"))
+from nebius_cli import install_cli, nebius_config  # noqa: E402
 
 SCRIPT = str(pathlib.Path(__file__).resolve().parents[2] / "nebius.sh")
 
@@ -367,6 +369,138 @@ def test_the_default_config_is_peacock_s():
     assert rc == 0 and out.split() == ["RUNNING", "203.0.113.7"], (rc, out, err)
     want = str(home / ".config" / "peacock" / "nebius.yaml")
     assert nebius_calls(w) and all(c[c.index("--config") + 1] == want for c in nebius_calls(w)), nebius_calls(w)
+
+
+class CliHome:
+    """A HOME with no ~/.config/peacock/nebius.yaml and, unless `own` is False, the CLI's own
+    ~/.nebius/config.yaml: `profiles`, else editor-eu embedded, eu-west1 from a PEM, and old, active.
+    nebius_cli.py's fake, first on PATH, is what the cut runs; the world's fake stays nebius.sh's."""
+
+    def __init__(self, w, profiles=None, own=True):
+        self.w, self.home = w, w.dir / "home"
+        self.dest = self.home / ".config" / "peacock" / "nebius.yaml"
+        self.log = w.dir / "cut.log"
+        pem = self.home / ".nebius" / "eu-west1-sa.pem"
+        pem.parent.mkdir(parents=True, exist_ok=True)
+        pem.write_text("FAKE-KEY-MATERIAL\n")
+        if own:
+            if profiles is None:
+                profiles = {"editor-eu": {"key_path": None}, "eu-west1": {"key_path": str(pem)},
+                            "old": {"key_path": None}}
+            nebius_config(self.home / ".nebius" / "config.yaml", "old", profiles)
+        self.cli = install_cli(w.dir / "cut-bin")
+        self.env = {"HOME": str(self.home), "PATH": f"{self.cli.parent}:{os.environ['PATH']}",
+                    "FAKE_NEBIUS_LOG": str(self.log)}
+
+    def run(self, *args, env=None, unset=("GPU_HOST_NEBIUS_CONFIG",)):
+        return run(self.w, *args, env={**self.env, **(env or {})}, unset=unset)
+
+    def ask(self, *args):
+        """The fake CLI's answer on the cut file, not logged."""
+        env = {k: v for k, v in {**os.environ, **self.env}.items() if k != "FAKE_NEBIUS_LOG"}
+        p = subprocess.run([str(self.cli), "--config", str(self.dest), *args], env=env, capture_output=True,
+                           text=True, timeout=60, stdin=subprocess.DEVNULL, check=True)
+        return p.stdout
+
+    def in_peacock(self):
+        d = self.dest.parent
+        return sorted(f.name for f in d.iterdir()) if d.exists() else []
+
+
+def test_a_missing_config_is_cut_from_the_cli_s_own_then_used():
+    w = World(state="RUNNING")
+    h = CliHome(w)
+    rc, out, err = h.run("status")
+    assert rc == 0 and out.split() == ["RUNNING", "203.0.113.7"], (rc, out, err)
+    assert f"{h.dest}: editor-eu (active), eu-west1; 1 other profiles left out" in err, err
+    assert "FAKE-KEY-MATERIAL" not in out + err, (out, err)
+    assert h.in_peacock() == ["nebius.yaml"] and stat.S_IMODE(h.dest.stat().st_mode) == 0o600, h.in_peacock()
+    assert h.ask("profile", "list") == "editor-eu [default]\neu-west1\n"
+    assert nebius_calls(w) and all(c[c.index("--config") + 1] == str(h.dest) for c in nebius_calls(w)), \
+        nebius_calls(w)
+
+
+def test_ctrl_c_mid_cut_stops_a_bash_loop_around_nebius_sh():
+    w = World(state="RUNNING")
+    h = CliHome(w)
+    marks = w.dir / "marks"
+    env = {k: v for k, v in {**w.env(), **h.env, "FAKE_NEBIUS_SLOW": "list", "FAKE_NEBIUS_SLOW_SECONDS": "2"}.items()
+           if k != "GPU_HOST_NEBIUS_CONFIG"}
+    loop = f'for i in 1 2; do echo "pass $i" >> "{marks}"; "{SCRIPT}" status; done'
+    p = subprocess.Popen(["bash", "-c", loop], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, start_new_session=True)
+    deadline = time.monotonic() + 30
+    while not (h.log.exists() and '"slow"' in h.log.read_text()):
+        assert time.monotonic() < deadline and p.poll() is None, (p.poll(), h.log.exists())
+        time.sleep(0.05)
+    os.killpg(p.pid, signal.SIGINT)
+    out, err = p.communicate(timeout=60)
+    assert p.returncode == -signal.SIGINT, (p.returncode, err)
+    assert marks.read_text() == "pass 1\n", marks.read_text()
+    assert h.in_peacock() == [], h.in_peacock()
+
+
+def test_a_usage_error_cuts_nothing():
+    w = World(state="RUNNING")
+    h = CliHome(w)
+    rc, out, err = h.run("bogus")
+    assert rc == 64 and "1 other; 64 usage." in err, (rc, err)
+    assert h.in_peacock() == [] and not h.log.exists(), h.in_peacock()
+
+
+def test_a_cut_that_fails_is_refused_naming_the_profile():
+    w = World(state="RUNNING")
+    h = CliHome(w, profiles={"editor-eu": {"key_path": None}, "old": {"key_path": None}})
+    rc, out, err = h.run("status")
+    assert rc == 1, (rc, out, err)
+    assert err.startswith("nebius-profiles.sh: ") and "eu-west1" in err, err
+    assert h.in_peacock() == [], h.in_peacock()
+    assert w.read()["calls"] == [], w.read()["calls"]
+
+
+def test_a_federation_profile_is_refused_by_the_first_use_cut():
+    for name in ("editor-eu", "eu-west1"):
+        w = World(state="RUNNING")
+        profiles = {"editor-eu": {"key_path": None}, "eu-west1": {"key_path": None}, "old": {"key_path": None}}
+        profiles[name] = {"key_path": None, "kind": "federation"}
+        h = CliHome(w, profiles=profiles)
+        rc, out, err = h.run("status")
+        assert rc == 1, (name, rc, out, err)
+        assert err.startswith("nebius-profiles.sh: ") and name in err and "The human's one-time setup" in err, err
+        assert h.in_peacock() == [], (name, h.in_peacock())
+        assert w.read()["calls"] == [], (name, w.read()["calls"])
+
+
+def test_no_cli_config_refuses_a_missing_file_as_before():
+    w = World(state="RUNNING")
+    h = CliHome(w, own=False)
+    rc, out, err = h.run("status")
+    assert rc == 1, (rc, out, err)
+    assert str(h.dest) in err and "scripts/env/nebius-profiles.sh" in err, err
+    assert h.in_peacock() == [] and not h.log.exists(), h.in_peacock()
+    assert w.read()["calls"] == [], w.read()["calls"]
+
+
+def test_a_named_config_is_never_cut():
+    w = World(state="RUNNING")
+    h = CliHome(w)
+    absent = str(w.dir / "no-such.yaml")
+    rc, out, err = h.run("status", env={"GPU_HOST_NEBIUS_CONFIG": absent}, unset=())
+    assert rc == 1, (rc, out, err)
+    assert absent in err and "scripts/env/nebius-profiles.sh" in err, err
+    assert h.in_peacock() == [] and not h.log.exists(), h.in_peacock()
+    assert not pathlib.Path(absent).exists()
+
+
+def test_an_existing_config_is_not_cut_again():
+    w = World(state="RUNNING")
+    h = CliHome(w)
+    nebius_config(h.dest, "editor-eu", {"editor-eu": {"key_path": None}})
+    before = h.dest.read_bytes()
+    rc, out, err = h.run("status")
+    assert rc == 0, (rc, out, err)
+    assert h.dest.read_bytes() == before and not h.log.exists(), h.log
+    assert h.in_peacock() == ["nebius.yaml"], h.in_peacock()
 
 
 def identities(w):

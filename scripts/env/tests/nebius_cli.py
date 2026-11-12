@@ -13,7 +13,10 @@ line; `FAKE_NEBIUS_LIST` replaces `profile list`'s output and `FAKE_NEBIUS_VERSI
 would; `FAKE_NEBIUS_FAIL=<verb>` fails it; the verb is the word after `profile` or `config` (`update`, `activate`, `delete`…), or `version`.
 FAKE-KEY-MATERIAL stands in for a CLI that echoes a key, so a script that passes any of it on is
 caught: a call whose answer a caller may use prints it on stderr, its answer alone on stdout;
-every other call prints it on both.
+every other call prints it on both. A profile is a service account's (its two ids, a key), a
+federation login's (a federation endpoint and id) or a token's (a token file), with the `auth-type`
+CLI 0.12 reports for it, as `nebius_config` writes it; `config get` of a key the profile lacks
+prints an empty line, as the CLI does.
 """
 import json
 import pathlib
@@ -103,12 +106,26 @@ def install_cli(directory):
 
 
 def nebius_config(path, active, profiles):
-    """Writes a config the fake reads: `profiles = {name: {"key_path": str | None}}`, in order."""
+    """Writes a config the fake reads: `profiles = {name: {"key_path": str | None}}`, in order, each a
+    service account's. `"kind"` makes one a `"federation"` (browser) login's or a `"token"`'s instead;
+    `"auth_type"` replaces the `auth-type` its kind reports, and `"without"` lists keys it lacks."""
+    def profile(name, p):
+        out = {"endpoint": "api.nebius.cloud", "private-key-file-path": p["key_path"] or ""}
+        kind = p.get("kind", "service account")
+        if kind == "service account":
+            out.update({"service-account-id": f"serviceaccount-{name}", "public-key-id": f"publickey-{name}"})
+        elif kind == "federation":
+            out.update({"federation-endpoint": "auth.nebius.com", "federation-id": f"federation-{name}"})
+        elif kind == "token":
+            out.update({"token-file": f"/run/token-{name}"})
+        else:
+            raise ValueError(f"no such kind {kind!r}: service account, federation or token")
+        out["auth-type"] = p.get("auth_type", kind)
+        for key in p.get("without", ()):
+            del out[key]
+        return out
     path = pathlib.Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"active": active, "profiles": {
-        name: {"endpoint": "api.nebius.cloud", "service-account-id": f"serviceaccount-{name}",
-               "public-key-id": f"publickey-{name}", "private-key-file-path": p["key_path"] or ""}
-        for name, p in profiles.items()}}))
+    path.write_text(json.dumps({"active": active, "profiles": {name: profile(name, p) for name, p in profiles.items()}}))
     path.chmod(0o600)
     return path

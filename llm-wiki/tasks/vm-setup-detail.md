@@ -13,6 +13,8 @@ Branch `ENS-vm-setup`, forked from `ENS-containers-only` at `7aeec989`; its PR t
 - Task 12: records and logs under a stamp, ship's stamp, `pull`, `pull --clear`, bench-each; below.
 - Task 13: CI's `gpu-tests` names a fixed tree id and cleans up with `cancel`; below.
 - Task 14: one table of build and test lines, each run as written; below.
+- Task 14a: a missing `nebius.yaml` is cut on first use; below.
+- Task 15: the branch's five images published; the table's 26.02 row run; below.
 
 ## Plain builds
 
@@ -570,6 +572,10 @@ plain build of the same Dockerfile from the repository's root, with no build arg
 - `test_bootstrap.py::test_bootstrap_leaves_the_shared_directory_writable_by_the_group` listed
   `<data dir>/cudf` and its commit's checkout among what bootstrap makes. Nothing makes them now;
   the data set's directory and its `tpch.sf1` remain.
+- `test_provision.py::test_provision_refuses_a_missing_nebius_yaml_naming_nebius_profiles` removed
+  `nebius.yaml` from a laptop whose `~/.nebius/config.yaml` is at mode 000. Such a laptop is now
+  cut from, so the test also removes `~/.nebius/config.yaml`: a missing file with nothing to cut it
+  from. The refusal it asserts is unchanged.
 
 ## Ported and dropped cases
 
@@ -695,10 +701,10 @@ directory on the build disk, keeping ccache and the registry off the home disk. 
 | `scripts/build-test.sh -- cpp/build/peacock_cpu_tests --gtest_filter=PeacockGpu.Version` (2026-11-12, after the loader-path fix; 1 test) | 0, 1 | 0, 1 |
 | `scripts/build-test.sh --run` | 0, 528 | 0, 527 |
 | `scripts/build-test.sh --gpu --build` | 0, 1994 (cold cargo; ninja had no work after the cpu build) | 0, 18 |
-| `rm -rf cpp/build cpp/install && scripts/build-test.sh --cudf 26.02 --build` | not run: no 26.02 build image of this tree's inputs here or on ghcr.io. `scripts/build-test.sh --cudf 26.02 --build` alone exits 2 at that lookup, naming `image.sh build build 26.02` and the `images.yml` dispatch | `scripts/build-test.sh --cudf 26.02 --build` alone: 2, 1, refused (below) |
+| `rm -rf cpp/build cpp/install && scripts/build-test.sh --cudf 26.02 --build` | 2026-11-11, before the image existed: `scripts/build-test.sh --cudf 26.02 --build` alone exits 2 at the image lookup, naming `image.sh build build 26.02` and the `images.yml` dispatch. 2026-11-12, at `aace33f5`: 0, 1686 (*The branch's images*, below) | `scripts/build-test.sh --cudf 26.02 --build` alone: 2, 1, refused (below) |
 
-- The 26.02 row waits for the branch's 26.02 build image (Task 15); its `rm` was not run, so the
-  tree stayed on 25.02 throughout.
+- The 26.02 row waited for the branch's 26.02 build image; until then its `rm` was not run, so the
+  tree stayed on 25.02 for every other row.
 - **The FFI test line, exit 127.** `-- <command>` ran the command before the
   `LD_LIBRARY_PATH=/opt/cudf/lib` export, which only `--run` made: `test_ffi` failed to load
   `libcudf.so`. `ctest` was not affected; its binaries carry the path. The export now comes before
@@ -762,3 +768,120 @@ directory on the build disk, keeping ccache and the registry off the home disk. 
   waits for bootstrap's `flock` child to hold an fd on that file, and checks `third_party/cudf` is
   still empty), as does the two-runs test this time; no `--depth 1`, and the shallow assertion in
   `test_bootstrap_checks_out_the_clone_s_third_party_cudf` fails.
+
+## The branch's images
+
+`images.yml`, dispatched on this branch at `aace33f5`, run `43258417105`: all five jobs green. Each
+image is pushed under its inputs tag and the commit's tag:
+
+| kind | cuDF | inputs tag | digest |
+|---|---|---|---|
+| build | 25.02 | `cudf-25.02-in-525f460c6dd5` | `sha256:9bfc69f3ef11…` |
+| build | 25.10 | `cudf-25.10-in-9cac897c5671` | `sha256:8a57556a08a0…` |
+| build | 26.02 | `cudf-26.02-in-722a431db732` | `sha256:75c59e21a0d0…` |
+| run | 25.02 | `cudf-25.02-in-febbd8e327d9` | `sha256:0a00b74d74cf…` |
+| run | 26.02 | `cudf-26.02-in-355b2cace775` | `sha256:6e4b6602781c…` |
+
+- `:cudf-<v>` did not move: it still names master's `b50d9b2a` images of 2026-11-01, as only a
+  dispatch on the default branch moves it. 25.10 is build-only (CI's second leg) and has no
+  `:cudf-25.10`.
+- The table's 26.02 row, on dev, 2026-11-12, from this worktree at `aace33f5` plus Task 14a's
+  scripts: `rm -rf cpp/build cpp/install && scripts/build-test.sh --cudf 26.02 --build`, exit 0 in
+  1686 s, `cpp/build` stamped 26.02. The published `cudf-26.02-in-722a431db732` could not be pulled
+  to dev: its 4.3 GB layer was cut by an unexpected EOF about every ten minutes, and docker gave up
+  after five retries (exit 125, 2823 s). The same inputs tag was built on dev with
+  `scripts/env/image.sh build build 26.02` (exit 0, 1710 s) and used instead. `cpp/build`,
+  `cpp/install` and `target-img-26.02` were removed after.
+- CI green on the branch waits for the pipeline dispatch of Task 16.
+
+## Task 14a
+
+- Red before the code, each on the old refusal (`no …/nebius.yaml: make it with
+  scripts/env/nebius-profiles.sh`): `test_a_missing_config_is_cut_from_the_cli_s_own_then_used` and
+  `test_a_cut_that_fails_is_refused_naming_the_profile` (`test_nebius.py`, exit 1);
+  `test_a_missing_nebius_yaml_is_cut_before_anything_is_written` and
+  `test_a_nebius_yaml_cut_that_fails_is_refused_before_any_ssh` (`test_provision.py`, exit 2).
+  `test_no_cli_config_refuses_a_missing_file_as_before`, `test_a_named_config_is_never_cut` and
+  `test_an_existing_config_is_not_cut_again` pass on the code before, kept as guards. Pinned by
+  mutation, the file restored after each: with `nebius.sh`'s `GPU_HOST_NEBIUS_CONFIG` condition
+  dropped, the named-config test fails (a `nebius.yaml` made); with the function's exists check
+  dropped, the not-again test fails.
+- One function, `peacock_nebius_config_cut` in `peacock-config.sh`, for both callers. It runs
+  `nebius-profiles.sh` beside the library (`${BASH_SOURCE[0]%/*}/../env/`) as a child, its stdout
+  to stderr, and returns 2 on any failure; the child has said why. `nebius.sh` turns that into 1;
+  in `provision-vm.sh` it is a statement, so `set -e` exits 2.
+- `nebius.sh` calls it only when `GPU_HOST_NEBIUS_CONFIG` is unset or empty, the test
+  `NEBIUS_CONFIG` is chosen by. `provision-vm.sh` reads no such variable: its file is always the
+  default.
+- The cut finds its CLI as `nebius-profiles.sh` does, PATH then `~/.nebius/bin`, never `NEBIUS`:
+  the script is used as it is. In `test_nebius.py`, `NEBIUS` stays the world's fake and the cut's
+  CLI is `nebius_cli.py`'s, first on PATH. A caller setting `NEBIUS` to a CLI off PATH, with no
+  `GPU_HOST_NEBIUS_CONFIG`, gets a cut from PATH's CLI, or its no-CLI refusal.
+- In `nebius.sh` the cut sits after the verb check, so a usage error stays 64, and before the
+  CLI lookup. The header grew a line; the usage range is now `2,32p`, which
+  `test_an_unknown_verb_prints_the_whole_usage` holds.
+- In `provision-vm.sh` the cut is the last check but one, after the env file, git identity, GPU
+  key and CLI, before `peacock_nebius_config_checked` and the PAT. A later refusal (a token gh
+  cannot use) keeps the file it made, as a hand run would.
+- The fake laptop's clone (`laptop.py`'s `LAPTOP_FILES`) holds `nebius-profiles.sh` too.
+- A HUP to the process group while bash waited in a command substitution (`profile list`,
+  `config get`) skipped the EXIT trap and left `nebius-cut.*`, the whole copy, behind.
+  `test_a_signal_mid_cut_leaves_only_what_was_there` now signals at `update`, `list` and `get`:
+  red in 3 runs of 3 before (HUP to the group, at `get` twice and `list` once), green in 3 of 3
+  after `nebius-profiles.sh` gained a trap per HUP, INT and TERM. With them a signal to bash alone
+  waits for the running CLI call, so no CLI outlives the dir.
+- Those traps first ended with a plain `exit 129/130/143`. A bash caller reads a plain 130 as an
+  interrupt the child handled and goes on: Ctrl-C mid-cut made `nebius.sh` exit 1 and a loop
+  around it run its next pass, which cut again. Each trap now removes the dir, resets itself and
+  EXIT, and kills its own process with the same signal. `cut_signalled` asserts the cut dies of
+  the signal in all 15 cases: red before (`(SIGTERM, True, 'update', 143, '')`), green in 2 runs
+  of 2 after. `test_ctrl_c_mid_cut_stops_a_bash_loop_around_nebius_sh`, a two-pass loop SIGINTed
+  at `profile list`: red before (exit 0, the second pass cut the file), green after.
+- `test_a_usage_error_cuts_nothing` (`nebius.sh bogus`) and `test_a_bad_argument_cuts_nothing`
+  (`provision-vm.sh … --bogus`) pass on the code and are guards: with the cut moved above
+  `verb=` in `nebius.sh`, or above the argument parsing in `provision-vm.sh`, each fails with a
+  `nebius.yaml` made.
+- Fixtures that made a temp dir and never removed it: `fakes.py`'s `World`,
+  `test_nebius_profiles.py`'s `Laptop`, `test_idle_watch.py`'s and `test_idle_watch_kinds.py`'s
+  `World`, and the latter's `test_load_install_reads_both_kinds`. Each now holds a
+  `TemporaryDirectory`, removed with the object. `path_without`'s links always lie inside a
+  fixture's own temp dir.
+- `test_bootstrap.py` left two empty `tmp.*` files in `/tmp` per run: its `bootstrap()` helper's
+  curl fails, and `bootstrap-vm.sh`'s gh block, which has no EXIT trap unlike the nebius one, exits
+  under `set -e` with its `mktemp` tarball in place. `machine.py`'s `Machine` env now names a
+  `TMPDIR` inside the machine, and the gh block has the nebius block's EXIT trap, reset after the
+  install. `test_bootstrap_leaves_no_download_when_the_gh_install_fails`: a failed download red
+  before (a `tmp.*` in the machine's tmpdir), and a tarball of another sha red alone with the trap
+  removed; both green after. The script's other download, Claude Code's installer, is piped to
+  bash and leaves no file.
+- `test_a_bad_argument_cuts_nothing` also runs `provision-vm.sh` with no `--env` and no
+  `peacock.env`: exit 2 naming it, nothing cut. With the cut moved to the top of the
+  `if [ -n "$target" ]` block it fails with a `nebius.yaml` made.
+- editor-eu and eu-west1 must be service-account profiles. `peacock_nebius_service_accounts_checked`
+  asks `config get` for `auth-type`, `service-account-id` and `public-key-id` and takes a profile
+  only when `auth-type` is exactly `service account` and both ids are set; a federation login, a
+  token, an empty or unknown `auth-type` are refused, naming the profile and "The human's one-time
+  setup". On the real CLI, measured by hand and not by these tests, a service account's profile
+  answers `auth-type` with `service account`, and a key it lacks prints an empty line, exit 0. The
+  `federation-endpoint` check of the first version is dropped: `auth-type` is the CLI's own answer
+  of who the profile acts as. It never asks `private-key`, whose answer is the key, and it turns
+  tracing off for itself, so `bash -x` shows none of the answers.
+- `nebius-profiles.sh` now cuts to `cut.yaml` in its private dir, runs that check there, and only
+  then moves the file into place; `peacock_nebius_cut` is unchanged, so install-watch's
+  one-profile cut accepts what it did. `peacock_nebius_config_checked` ends with the same check.
+- Red before the code, each a federation editor-eu taken with exit 0:
+  `test_a_federation_profile_is_refused_naming_the_recipe` (`test_nebius_profiles.py`, for each of
+  the two names), `test_a_federation_profile_is_refused_by_the_first_use_cut` (`test_nebius.py`,
+  exit 1, nothing left) and `test_provision_refuses_a_federation_profile_naming_the_recipe`
+  (`test_provision.py`, exit 2, no ssh). `test_only_a_service_account_with_both_ids_is_taken`
+  refuses a token's profile, an empty and a `federation` `auth-type` with both ids, and a service
+  account lacking either id; red on the endpoint-only rule (the empty `auth-type` taken). Each part
+  of the rule pinned by mutation, the line restored after each: without the `auth-type` test the
+  empty-`auth-type` case fails, without `service-account-id` the case lacking it, without
+  `public-key-id` the case lacking that. `nebius_cli.py`'s `nebius_config` writes a kind
+  (`service account`, `federation`, `token`) with its `auth-type`, an `auth_type` override and keys
+  to leave out; `fakes.py`'s world answers `auth-type` as a service account.
+- `peacock_nebius_cut` turns tracing off for itself too (`local -; set +x`): under `bash -x`
+  it traced eu-west1's key path, endpoint and ids. `test_no_cli_answer_is_traced_under_bash_x`
+  now holds the trace to none of those answers, not only to no key material: red before (the key
+  path in the trace), green after.

@@ -77,11 +77,14 @@ gh_version=$(pin GH_VERSION)
 gh_sha=$(pin GH_SHA256)
 if [ "$(/usr/local/bin/gh --version 2> /dev/null | awk 'NR == 1 { print $3 }')" != "$gh_version" ]; then
   tarball=$(mktemp)
+  # Every way out removes the download, as the nebius one's below.
+  trap 'rm -f "$tarball"' EXIT
   curl -fsSL -o "$tarball" \
     "https://github.com/cli/cli/releases/download/v$gh_version/gh_${gh_version}_linux_amd64.tar.gz"
   echo "$gh_sha  $tarball" | sha256sum -c --quiet -
   sudo tar -xzf "$tarball" -C /usr/local --strip-components=1 --no-same-owner "gh_${gh_version}_linux_amd64/bin/gh"
   rm -f "$tarball"
+  trap - EXIT
 fi
 
 # nebius from the URL the build image takes; nebius.sh finds it on PATH.

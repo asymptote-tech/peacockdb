@@ -168,10 +168,11 @@ class Machine:
         self.world_path.write_text(json.dumps({"label": self.label("25.02"), "seconds": 0, "fetching": 0,
                                                "fetch_overlap": False}))
         # The fake is a fresh VM, without nebius, whatever the host running the tests has (the build
-        # image has the pinned one).
+        # image has the pinned one). A script's temp files stay in the machine, removed with it.
+        (tmp / "tmpdir").mkdir()
         self.env = {"PATH": f"{self.bin}:{path_without(tmp, {'nebius'})}", "HOME": str(self.home), "LANG": "C.UTF-8",
                     "FAKE_DOCKER_LOG": str(self.docker_log), "FAKE_DOCKER_WORLD": str(self.world_path),
-                    "PEACOCK_DATA_DIR": str(self.data_dir)}
+                    "PEACOCK_DATA_DIR": str(self.data_dir), "TMPDIR": str(tmp / "tmpdir")}
         return self
 
     def __exit__(self, *exc):

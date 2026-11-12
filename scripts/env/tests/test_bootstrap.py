@@ -246,6 +246,21 @@ def test_bootstrap_leaves_no_download_when_the_nebius_install_fails():
         assert list((m.home.parent / "tmpdir").iterdir()) == [], log
 
 
+def test_bootstrap_leaves_no_download_when_the_gh_install_fails():
+    # A download that fails, and a tarball of another sha.
+    for curl, tarball in ((FAKE_CURL, None), (None, "another gh tarball")):
+        with Machine() as m:
+            env = whole_run_env(m)
+            if curl:
+                m.install("curl", curl)
+            if tarball:
+                env["FAKE_GH_TARBALL"] = tarball
+            r = m.run("bootstrap-vm.sh", env=env)
+            log = (m.home.parent / "sudo.log").read_text()
+            assert r.returncode != 0 and "github.com/cli/cli/releases" in log, (r.returncode, r.stderr, log)
+            assert list((m.home.parent / "tmpdir").iterdir()) == [], (curl is None, log)
+
+
 def test_bootstrap_skips_the_nebius_cli_at_its_pin():
     with Machine() as m:
         env = whole_run_env(m)

@@ -84,11 +84,13 @@ Nebius GPU VM through `run-gpu.sh`. Each step has a gap:
      the way `install-watch` cuts its one profile: a temp copy, mode 600; a profile whose key sits in
      a file (`config get private-key-file-path`; eu-west1 today) gets that file embedded and the path
      dropped; `editor-eu` activated; every other profile deleted; the copy moved into place, mode
-     600. A rerun replaces the file. It refuses, naming the profile, when either profile is missing
-     or a key path names no file. It prints only the two names and how many profiles it left out.
+     600. A rerun replaces the file. It refuses, naming the profile, when either profile is missing,
+     is not a service account's (a federation login acts as the person, with all their rights), or
+     has a key path naming no file. It prints only the two names and how many profiles it left out.
      `install-watch`'s cut and this one are one function, which keeps a list of profiles.
    - `provision-vm.sh` checks the file before anything is written, with the laptop's own `nebius`
-     (on PATH, or `~/.nebius/bin/`). It refuses one that is missing (naming `nebius-profiles.sh`),
+     (on PATH, or `~/.nebius/bin/`). A missing one is cut first by `nebius-profiles.sh` when
+     `~/.nebius/config.yaml` exists, and refused otherwise, naming `nebius-profiles.sh`. It refuses
      one whose `nebius --config <file> profile list` names another profile or lacks one of the two,
      and one with a profile that still reads its key from a file, which would not work on the VM.
      No CLI on the laptop, or a `profile list` of a shape the parser does not know, is refused too,
@@ -96,14 +98,17 @@ Nebius GPU VM through `run-gpu.sh`. Each step has a gap:
      `~/.config/peacock/nebius.yaml` with the other secrets, on ssh's stdin, mode 600. `profile
      list`'s output has one parser, shared with `install-watch`.
    - `nebius.sh` gives every CLI call `--config` with `GPU_HOST_NEBIUS_CONFIG`, else
-     `~/.config/peacock/nebius.yaml`, on every machine. A missing file is refused, naming
-     `nebius-profiles.sh`. `install-watch` cuts its copy from the same file; both keys are embedded
-     there, so eu-west1's line in `build-test.md` loses its `--key-file`. A profile that still
-     reads its key from a file, in a config `GPU_HOST_NEBIUS_CONFIG` names, gets that file embedded
-     by the same cut instead of a refusal; `--key-file` stays, for a PEM other than the one the
-     profile names. CI's `nebius-setup` sets `GPU_HOST_NEBIUS_CONFIG` to the config it makes.
+     `~/.config/peacock/nebius.yaml`, on every machine. A missing default file is cut first by
+     `nebius-profiles.sh` when `~/.nebius/config.yaml` exists, as `provision-vm.sh` does; else it
+     is refused, naming `nebius-profiles.sh`. A file that exists is never cut again. `install-watch`
+     cuts its copy from the same file; both keys are embedded there, so eu-west1's line in
+     `build-test.md` loses its `--key-file`. A profile that still reads its key from a file, in a
+     config `GPU_HOST_NEBIUS_CONFIG` names, gets that file embedded by the same cut instead of a
+     refusal; `--key-file` stays, for a PEM other than the one the profile names.
+     CI's `nebius-setup` sets `GPU_HOST_NEBIUS_CONFIG` to the config it makes.
    - `~/.nebius/config.yaml` is read by `nebius-profiles.sh` alone, through the CLI, on a copy.
-     The tests run `provision-vm.sh` and `nebius.sh` with that file at mode 000. The cut's tests use
+     The tests run `provision-vm.sh` and `nebius.sh` with that file at mode 000 wherever
+     `nebius.yaml` exists. The cut's tests use
      a fake CLI: two profiles kept out of several, one embedded and one from a file, a missing
      profile, a missing PEM, a rerun.
 6. **One short table of command lines, each run as written.** The table in `build-test.md`'s "Local
@@ -226,7 +231,7 @@ Component-level API: none.
 - The Dockerfiles' change moves every image's inputs tag. So `images.yml` publishes the branch's
   images, dispatched on the branch, before anything there pulls them: CI, `run-gpu.sh prepare`, and
   the trial's `bootstrap-vm.sh`.
-- From this branch on, `nebius.sh` on dev reads `~/.config/peacock/nebius.yaml`. That file is made
-  on dev with `nebius-profiles.sh` before the first dispatch.
+- From this branch on, `nebius.sh` on dev reads `~/.config/peacock/nebius.yaml`. Its first call on
+  dev cuts that file; `nebius-profiles.sh` by hand refreshes it.
 - Out of scope: the agent-container launcher (`up.sh`, `down.sh`); shad-gpu and its scripts; the
   GPU VMs' idle watcher.

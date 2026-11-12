@@ -142,8 +142,10 @@ peacock_nebius_listed() {
 # path dropped. Only the CLI reads <src> and <copy>, and its calls' output is dropped: it can hold a
 # key. <copy> holds every profile until the end, so the caller puts it in a private directory on
 # <dest>'s filesystem and removes that on any exit. Sets PEACOCK_NEBIUS_LEFT_OUT to how many were
-# left out.
+# left out. The CLI's answers are not traced under set -x.
 peacock_nebius_cut() {
+  local -
+  set +x
   local cli=$1 src=$2 copy=$3 dest=$4 active=$5 spec name pem path endpoint sa pk keep=() n
   shift 5
   # Made empty at 600 first: cp onto a file keeps its mode, so the copy is never readable by others.
@@ -193,6 +195,15 @@ peacock_nebius_cut() {
   fi
 }
 
+# peacock_nebius_config_cut — a missing nebius.yaml is cut by nebius-profiles.sh when this machine
+# has the CLI's own ~/.nebius/config.yaml (a laptop); one that exists is never cut again. A process of
+# its own, so its temp directory and EXIT trap stay its own; its line goes to stderr. Its refusal,
+# already said, returns 2.
+peacock_nebius_config_cut() {
+  if [ -f "$PEACOCK_NEBIUS_CONFIG" ] || [ ! -f "$HOME/.nebius/config.yaml" ]; then return 0; fi
+  "${BASH_SOURCE[0]%/*}/../env/nebius-profiles.sh" >&2 || return 2
+}
+
 # peacock_nebius_config_checked <cli> <file> — refuses unless <file> holds exactly
 # PEACOCK_NEBIUS_PROFILES, each key embedded: a key path names a file the machine may not have.
 peacock_nebius_config_checked() {
@@ -213,6 +224,28 @@ peacock_nebius_config_checked() {
     path=$(peacock_nebius_on "$cli" "$file" --profile "$p" config get private-key-file-path 2>/dev/null) \
       || { peacock_refuse "cannot read profile $p's key path in $file"; return; }
     [ -z "$path" ] || { peacock_refuse "profile $p in $file reads its key from a file: make it again with scripts/env/nebius-profiles.sh"; return; }
+  done
+  peacock_nebius_service_accounts_checked "$cli" "$file" "$file"
+}
+
+# peacock_nebius_service_accounts_checked <cli> <config> <named> — refuses, naming <named>, the
+# first of PEACOCK_NEBIUS_PROFILES in <config> that is not a service account's: its `auth-type` is
+# not `service account` (a browser login, a token, an empty or unknown one), or it lacks its
+# service-account-id or public-key-id. A browser login acts as the person, with all their rights,
+# whatever it is called. The private key is never asked; the answers are not traced under set -x.
+peacock_nebius_service_accounts_checked() {
+  local -
+  set +x
+  local cli=$1 config=$2 named=$3 p auth sa pk
+  for p in "${PEACOCK_NEBIUS_PROFILES[@]}"; do
+    if ! auth=$(peacock_nebius_on "$cli" "$config" --profile "$p" config get auth-type 2>/dev/null) \
+      || ! sa=$(peacock_nebius_on "$cli" "$config" --profile "$p" config get service-account-id 2>/dev/null) \
+      || ! pk=$(peacock_nebius_on "$cli" "$config" --profile "$p" config get public-key-id 2>/dev/null); then
+      peacock_refuse "cannot read profile $p's auth type and ids in $named"; return
+    fi
+    if [ "$auth" = "service account" ] && [ -n "$sa" ] && [ -n "$pk" ]; then continue; fi
+    peacock_refuse "profile $p in $named is not a service account: a browser login acts as you, with all your rights. Make it as llm-wiki/build-test.md, \"The human's one-time setup\", says"
+    return
   done
 }
 

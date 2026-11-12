@@ -824,6 +824,52 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
 - [ ] **Step 4: run** `python3 scripts/env/tests/test_build_test.py` → `0 failed`.
 - [ ] **Step 5: report a checkpoint** `vm-setup: one table of build and test lines, each run as written`.
 
+### Task 14a: a missing `nebius.yaml` is cut on first use
+
+`~/.config/peacock/nebius.yaml` is made where it is first needed, so `nebius-profiles.sh` by hand
+is only the refresh of a file that exists.
+
+**Files:**
+- Modify: `scripts/nebius.sh`, `scripts/env/provision-vm.sh`, `scripts/env/nebius-profiles.sh`
+  (header), `llm-wiki/build-test.md` ("Nebius host" `nebius.sh`'s config bullet, "Credential
+  files", "A fresh VM" step 3 and `provision-vm.sh`'s bullet, the Nebius scripts and Images rows)
+- Test: `scripts/nebius/tests/test_nebius.py`, `scripts/env/tests/test_provision.py`
+
+**Interfaces:**
+- Consumes: `scripts/env/nebius-profiles.sh` as it is (Task 6), run as a child process, so its
+  temp directory and its EXIT trap stay its own.
+- Produces, in `nebius.sh` and `provision-vm.sh`: when the config is the default
+  `~/.config/peacock/nebius.yaml` (no `GPU_HOST_NEBIUS_CONFIG`) and it is missing, and
+  `~/.nebius/config.yaml` exists, `nebius-profiles.sh` runs first, its two-names line on stderr,
+  then the call goes on with the file it made. Its refusal is the caller's: exit 1 for `nebius.sh`,
+  2 for `provision-vm.sh`, its message as it is. With no `~/.nebius/config.yaml` (a VM),
+  or with `GPU_HOST_NEBIUS_CONFIG` set, a missing file is refused as now. A file that exists is
+  never cut again, whatever the CLI's profiles are now.
+- Produces, in the cut (`peacock_nebius_cut`'s two-profile use) and in
+  `peacock_nebius_config_checked`: editor-eu and eu-west1 are service-account profiles, each with
+  its key. A profile of another kind (a federation login, which acts as the person with all their
+  rights) is refused, exit 2, naming the profile and the service-account recipe in build-test.md
+  ("The human's one-time setup"). The kind is read with the CLI's `config get` on the copy, never
+  from the file; install-watch's one-profile cut keeps what it accepts now.
+
+- [ ] **Step 1: write the failing tests**, over the fake CLI the cut's tests use:
+  - `test_nebius.py`: `test_a_missing_config_is_cut_from_the_cli_s_own_then_used` (the file made,
+    mode 600, the two profiles, and the call made with `--config` naming it);
+    `test_a_cut_that_fails_is_refused_naming_the_profile` (exit 1, no file left);
+    `test_no_cli_config_refuses_a_missing_file_as_before`; `test_a_named_config_is_never_cut`
+    (`GPU_HOST_NEBIUS_CONFIG` missing: refused, nothing made);
+    `test_an_existing_config_is_not_cut_again`.
+  - `test_provision.py`: `test_a_missing_nebius_yaml_is_cut_before_anything_is_written`, and its
+    refusal case (exit 2, no ssh).
+  The existing mode-000 cases now cover only a run where `nebius.yaml` exists.
+- [ ] **Step 2: run them** → FAIL.
+- [ ] **Step 3: implement** in `nebius.sh` (around its missing-file check) and `provision-vm.sh`
+  (before `peacock_nebius_config_checked`); the header of `nebius-profiles.sh` and the wiki say the
+  hand run is for a refresh: a profile or key that changed, or the file removed.
+- [ ] **Step 4: run** `test_nebius.py`, `test_provision.py`, `test_nebius_profiles.py`, shellcheck
+  `-x` over CI's list → green; the build-test.md counts and grand total updated.
+- [ ] **Step 5: report a checkpoint** `vm-setup: a missing nebius.yaml is cut on first use`.
+
 ### Task 15 *(coordinator)*: publish the branch's images; the PR is green
 
 Needs GitHub alone: the branch pushed with Task 1's commit. It may run as soon as that commit is
@@ -843,14 +889,15 @@ pushed, and must before any CI run on the branch is read or any VM pulls an imag
 
 ### Task 16 *(coordinator)*: nebius-gpu by hand; CI's `gpu-tests` through the runner
 
-Needs: Task 15; dev's `~/.config/peacock/nebius.yaml`, made on dev with
-`scripts/env/nebius-profiles.sh` before this task (from this branch on, `nebius.sh` on dev reads
-it); nebius-gpu's login user accepting dev's `~/.config/peacock/gpu_ed25519.pub`, the key
+Needs: Task 15; dev's `~/.nebius/config.yaml` holding editor-eu and eu-west1, from which
+`nebius.sh`'s first call cuts `~/.config/peacock/nebius.yaml` (Task 14a); nebius-gpu's
+login user accepting dev's `~/.config/peacock/gpu_ed25519.pub`, the key
 `nebius.sh` offers from this branch on, in place of ssh's default ones; nebius-gpu, the L40S; the
 sandbox off; an actor in `GPU_ALLOWED_ACTORS`.
 
-- [ ] **Step 1:** `test -f ~/.config/peacock/nebius.yaml`, then `scripts/nebius.sh status` →
-  exit 0. In the `/build` tree: `scripts/build-test.sh --gpu --build --no-release-bench`.
+- [ ] **Step 1:** `scripts/nebius.sh status` → exit 0, then `test -f ~/.config/peacock/nebius.yaml`
+  (the cut that call made). In the `/build` tree:
+  `scripts/build-test.sh --gpu --build --no-release-bench`.
 - [ ] **Step 2:** `scripts/nebius.sh start`; with `G="scripts/env/run-gpu.sh --instance-id
   computeinstance-e00tnrse7ayntnzcyt"`: `$G prepare --no-sf40`; `$G ship`; `$G run list`, its local
   process killed once the log runs; `$G status` → `running`; `$G follow` → the log from its first

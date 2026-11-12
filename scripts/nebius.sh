@@ -23,9 +23,10 @@
 #                                 a profile's key path gets the file it names embedded, or the PEM
 #                                 --key-file names; beside an embedded key --key-file is refused
 #
-# Every CLI call names its config, GPU_HOST_NEBIUS_CONFIG, else ~/.config/peacock/nebius.yaml. The
-# CLI is NEBIUS, else nebius on PATH, else ~/.nebius/bin's; no config or no CLI is exit 1. The ssh
-# key is GPU_HOST_KEY, else ~/.config/peacock/gpu_ed25519 when it exists.
+# Every CLI call names its config, GPU_HOST_NEBIUS_CONFIG, else ~/.config/peacock/nebius.yaml; a
+# missing nebius.yaml is cut first by scripts/env/nebius-profiles.sh where ~/.nebius/config.yaml
+# exists. The CLI is NEBIUS, else nebius on PATH, else ~/.nebius/bin's; no config or no CLI is exit 1.
+# The ssh key is GPU_HOST_KEY, else ~/.config/peacock/gpu_ed25519 when it exists.
 #
 # Exit codes: 0 done; 2 busy, soft stop refused; 75 no capacity, retry later; 69 instance gone;
 # 1 other; 64 usage.
@@ -77,9 +78,10 @@ LOG=$STATE_DIR/nebius.log
 verb=${1:-}; shift || true
 case $verb in
   status|ip|start|stop|ssh|rsh|install-watch) ;;
-  *) sed -n '2,31p' "$0" >&2; exit 64;;
+  *) sed -n '2,32p' "$0" >&2; exit 64;;
 esac
 # Exit 1, not peacock-config.sh's 2: here 2 is "busy".
+if [ -z "${GPU_HOST_NEBIUS_CONFIG:-}" ]; then peacock_nebius_config_cut || exit 1; fi
 [ -f "$NEBIUS_CONFIG" ] \
   || { echo "nebius: no $NEBIUS_CONFIG: make it with scripts/env/nebius-profiles.sh" >&2; exit 1; }
 if [ -z "${NEBIUS:-}" ]; then peacock_nebius_cli || exit 1; NEBIUS=$PEACOCK_NEBIUS; fi

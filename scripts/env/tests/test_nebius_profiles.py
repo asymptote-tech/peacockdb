@@ -30,7 +30,9 @@ INSTALLER = "curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | b
 
 class Laptop:
     def __init__(self, profiles=None, cli="path"):
-        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="nebius-profiles-"))
+        # Removed with the Laptop: path_without below links all of PATH into it.
+        self.owned = tempfile.TemporaryDirectory(prefix="nebius-profiles-")
+        self.tmp = pathlib.Path(self.owned.name)
         self.home = self.tmp / "home"
         self.pem = self.home / ".nebius" / "eu-west1-sa.pem"
         self.pem.parent.mkdir(parents=True)
@@ -126,6 +128,35 @@ def test_refuses_a_key_path_naming_no_file():
     assert m.left_in_peacock() == [], m.left_in_peacock()
 
 
+def refused_as_no_service_account(name, spec):
+    """The cut of a source whose <name> profile is <spec> is refused naming it and the recipe."""
+    m = Laptop()
+    profiles = {"editor-eu": {"key_path": None}, "eu-west1": {"key_path": str(m.pem)}, "old": {"key_path": None}}
+    profiles[name] = {"key_path": None, **spec}
+    nebius_config(m.source, "old", profiles)
+    rc, out, err = m.run()
+    assert rc == 2, (name, spec, rc, err)
+    assert name in err and "not a service account" in err and "The human's one-time setup" in err, (name, spec, err)
+    assert "FAKE-KEY-MATERIAL" not in out + err, (name, spec, out, err)
+    assert m.left_in_peacock() == [], (name, spec, m.left_in_peacock())
+
+
+def test_a_federation_profile_is_refused_naming_the_recipe():
+    # A browser login acts as the person, with all their rights, whatever its name.
+    for name in ("editor-eu", "eu-west1"):
+        refused_as_no_service_account(name, {"kind": "federation"})
+
+
+def test_only_a_service_account_with_both_ids_is_taken():
+    # Each case fails one part of the rule alone: the auth type, then each id.
+    for spec in ({"kind": "token"},
+                 {"auth_type": ""},
+                 {"auth_type": "federation"},
+                 {"without": ["service-account-id"]},
+                 {"without": ["public-key-id"]}):
+        refused_as_no_service_account("editor-eu", spec)
+
+
 def test_a_rerun_replaces_the_file():
     m = Laptop()
     m.dest.parent.mkdir(parents=True)
@@ -155,39 +186,43 @@ def test_a_late_refusal_leaves_nothing_and_prints_no_key():
         assert m.left_in_peacock() == [], (verb, m.left_in_peacock())
 
 
-def cut_signalled(sig, group):
-    """A cut signalled while the fake sleeps in `update`, to the process group or to bash alone, which
-    leaves the CLI running to write the copy by its path; returns once that CLI has ended."""
+def cut_signalled(sig, group, verb):
+    """A cut signalled while the fake sleeps in <verb>, to the process group or to bash alone; returns once
+    that CLI has ended. In `update` the CLI writes the copy by its path after its sleep; `list` and
+    `get` run inside a command substitution, where bash waits for the subshell."""
     m = Laptop()
     m.dest.parent.mkdir(parents=True)
     m.dest.write_text("the earlier cut\n")
-    p = subprocess.Popen([str(SCRIPT)], env={**m.env, "FAKE_NEBIUS_SLOW": "update", "FAKE_NEBIUS_SLOW_SECONDS": "2"},
+    p = subprocess.Popen([str(SCRIPT)], env={**m.env, "FAKE_NEBIUS_SLOW": verb, "FAKE_NEBIUS_SLOW_SECONDS": "2"},
                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                          start_new_session=True)
     deadline = time.monotonic() + 30
     while not any(c[0] == "slow" for c in m.calls()):
-        assert time.monotonic() < deadline and p.poll() is None, (sig, p.poll(), m.calls())
+        assert time.monotonic() < deadline and p.poll() is None, (sig, verb, p.poll(), m.calls())
         time.sleep(0.05)
     cli = next(c[1] for c in m.calls() if c[0] == "slow")
     (os.killpg if group else os.kill)(p.pid, sig)
     out, err = p.communicate(timeout=60)
-    assert p.returncode != 0, (sig, group, p.returncode, err)
+    # Dead of the signal, not a plain exit: a bash caller reads exit 130 as an interrupt the child
+    # handled, and goes on.
+    assert p.returncode == -sig, (sig, group, verb, p.returncode, err)
     while True:
         try:
             os.kill(cli, 0)
         except ProcessLookupError:
             break
-        assert time.monotonic() < deadline + 30, (sig, group, "the CLI did not end")
+        assert time.monotonic() < deadline + 30, (sig, group, verb, "the CLI did not end")
         time.sleep(0.05)
     return m
 
 
 def test_a_signal_mid_cut_leaves_only_what_was_there():
-    for sig, group in ((signal.SIGTERM, True), (signal.SIGHUP, True), (signal.SIGINT, True),
-                       (signal.SIGTERM, False), (signal.SIGHUP, False)):
-        m = cut_signalled(sig, group)
-        assert m.left_in_peacock() == ["nebius.yaml"], (sig, group, m.left_in_peacock())
-        assert m.dest.read_text() == "the earlier cut\n", (sig, group)
+    for verb in ("update", "list", "get"):
+        for sig, group in ((signal.SIGTERM, True), (signal.SIGHUP, True), (signal.SIGINT, True),
+                           (signal.SIGTERM, False), (signal.SIGHUP, False)):
+            m = cut_signalled(sig, group, verb)
+            assert m.left_in_peacock() == ["nebius.yaml"], (sig, group, verb, m.left_in_peacock())
+            assert m.dest.read_text() == "the earlier cut\n", (sig, group, verb)
 
 
 def test_the_copy_is_600_while_the_cut_runs():
@@ -213,6 +248,9 @@ def test_no_cli_answer_is_traced_under_bash_x():
     rc, out, err = m.run(shell=("bash", "-x"))
     assert rc == 0 and "+ " in err, (rc, err)
     assert "FAKE-KEY-MATERIAL" not in out + err, err
+    # Nor any other answer: eu-west1's key path, endpoint and ids, which the cut asks to embed its key.
+    for answer in (str(m.pem), "api.nebius.cloud", "serviceaccount-", "publickey-"):
+        assert answer not in err, (answer, err)
     rc, out, err = m.run(shell=("bash", "-x"), FAKE_NEBIUS_LIST="old [default]\n  key: FAKE-KEY-MATERIAL")
     assert rc == 2, (rc, err)
     assert "FAKE-KEY-MATERIAL" not in out + err, err

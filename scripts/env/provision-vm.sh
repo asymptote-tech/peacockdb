@@ -9,10 +9,10 @@
 # and bootstrap-vm.sh runs as it at --ref on every run. --env is needed until ~/.config/peacock holds
 # the storage keys. --gpu-key is a private key the GPU hosts already accept, beside its .pub,
 # ~/.config/peacock/gpu_ed25519 by default. ~/.config/peacock/nebius.yaml must hold the two Nebius
-# profiles nebius-profiles.sh cuts, and nothing else. The PAT, asked for once, the GPU key and
-# nebius.yaml reach the VM on ssh's stdin alone. The VM is recorded as --name, its address by
-# default. --new-pat replaces the PAT here and on every recorded VM it reaches. A rerun skips what
-# is done.
+# profiles nebius-profiles.sh cuts, and nothing else; a missing one is cut first, from
+# ~/.nebius/config.yaml. The PAT, asked for once, the GPU key and nebius.yaml reach the VM on ssh's
+# stdin alone. The VM is recorded as --name, its address by default. --new-pat replaces the PAT here
+# and on every recorded VM it reaches. A rerun skips what is done.
 [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; } || {
   echo "${0##*/}: this machine's bash is $BASH_VERSION, older than 4.4: install a current one (on macOS, brew install bash)" >&2; exit 2; }
 # Above, in bash 3.2's syntax and before any source: macOS ships 3.2, and what follows needs 4.4.
@@ -56,7 +56,8 @@ else
   dev=$user@$address
 fi
 
-# What this machine must hold, checked before anything is written here or there.
+# What this machine must hold, checked before anything is written here or there. The one exception
+# is a missing nebius.yaml: it is cut here, and kept when a later check refuses.
 if [ -n "$target" ]; then
   for key in user.name user.email; do
     [ -n "$(git -C "$here" config --get "$key" || true)" ] \
@@ -75,10 +76,12 @@ if [ -n "$target" ]; then
   [ -f "$gpu_key" ] || die "no GPU key $gpu_key: --gpu-key names a private key the GPU hosts accept"
   [ -f "$gpu_key.pub" ] || die "no $gpu_key.pub beside the GPU key: --gpu-key names a key with its .pub"
   peacock_nebius_cli
+  peacock_nebius_config_cut
   peacock_nebius_config_checked "$PEACOCK_NEBIUS" "$PEACOCK_NEBIUS_CONFIG"
 fi
 
-# The token is read and checked before anything is kept, so a wrong one leaves nothing behind.
+# The token is read and checked before anything is kept, so a wrong one leaves nothing behind but a
+# nebius.yaml cut above.
 if [ -n "$new_pat" ] || [ ! -s "$PEACOCK_PAT" ]; then
   command -v gh > /dev/null || die "no gh on this machine to check the token with"
   origin=$(git -C "$here" remote get-url origin)

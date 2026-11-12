@@ -202,7 +202,8 @@ DEFAULT = {"exists": True, "state": "STOPPED", "ip": "203.0.113.7", "start_error
            "stop_error": "", "get_error": "",
            "hang": [], "ip_sequence": [], "root_profile": "ok",
            "profiles": ["default"], "active_profile": "default", "profile_list": None,
-           "profile_config": {"endpoint": "api.nebius.cloud", "service-account-id": "serviceaccount-fake",
+           "profile_config": {"endpoint": "api.nebius.cloud", "auth-type": "service account",
+                              "service-account-id": "serviceaccount-fake",
                               "public-key-id": "publickey-fake", "private-key-file-path": ""},
            "profile_key_paths": {},
            "uptime": "99999", "watch_log": "",
@@ -211,7 +212,9 @@ DEFAULT = {"exists": True, "state": "STOPPED", "ip": "203.0.113.7", "start_error
 
 class World:
     def __init__(self, **over):
-        self.dir = pathlib.Path(tempfile.mkdtemp(prefix="gpuhost-"))
+        # Removed with the World: a test run makes thousands, and path_without_nebius links all of PATH.
+        self.tmp = tempfile.TemporaryDirectory(prefix="gpuhost-")
+        self.dir = pathlib.Path(self.tmp.name)
         self.path = self.dir / "world.json"
         self.write({**DEFAULT, **over, "calls": []})
         (self.dir / "nebius-config.yaml").write_text("")

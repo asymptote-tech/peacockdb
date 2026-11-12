@@ -29,7 +29,8 @@ import tempfile
 from machine import KEYS, REPO, git
 from nebius_cli import install_cli, nebius_config
 
-LAPTOP_FILES = ["scripts/env/provision-vm.sh", "scripts/lib/peacock-config.sh", "scripts/lib/ssh-retry.sh"]
+LAPTOP_FILES = ["scripts/env/provision-vm.sh", "scripts/env/nebius-profiles.sh", "scripts/lib/peacock-config.sh",
+                "scripts/lib/ssh-retry.sh"]
 ORIGIN = "git@github.com:asymptote-tech/peacockdb.git"
 PAT = "github_pat_11FAKETOKEN0value_Zq81"
 LAPTOP_GITCONFIG = "[user]\n\tname = Ada Laptop\n\temail = ada@example.test\n"
