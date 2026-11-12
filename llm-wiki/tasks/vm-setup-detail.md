@@ -12,6 +12,7 @@ Branch `ENS-vm-setup`, forked from `ENS-containers-only` at `7aeec989`; its PR t
 - Task 11: one tree per VM dir; below.
 - Task 12: records and logs under a stamp, ship's stamp, `pull`, `pull --clear`, bench-each; below.
 - Task 13: CI's `gpu-tests` names a fixed tree id and cleans up with `cancel`; below.
+- Task 14: one table of build and test lines, each run as written; below.
 
 ## Plain builds
 
@@ -566,6 +567,9 @@ plain build of the same Dockerfile from the repository's root, with no build arg
   tree id. Each call now takes `PEACOCK_TREE_ID=ci`, a fourth, `cancel`, finds the run ended (exit
   0), the VM dir's `.tree` holds `ci`, and no `.run-gpu-tree` is made in the checkout. The dir,
   container and install assertions are unchanged.
+- `test_bootstrap.py::test_bootstrap_leaves_the_shared_directory_writable_by_the_group` listed
+  `<data dir>/cudf` and its commit's checkout among what bootstrap makes. Nothing makes them now;
+  the data set's directory and its `tpch.sf1` remain.
 
 ## Ported and dropped cases
 
@@ -662,3 +666,99 @@ From `4e785104`'s `test_gpu_records.py`, for records and pull (Task 12):
   `records.tsv`), and `vm_cleared` removes only listed files whose copy home has the same sha256, so
   a clear beside it takes nothing of it. The case of a run being started as the pull comes is
   `test_pull_clear_is_refused_by_a_run_that_starts_while_it_waits`.
+- Dropped with `machine_cudf_source`: `test_bootstrap_keeps_one_cudf_checkout_a_commit` and
+  `test_bootstrap_refuses_a_cudf_commit_it_cannot_fetch`, which pinned the machine's sparse checkout.
+  What still matters is kept for the clone's own submodule: the rerun with the origin gone is in
+  `test_bootstrap_checks_out_the_clone_s_third_party_cudf`, and a commit it cannot fetch, exit 2
+  naming it, is `test_a_cudf_checkout_that_fails_is_named_after_every_other_step`. That one moves
+  the origin away rather than pinning an unknown commit, and the refusal now comes after sf1, so
+  "no docker call" is replaced by "sf1 was made, the tree left as it was". The fake cuDF origin's
+  `README.md`, there to show the sparse set was kept, is dropped.
+
+## The table, run as written
+
+On dev, 2026-11-11, from this worktree at `60e99496` plus this change, in Task 2's image
+`peacockdb-build:cudf-25.02-in-525f460c6dd5`. Dev has 12 cores and 14 GiB, so every line ran with
+`RUST_TEST_THREADS=2` in the environment (*Memory constraints*), and `XDG_CACHE_HOME` named a
+directory on the build disk, keeping ccache and the registry off the home disk. "in image" is
+`scripts/build-test.sh -- bash -c '<the line>'`, run right after the host's. Wall times in seconds.
+
+| line | host: exit, wall | in image: exit, wall |
+|---|---|---|
+| `scripts/build-test.sh --rust-only --build` | 0, 1087 (cold) | 0, 2 |
+| `scripts/build-test.sh -- cargo test --features rust-only -p peacockdb-core --test test_cost_model -- every_node_kind_is_in_exactly_one_cost_category` | 0, 1 | 0, 1 |
+| `scripts/build-test.sh --rust-only --run` | 0, 534 | 0, 531 |
+| `PCK_TEST_FILTER=tpch_q6_ scripts/build-test.sh --rust-only --run` | 0, 2 (10 tests) | 0, 2 |
+| `scripts/build-test.sh --build` | 0, 1635 (cold) | 0, 6 |
+| `scripts/build-test.sh -- cargo test -p peacockdb-ffi --test test_ffi -- test_version_is_nonempty` | 127, 0; after the fix 0, 0 | 127, 1; after the fix 0, 1 |
+| `scripts/build-test.sh -- ctest --test-dir cpp/build -R peacock_cpu_tests` (the table's first C++ line, the whole cpu suite) | 0, 1 | 0, 1 |
+| `scripts/build-test.sh -- cpp/build/peacock_cpu_tests --gtest_filter=PeacockGpu.Version` (2026-11-12, after the loader-path fix; 1 test) | 0, 1 | 0, 1 |
+| `scripts/build-test.sh --run` | 0, 528 | 0, 527 |
+| `scripts/build-test.sh --gpu --build` | 0, 1994 (cold cargo; ninja had no work after the cpu build) | 0, 18 |
+| `rm -rf cpp/build cpp/install && scripts/build-test.sh --cudf 26.02 --build` | not run: no 26.02 build image of this tree's inputs here or on ghcr.io. `scripts/build-test.sh --cudf 26.02 --build` alone exits 2 at that lookup, naming `image.sh build build 26.02` and the `images.yml` dispatch | `scripts/build-test.sh --cudf 26.02 --build` alone: 2, 1, refused (below) |
+
+- The 26.02 row waits for the branch's 26.02 build image (Task 15); its `rm` was not run, so the
+  tree stayed on 25.02 throughout.
+- **The FFI test line, exit 127.** `-- <command>` ran the command before the
+  `LD_LIBRARY_PATH=/opt/cudf/lib` export, which only `--run` made: `test_ffi` failed to load
+  `libcudf.so`. `ctest` was not affected; its binaries carry the path. The export now comes before
+  the command's `exec`, once, a caller's value after it. Red before:
+  `test_a_command_has_cudf_s_libraries_on_the_loader_path` (an empty loader path in the command).
+  `cargo test` adds the FFI's `OUT_DIR` itself, so `/opt/cudf/lib` is all a command needs.
+- **`--cudf` in a shell in the image.** In the 25.02 image, with no `cpp/build`,
+  `--cudf 26.02 --build` stamped `cpp/build` 26.02 and began a configure with gcc-12 against the
+  image's 25.02 `/opt/cudf`, in `target-img-25.02` (measured, before the fix; the configure then
+  failed on the missing submodule below). Inside the image a `--cudf` other than `PEACOCK_CUDF`,
+  which the outer run sets, is now refused before anything, naming the host. Red before:
+  `test_a_shell_in_the_image_refuses_another_cudf` (exit 0, the build run).
+- **`third_party/cudf`.** This worktree had none: a worktree gets no submodule checkout. The cpu
+  build stamped `cpp/build`, then cmake failed on `third_party/cudf/cmake/rapids_config.cmake`,
+  exit 1. The image prefetches only what its own configure fetched; the tree's submodule is
+  still read. A cpu or gpu shape without that file is now refused, exit 2, before any docker call,
+  naming `git submodule update --init --depth 1 third_party/cudf`. That command was checked in a
+  throwaway clone: 13 s, 77 MB. Red before:
+  `test_a_cpp_build_without_third_party_cudf_is_refused` (exit 0, nothing refused). For the runs the
+  worktree's `third_party/cudf` was filled with that checkout's files, leaving git's state alone.
+- The worktree had no `tpch.sf1` or `tpcds.sf1`; copies from another clone of the same
+  `generate_testdata.sh` were put in for the `--run` lines and removed after.
+- Disk: a cold `--rust-only --build` leaves 14 GB in `target-img-25.02`, a cold cpu build 11 GB,
+  `--gpu --build` 12 GB of debug and its release build beside them, and `cpp/install` 4.9 GB. The
+  build disk had 22 GB free, so the target dir was removed between the rust-only, cpu and gpu
+  rows, and the debug incremental cache during the gpu build's release half. Each row's in-image
+  run followed its host run on the same target dir.
+- The rust-only rows ran before the loader-path fix and were not run again (their target dir was
+  gone, and its rebuild did not fit beside the gpu build). The cpu `--run` after the fix runs the
+  same targets without the feature, green.
+- Counts: `--rust-only --run` 66 + 3 + 2451 + 41 + `--lib` 1209 (2 ignored); `--run` adds
+  `ctest -L cpu` (1) and `test_ffi` 4, and `--lib` 1214; the filter `tpch_q6_` ran 10 cases of
+  `test_cpu_corpus` and none elsewhere.
+- The C++ row was first `-- ctest --test-dir cpp/build -R peacock_cpu_tests`. Each C++ suite is one
+  ctest entry for one gtest binary, so that ran all of `peacock_cpu_tests`. One test is the binary
+  with `--gtest_filter`.
+- `PEACOCK_CUDF` inside the image is set by the outer half only; the image has no ENV for it. A
+  `docker run` of its own (the CPU-VM build) names none, and the first form of the `--cudf` guard
+  refused every such run as "cuDF unknown". Only a named version that differs from `--cudf` is
+  refused now. Red before: `test_inside_with_no_image_version_named_any_cudf_goes_through`. The
+  CPU-VM build's recipe in build-test.md now passes `-e PEACOCK_CUDF=<v>` so the guard holds there.
+- The command exemption from the `third_party/cudf` refusal is held by
+  `test_a_cpp_build_without_third_party_cudf_is_refused`: `-- true` inside and outside, and
+  `--rust-only --build` outside, go through. With the exemption deleted it fails.
+- `bootstrap-vm.sh` checks out the clone's `third_party/cudf`, under a lock (where and when: the
+  second round, below). Red before: `test_bootstrap_checks_out_the_clone_s_third_party_cudf` (no `rapids_config.cmake` in the
+  clone). Without the lock, `test_two_bootstraps_at_once_generate_once_and_fetch_in_turn` failed 2
+  runs in 3 on `could not lock config file .git/config`; with it, 3 in 3 passed. The fake machine's
+  `~/.gitconfig` allows git's `file` transport, as its cuDF origin is a `file://` repository, which
+  git refuses a submodule clone from by default.
+- Second round, 2026-11-12. `bootstrap-vm.sh` checks out the submodule last, after
+  `machine_data_set`: nothing before it reads the submodule's files (the image inputs read the
+  index's gitlink). Red before: `test_a_cudf_checkout_that_fails_is_named_after_every_other_step`
+  (no sf1). The lock lies in `git rev-parse --git-common-dir`, so a clone whose `.git` is a file
+  works. Red before: `test_a_clone_whose_git_dir_lies_elsewhere_gets_its_third_party_cudf`
+  (`Not a directory`, exit 1). `machine_cudf_source` and `CUDF_SOURCE` are gone;
+  `machine_cudf_gitlink` stays for the refusal's message.
+- Pinned by mutation, each with its line deleted and the file then restored: no `|| die`, and the
+  failure test sees git's exit 1; no `flock`, and
+  `test_the_cudf_checkout_waits_for_the_clone_s_lock` fails (it holds the lock with `fcntl.flock`,
+  waits for bootstrap's `flock` child to hold an fd on that file, and checks `third_party/cudf` is
+  still empty), as does the two-runs test this time; no `--depth 1`, and the shallow assertion in
+  `test_bootstrap_checks_out_the_clone_s_third_party_cudf` fails.

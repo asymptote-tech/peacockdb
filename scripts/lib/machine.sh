@@ -4,9 +4,9 @@
 # "CPU VMs"). Every path but the data directory comes from $HOME, and every container runs as
 # the caller's uid:gid. Sourced after image-inputs.sh and data-inputs.sh.
 # A step function (machine_image_checked, machine_image_label_checked, machine_image_inputs_checked,
-# machine_cargo_fetch, machine_data_set, machine_cudf_source) is called as a statement of its own,
-# never in `$(…)` or before `||`: set -e is what stops it at a failed step, and both turn it off
-# inside. The others print a value for `$(…)`.
+# machine_cargo_fetch, machine_data_set) is called as a statement of its own, never in `$(…)` or
+# before `||`: set -e is what stops it at a failed step, and both turn it off inside. The others
+# print a value for `$(…)`.
 
 MACHINE_IMAGE=ghcr.io/asymptote-tech/peacockdb-build
 MACHINE_USER=$(id -u):$(id -g)
@@ -24,41 +24,6 @@ MACHINE_STAGE=/peacock/stage
 
 # machine_cudf_gitlink <tree> — the third_party/cudf commit <tree>'s index pins.
 machine_cudf_gitlink() { git -C "$1" ls-files -s third_party/cudf | awk '$1 == 160000 { print $2 }'; }
-
-# machine_cudf_source <tree> — sets CUDF_SOURCE to the machine's checkout of the third_party/cudf
-# commit <tree> pins, with the paths the build image's prefetch takes, which the FFI build's
-# configure reads. One a commit, so a build's never moves under it; fetched under a lock when the
-# machine has none, and appearing only whole. A clone's own third_party/cudf is never read.
-machine_cudf_source() {
-  local tree=$1 commit url stage lock mask
-  commit=$(machine_cudf_gitlink "$tree")
-  url=$(git config --file "$tree/.gitmodules" --get submodule.third_party/cudf.url || true)
-  if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]] || [ -z "$url" ]; then
-    echo "${0##*/}: $tree pins no third_party/cudf commit, or its .gitmodules names no URL" >&2
-    return 2
-  fi
-  CUDF_SOURCE=$MACHINE_DATA/cudf/$commit
-  mask=$(umask)
-  umask 002
-  mkdir -p "$MACHINE_DATA/cudf"
-  exec {lock}> "$MACHINE_DATA/cudf/.$commit.lock"
-  flock "$lock"
-  if [ ! -d "$CUDF_SOURCE" ]; then
-    stage=$CUDF_SOURCE.partial
-    rm -rf "$stage"
-    git init -q "$stage"
-    if ! git -C "$stage" fetch -q --depth 1 --filter=blob:none "$url" "$commit"; then
-      rm -rf "$stage"
-      echo "${0##*/}: cannot fetch third_party/cudf $commit from $url" >&2
-      return 2
-    fi
-    git -C "$stage" sparse-checkout set --no-cone /cmake/ /cpp/cmake/ /VERSION /RAPIDS_BRANCH
-    git -C "$stage" checkout -q FETCH_HEAD
-    mv "$stage" "$CUDF_SOURCE"
-  fi
-  exec {lock}>&-
-  umask "$mask"
-}
 
 # machine_image_checked <ref> <tree> <cudf> [<kind>] — pulls the image <ref>, of <kind> build (the
 # default) or run, then machine_image_label_checked. A failed pull names the images.yml dispatch

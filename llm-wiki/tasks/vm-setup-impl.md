@@ -809,7 +809,12 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
 - [ ] **Step 2: run every line once as written**, in a tree under `/build` with Task 2's image,
   with real targets and test names: from the host, then as
   `scripts/build-test.sh -- bash -c '<the line>'` (a shell in the build image). Record each in the
-  detail file's `## The table, run as written`: line, where, exit, wall time.
+  detail file's `## The table, run as written`: line, where, exit, wall time. Two exceptions: a
+  shell in the image holds one cuDF, so there `--cudf` other than its `PEACOCK_CUDF` is refused,
+  exit 2, naming the host; and the cpu and gpu shapes read the clone's `third_party/cudf`, so a
+  tree without it is refused, exit 2, naming `git submodule update --init --depth 1
+  third_party/cudf`, which `scripts/env/bootstrap-vm.sh` runs as its last step. The 26.02 row runs
+  from the host in Task 15, once its image is published.
 - [ ] **Step 3: each failing line**, test first: a case in `test_build_test.py` → FAIL; fix
   `build-test.sh`; → PASS; rerun the line. The first suspect is a `-- ctest` or an FFI `-- cargo
   test` with no `/opt/cudf/lib` on the loader path: then
@@ -829,7 +834,11 @@ pushed, and must before any CI run on the branch is read or any VM pulls an imag
 - [ ] **Step 2:** for each, `docker buildx imagetools inspect
   ghcr.io/asymptote-tech/peacockdb-<kind>:$(bash -c '. scripts/lib/image-inputs.sh; image_inputs_tag
   . <kind> <v>')` → a digest; `…:cudf-<v>` keeps its digest from before. Record the five.
-- [ ] **Step 3:** the PR's CI green on the branch's last commit; a red job reaches the developer
+- [ ] **Step 3:** the table's 26.02 row, from the host in the `/build` tree:
+  `rm -rf cpp/build cpp/install && scripts/build-test.sh --cudf 26.02 --build` → exit 0; record
+  it in `## The table, run as written` (exit, wall time). Then `rm -rf cpp/build cpp/install`, so
+  Task 16's 25.02 build is not refused.
+- [ ] **Step 4:** the PR's CI green on the branch's last commit; a red job reaches the developer
   as a failing test.
 
 ### Task 16 *(coordinator)*: nebius-gpu by hand; CI's `gpu-tests` through the runner

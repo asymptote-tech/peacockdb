@@ -23,7 +23,9 @@ CLONE_FILES = [
     "scripts/env/bootstrap-vm.sh", "scripts/lib/image-inputs.sh", "scripts/lib/data-inputs.sh",
     "scripts/lib/machine.sh", "testdata/generate_testdata.sh", "cpp/CMakeLists.txt",
 ]
-GITCONFIG = "[user]\n\tname = Machine User\n\temail = machine@example.test\n"
+# cuDF's origin here is a file:// repository, which git refuses a submodule clone by default.
+GITCONFIG = ("[user]\n\tname = Machine User\n\temail = machine@example.test\n"
+             '[protocol "file"]\n\tallow = always\n')
 
 # What docker pull says when the registry has no such tag (dev's docker, then an older one's), and on
 # a network error.
@@ -197,7 +199,6 @@ class Machine:
             (self.cudf_origin / "cmake").mkdir(parents=True, exist_ok=True)
             (self.cudf_origin / "cmake" / "rapids_config.cmake").write_text(f"# {version}\n")
             (self.cudf_origin / "VERSION").write_text(version + "\n")
-            (self.cudf_origin / "README.md").write_text("outside the sparse paths\n")
             if not self.cudf_shas:
                 git(self.cudf_origin, "init", "-q")
                 git(self.cudf_origin, "config", "uploadpack.allowAnySHA1InWant", "true")

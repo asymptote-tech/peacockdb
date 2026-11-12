@@ -6,6 +6,7 @@ A whole run has curl serve a stand-in gh tarball and nebius binary, which the cl
 name, and finds Claude Code and superpowers at their pins; sudo runs nothing. No PATH here holds
 the host's nebius; a test that wants one installs its own.
 """
+import fcntl
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
@@ -354,34 +356,87 @@ def test_bootstrap_generates_sf1_by_generator_inputs_once():
         assert len(generator_runs(m)) == 2, generator_runs(m)
 
 
-def test_bootstrap_keeps_one_cudf_checkout_a_commit():
+def test_bootstrap_checks_out_the_clone_s_third_party_cudf():
+    """cpp/CMakeLists.txt includes cuDF's cmake files from the clone's own submodule, which a clone
+    leaves empty; build-test.sh refuses a cpu or gpu build without it."""
     with Machine() as m:
-        (m.clone / "third_party" / "cudf" / "VERSION").write_text("the clone's own, never read\n")
         bootstrap_whole(m)
-        checkout = m.data_dir / "cudf" / m.cudf_sha
-        assert (checkout / "VERSION").read_text() == "25.02.00\n"
-        assert (checkout / "cmake" / "rapids_config.cmake").is_file()
-        assert not (checkout / "README.md").exists(), "a path outside the sparse set was checked out"
+        own = m.clone / "third_party" / "cudf"
+        assert (own / "cmake" / "rapids_config.cmake").read_text() == "# 25.02.00\n"
+        status = git(m.clone, "submodule", "status")
+        assert status.split()[:2] == [m.cudf_sha, "third_party/cudf"], status  # no -, + or U flag
+        assert git(own, "rev-parse", "--is-shallow-repository") == "true"
         shutil.move(m.cudf_origin, m.home.parent / "cudf-origin-gone")
         bootstrap_whole(m)
 
 
-def test_bootstrap_refuses_a_cudf_commit_it_cannot_fetch():
+def test_a_cudf_checkout_that_fails_is_named_after_every_other_step():
+    """Nothing before the data set reads the submodule's files, so a failed fetch stops nothing else."""
     with Machine() as m:
-        missing = "0123456789abcdef0123456789abcdef01234567"
-        git(m.clone, "update-index", "--cacheinfo", f"160000,{missing},third_party/cudf")
-        r, _ = bootstrap(m, FAKE_SUDO_STATUS="0")
-        assert r.returncode == 2 and missing in r.stderr, r.stderr
-        assert not (m.data_dir / "cudf" / missing).exists()
-        assert not list((m.data_dir / "cudf").glob("*.partial")), list((m.data_dir / "cudf").iterdir())
-        assert m.docker_calls() == [], m.docker_calls()
+        gone = m.home.parent / "cudf-origin-gone"
+        shutil.move(m.cudf_origin, gone)
+        env = whole_run_env(m)
+        before = git(m.clone, "status", "--porcelain")  # the pins the whole run is given
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2 and m.cudf_sha in r.stderr, (r.returncode, r.stderr)
+        assert (m.data_dir / data_hash(m) / "tpch.sf1").is_dir(), "the checkout stopped the run before sf1"
+        assert git(m.clone, "status", "--porcelain") == before, git(m.clone, "status", "--porcelain")
+        shutil.move(gone, m.cudf_origin)
+        bootstrap_whole(m)
+        assert (m.clone / "third_party" / "cudf" / "cmake" / "rapids_config.cmake").is_file()
+
+
+def test_a_clone_whose_git_dir_lies_elsewhere_gets_its_third_party_cudf():
+    """A --separate-git-dir clone or a linked worktree has a .git file, not a directory."""
+    with Machine() as m:
+        elsewhere = m.home.parent / "clone.git"
+        shutil.move(m.clone / ".git", elsewhere)
+        (m.clone / ".git").write_text(f"gitdir: {elsewhere}\n")
+        bootstrap_whole(m)
+        assert (m.clone / "third_party" / "cudf" / "cmake" / "rapids_config.cmake").is_file()
+
+
+def waits_on(pid, lock):
+    """Whether a child of `pid` is a flock holding an fd on `lock`."""
+    for proc in pathlib.Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            fields = (proc / "stat").read_text().rsplit(")", 1)[1].split()
+            if int(fields[1]) != pid or (proc / "comm").read_text().strip() != "flock":
+                continue
+            if any(os.readlink(fd) == str(lock) for fd in (proc / "fd").iterdir()):
+                return True
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+    return False
+
+
+def test_the_cudf_checkout_waits_for_the_clone_s_lock():
+    with Machine() as m:
+        lock = pathlib.Path(git(m.clone, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        lock = lock / "peacock-submodule.lock"
+        env = {**m.env, **whole_run_env(m)}
+        script = str(m.clone / "scripts" / "env" / "bootstrap-vm.sh")
+        own = m.clone / "third_party" / "cudf"
+        with open(lock, "w") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            run = subprocess.Popen([script], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True)
+            deadline = time.monotonic() + 60
+            while not waits_on(run.pid, lock):
+                assert run.poll() is None and time.monotonic() < deadline, run.communicate()
+                time.sleep(0.05)
+            assert list(own.iterdir()) == [], list(own.iterdir())
+        out, err = run.communicate(timeout=120)
+        assert run.returncode == 0, (out, err)
+        assert (own / "cmake" / "rapids_config.cmake").is_file()
 
 
 def test_bootstrap_leaves_the_shared_directory_writable_by_the_group():
     with Machine() as m:
         bootstrap_whole(m)
-        made = [m.data_dir / "cudf", m.data_dir / "cudf" / m.cudf_sha, m.data_dir / data_hash(m),
-                m.data_dir / data_hash(m) / "tpch.sf1"]
+        made = [m.data_dir / data_hash(m), m.data_dir / data_hash(m) / "tpch.sf1"]
         for path in made:
             assert path.stat().st_mode & stat.S_IWGRP, (path, oct(path.stat().st_mode))
 

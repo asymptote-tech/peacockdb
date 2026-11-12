@@ -6,9 +6,9 @@
 # Run as the machine user, with sudo; provision-vm.sh runs it so. Installs what is missing: Docker,
 # and gh, nebius and Claude Code with the superpowers plugin at docker/pins.env's versions; makes
 # the data directory the machine's users share; clones the repository into ~/peacockdb at <ref>,
-# master by default, and the third_party/cudf it pins. In the build image of cuDF <v> (25.02 by
-# default) and of the clone's inputs, by its inputs tag, it fills cargo's registry and generates
-# sf1. A step already done is skipped.
+# master by default. In the build image of cuDF <v> (25.02 by default) and of the clone's inputs,
+# by its inputs tag, it fills cargo's registry and generates sf1. Last, it checks out the clone's
+# third_party/cudf, which the C++ configure reads. A step already done is skipped.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -63,9 +63,6 @@ declare -F image_inputs_tag > /dev/null \
 if ! getent group peacock > /dev/null; then sudo groupadd peacock; fi
 if [[ " $(id -nG "$(id -un)") " != *" peacock "* ]]; then sudo usermod -aG peacock "$(id -un)"; fi
 if [ ! -d "$MACHINE_DATA" ]; then sudo install -d -o "$(id -un)" -g peacock -m 2775 "$MACHINE_DATA"; fi
-
-# The cuDF cmake files the FFI build reads, at the commit the clone pins.
-machine_cudf_source "$clone"
 
 # pin <name> — its value in the clone's docker/pins.env.
 pin() {
@@ -149,6 +146,15 @@ ref=$MACHINE_IMAGE:$(image_inputs_tag "$clone" build "$cudf")
 machine_image_checked "$ref" "$clone" "$cudf"
 machine_cargo_fetch "$ref" "$clone"
 machine_data_set "$ref" "$clone"
+# The C++ configure, the FFI's too, reads cuDF's cmake files from the clone's own submodule; no step
+# above reads them, so a failed fetch stops nothing else. Two runs at once each check it out, so
+# the checkout is serialised under a lock in the clone's git dir, a linked worktree's common one.
+git_dir=$(git -C "$clone" rev-parse --path-format=absolute --git-common-dir)
+exec {submodule_lock}> "$git_dir/peacock-submodule.lock"
+flock "$submodule_lock"
+git -C "$clone" submodule update --init --depth 1 third_party/cudf \
+  || die "cannot check out $clone/third_party/cudf at $(machine_cudf_gitlink "$clone")"
+exec {submodule_lock}>&-
 
 cat << EOF
 The machine is ready. scripts/env/provision-vm.sh, run on your own machine, does the rest; by

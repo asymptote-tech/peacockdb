@@ -23,7 +23,8 @@
 #
 # The cpu and gpu builds own cpp/build and stamp it with <v> in cpp/build/.peacock-cudf. A
 # cpp/build of another version, or one with no stamp (a host configure), is refused, not
-# reconfigured. --run runs every target even after one fails.
+# reconfigured. Both need third_party/cudf checked out. A shell in the image is <v>'s alone: a
+# --cudf naming another is refused there. --run runs every target even after one fails.
 # These reach the container by name when set, never by value: RUSTFLAGS CMAKE_GENERATOR LDFLAGS
 # LD_LIBRARY_PATH PCK_TEST_FILTER PCK_SHARD UPDATE_CANONICAL PEACOCK_NO_FETCH RUST_TEST_THREADS
 # CARGO_BUILD_JOBS, the regeneration knobs PCK_UPDATE_SECTIONS PEACOCK_REWRITE_RECIPE_BYTES
@@ -90,6 +91,10 @@ done
 known=""
 for spec in "$root"/docker/conda/cudf-*.spec; do spec=${spec##*/cudf-}; known+="${spec%.spec} "; done
 [ -f "$root/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda holds specs for ${known% }"
+# Inside, PEACOCK_CUDF names the image's version when the docker run set it, as the outer half does:
+# /opt/cudf, gcc and the target dir are that version's, so another --cudf is refused.
+[ "${PEACOCK_IN_IMAGE:-}" != 1 ] || [ -z "${PEACOCK_CUDF:-}" ] || [ "$cudf" = "$PEACOCK_CUDF" ] \
+  || die "this shell is the build image of cuDF $PEACOCK_CUDF, not $cudf: run --cudf $cudf from the host"
 if [ ${#command[@]} -gt 0 ]; then
   if [ "$build$run$no_release_bench" != 000 ] || [ -n "$mode_flag" ]; then
     die "a command runs alone: drop --build, --run, --gpu, --rust-only and --no-release-bench beside --"
@@ -101,6 +106,9 @@ fi
   || die "--no-release-bench is a --gpu --build flag"
 [ "$mode" != gpu ] || [ "$run" = 0 ] \
   || die "a device run is not this script's: build with --gpu --build, then $DEVICE_RUN ship and $DEVICE_RUN run list"
+# cpp/CMakeLists.txt includes cuDF's cmake files from the submodule, which a worktree lacks until checked out.
+[ ${#command[@]} -gt 0 ] || [ "$mode" = rust-only ] || [ -f "$root/third_party/cudf/cmake/rapids_config.cmake" ] \
+  || die "third_party/cudf is not checked out, and the C++ configure reads its cmake files: git submodule update --init --depth 1 third_party/cudf"
 
 # ---- outside the image: run this script again inside it --------------------------------------
 if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
@@ -179,6 +187,8 @@ if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
 fi
 
 # ---- inside the image -------------------------------------------------------------------------
+# The FFI binaries load libcudf from the image's prefix, a command's as well as --run's.
+export LD_LIBRARY_PATH=/opt/cudf/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 if [ ${#command[@]} -gt 0 ]; then exec "${command[@]}"; fi
 cd "$root"
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$root/target-img-$cudf}
@@ -367,8 +377,6 @@ run_target() {  # <package> <name> <cargo selector...>
 
 if [ "$mode" = cpu ]; then
   [ "$(cat "$STAMP" 2>/dev/null)" = "$cudf" ] || die "cpp/build is not a cuDF $cudf build: run --build first"
-  # The FFI binaries load libcudf from the image's prefix.
-  export LD_LIBRARY_PATH=/opt/cudf/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
   echo "==> ctest -L cpu"
   if ! ctest --test-dir cpp/build -L cpu --output-on-failure; then
     echo "!!! ctest -L cpu failed"

@@ -24,6 +24,8 @@ REPO = pathlib.Path(__file__).resolve().parents[3]
 COPIED = ["scripts/build-test.sh", "docker/pins.env", "docker/conda/cudf-25.02.spec",
           "docker/conda/cudf-25.10.spec", "docker/conda/cudf-26.02.spec"]
 NOT_RUST_ONLY = '#![cfg(not(feature = "rust-only"))]\n'
+# What cpp/CMakeLists.txt includes first from the submodule.
+CUDF_CMAKE = "third_party/cudf/cmake/rapids_config.cmake"
 # One target per class: rust-only by default, cmake-gated, gpu-runtime, gated on the gpu feature,
 # and the two excluded by name.
 TARGETS = {
@@ -134,6 +136,7 @@ class Tree:
         write(self.root / "scripts/build.sh", RECORD.format(log="build.log"), 0o755)
         write(self.root / "scripts/env/stage-install.sh", RECORD.format(log="stage.log"), 0o755)
         write(self.root / "scripts/env/image-ref.sh", FAKE_IMAGE_REF, 0o755)
+        write(self.root / CUDF_CMAKE, "")
         if root is None:
             git(self.root, "init", "-q")
             git(self.root, "add", "-A")
@@ -154,7 +157,8 @@ class Tree:
     def environ(self, env, inside):
         e = {**self.env, **(env or {})}
         if inside:
-            e.update(PEACOCK_IN_IMAGE="1", GCC_VERSION=e.get("GCC_VERSION", "12"))
+            e.update(PEACOCK_IN_IMAGE="1", GCC_VERSION=e.get("GCC_VERSION", "12"),
+                     PEACOCK_CUDF=e.get("PEACOCK_CUDF", "25.02"))
         else:
             e.setdefault("PEACOCK_BUILD_IMAGE", "img:test")
         return {k: v for k, v in e.items() if v is not None}
@@ -519,6 +523,50 @@ def test_refuses_an_unstamped_cpp_build():
         assert t.lines("build.log") == [] and t.cargo() == [] and t.stamp() is None
 
 
+def test_a_shell_in_the_image_refuses_another_cudf():
+    """The image holds one cuDF: --cudf 26.02 typed in a 25.02 image's shell would build against
+    25.02's /opt/cudf and its gcc, and stamp cpp/build 26.02."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        for args in (["--build"], ["--rust-only", "--run"], ["--", "true"]):
+            r = t.run("--cudf", "26.02", *args, inside=True)
+            assert r.returncode == 2, (args, r.returncode, r.stdout, r.stderr)
+            assert "25.02" in r.stderr and "26.02" in r.stderr and "host" in r.stderr, r.stderr
+        assert t.lines("build.log") == [] and t.cargo() == [] and t.stamp() is None
+
+
+def test_inside_with_no_image_version_named_any_cudf_goes_through():
+    """A docker run of the image's own (the CPU-VM build) may name no PEACOCK_CUDF: only a version
+    known to differ from --cudf is refused."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        unset = {"PEACOCK_CUDF": None}
+        ok(t.run("--build", inside=True, env=unset))
+        ok(t.run("--cudf", "26.02", "--rust-only", "--build", inside=True, env=unset))
+        ok(t.run("--cudf", "26.02", "--", "true", inside=True, env=unset))
+        assert t.stamp() == "25.02" and len(t.lines("build.log")) == 1
+
+
+def test_a_cpp_build_without_third_party_cudf_is_refused():
+    """cpp/CMakeLists.txt includes cuDF's cmake files from the submodule; a worktree has none until
+    it is checked out, and cmake's own error comes after cpp/build is stamped."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        (t.root / CUDF_CMAKE).unlink()
+        for inside in (False, True):
+            for args in (["--build"], ["--run"], ["--gpu", "--build"]):
+                r = t.run(*args, inside=inside)
+                assert r.returncode == 2, (inside, args, r.returncode, r.stdout, r.stderr)
+                assert "third_party/cudf" in r.stderr and "git submodule update" in r.stderr, r.stderr
+        assert t.docker() == [] and t.lines("build.log") == [] and t.lines("stage.log") == []
+        assert t.cargo() == [] and t.stamp() is None
+        # A command and the rust-only shape configure no C++.
+        for inside in (False, True):
+            ok(t.run("--", "true", inside=inside))
+        ok(t.run("--rust-only", "--build"))
+        ok(t.run("--rust-only", "--build", "--run", inside=True))
+
+
 def test_cpu_build_configures_stamps_and_builds_every_target():
     with tempfile.TemporaryDirectory() as tmp:
         t = Tree(tmp)
@@ -665,6 +713,20 @@ def test_command_form_passes_the_exit_code():
         r = ok(t.run("--", "sh", "-c", 'echo "$PWD"', inside=True))
         assert r.stdout.strip() == str(t.root), r.stdout
         assert t.docker() == []
+
+
+def test_a_command_has_cudf_s_libraries_on_the_loader_path():
+    """An FFI test binary loads libcudf from the image's prefix: without /opt/cudf/lib on the loader
+    path, `-- cargo test -p peacockdb-ffi` exits 127."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        r = ok(t.run("--", "sh", "-c", 'echo "$LD_LIBRARY_PATH"', inside=True))
+        assert r.stdout.strip() == "/opt/cudf/lib", r.stdout
+        r = ok(t.run("--", "sh", "-c", 'echo "$LD_LIBRARY_PATH"', inside=True, env={"LD_LIBRARY_PATH": "/x"}))
+        assert r.stdout.strip() == "/opt/cudf/lib:/x", r.stdout
+        write(t.root / "cpp/build/.peacock-cudf", "25.02\n")
+        ok(t.run("--run", inside=True, env={"LD_LIBRARY_PATH": "/x"}))
+        assert {c["ld"] for c in t.cargo()} == {"/opt/cudf/lib:/x"}, t.cargo()
 
 
 def test_runner_temp_is_mounted_when_set():
