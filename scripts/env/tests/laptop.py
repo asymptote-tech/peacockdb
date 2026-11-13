@@ -3,10 +3,12 @@
 The laptop is a home with a git identity and a clone of the scripts whose origin is the GitHub
 repository. `ssh` is a fake that records each call's argv and stdin and runs the remote command in
 a fake VM: a directory per address holding passwd, group, the users' homes, and `root/` for what
-is written under /etc and /var. A user is reached only with an authorized_keys. On a VM, sudo runs
+is written under /etc and /var. A user is reached only with an authorized_keys. As ssh does, `-t`
+gives the far end a terminal only when the laptop's stdin is one, and otherwise says so. On a VM, sudo runs
 its command as the caller; getent, groupadd, useradd, usermod and install act on that directory;
 gh keeps its login in ~/.config/gh/hosts.yml on the laptop and on a VM alike. The clone's
-bootstrap-vm.sh is a stub that records its user and arguments, installs a fake claude and makes an
+bootstrap-vm.sh is a stub that records its user and arguments, installs a fake claude, whose login
+needs a terminal, into ~/.local/bin, which is not on ssh's PATH, and makes an
 empty clone on the --ref branch; like the real one, it refuses a --ref other than the branch an
 existing clone is on, naming both. The laptop holds a GPU key pair where provision-vm.sh looks by
 default, and ssh-keygen is a fake that records any call.
@@ -14,6 +16,7 @@ default, and ssh-keygen is a fake that records any call.
 import json
 import os
 import pathlib
+import pty
 import shutil
 import subprocess
 import tempfile
@@ -38,7 +41,10 @@ while i < len(args) and args[i].startswith("-"):
     opts += args[i:i + step]
     i += step
 target, command = args[i], " ".join(args[i + 1:])
-stdin = b"" if "-n" in opts else sys.stdin.buffer.read()
+tty = "-t" in opts and sys.stdin.isatty()
+if "-t" in opts and not tty:
+    print("Pseudo-terminal will not be allocated because stdin is not a terminal.", file=sys.stderr)
+stdin = b"" if "-n" in opts or tty else sys.stdin.buffer.read()
 with open(os.environ["FAKE_SSH_LOG"], "a") as f:
     f.write(json.dumps({"argv": args, "stdin": stdin.decode(errors="replace")}) + "\n")
 user, _, address = target.rpartition("@")
@@ -54,6 +60,8 @@ if home is None or not (pathlib.Path(home) / ".ssh" / "authorized_keys").is_file
 env = {k: v for k, v in os.environ.items() if k.startswith("FAKE_")}
 env.update(HOME=home, USER=user, LOGNAME=user, FAKE_VM=str(vm), FAKE_USER_NAME=user, LANG="C.UTF-8",
            PATH=f"{os.environ['FAKE_VM_BIN']}:{os.environ['FAKE_BASE_PATH']}")
+if tty:
+    env["FAKE_SSH_TTY"] = "1"
 sys.exit(subprocess.run(["bash", "-c", command], input=stdin, env=env, cwd=home).returncode)
 '''
 
@@ -90,6 +98,8 @@ import json, os, pathlib, sys
 with open(os.path.join(os.environ["FAKE_VM"], "claude.log"), "a") as f:
     f.write(json.dumps({"argv": sys.argv[1:], "config": os.environ.get("CLAUDE_CONFIG_DIR")}) + "\n")
 if sys.argv[1:3] == ["auth", "login"]:
+    if os.environ.get("FAKE_SSH_TTY") != "1":
+        sys.exit("claude auth login: no terminal to finish the login in")
     d = pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path(os.environ["HOME"], ".claude"))
     d.mkdir(parents=True, exist_ok=True)
     (d / ".credentials.json").write_text('{"claudeAiOauth": {}}')
@@ -215,6 +225,13 @@ else:
 }
 
 
+def vm_path():
+    """This machine's PATH less any directory holding a claude: a VM's has no ~/.local/bin, and a test
+    must never start the real Claude Code."""
+    return os.pathsep.join(d for d in os.environ["PATH"].split(os.pathsep)
+                           if not os.path.exists(os.path.join(d, "claude")))
+
+
 class Laptop:
     """A temporary laptop; `provision` runs its clone's provision-vm.sh with the fakes on PATH."""
 
@@ -256,7 +273,7 @@ class Laptop:
                     "FAKE_SSH_LOG": str(self.ssh_log), "FAKE_GH_LOG": str(self.gh_log),
                     "FAKE_SSH_KEYGEN_LOG": str(self.keygen_log),
                     "FAKE_VMS": str(self.vms), "FAKE_VM_BIN": str(self.vm_bin),
-                    "FAKE_BASE_PATH": os.environ["PATH"], "FAKE_CLAUDE": str(tmp / "claude")}
+                    "FAKE_BASE_PATH": vm_path(), "FAKE_CLAUDE": str(tmp / "claude")}
         return self
 
     def __exit__(self, *exc):
@@ -275,10 +292,25 @@ class Laptop:
         (vm / "group").write_text(f"root:x:0:\n{login}:x:1000:\n")
         return vm
 
-    def provision(self, *args, stdin="", env=None):
+    def provision(self, *args, stdin="", env=None, tty=False):
+        """Runs provision-vm.sh with `stdin` on a pipe; with `tty`, typed at a terminal; with None, /dev/null."""
         cmd = [str(self.clone / "scripts" / "env" / "provision-vm.sh"), *map(str, args)]
-        return subprocess.run(cmd, env={**self.env, **(env or {})}, input=stdin, capture_output=True, text=True,
-                              timeout=120, umask=0o022)
+        return self.run(cmd, stdin, env, tty)
+
+    def run(self, cmd, stdin="", env=None, tty=False):
+        """Runs `cmd` on the laptop, with the fakes on PATH, as `provision` does."""
+        kw = dict(env={**self.env, **(env or {})}, capture_output=True, text=True, timeout=120, umask=0o022)
+        if not tty:
+            if stdin is None:
+                return subprocess.run(cmd, stdin=subprocess.DEVNULL, **kw)
+            return subprocess.run(cmd, input=stdin, **kw)
+        master, terminal = pty.openpty()
+        try:
+            os.write(master, (stdin or "").encode())
+            return subprocess.run(cmd, stdin=terminal, **kw)
+        finally:
+            os.close(terminal)
+            os.close(master)
 
     def ssh_calls(self):
         return [json.loads(ln) for ln in self.ssh_log.read_text().splitlines()] if self.ssh_log.exists() else []

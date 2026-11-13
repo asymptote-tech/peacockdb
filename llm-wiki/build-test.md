@@ -4,12 +4,13 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 7593 test cases — Rust 5959, C++ 233, Python 1401.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 156 image and VM tests under `scripts/env/tests/`, run by hand too. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 7668 test cases — Rust 5959, C++ 233, Python 1476.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs, the external-embeddings sidecar recount, which is run by hand, and the 231 image and VM tests under `scripts/env/tests/`, run by hand too. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
-CI GPU job, `--test-threads=1`, on nebius-gpu while shad-gpu is down (*Nebius host*), so the sf40
-rows wait for shad-gpu · `manual` = no CI step runs it · `2gpu` =
+CI GPU job, `--test-threads=1`, on nebius-gpu while shad-gpu is down (*Nebius host*); the sf40
+benchmark cases run by hand on nebius-h100, through `run-gpu.sh … run bench`, and the sf40 C++ pair
+has no host while shad-gpu is down (its rows say so) · `manual` = no CI step runs it · `2gpu` =
 manual, host with ≥2 GPUs (verda-gpu) · `validate-large` = validate-large.yml manual dispatch.
 The first table says it once per block: cpu and ffi are dataset-matrix, gpu is shad-gpu. Everything
 except the `shad-gpu` and `2gpu` rows also runs locally; large CPU batches go to verda.
@@ -940,14 +941,14 @@ that crate is never staged: no peacockdb-core test reads the checkout beyond tes
 | Exec-model engine plans (Python) | the engine's own plan goldens run by the prototype over sf1 against DuckDB: as planned (130), pruned by their dynamic filters before and after join order (73), with every join cluster disassembled and rebuilt (111), and reordered by DPhyp and oriented (111) | [test_engine_answers.py](../scripts/exec_model/tests/plans/test_engine_answers.py), [test_engine_optimized.py](../scripts/exec_model/tests/optimizer/test_engine_optimized.py) | manual — exec-model-corpus.yml, 3 shards | 425 |
 | Exec-model per-call model, measured (Python) | the per-call model fitted from the sf40 calibration record orders each query's modes as the device did: at least fifteen pairs of modes whose measured times differ by more than 10 %, none the wrong way round — 25 of the record's 30 today. The record is not in git: the job fetches it from S3, and the test fails naming the fetch script when it is absent | [test_the_measured_record_orders_each_query_s_modes_as_they_were_measured](../scripts/exec_model/tests/optimizer/test_call_cost_measured.py) | manual — exec-model-corpus.yml, call-cost job | 1 |
 | Calibration scripts (Python) | the two capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, each case is checked against its own dataset's plan golden, `hbm_bytes` lands on the right tuple, a call is the median of its executions, a capture of two datasets joins onto their two records, a case captured alone is refused under another case's name and parts merge into one file only when they cover the record, and a missing `--peak-bw` exits non-zero, and a ten-row record draws the six panel directories and `index.html`, two datasets as two series in every pooled panel, a kind one dataset makes in that dataset's run-wide colour, an hbm file a row per execution draws the same per-call points as its fold, and a fold takes rows of both shapes each by its own. And the split a record is published by: a run of one dataset is its file byte for byte, two datasets are two files under one heading, a query is spelled as the benchmark macro spells it, and a run missing a declared case, timing an undeclared one, captured under Nsight or naming no device or two is refused naming why, with nothing written; each file lies under its device's slug, the harness's rule. And the fetch: a device's record from its own key into its own directory, the H200's pin, which names no device, as it was, and a name that is not a pin path refused before any fetch. A capture is refused unless every GPU it lists is the card the record's heading names, a record naming none being the H200's, and refused naming the table when it has no GPU table or lists no GPU; no project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_hbm.py](../scripts/calibration/tests/test_hbm.py), [test_plot.py](../scripts/calibration/tests/test_plot.py), [test_split.py](../scripts/calibration/tests/test_split.py), [test_fetch.py](../scripts/calibration/tests/test_fetch.py) | cost-report | 41 |
-| Nebius scripts (Python) | `nebius.sh` against fake nebius, ssh and ssh-keyscan: every exit code, and the host-key rule; `--instance-id`/`--profile`, the per-instance alias, and the soft stop on a CPU VM; `install-watch`'s one profile, its embedded key and the install file; the idle watcher's decision over a process snapshot and a clock, for both kinds, and the hourly checker's verdict over the watcher's last log line; `watch.sh` and the hourly workflow's three legs, each skipped with a notice rather than failed; that only an actor on `GPU_ALLOWED_ACTORS` reaches the host; `ci-ship.sh` with real rsync into a local home — `lib/`'s symlinks and exec bits, a cache mirroring each run, retries that end red; and `nebius-test.sh`'s list over stub binaries — what runs, with what, and what is red. No VM, no secret | [test_nebius.py](../scripts/nebius/tests/test_nebius.py), [test_idle_watch.py](../scripts/nebius/tests/test_idle_watch.py), [test_install_watch.py](../scripts/nebius/tests/test_install_watch.py), [test_watch.py](../scripts/nebius/tests/test_watch.py), [test_ci_ship.py](../scripts/nebius/tests/test_ci_ship.py) | cost-report | 170 |
-| Images (Python) | the images' committed inputs and the scripts that build and run them: `docker/pins.env` against the specs, the specs' hashes and the venv lock; `image.sh`'s build line, its tags, its `peacockdb.inputs` label holding every `docker/` file its Dockerfile reads and only the pins it declares, a pin left out only where another version's stage declares it, the same in every locale, and the pushes it refuses; the cmake wrapper's redirects to the prefetched rapids-cmake and flatbuffers; the DuckDB extension directory; the static-cudart guard; `images.yml` started by a dispatch alone, its four steps unconditional and of a fixed shape, building and pushing through `image.sh` with the job's own token and nothing else, its disk gate run over fakes, and the reader it is parsed with refusing what it does not read. The embeddings cache over its pinned origins, with a fake curl: CI, GITHUB_ACTIONS and PEACOCK_NO_FETCH refusing before any call; nothing fetched that a full cache holds, and a missing query set fetched from its origin, resumed; through a symlink, the cache beside the link; an unzip killed midway leaving no GloVe text a re-run accepts; and the committed pin naming each artifact once. The calibration bucket's endpoint and region from `AWS_ENDPOINT_URL` and `AWS_REGION`, keeping the old storage when no endpoint is named and refusing an endpoint without a region. `bootstrap-vm.sh` over a fake docker and sudo: what it refuses before its first install, root among it; a `--ref` the clone is not on refused, naming both branches; one `apt-get update` before any install; the machine-wide data directory, `/var/lib/peacock` unless `PEACOCK_DATA_DIR` names another, before any download; and a whole run: no marker, `DISABLE_AUTOUPDATER=1` in `~/.bashrc` and no `CLAUDE_CONFIG_DIR`, no other script named; an image of other inputs or without the label refused before any run in it; the registry fetched with the clone read-only; sf1 chosen by generator inputs and generated once, offline; one cuDF checkout a commit, sparse, reused, the clone's own submodule never read, and a commit it cannot fetch refused; what it writes in the data directory group-writable; two runs at once generating once and fetching in turn. `provision-vm.sh` over a fake ssh and VM: the laptop's files and their modes, the developer's user, groups and keys, bootstrap on every run, the GPU key `--gpu-key` names copied to the VM and a missing key or `.pub` refused with no key made, the secrets on ssh's stdin alone, the PAT in no argv and not in the VM's env file, another key in `peacock.env` refused by name, an incomplete env file, a missing git identity and a token it cannot use refused, the env file kept with no CR and a final newline, `--env` naming the laptop's own file too, and its comments skipped, a `--ref` the VM's clone is not on refused, a rerun skipping what is done, `--new-pat` on every VM it reaches, help printed without sed and a bash older than 4.4 refused. With the images built: each image as a uid it does not know with no network, every library the staged binaries need resolving in the run image, and `run-tests.sh` over fake binaries | [test_image.py](../scripts/env/tests/test_image.py), [test_images_workflow.py](../scripts/env/tests/test_images_workflow.py), [test_embeddings.py](../scripts/env/tests/test_embeddings.py), [test_s3.py](../scripts/env/tests/test_s3.py), [test_bootstrap.py](../scripts/env/tests/test_bootstrap.py), [test_provision.py](../scripts/env/tests/test_provision.py), [test_run_tests.py](../scripts/env/tests/test_run_tests.py) | manual | 156 |
+| Nebius scripts (Python) | `nebius.sh` against fake nebius, ssh and ssh-keyscan: every exit code, and the host-key rule; `--instance-id`/`--profile`, the per-instance alias, and the soft stop on a CPU VM; `install-watch`'s one profile, its embedded key and the install file; the idle watcher's decision over a process snapshot and a clock, for both kinds, and the hourly checker's verdict over the watcher's last log line; `watch.sh` and the hourly workflow's three legs, each skipped with a notice rather than failed; that only an actor on `GPU_ALLOWED_ACTORS` reaches the host; `ci-ship.sh` with real rsync into a local home — `lib/`'s symlinks and exec bits, a cache mirroring each run, retries that end red; and `nebius-test.sh`'s list over stub binaries — what runs, with what, and what is red. No VM, no secret | [test_nebius.py](../scripts/nebius/tests/test_nebius.py), [test_idle_watch.py](../scripts/nebius/tests/test_idle_watch.py), [test_install_watch.py](../scripts/nebius/tests/test_install_watch.py), [test_watch.py](../scripts/nebius/tests/test_watch.py), [test_ci_ship.py](../scripts/nebius/tests/test_ci_ship.py), [test_nebius_instances.py](../scripts/nebius/tests/test_nebius_instances.py), [test_idle_watch_kinds.py](../scripts/nebius/tests/test_idle_watch_kinds.py), [test_watch_workflow.py](../scripts/nebius/tests/test_watch_workflow.py) | cost-report | 170 |
+| Images (Python) | the images' committed inputs and the scripts that build and run them: `docker/pins.env` against the specs, the specs' hashes and the venv lock; `image.sh`'s build line, its tags, its `peacockdb.inputs` label holding every `docker/` file its Dockerfile reads and only the pins it declares, a pin left out only where another version's stage declares it, the same in every locale, and the pushes it refuses; the cmake wrapper's redirects to the prefetched rapids-cmake and flatbuffers; the DuckDB extension directory; the static-cudart guard; `images.yml` started by a dispatch alone, its four steps unconditional and of a fixed shape, building and pushing through `image.sh` with the job's own token and nothing else, its disk gate run over fakes, and the reader it is parsed with refusing what it does not read. The embeddings cache over its pinned origins, with a fake curl: CI, GITHUB_ACTIONS and PEACOCK_NO_FETCH refusing before any call; nothing fetched that a full cache holds, and a missing query set fetched from its origin, resumed; through a symlink, the cache beside the link; an unzip killed midway leaving no GloVe text a re-run accepts; and the committed pin naming each artifact once. The calibration bucket's endpoint and region from `AWS_ENDPOINT_URL` and `AWS_REGION`, keeping the old storage when no endpoint is named and refusing an endpoint without a region. `bootstrap-vm.sh` over a fake docker and sudo: what it refuses before its first install, root among it; a `--ref` the clone is not on refused, naming both branches; one `apt-get update` before any install; the machine-wide data directory, `/var/lib/peacock` unless `PEACOCK_DATA_DIR` names another, before any download; and a whole run: no marker, `DISABLE_AUTOUPDATER=1` in `~/.bashrc` and no `CLAUDE_CONFIG_DIR`, no other script named; an image of other inputs or without the label refused before any run in it; the registry fetched with the clone read-only; sf1 chosen by generator inputs and generated once, offline; one cuDF checkout a commit, sparse, reused, the clone's own submodule never read, and a commit it cannot fetch refused; what it writes in the data directory group-writable; two runs at once generating once and fetching in turn. `provision-vm.sh` over a fake ssh and VM: the laptop's files and their modes, the developer's user, groups and keys, bootstrap on every run, the GPU key `--gpu-key` names copied to the VM and a missing key or `.pub` refused with no key made, the secrets on ssh's stdin alone, the PAT in no argv and not in the VM's env file, another key in `peacock.env` refused by name, an incomplete env file, a missing git identity and a token it cannot use refused, the env file kept with no CR and a final newline, `--env` naming the laptop's own file too, and its comments skipped, a `--ref` the VM's clone is not on refused, a rerun skipping what is done, without a terminal Claude's login named as a command that works rather than run, `--new-pat` on every VM it reaches, help printed without sed and a bash older than 4.4 refused. `fetch-sf40.sh` over a fake aws and buckets: the endpoint and region from the env file, the keys in no argv and in no environment but aws's, from a file or stdin, one missing refused; a second run fetching nothing; a short file refetched, a short download refused and not kept; a parquet the manifest does not name, a manifest naming a path, an unknown dataset refused; the aggregate in C order against its pin, a wrong one refused, an unpinned one printed; the pinned aws CLI installed when there is none, a zip of another sha refused. `install-duckdb.sh` over a fake curl: the pinned CLI installed, a zip of another sha or version refused with nothing installed, a failed download named, the pinned version skipped, another replaced, sudo where the prefix is not writable. `run-gpu.sh` over a fake `nebius.sh` and VM: every call through `nebius.sh`, with `--instance-id` and `--profile` as given, none without `--instance-id`, and never `start` or `stop`; its exit 64 as 2, and 69 and 75 passed on; a stale build or run image refused naming the file, `run` too, reading the label without a pull, and a VM without the run image refused as `prepare` first, an old driver as 3 naming both versions, admin-only counters as 4 after `update-initramfs`; the storage keys on stdin alone; the cuDF prefix copied once per image; the install shipped by `--dir`, the staged one by default, a missing one refused; the committed testdata shipped, the datasets linked at their absolute paths and mounted at their own; the run's hostname, filter and resume passed on, a run in progress refused, its exit as the run's; results, record and log pulled home. `check-build-image.sh` over the same fakes: the build image pulled, then its label read, on the VM; one of other inputs or without a label refused; none without `--instance-id`. `stage-install.sh` over a fake cargo: four gpu binaries and a release benchmark staged from empty and stripped, a failed build named, another image's cuDF refused. `create_nsys_profile.sh --ssh`: every call and rsync through the given command. With the images built: each image as a uid it does not know with no network, every library the staged binaries need resolving in the run image, and `run-tests.sh` over fake binaries | [test_image.py](../scripts/env/tests/test_image.py), [test_images_workflow.py](../scripts/env/tests/test_images_workflow.py), [test_embeddings.py](../scripts/env/tests/test_embeddings.py), [test_s3.py](../scripts/env/tests/test_s3.py), [test_bootstrap.py](../scripts/env/tests/test_bootstrap.py), [test_provision.py](../scripts/env/tests/test_provision.py), [test_fetch_sf40.py](../scripts/env/tests/test_fetch_sf40.py), [test_install_duckdb.py](../scripts/env/tests/test_install_duckdb.py), [test_run_gpu.py](../scripts/env/tests/test_run_gpu.py), [test_check_build_image.py](../scripts/env/tests/test_check_build_image.py), [test_stage_install.py](../scripts/env/tests/test_stage_install.py), [test_run_tests.py](../scripts/env/tests/test_run_tests.py) | manual | 231 |
 | C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule over the same shared case table the Rust clamp reads, the two refusals of the test-only upload symbol, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; `TableResult::of`'s two refusals, Final and Single modes refused by name, and a `ColumnRef` resolved by index and name, and `MERGE_M2`'s count type — `INT32` before cuDF 25.06, `INT64` from it, and the type this build's headers pick; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 26 |
 | cuDF GPU smoke (C++) | the GPU is alive; the RMM pool reserves the budget the binary declared; `peacock_device_info` names the device, gives the runtime's version, and refuses a null output. The two hardcoded-comet partition-id cases are gone: they were a third copy of the lane rule, and the live gate proves the kernel against the production rule instead | [CudfGpu.SequenceSum](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp), [PeacockGpu.DeviceInfoDescribesTheDevice](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 3 |
 | Plan-executor (C++) | hand-built plan IR through the C++ executor, node by node — a join through the session's build, probe and finish, laid out as the wire lays it, its two sides and the `CudfJoin` leaf under one structural union — plus the per-call entry points at their contract edges (row-group override, export range, slice), a scan of no column answering its row count from the footer — whole, one row group, under a limit — and a project of no expression refused, the sqrt arm on both evaluators, a value-form CASE with and without ELSE — the first match winning, a NULL comparand or WHEN never matching — `date_part` answering in the type the wire names for three fields, a merge that emits state rather than a value, the literal arm — a typed null on the AST path, the decimal literal's scaled double, a decimal literal under a cast to `Float64` or `Int64` kept on the AST, every wire type walked through the dispatch, the LIKE guard, `IS [NOT] DISTINCT FROM` against a typed null on each evaluator — and the timed regions: `Off` records none, every entry point opens one per output partition, a second call of one seq counts up, a slice and an export are charged to the node that produced the handle, a handle from before timing was on and an adopted one each refused a charge, an export of no rows opens one too, and collecting drains; and the NVTX switch on its own: ranges without timing record no region. The handle's own rules are ten of these: a slice and a selection share their columns' owners, and five shapes are refused — a table of no columns, a name count that does not match, an ordinal past the columns, a selection of no ordinals, and a column appended at the wrong row count, a slice's string bytes are its own rows' and not its parent's, a scatter's partitions share one table and outlive their siblings and concatenate back to the input, an empty lane is a zero-row slice of no string bytes, two input handles are refused rather than concatenated, a scatter's peak and its requested total are those of partitioning the same input alone, measured with the RMM statistics adaptor over a fixed-width table and a string one; the total is the bound that discriminates on both shapes, since a string column's gather in cuDF already costs more than the copies did and so set the peak all along — and `slice_handle` still owns its rows; and the operator exit paths, nine of these: a bare `ColumnRef` evaluates to a view of the input's own column and allocates nothing, a non-AST predicate allocates no more than the comparison and the filter alone, a fused filter projection no more than the same filter without one, a project of column references nothing at all, a window no more than its own result column, and an aggregate no more than cuDF's groupby — each bound measured on the same input, since a hand formula would bake a cuDF cost into a constant; plus a filter whose projection repeats an ordinal, which answers both columns over one owner, and two that bound a release rather than an allocation, since no allocation bound can see an operator retaining what it should drop: a filter narrowed to one column gives back the dropped column's own bytes, and a project holds its shared column exactly once and frees the rest; and the grouping id's value and width from one key to sixty-four, each width boundary from both sides, and its refusal past them; and an aggregate's init handed no input answering over its declared input's zero-row table, where a merge handed none still refuses; the aggregate's request builder per function and phase, the Welford state with no NULL over an all-NULL group or merge, and a keyless Welford through the builder, with rows and over none, and a `ColumnRef` refused past the width, with no name, or under another column's name; and a date or timestamp ± an interval literal, each expected value DataFusion's: the month-end clamp in a leap and a common year, both ways, a mixed interval at every timestamp unit in the months-days-nanoseconds order, a sub-day part truncated on a date and floored on a timestamp, the interval on the left, a NULL interval, zero rows keeping the type, and any other interval use refused naming #249 | [PlanExecutor.HashJoinNationRegion](../cpp/tests/gpu/test_plan_executor.cpp), [ExitCopies.AProjectOfColumnRefsAllocatesNothing](../cpp/tests/gpu/test_plan_executor.cpp), [test_grouping_id.cpp](../cpp/tests/gpu/test_grouping_id.cpp), [test_aggregate_no_input.cpp](../cpp/tests/gpu/test_aggregate_no_input.cpp), [test_column_refs.cpp](../cpp/tests/gpu/test_column_refs.cpp), [test_aggregate_builder.cpp](../cpp/tests/gpu/test_aggregate_builder.cpp), [test_interval_arithmetic.cpp](../cpp/tests/gpu/test_interval_arithmetic.cpp) | shad-gpu | 126 |
 | Join session (C++) | the four `peacock_join_*` symbols through the C ABI alone — plan bytes in, Arrow batches up, IPC answers down — over the matrix of [join-rewrite-design.md](tasks/join-rewrite-design.md) §5.6: all nine join types against keys only, a cross residual the AST takes and one it refuses, a residual reading one side alone, a nested loop whose conjuncts are all AST-able, partly so, or not at all, and a cross join; NULL keys on both sides under either `null_equals_null`, many-to-many keys, a composite key with a NULL in its second column; a build that is absent, zero rows or all-NULL keys, a probe that is absent, one batch, or three with a zero-row batch between; a projection absent, crossing sides, or empty and refused. Left and Full pad a NULL-key build row rather than dropping it. Five cases probe three batches with a zero-row batch between, no batch matching what another did, because `matched` is an OR folded across calls and a single batch cannot tell that from the last call's answer — which is the whole of #136. Four properties no answer can show get a case each — hoisting a one-side operand keeps a nested loop off the cross product, bounded by the same join whose condition needs no hoisting plus the build's own bytes; a probe hands its gathered columns over without a copy (#154), its peak bounded by the same cuDF calls on tables of the same shape and its `net` bounded *both* ways, since an upper bound is the only thing that sees a session retaining the batch it consumed; releasing a session, and ending the plan under a live one, give back the build side's own measured bytes; each call opens exactly one region; and the two `size_type` ceilings refuse by name rather than wrapping, asked on sizes because no test host holds a table that big | [JoinSession.LeftPadsEveryBuildRowNoProbeMatchedIncludingANullKey](../cpp/tests/gpu/test_join_session.cpp), [JoinSession.HoistingKeepsANestedLoopOffTheCrossProduct](../cpp/tests/gpu/test_join_session.cpp) | shad-gpu | 56 |
-| TPC-H sf40 bare-cuDF (C++) | hand-written cuDF pipelines vs DuckDB sf40; the benchmark vehicle | [TpchSf40.Q1GroupByAggregates](../cpp/tests/gpu/test_tpch.cpp), [Q3JoinsGroupByTopN](../cpp/tests/gpu/test_tpch.cpp) | shad-gpu (sf40 is a hard precondition) | 4 |
-| TPC-H+V sf40 bare-cuDF (C++) | the same for the vector-embedding queries | [TpchSf40.Q11VectorBruteForce](../cpp/tests/gpu/test_tpchv.cpp) | shad-gpu | 4 |
+| TPC-H sf40 bare-cuDF (C++) | hand-written cuDF pipelines vs DuckDB sf40; the benchmark vehicle | [TpchSf40.Q1GroupByAggregates](../cpp/tests/gpu/test_tpch.cpp), [Q3JoinsGroupByTopN](../cpp/tests/gpu/test_tpch.cpp) | manual: shad-gpu alone, which holds sf40 and is down; `run-gpu.sh` skips it | 4 |
+| TPC-H+V sf40 bare-cuDF (C++) | the same for the vector-embedding queries | [TpchSf40.Q11VectorBruteForce](../cpp/tests/gpu/test_tpchv.cpp) | manual: shad-gpu alone, which holds sf40 and is down; `run-gpu.sh` skips it | 4 |
 | TPC-H sf40 streamed (C++) | the same four queries and the same DuckDB goldens with nothing held resident — a chunked reader under a byte budget, so it answers whether the query fits rather than how fast the operators are | [TpchSf40Streamed.Q1Streamed](../cpp/tests/gpu/test_tpch_streamed.cpp) | manual | 4 |
 | Per-operator cuDF timings (C++) | one operator at a time over real sf40 columns, so a query cost reads as a sum of parts; asserts row counts only, so a benchmark cannot time an empty column | [CudfNodes.OperatorTimings](../cpp/tests/gpu/test_cudf_nodes.cpp) | manual | 1 |
 | Multi-GPU TPC-H (C++) | WorkerPool, hash_shuffle, per-device RMM pools across GPUs | [TpchSf40.Q3MultiGpu](../cpp/tests/gpu/test_multi_gpu_tpch.cpp) | manual, 2gpu | 4 |
@@ -1005,22 +1006,24 @@ region from `AWS_ENDPOINT_URL` and `AWS_REGION` (`scripts/lib/s3.sh`). `upload_d
 endpoint themselves. With `AWS_ENDPOINT_URL` unset, the calibration bucket uses the endpoint and
 region above, for `build-test-shadgpu.sh`.
 
-| Dataset | Shape | <sub>local</sub> | <sub>verda</sub> | <sub>shad-gpu</sub> | S3 bucket | Used by |
-|---|---|:-:|:-:|:-:|---|---|
-| tpch.minimal | 5 tables, 19 MB, git-committed | ✓ | ✓ | ✓ | — | C++ plan tests, plan serializer, node executor |
-| pbench.sf1 | 5 tables, 588 KB, git-committed | ✓ | ✓ | ✓ | — | plan + CPU corpus subsets, the join-rewrite chain's shapes |
-| TPC-H+V sf1, external vectors | 8 tables, 987 MB; GloVe 100-d + DEEP1B 96-d | ✓ | ✓ | ✓ | — | most CPU/GPU rust tests |
-| TPC-H+V sf1, synthetic vectors | same tables, hash-generated FLOAT[8] | — | — | — | — | CI only — regenerated every run |
-| TPC-DS sf1 | 24 tables, 764 MB | ✓ | ✓ | ✓ | — | plan + CPU + GPU subsets |
-| TPC-H+V sf40 | 8 tables, 40 GB | — | — | ✓ | `tpch-sf40` | `peacock_tpch(v)_tests`, `peacock_gpu_benchmarks`, multi-GPU (manual) |
-| TPC-DS sf40 | 24 tables, 15.8 GB | — | — | ✓ | `tpcds-sf40` | `peacock_gpu_benchmarks` |
-| TPC-DS sf200 | 24 tables, 80 GB | — | — | ✓ | `tpcds-sf200` | no tests — S3 check, validate-large |
-| TPC-H sf200 | not generated yet | — | — | — | `tpch-sf200` | nothing yet |
-| embeddings cache | 1.8 GB local / 129 GB shad-gpu | ✓ | — | ✓ | — | generator input, not a test input |
-| calibration record | the sf40 benchmark run's per-call rows, a file per dataset: tpch 254 thousand, 26 MB; tpcds 1,060, 106 kB | — | — | — | `calibration` | `test_call_cost_measured`, `plot.py` |
+| Dataset | Shape | <sub>local</sub> | <sub>verda</sub> | <sub>shad-gpu</sub> | <sub>nebius-h100</sub> | <sub>nebius-cpu128</sub> | S3 bucket | Used by |
+|---|---|:-:|:-:|:-:|:-:|:-:|---|---|
+| tpch.minimal | 5 tables, 19 MB, git-committed | ✓ | ✓ | ✓ |  |  | — | C++ plan tests, plan serializer, node executor |
+| pbench.sf1 | 5 tables, 588 KB, git-committed | ✓ | ✓ | ✓ |  |  | — | plan + CPU corpus subsets, the join-rewrite chain's shapes |
+| TPC-H+V sf1, external vectors | 8 tables, 987 MB; GloVe 100-d + DEEP1B 96-d | ✓ | ✓ | ✓ |  |  | — | most CPU/GPU rust tests |
+| TPC-H+V sf1, synthetic vectors | same tables, hash-generated FLOAT[8] | — | — | — |  |  | — | CI only — regenerated every run |
+| TPC-DS sf1 | 24 tables, 764 MB | ✓ | ✓ | ✓ |  |  | — | plan + CPU + GPU subsets |
+| TPC-H+V sf40 | 8 tables, 40 GB | — | — | ✓ | ✓ | ✓ | `tpch-sf40` | `peacock_tpch(v)_tests`, `peacock_gpu_benchmarks`, multi-GPU (manual) |
+| TPC-DS sf40 | 24 tables, 15.8 GB | — | — | ✓ | ✓ | ✓ | `tpcds-sf40` | `peacock_gpu_benchmarks` |
+| TPC-DS sf200 | 24 tables, 80 GB | — | — | ✓ |  |  | `tpcds-sf200` | no tests — S3 check, validate-large |
+| TPC-H sf200 | not generated yet | — | — | — |  |  | `tpch-sf200` | nothing yet |
+| embeddings cache | 1.8 GB local / 129 GB shad-gpu | ✓ | — | ✓ |  |  | — | generator input, not a test input |
+| calibration record | the sf40 benchmark run's per-call rows, a file per dataset: tpch 254 thousand, 26 MB; tpcds 1,060, 106 kB | — | — | — |  |  | `calibration` | `test_call_cost_measured`, `plot.py` |
 
 Paths: `testdata/{tpch.minimal,pbench.sf1,tpch.sf1,tpcds.sf1,embeddings-cache}`; sf40 and sf200 live
-outside the repo on shad-gpu, under `/home/info/peacock-datasets/testdata/`. **+V** means
+outside the repo on shad-gpu, under `/home/info/peacock-datasets/testdata/`. The two Nebius
+columns track sf40 alone. `fetch-sf40.sh` puts both sets in `/var/lib/peacock/<dataset>/` there
+("Containers"). Each ✓ there is a fetch checked against both pins, on 2026-11-04. **+V** means
 the TPC-H tables carry vector columns — `part.p_text_embedding` and
 `partsupp.ps_image_embedding` + `ps_text_embedding`; TPC-DS does not have embeddings.
 
@@ -1056,9 +1059,12 @@ sha256 matches local). Notes on the rows above:
   CI the runner's own with the `S3_*` secrets; a dev box without credentials runs it on
   shad-gpu, `AWS=/home/info/bin/aws scripts/calibration/fetch_record.sh --ssh shad-gpu tpch.sf40`.
   Only `build-test-shadgpu.sh --pull-benchmarks` writes the bucket.
-- **sf40 lives only on shad-gpu**, and its presence there is a hard precondition of the
-  GPU job; the sf40 goldens are committed (see below), so CI compares without touching
-  40 GB.
+- **sf40 lives on shad-gpu**, and `fetch-sf40.sh` fetches it to nebius-h100 and nebius-cpu128.
+  tpch.sf40's aggregate is
+  `d9e4a8fe74e1923fc6f5fc47c0fc4b20d7d4e55b82e0a94090e2e37071bb8713`. It was pinned from the CPU
+  VM's fetch, and the H100's own fetch matched it.
+  CI's `gpu-tests` runs on the L40S and reads no sf40; the sf40 goldens are committed (see
+  below), so a comparison never touches 40 GB.
 - **tpcds sf40 is the benchmark's alone**: no test tier reads it, only the s3-datasets check
   (`check_s3_datasets.py`) checks its bucket, `tpcds-sf40`. It is made by `generate_testdata.sh
   --bench tpcds --sf 40` (DuckDB 1.5.4, one thread). On shad-gpu: 9 min 41 s, peak RSS 60 GiB,
@@ -1481,7 +1487,8 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
   No glibc patch: the VM has glibc 2.39 and CI's binaries need 2.35. No sf40 check: the sf40
   pair is out on an L40S.
 - **nebius-watch.yml** — hourly and on dispatch: the hourly checker, which hard-stops an
-  unused nebius-gpu (*Nebius host*). GitHub reads its schedule from master only.
+  unused Nebius VM, one matrix leg per VM (*Nebius host*). GitHub reads its schedule from master
+  only.
 - **images.yml** — on dispatch only: builds and publishes the build and run images (*Images*).
   GitHub can dispatch it only once master holds it.
 - **cost-report** — the report crate and its inputs, and the cheap script tests: python
@@ -1660,85 +1667,105 @@ Rules that keep this healthy:
 
 ## Nebius host
 
-The device tier runs on **nebius-gpu** while shad-gpu is down. It is a paid VM. Every GPU step
-starts it and stops it after. Two guards stop it when nobody does.
+Three Nebius VMs, each with its own role. A chain needs no host override: these roles are the rule.
 
-**The instance.** `computeinstance-e00tnrse7ayntnzcyt` in project
-`project-e00tdypyen10mmyep61c8q`. An NVIDIA L40S with 46 GB. Ubuntu 24.04 and glibc 2.39, so
-no binary needs a glibc patch. cuDF 25.02 in `~/data/miniforge3/envs/rapids-cuda-12.2`;
+| VM | instance | region | profile on dev | machine | role |
+|---|---|---|---|---|---|
+| nebius-gpu | `computeinstance-e00tnrse7ayntnzcyt` | eu-north1 | the active one, `editor-eu` | L40S, 46 GB | correctness: the L40S list below; no sf40, no benchmarks |
+| nebius-h100 | `computeinstance-e00e6yena4nzjgaym0` | eu-north1 | `editor-eu` | H100 80GB HBM3, 16 vCPU, 196 GB | sf40, the benchmarks and Nsight, through `scripts/env/run-gpu.sh` |
+| nebius-cpu128 | `computeinstance-e01t2mm4265y8x88ey` | eu-west1 | `eu-west1` | 128 cores, no card | DuckDB, and the H100's staged install ("The CPU-VM build") |
+
+Each is a paid VM. A VM starts right before its first remote command and stops right after its
+last pull. It is never left up across a local build, CI, a review or the human. Two guards stop
+it when nobody does. The login is `dmitry` on all three, with one key: `~/.ssh/id_ed25519` on
+dev, `NEBIUS_GPU_SSH_KEY` in CI.
+
+Every script names a VM by `nebius.sh`'s two options. With neither, it is nebius-gpu:
+
+```
+scripts/nebius.sh <verb>                                                                    # nebius-gpu
+scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu <verb>  # nebius-h100
+scripts/nebius.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 <verb>   # nebius-cpu128
+```
+
+**nebius-gpu** is in project `project-e00tdypyen10mmyep61c8q`. Ubuntu 24.04 and glibc 2.39, so no
+binary needs a glibc patch. cuDF 25.02 in `~/data/miniforge3/envs/rapids-cuda-12.2`;
 `. ~/peacock-env.sh` sets up a shell. cuDF 26.02 there is out ([#260](tickets/system-hardening.md#t260)).
+The device tier runs there while shad-gpu is down. Only GPU work goes there: the device build and
+the device runs. Every CPU build and run stays local, or on verda.
 
 - **It is preemptible.** It can stop, change IP or vanish mid-step. Preemption is a stop: the
   boot disk keeps its trees, builds and data.
-- **The IP changes on every start.** Never write it down. `nebius.sh` asks the API for it on
-  every call.
-- **Only GPU work goes there**: the device build and the device runs. Every CPU build and run
-  stays local, or on verda.
+- **An IP can change on every start**, on any of the three. Never write one down. `nebius.sh`
+  asks the API for it on every call.
 
-**Other VMs.** The scripts and both guards also serve nebius-h100
-(`computeinstance-e00e6yena4nzjgaym0`, eu-north1) and nebius-cpu128
-(`computeinstance-e01t2mm4265y8x88ey`, eu-west1, a 128-core CPU VM). The rest of this section
-describes nebius-gpu, the default. For another VM:
-
-- `nebius.sh [--instance-id <id>] [--profile <name>] <verb>` picks the VM and its CLI profile.
-  The options come before the verb. A malformed or repeated option is exit 64.
-  `nebius-sync.sh` takes the same two options, and `--no-data` skips the sf1 data.
-- Each VM has its own ssh alias: `nebius-gpu`, or `nebius-<instance id>`. A changed host key
-  replaces that VM's line alone.
-- `install-watch [--key-file <pem>]` ships one profile: `--profile`'s, or the active one. It is
-  cut from a temp copy of `~/.nebius/config.yaml` and becomes root's only profile. A profile that
-  keeps its key in a PEM file (eu-west1) needs that file as `--key-file`. The key is embedded,
-  and the PEM stays on dev.
-  A profile that embeds its key already (editor-eu) refuses `--key-file`: another PEM would
-  replace a working key.
-- `install-watch` also writes `/etc/peacock-gpu-idle.json`: the instance id, and kind `gpu`, or
-  `cpu` on a VM without `nvidia-smi`. The watcher reads both from it. Without the file it is
-  nebius-gpu, kind `gpu`. A file it cannot trust gives no id, and the watcher stops nothing.
-- On a `cpu` VM, test activity is `duckdb`, `aws`, or input on an ssh terminal. A soft stop
-  there refuses, exit 2, while `duckdb` runs.
-- `nebius-watch.yml` checks all three VMs hourly, one matrix leg each, through
-  `scripts/nebius/watch.sh <vm> [nebius.sh options…]`. A leg is a notice, not a failure, when
-  its secrets are absent, its profile cannot be made, or its VM is gone (exit 69). One leg's
-  failure never stops another.
-- Besides the five secrets below, the `nebius-gpu` Environment holds four for eu-west1, used by
-  nebius-cpu128's leg only: `NEBIUS_EU_WEST1_{SA_ID,PUBLIC_KEY_ID,PROJECT_ID,PRIVATE_KEY}`.
-  `nebius-setup`'s `profile` input names the profile it makes (default `ci`).
+**nebius-h100** holds no tree. `run-gpu.sh` ships each run's install and testdata to it.
+Ubuntu's glibc 2.39, driver 580.173.02. Its image already has Docker, the NVIDIA Container Toolkit
+and nsys, and its counters are open to non-root, so its first `prepare` needed no restart.
+**nebius-cpu128** is a containers VM: `provision-vm.sh` readies it ("Containers"). It ran clean
+there on 2026-11-04, with no fix.
 
 ### The scripts
 
-`scripts/nebius.sh` is the one door to the VM. It runs the `nebius` CLI with the caller's
-active profile.
+`scripts/nebius.sh [--instance-id <id>] [--profile <name>] <verb>` is the one door to every VM.
+The options come before the verb. `--instance-id` takes a `computeinstance-…` id; without it the
+VM is nebius-gpu. `--profile` goes to every `nebius` CLI call; without it the CLI uses the active
+profile. A malformed or repeated option is exit 64.
 
 - `status`: the state, and the IP when RUNNING. `ip`: the IP alone.
 - `start`: starts the VM and waits for RUNNING, then for ssh. On a running VM it only waits for
   ssh. It waits out a STOPPING VM first. If the VM is RUNNING but ssh never answers, it exits
   1, and it stops the VM again if this call started it.
-- `stop`: a soft stop. It refuses, exit 2, while a process is on the card. An unreachable VM is
-  stopped on the API's word. `stop --force` stops it regardless.
+- `stop`: a soft stop. It refuses, exit 2, while a process is on the card. On a VM without
+  `nvidia-smi` it refuses while `duckdb` runs. An unreachable VM is stopped on the API's word.
+  `stop --force` stops it regardless.
 - `ssh <cmd…>`: runs a command on the VM. `rsh` is the same for `rsync -e`.
-- `install-watch`: installs the idle watcher and its API credentials on the VM. It ends by
-  running root's `nebius` profile the way the watcher does, and fails loudly if that profile
-  cannot reach the API.
+- `install-watch [--key-file <pem>]`: installs the idle watcher and its API credentials on the
+  VM ("The two idle guards").
 
 | exit | meaning | what to do |
 |---|---|---|
 | 0 | done | |
-| 2 | soft stop refused: a process is on the card | leave it; someone's run is on it |
+| 2 | soft stop refused: a process is on the card, or DuckDB on a CPU VM | leave it; someone's run is on it |
 | 75 | no capacity or quota | retry later |
 | 69 | the instance no longer exists | stall; rebuilding it is the human's |
 | 1 | anything else; from `start`, most often the VM up but unreachable over ssh | read `~/.config/peacock/nebius/nebius.log`. From `start`: stall with that reason, do not retry |
 
-**Host keys.** Every ssh uses the alias `nebius-gpu` and its own known-hosts file under
-`~/.config/peacock/nebius/`, so a new IP never warns. When the key itself changes, the script
-asks the API whether the IP is this instance's. Only then does it replace the stored key, and it
-logs both fingerprints. Never edit `~/.ssh/config` for the VM, and never accept a key by hand.
+**Host keys.** Every ssh uses a per-instance alias in one known-hosts file under
+`~/.config/peacock/nebius/`, so a new IP never warns. The alias is `nebius-gpu` for nebius-gpu
+and `nebius-<instance id>` for any other VM, so one VM's new key never touches another's. When
+the key itself changes, the script asks the API whether the IP is this instance's. Only then does
+it replace the stored key, that VM's line alone, and it logs both fingerprints. Never edit
+`~/.ssh/config` for a VM, and never accept a key by hand.
 
-`scripts/nebius-sync.sh [--dest <dir>]` copies the working tree, uncommitted, to `~/<dir>` on
-the VM, and prints `<dir>`. The default is `peacockdb-<the worktree's directory name>`. Ignored
-build dirs, target dirs and generated data survive on both sides. It retries a failed rsync. It
-generates the sf1 tpch and tpcds data on the VM if it is missing. Do not commit to build.
+**install-watch gives the VM one profile**: `--profile`'s, or the active one. It becomes root's
+only profile. It is cut from a temp copy of `~/.nebius/config.yaml` on dev, so no other profile
+ever reaches the VM. Only the CLI reads the copy. A profile keeps its key in one of two ways:
 
-Build on the VM with `build-test-shadgpu.sh --build` only. Its `--run`, `--push-binaries` and
+- **Embedded** (editor-eu). Run install-watch without `--key-file`. Given one, it refuses, exit 1,
+  before any VM work: another PEM would replace a working key.
+- **In a PEM file** (eu-west1, `~/.nebius/eu-west1-sa.pem`). Pass that file as `--key-file`. The
+  CLI embeds it into the copy and drops the path, so the VM needs no PEM, and the PEM never
+  leaves dev. Without `--key-file` such a profile is refused.
+
+install-watch writes the install file, `/etc/peacock-gpu-idle.json`, before it starts the timer.
+It ends by running root's profile the way the watcher does, and fails loudly if that profile
+cannot reach the API. For the three VMs:
+
+```
+scripts/nebius.sh install-watch
+scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu install-watch
+scripts/nebius.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 install-watch --key-file ~/.nebius/eu-west1-sa.pem
+```
+
+`scripts/nebius-sync.sh [--instance-id <id>] [--profile <name>] [--dest <dir>] [--no-data]`
+copies the working tree, uncommitted, to `~/<dir>` on the VM, and prints `<dir>`. The two
+options go to every `nebius.sh` call. An unknown option is exit 64. The default dir is
+`peacockdb-<the worktree's directory name>`. Ignored build dirs, target dirs and generated data
+survive on both sides. It retries a failed rsync. It generates the sf1 tpch and tpcds data on the
+VM if it is missing; `--no-data` skips that. Do not commit to build.
+
+Build on nebius-gpu with `build-test-shadgpu.sh --build` only. Its `--run`, `--push-binaries` and
 `--patch` go to shad-gpu.
 
 `scripts/nebius-test.sh` runs on the VM, against a tree that holds `cpp/install/`:
@@ -1748,7 +1775,7 @@ Build on the VM with `build-test-shadgpu.sh --build` only. Its `--run`, `--push-
 - `status <tree>` prints each binary's rc, or `running`, then `ALL rc=<n>`, `ALL running` or
   `ALL died`. `ALL died` means a preemption or a reboot killed the run: rerun it.
 
-A GPU step, end to end (`<dest>` is what the sync printed):
+A GPU step, end to end, on nebius-gpu (`<dest>` is what the sync printed):
 
 ```
 scripts/nebius.sh start
@@ -1774,42 +1801,162 @@ If the VM is lost mid-step: `status`, `start` again, sync, rerun the step.
 A binary that runs 0 tests fails, and so does an empty glob or a segfault in any log. Every
 binary runs even after one fails.
 
-Out until further notice: the sf40 binaries, `--run-benchmarks`, Nsight captures and any H200
-timing. A task records each one it skips as deferred in its detail file.
+The sf40 benchmark cases (`run-gpu.sh … run bench`) and Nsight captures run on the H100, never on
+the L40S ("The H100's device run"). The sf40 C++ pair, `peacock_tpch_tests` and
+`peacock_tpchv_tests`, has no H100 path yet: `run-tests.sh` skips it in every mode. Only shad-gpu
+runs it, and shad-gpu is down. H200 timing is out.
+
+### The H100's device run
+
+`scripts/env/run-gpu.sh --instance-id <id> [--profile <name>] [--dir <i>] [--cudf <v>] <verb>`
+runs the device tiers and the benchmark in the run image ("Images"). The two options go, as
+given, to every `nebius.sh` call. `--instance-id` is required: without it `nebius.sh` means
+nebius-gpu, which runs no sf40, so `run-gpu.sh` refuses, exit 2, before any call.
+`run-gpu.sh` reaches the VM only through `nebius.sh … ssh` and `rsh`, and never starts or stops
+it: the caller does. `<i>` names the VM's directory, `~/peacock/<i>/`: this tree's directory name
+by default. `<v>` is the cuDF version, 25.02 by default.
+
+- `prepare` readies the VM. It installs Docker, the NVIDIA Container Toolkit and nsys if missing,
+  and opens the GPU's counters to non-root. It pulls the build and run images, each refused unless
+  its `peacockdb.inputs` label is this tree's. It generates sf1 in the build image, and fetches
+  sf40 with `fetch-sf40.sh`, dev's `~/.config/peacock/peacock.env` on stdin. It copies the run
+  image's `/opt/cudf` to `~/peacock/cudf-<v>/`, for Nsight on the VM itself.
+- `ship [--install <dir>]` sends the staged install (this tree's `cpp/install` by default) and the
+  tree's committed testdata to `~/peacock/<i>/`, with the datasets linked in.
+- `run <list|filter|bench>` first reads the VM's run image's `peacockdb.inputs` label, with no
+  pull, and refuses, exit 2, an image built from other inputs than this tree: `prepare` again.
+  Then it runs the run image's `run-tests.sh <mode>` as container `peacock-<i>`, and follows its log. The log is kept in `~/peacock/<i>/logs/<mode>.log`. `PCK_TEST_FILTER` and
+  `PEACOCK_BENCH_RESUME` pass on. If ssh drops, the container goes on, and the next `run` refuses,
+  exit 2, until it ends.
+- `pull` brings `testdata/benchmark-results/` and `testdata/calibration/` into this tree. A file
+  edited here since `ship` is kept. The runs' logs go to `~/.cache/peacock/run-gpu/<i>/`. `pull`
+  leaves the VM's `calibration/records.tsv`, and `bench` refuses one with rows: remove it on the VM
+  after the pull.
+
+| exit | meaning |
+|---|---|
+| 0 | done |
+| 1 | the run failed |
+| 2 | bad input (`nebius.sh`'s 64 too), no `--instance-id`, a stale image, a run in progress, or no `prepare` or `ship` yet |
+| 3 | the VM's driver is older than the run image needs |
+| 4 | the counters open only after a restart: `nebius.sh … stop --force`, `start`, then `prepare` again |
+| 75, 69 | `nebius.sh`'s |
+
+`scripts/env/stage-install.sh [--cudf <v>]` makes the install `ship` sends. It runs at the tree
+root inside the build image of `<v>`, and refuses another image (exit 2). It builds and installs
+the C++ into `cpp/install`. Then it stages, from empty, the gpu test binaries into
+`cpp/install/rust-tests/` and the release `peacock_gpu_benchmarks` into
+`cpp/install/rust-benchmarks/`, each stripped of debug info. cargo builds into `target-img-<v>`
+unless `CARGO_TARGET_DIR` is set. Exit 1 is a failed build. It runs on nebius-cpu128 ("The CPU-VM
+build").
+
+A run, end to end, once the CPU-VM build has staged the install on dev:
+
+```
+N="scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"
+G="scripts/env/run-gpu.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"
+$N start
+$G prepare          # exit 4 the first time: $N stop --force; $N start; $G prepare again
+$G ship --install <the staged cpp/install>
+$G run list         # or: PCK_TEST_FILTER=<f> $G run bench
+$G pull
+$N stop
+```
+
+Nsight runs on the VM itself, over the same door:
+`create_nsys_profile.sh --ssh "$N rsh" --host nebius-h100 --remote-dir /home/dmitry/peacock/<i>
+--remote-cudf-root /home/dmitry/peacock/cudf-25.02`. Its HBM defaults are an H200's. The
+metric set `gh100` fits the H100 too, but the peak does not: set `PCK_BENCH_HBM_PEAK_BW=3.35e12`.
+That is the H100's 2619 MHz memory clock × 2 × 5120 bits, NVIDIA's 3.35 TB/s.
+
+On 2026-11-04 the first `prepare` took about 21 min: 8 for the two images, 12 for sf40. A second
+took about 1 min. The sf1 list ran green in 14 min, each binary at the count this page gives. One
+benchmark case, `bench_tpch_sf40_q6_tp1_single`, took 97 ms a run.
+
+### The CPU-VM build
+
+Binaries for H100 runs are built on nebius-cpu128, from the workspace as it stands, uncommitted,
+never from a `git pull`: a clone on the VM holds only what was last pushed. Local and verda builds
+stay for development.
+
+```bash
+C="scripts/nebius.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1"
+$C start
+D=$(scripts/nebius-sync.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 --no-data)
+scripts/env/check-build-image.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1
+$C ssh "cd ~/$D && docker run --rm --user \$(id -u):\$(id -g) -e HOME=/tmp -v \$PWD:\$PWD -w \$PWD ghcr.io/asymptote-tech/peacockdb-build:cudf-25.02 scripts/env/stage-install.sh"
+rsync -a -e "$C rsh" "nebius-cpu128:$D/cpp/install/" <local install dir>/
+$C stop
+```
+
+`check-build-image.sh` pulls the build image on the VM and refuses it, exit 2, unless its
+`peacockdb.inputs` label is this tree's. The comparison runs on dev: the synced tree has no `.git`,
+and the build image's inputs include the `third_party/cudf` commit the git index pins. Exit 2 is a
+refused image or bad input; any other failure is `nebius.sh`'s exit.
+
+Any other tree file a CPU-VM step reads reaches the VM the same way, with `nebius-sync.sh …
+--no-data`. No cargo registry is mounted and ccache is in `/tmp`, so every build fetches the
+crates and compiles the C++ cold. `target-img-25.02/` is gitignored, so it survives the next sync.
 
 ### The two idle guards
 
 **The watcher** is `scripts/nebius/idle_watch.py`, run every minute on the VM by the
-systemd timer `peacock-gpu-idle.timer`. The timer survives reboots. Test activity is a process
-on the card or a running test binary. Build activity is `rsync`, `cargo`, `cmake`, `ninja`,
-`nvcc` or `cc1plus`. The watcher stops the VM through the API:
+systemd timer `peacock-gpu-idle.timer`. The timer survives reboots. It reads the VM's instance
+id and kind from the install file, `/etc/peacock-gpu-idle.json`:
+`{"instance_id": …, "kind": "gpu"|"cpu"}`. install-watch writes it: kind `gpu` if the VM has
+`nvidia-smi`, else `cpu`. Without the file the watcher is nebius-gpu's, kind `gpu`. A file it
+cannot read or trust gives no id: the watcher stops nothing, logs why, and the hourly checker is
+the stop.
+
+On a `gpu` VM, test activity is a process on the card or a running test binary. Build activity
+is `rsync`, `cargo`, `cmake`, `ninja`, `nvcc` or `cc1plus`. A `cpu` VM has no card and no
+`nvidia-smi` probe. There, test activity is `duckdb` or `aws` (a data fetch), and input on an
+ssh terminal (`/dev/pts/<n>`) counts too. Build activity adds `apt-get`, `dpkg`, `git`, `curl`
+and the `docker` client; `dockerd` is not a build. The watcher stops the VM through the API:
 
 - after 1 hour with no test activity;
 - after 2 hours, measured from the last test, if a build was seen since that test;
-- when one test process has run for 4 hours. That is a process on the card, or a test binary
-  found by name. A hung CPU-side test is never on the card, and without the second it would
-  keep the VM up forever.
+- when one test process has run for 4 hours. That is a process on the card, or a test process
+  found by name, DuckDB included. A hung CPU-side test is never on the card, and without the
+  second it would keep the VM up forever. A terminal has no cap.
 
 The clocks never start before boot, so a fresh start is never stopped on old state. Each tick
-appends one JSON line to `/var/log/peacock-gpu-idle.log`, with the card's processes (`card`)
-and the test binaries found by name (`test_procs`), each with its start time. State lives in
-`/var/lib/peacock-gpu-idle/`.
+appends one JSON line to `/var/log/peacock-gpu-idle.log`, with the card's processes (`card`),
+the test processes found by name (`test_procs`), each with its start time, the terminals' last
+input (`sessions`), and the `instance` and `kind`. State lives in `/var/lib/peacock-gpu-idle/`.
 
 **The hourly checker** is `.github/workflows/nebius-watch.yml`, scheduled hourly and
-dispatchable. It keeps no state. If the VM is RUNNING, it reads the watcher's last log line over
-ssh and passes it to `scripts/nebius/check.py`. It hard-stops the VM when:
+dispatchable. It keeps no state. It checks the three VMs, one matrix leg each. Each leg runs
+`scripts/nebius/watch.sh <vm> [--instance-id <id>] --profile <name>`:
+
+| leg | options | secrets |
+|---|---|---|
+| nebius-gpu | `--profile ci` | `NEBIUS_*` |
+| nebius-h100 | `--instance-id computeinstance-e00e6yena4nzjgaym0 --profile ci` | `NEBIUS_*` |
+| nebius-cpu128 | `--instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1` | `NEBIUS_EU_WEST1_*` |
+
+One leg's failure does not stop another's. A leg is skipped with a notice, not failed, when:
+
+- its secrets are absent: `<vm>: <names> absent; skipped`;
+- its profile cannot be created: `<vm>: the <profile> profile could not be created; skipped`;
+- its instance no longer exists (`nebius.sh` exit 69): `<vm>: instance no longer exists; skipped`.
+
+So the human may delete a VM, and the watch stays green. If the VM is RUNNING, the leg reads the
+watcher's last log line over ssh and passes it to `scripts/nebius/check.py`. It hard-stops the VM
+when:
 
 - the line is missing, or more than an hour old (the watcher is dead);
 - the line, or the watcher's rule applied to it now, says stop;
 - ssh does not answer for 15 minutes.
 
-Any non-zero exit of `check.py` counts as a stop, a crash included. A VM up for less than
-10 minutes is skipped until the next hour. The dispatch input `clock_offset` adds that many
-seconds to the checker's clock. A test dispatch with `clock_offset=7200` against an idle VM
-that has been up for more than 10 minutes should hard-stop it.
+Any non-zero exit of `check.py` counts as a stop, a crash included. A failed hard stop is an
+error, and the leg exits 1. A VM up for less than 10 minutes is skipped until the next hour. The
+dispatch input `clock_offset` adds that many seconds to the checker's clock. A test dispatch with
+`clock_offset=7200` against an idle VM that has been up for more than 10 minutes should hard-stop
+it.
 
-- **Run `install-watch` before the hourly checker is live**, and again after the VM is rebuilt.
-  Without it, the checker finds no watcher log and hard-stops a running VM.
+- **Run `install-watch` on each VM before the hourly checker is live**, and again after the VM is
+  rebuilt. Without it, the checker finds no watcher log and hard-stops a running VM.
 - **Run `install-watch` again after any change under `scripts/nebius/`** once it reaches
   master. The VM's watcher and master's checker must apply the same rule. A checker newer than
   the watcher can read its lines as malformed, and then it hard-stops the VM.
@@ -1822,9 +1969,18 @@ that has been up for more than 10 minutes should hard-stop it.
 ### CI and its secrets
 
 `gpu-tests` ("GPU Tests (nebius-gpu)", in *CI structure*) and `nebius-watch.yml` are the only
-jobs in the GitHub Environment `nebius-gpu`. It holds five secrets: `NEBIUS_SA_ID`,
-`NEBIUS_PUBLIC_KEY_ID`, `NEBIUS_PROJECT_ID`, `NEBIUS_PRIVATE_KEY`, and `NEBIUS_GPU_SSH_KEY`
-for the VM login. `.github/actions/nebius-setup` turns them into a CLI profile and an ssh key.
+jobs in the GitHub Environment `nebius-gpu`. `gpu-tests` runs on nebius-gpu only. The Environment
+holds nine secrets:
+
+- `NEBIUS_SA_ID`, `NEBIUS_PUBLIC_KEY_ID`, `NEBIUS_PROJECT_ID`, `NEBIUS_PRIVATE_KEY`: eu-north1,
+  for nebius-gpu and nebius-h100;
+- `NEBIUS_EU_WEST1_SA_ID`, `NEBIUS_EU_WEST1_PUBLIC_KEY_ID`, `NEBIUS_EU_WEST1_PROJECT_ID`,
+  `NEBIUS_EU_WEST1_PRIVATE_KEY`: eu-west1, for nebius-cpu128 (the watch only);
+- `NEBIUS_GPU_SSH_KEY`, the login on all three VMs.
+
+`.github/actions/nebius-setup` turns one region's four into a CLI profile, named by its `profile`
+input (default `ci`), with the key embedded. It installs the ssh key too. `gpu-tests` uses the
+default.
 
 The repo variable `GPU_ALLOWED_ACTORS` is a comma-separated list of logins.
 `scripts/nebius/check-actor.sh` fails `gpu-tests` unless both the actor and the triggering
@@ -1836,7 +1992,7 @@ coordinator's unattended dispatch.
 
 ### Disk
 
-The boot disk is 96 GB in all, and two chains and CI share it.
+nebius-gpu's boot disk is 96 GB in all, and two chains and CI share it.
 
 - Run `df -h /` on the VM before every build.
 - Below 20 GB free, clean what can be rebuilt: stale build and target dirs of your own tree,
@@ -1848,15 +2004,25 @@ The boot disk is 96 GB in all, and two chains and CI share it.
   another chain's tree.
 - Record what you removed in the task's detail file.
 
+On nebius-h100 and nebius-cpu128, run `df -h / /var/lib/peacock` before `prepare` or a fetch. sf40
+is about 56 GB, and the two images about 15 GB.
+
+- nebius-h100's root is 174 GB. After `prepare` 81 GB is free.
+- nebius-cpu128's root is 213 GB. After sf40, the tpch database and the build image 89 GB is free.
+- A grown disk's root grew at the next boot on both. If `df -h /` still shows the old size, run
+  `sudo growpart /dev/vda 1 && sudo resize2fs /dev/vda1`.
+
 ### Who stops it
 
 - **Developers and CI stop softly**: `nebius.sh stop`. Exit 2 means another party's run is
-  on the card; leave it, and the guards take the VM down later.
-- **The coordinator stops hard**: `nebius.sh stop --force`, on entering `completeness
-  approved`, on entering `done`, and before every exit.
+  on the card, or DuckDB on the CPU VM; leave it, and the guards take the VM down later.
+- **The coordinator stops hard, all three VMs**: `nebius.sh … stop --force` for each, whichever
+  chain started it. It does so on entering `completeness approved`, on entering `done`, and before
+  every exit. This can cut another chain's run short. The human accepts that (2026-11-03); the cut
+  run resumes with `PEACOCK_BENCH_RESUME=1`.
 - **The guards stop hard**: the watcher through the API, the checker with `stop --force`.
 
-Contention is accepted. Two chains and CI share the VM, with no lock. One party's stop can kill
+Contention is accepted. Chains and CI share the VMs, with no lock. One party's stop can kill
 another's run; the loser reruns its step and does not diagnose it.
 
 ### Credential files
@@ -1867,6 +2033,27 @@ No `cat`, `grep`, `sed`, Read, or redaction attempt: a redaction leaked a privat
 transcript on 2026-10-14. Reach the cloud through `nebius.sh`. Learn the CLI from
 `nebius … --help`.
 
+### The human's one-time setup
+
+nebius-cpu128 is in eu-west1, on its own service account. Its credentials were set up once, by
+hand. A new region repeats these steps.
+
+1. Make a key pair for the service account. Upload its public key in the Nebius web console; the
+   console gives the public key id. Keep the private key on dev as `~/.nebius/eu-west1-sa.pem`.
+2. On dev, the profile:
+   `nebius profile create eu-west1 --endpoint api.nebius.cloud --service-account-id <sa> --public-key-id <key> --private-key-file-path <pem> --parent-id <project>`.
+   It keeps a path to the PEM, so install-watch needs `--key-file` for it.
+3. The four CI secrets, each value on stdin:
+
+   ```
+   gh secret set NEBIUS_EU_WEST1_SA_ID --env nebius-gpu
+   gh secret set NEBIUS_EU_WEST1_PUBLIC_KEY_ID --env nebius-gpu
+   gh secret set NEBIUS_EU_WEST1_PROJECT_ID --env nebius-gpu
+   gh secret set NEBIUS_EU_WEST1_PRIVATE_KEY --env nebius-gpu < ~/.nebius/eu-west1-sa.pem
+   ```
+
+4. install-watch on the VM, with `--key-file` (above).
+
 ## Remote hosts
 
 | Host | Use | Managed by |
@@ -1874,8 +2061,9 @@ transcript on 2026-10-14. Reach the cloud through `nebius.sh`. Learn the CLI fro
 | **nebius-gpu** | GPU test suite while shad-gpu is down (L40S, cuDF 25.02, glibc 2.39) | `scripts/nebius.sh`, `nebius-sync.sh`, `nebius-test.sh`; see *Nebius host* |
 | **shad-gpu** | Down until further notice; see *Nebius host*. When up: GPU test suite (cudf 25.02, H200-class; old glibc → patch step) | `scripts/build-test-shadgpu.sh` (`--build --push-binaries --patch --run[-detached]` / `--all`, `--run-status`). Resilient rsync + retries — the link is flaky |
 | **verda** (when available) | large CPU runs, golden regen | `scripts/build-test.sh --host <user@ip> --all` (add `--rust-only` to skip the C++/FFI half) |
-| **verda-gpu** | same root volume as verda, with an H200 attached; cuDF 26.02, modern glibc, nsys 2024.5 | `scripts/build-test.sh --host <user@ip> --gpu --all`; the corpus benchmark and its Nsight passes too — see *Corpus benchmarks* |
-| **nebius** | large CPU-only VM | manual |
+| **verda-gpu** | same root volume as verda, with an H200 attached; cuDF 26.02, modern glibc, nsys 2024.5 | `scripts/build-test.sh --host <user@ip> --gpu --all`. No benchmark or Nsight pass: those run on nebius-h100 (*Nebius host*) |
+| **nebius-h100** | sf40, the corpus benchmark and its Nsight passes (H100 80GB) | `scripts/env/run-gpu.sh`; see *Nebius host* |
+| **nebius-cpu128** | DuckDB, and the CPU-VM build of the H100's install (128 cores, no card) | `scripts/nebius.sh`, `provision-vm.sh`; see *Nebius host* |
 
 - **Testing the regen *mechanism* is not a full regen.** Scope it with `PCK_TEST_FILTER`
   (forwarded to every staged binary; the gpu lib binary takes it inside its `gpu_tests::`
@@ -2026,7 +2214,7 @@ The binaries and data are mounted, never in the image:
 - `/peacock/testdata` is the repository's `testdata/` with its datasets. Read-write: a run writes
   `benchmark-results/` and the calibration record.
 - The entrypoint is `/opt/run/run-tests.sh <list|filter|bench>`. `list` is the L40S list, by
-  `gpu-host-test.sh`'s rules. `filter` runs the list with every rust binary but
+  `nebius-test.sh`'s rules. `filter` runs the list with every rust binary but
   `peacockdb_core_gpu_lib` narrowed by `-e PCK_TEST_FILTER=<f>`; the C++ suites and the lib's
   device rung run whole. Beyond the usual failures, it fails when the filter matches no test in the
   narrowed binaries. `bench` runs the benchmark binary and refuses a
@@ -2074,7 +2262,7 @@ The binaries and data are mounted, never in the image:
 A developer works on a CPU VM: builds run in the build image there, and so do the DuckDB runs that
 want its 128 cores. The developer readies it from their own machine, the laptop, with
 `scripts/env/provision-vm.sh`, which runs `scripts/env/bootstrap-vm.sh` on the VM. Each has
-`--help`.
+`--help`. nebius-cpu128 is such a VM (*Nebius host*).
 
 ### Trust
 
@@ -2128,7 +2316,11 @@ skips what is done.
   `user.email`.
 - The VM goes into the laptop's `~/.config/peacock/vm` as `<name> <user>@<address>`; `--name` is
   the address by default.
-- Last, `claude auth login` over `ssh -t`, unless Claude is logged in there already.
+- Last, `claude auth login` over `ssh -t`, unless Claude is logged in there already. It needs a
+  person at a terminal. With stdin not a terminal (`</dev/null`, a script) the login is skipped and
+  the run still exits 0. It prints the command to run instead, on stderr:
+  `Claude Code is not logged in on <user>@<address>: run ssh -t <user>@<address> 'DISABLE_AUTOUPDATER=1 ~/.local/bin/claude auth login'`.
+  The path is spelled out because a plain `ssh <host> <command>` has no `~/.local/bin` on its PATH.
 - `provision-vm.sh --new-pat` replaces the PAT on the laptop and on every VM in `vm` it reaches.
   It names each VM it cannot reach.
 
@@ -2197,6 +2389,22 @@ same with one more line, which `provision-vm.sh` writes:
   (`scripts/lib/data-inputs.sh`). With none for the hash, `bootstrap-vm.sh` generates one in the
   build image, with `--network none`, under a lock. Two runs at once generate it once. A set
   appears only complete. An old set is removed by hand.
+- **sf40**, on the H100 and the CPU VM: `scripts/env/fetch-sf40.sh tpch.sf40 tpcds.sf40` fetches
+  each from its bucket into `<data dir>/<dataset>/`. The keys come from `peacock.env`, or stdin
+  with `--env -`, and reach aws alone. Each file is checked against the bucket's `manifest.json`
+  size, and a second run fetches nothing it holds. Then the set's aggregate sha256 is checked
+  against `scripts/env/sf40.sha256`, one line a dataset; an unpinned one is printed. Without an
+  aws CLI it installs the pinned one into `~/.local/aws-cli`.
+- **DuckDB**, on the CPU VM: `scripts/env/install-duckdb.sh` installs `/usr/local/bin/duckdb` at
+  `DUCKDB_VERSION`, from the zip the build image takes, checked against `DUCKDB_SHA256`.
+- **The DuckDB database**, on the CPU VM:
+  `benchmarks/duckdb_minimal.sh --dir /var/lib/peacock --sf 40 --skip-download` imports the
+  fetched `tpch.sf40` parquet into `/var/lib/peacock/tpch.sf40.duckdb`. `--skip-download` is
+  needed: without it the script lists the bucket with a bare `aws` and aws's own credentials, and
+  the VM keeps its keys in `peacock.env` alone. On 2026-11-04 the database was 32.7 GiB. The
+  import took 392 s, and the whole run, with its golden checks and timings, 9 min 16 s.
+- **Fetch times**, on 2026-11-04: on the CPU VM 6 min 41 s, on the H100 about 12 min. A second
+  run fetches nothing: 28 s on the CPU VM, with the parquet in the page cache.
 
 ## Benchmarks
 

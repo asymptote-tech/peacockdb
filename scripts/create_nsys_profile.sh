@@ -25,6 +25,11 @@
 # build-test.sh — names all three, since the patched loader path is shad-gpu's alone:
 #   ./scripts/create_nsys_profile.sh --host verda-gpu --remote-dir /home/dmitry/peacockdb \
 #       --remote-cudf-root /home/dmitry/miniforge3/envs/rapids-26.02
+# --ssh <command> reaches the host through <command> instead of ssh, every call and every
+# rsync, as `<command> <host> <cmd…>`; a Nebius VM through scripts/nebius.sh (H100 shown):
+#   ./scripts/create_nsys_profile.sh --trace --host nebius-h100 \
+#       --ssh 'scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu rsh' \
+#       --remote-dir /home/dmitry/peacock/<dir> --remote-cudf-root /home/dmitry/peacock/cudf-25.02
 # The HBM defaults below are an H200's; another card overrides PCK_BENCH_HBM_SET and
 # PCK_BENCH_HBM_PEAK_BW, and nsys and python3 must be on that host's PATH.
 #
@@ -82,6 +87,7 @@ while [ $# -gt 0 ]; do
     --host)             need_value "$1" "${2:-}"; REMOTE="$2"; HOST_OVERRIDDEN=1; shift ;;
     --remote-dir)       need_value "$1" "${2:-}"; REMOTE_REPO="$2"; HOST_OVERRIDDEN=1; shift ;;
     --remote-cudf-root) need_value "$1" "${2:-}"; REMOTE_CUDF_ROOT="$2"; shift ;;
+    --ssh)              need_value "$1" "${2:-}"; REMOTE_SSH="$2"; shift ;;
     -h|--help) usage 0 ;;
     *) echo "unknown argument: $1" >&2; usage 1 ;;
   esac
@@ -143,7 +149,7 @@ for name in $datasets; do
     || die "$record is missing, and the counters pass has no times of its own to
      join onto. Fetch it: scripts/calibration/fetch_record.sh $name"
 done
-ssh "$REMOTE" test -x "$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET" \
+remote_ssh test -x "$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET" \
   || die "$BENCH_TARGET is not on $REMOTE — build it and --push-binaries --patch first."
 
 # One pass on the host: capture, export, and say what came of it.
@@ -159,7 +165,7 @@ ssh "$REMOTE" test -x "$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET" \
 remote_pass() {    # remote_pass <label> <capture rel> <record rel|""> <filter> <nsys flags…>
   local label=$1 capture_rel=$2 record_rel=$3 filter=$4; shift 4
   local flags="$*"
-  ssh "$REMOTE" bash <<EOF
+  remote_ssh bash <<EOF
 set -uo pipefail
 # The harness finds each dataset as <dataset>.sf<sf> under this, so the host's symlinks
 # (build-test-shadgpu.sh's run makes them) are the only dataset configuration there is.
@@ -223,7 +229,7 @@ if [ "$METRICS" -eq 1 ]; then
   parts_rel=calibration/hbm-parts
   dirs="$REMOTE_REPO/scripts/calibration $REMOTE_REPO/testdata/$parts_rel"
   for name in $datasets; do dirs="$dirs $REMOTE_REPO/testdata/$RECORDS_REL/$name"; done
-  ssh "$REMOTE" "rm -rf $REMOTE_REPO/testdata/$parts_rel && mkdir -p $dirs"
+  remote_ssh "rm -rf $REMOTE_REPO/testdata/$parts_rel && mkdir -p $dirs"
   resilient_rsync -a scripts/calibration/{nsys_hbm,nvtx_names,record}.py \
     "$REMOTE:$REMOTE_REPO/scripts/calibration/"
   for name in $datasets; do
@@ -240,7 +246,7 @@ if [ "$METRICS" -eq 1 ]; then
       --gpu-metrics-device="$HBM_DEVICE" --gpu-metrics-set="$HBM_SET" \
       --gpu-metrics-frequency="$HBM_FREQ"
     # Joined, then deleted, before the next case: the disk holds one case's capture at most.
-    ssh "$REMOTE" "$reader --capture testdata/$METRICS_CAPTURE_REL.sqlite \
+    remote_ssh "$reader --capture testdata/$METRICS_CAPTURE_REL.sqlite \
       --case $(printf '%q' "${metric_cases[$i]}") --peak-bw $HBM_PEAK_BW \
       --out testdata/$parts_rel/$bench.tsv \
       && rm testdata/$METRICS_CAPTURE_REL.sqlite testdata/$METRICS_CAPTURE_REL.nsys-rep" \
@@ -248,7 +254,7 @@ if [ "$METRICS" -eq 1 ]; then
     part_args+=(--parts "testdata/$parts_rel/$bench.tsv")
   done
   # The merge is where the parts are held to the whole record, so a filtered pass stops here.
-  ssh "$REMOTE" "$reader $(printf '%q ' "${part_args[@]}") --out testdata/$HBM_REL" \
+  remote_ssh "$reader $(printf '%q ' "${part_args[@]}") --out testdata/$HBM_REL" \
     || die "merging the counters parts on $REMOTE failed (above)."
   pull_one "$HBM_REL" "HBM traffic" || die "bringing testdata/$HBM_REL home from $REMOTE failed."
 fi

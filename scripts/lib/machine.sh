@@ -3,9 +3,10 @@
 # A CPU VM's layout, and the steps bootstrap-vm.sh takes in the build image (llm-wiki/build-test.md,
 # "Containers"). Every path but the data directory comes from $HOME, and every container runs as
 # the caller's uid:gid. Sourced after image-inputs.sh and data-inputs.sh.
-# A step function (machine_image_checked, machine_cargo_fetch, machine_data_set,
-# machine_cudf_source) is called as a statement of its own, never in `$(…)` or before `||`: set -e
-# is what stops it at a failed step, and both turn it off inside. The others print a value for `$(…)`.
+# A step function (machine_image_checked, machine_image_label_checked, machine_cargo_fetch,
+# machine_data_set, machine_cudf_source) is called as a statement of its own, never in `$(…)` or
+# before `||`: set -e is what stops it at a failed step, and both turn it off inside. The others
+# print a value for `$(…)`.
 
 MACHINE_IMAGE=ghcr.io/asymptote-tech/peacockdb-build
 MACHINE_USER=$(id -u):$(id -g)
@@ -55,17 +56,24 @@ machine_cudf_source() {
   umask "$mask"
 }
 
-# machine_image_checked <ref> <tree> <cudf> — pulls the build image <ref>; refuses it, naming each
-# input that differs, unless its peacockdb.inputs label is image_inputs over <tree>.
+# machine_image_checked <ref> <tree> <cudf> [<kind>] — pulls the image <ref>, of <kind> build (the
+# default) or run, then machine_image_label_checked.
 machine_image_checked() {
-  local ref=$1 tree=$2 cudf=$3 label differ
-  docker pull "$ref"
+  docker pull "$1"
+  machine_image_label_checked "$@"
+}
+
+# machine_image_label_checked <ref> <tree> <cudf> [<kind>] — the image <ref> as it is, no pull:
+# refuses it, naming each input that differs, unless its peacockdb.inputs label is image_inputs
+# over <tree>.
+machine_image_label_checked() {
+  local ref=$1 tree=$2 cudf=$3 kind=${4:-build} label differ
   label=$(docker image inspect --format '{{index .Config.Labels "peacockdb.inputs"}}' "$ref")
   if [ -z "$label" ] || [ "$label" = "<no value>" ]; then
     echo "${0##*/}: $ref has no peacockdb.inputs label: publish it again with scripts/env/image.sh" >&2
     return 2
   fi
-  differ=$(image_inputs_differ "$label" "$tree" build "$cudf")
+  differ=$(image_inputs_differ "$label" "$tree" "$kind" "$cudf")
   if [ -n "$differ" ]; then
     echo "${0##*/}: $ref was built from other inputs than $tree: $(paste -sd' ' <<< "$differ")" >&2
     return 2
