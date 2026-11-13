@@ -1,12 +1,16 @@
-//! A device session over one plan, shared by the tiers that open one.
+//! A device session over one plan, shared by the tiers that open one, and the runs over one
+//! tree alone and over several roots fused that the fused tests compare.
 
 use std::path::PathBuf;
 
+use datafusion::arrow::array::RecordBatch;
+
 use crate::executor::{
-    GpuContext, PrefillError, PrefillStats, Region, collect_regions, prefill_on,
+    CpuBatch, GpuBackend, GpuContext, PrefillError, PrefillStats, Region, RunReport,
+    collect_regions, prefill_on, run, run_roots,
 };
 use crate::plan::GpuNode;
-use crate::wire::{RecipePlan, attach_recipes};
+use crate::wire::{RecipePlan, attach_recipes_for_roots};
 use peacockdb_ffi::raw::{
     PeacockExecutor, peacock_executor_begin_plan, peacock_executor_create,
     peacock_executor_destroy, peacock_executor_end_plan, peacock_last_error,
@@ -25,7 +29,12 @@ pub(crate) struct Session {
 impl Session {
     /// `join_scratch` is the mode's `join_scratch_bytes`, which every join's session chunks by.
     pub(crate) fn open(tree: &dyn GpuNode, join_scratch: u64, what: &str) -> Self {
-        let recipes = attach_recipes(tree, join_scratch)
+        Self::open_roots(&[tree], join_scratch, what)
+    }
+
+    /// [`Session::open`] over several roots, crossing as one buffer and one seq space.
+    pub(crate) fn open_roots(roots: &[&dyn GpuNode], join_scratch: u64, what: &str) -> Self {
+        let recipes = attach_recipes_for_roots(roots, join_scratch)
             .unwrap_or_else(|e| panic!("{what}: no recipes: {e}"));
         let mut executor: *mut PeacockExecutor = std::ptr::null_mut();
         assert_eq!(
@@ -76,6 +85,49 @@ impl Drop for Session {
             peacock_executor_destroy(self.executor);
         }
     }
+}
+
+/// `tree` run alone in a session over it, its accounting closed: its answer.
+pub(crate) fn answer_alone(tree: &dyn GpuNode, join_scratch: u64, what: &str) -> Vec<RecordBatch> {
+    let mut session = Session::open(tree, join_scratch, what);
+    let report = run::<GpuBackend>(tree, &session.context(), None)
+        .unwrap_or_else(|e| panic!("{what}, alone: {e}"));
+    assert_closed(&report, what);
+    record_batches(&report.batches)
+}
+
+/// `roots` run as one plan in one session over all of them, its accounting closed: each
+/// root's answer, in root order.
+pub(crate) fn answers_of_roots(
+    roots: &[&dyn GpuNode],
+    join_scratch: u64,
+    what: &str,
+) -> Vec<Vec<RecordBatch>> {
+    let mut session = Session::open_roots(roots, join_scratch, what);
+    let fused = run_roots::<GpuBackend>(roots, &session.context(), None, None)
+        .unwrap_or_else(|e| panic!("{what}, fused: {e}"));
+    assert_closed(&fused.report, what);
+    fused
+        .answers
+        .iter()
+        .map(|answer| record_batches(answer))
+        .collect()
+}
+
+fn assert_closed(report: &RunReport, what: &str) {
+    assert_eq!(report.in_flight_bytes, 0, "{what} ended holding batches");
+    assert_eq!(
+        report.holds, report.releases,
+        "{what} held {} batches and released {}",
+        report.holds, report.releases
+    );
+}
+
+fn record_batches(batches: &[CpuBatch]) -> Vec<RecordBatch> {
+    batches
+        .iter()
+        .map(|batch| batch.record_batch().clone())
+        .collect()
 }
 
 fn error_of(executor: *mut PeacockExecutor) -> String {

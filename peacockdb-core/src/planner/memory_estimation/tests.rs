@@ -1,5 +1,6 @@
 use super::*;
 use crate::plan::Batching;
+use crate::planner::estimate;
 use crate::planner::{BatchSizing, PlanKnobs, plan, translate};
 
 const BUDGET: u64 = 2 * 1024 * 1024 * 1024;
@@ -354,4 +355,137 @@ async fn an_empty_relation_is_not_a_source_the_budget_sizes() {
     .await;
     assert_eq!(model.sources.len(), 1, "{:?}", model.sources);
     assert_eq!(model.resident[0], 0, "the empty relation holds nothing");
+}
+
+#[test]
+fn a_buffer_is_charged_everything_its_child_emits() {
+    use crate::plan::new_hold_buffer;
+    use crate::tests::plans::{coalesce_all, filter, join, source, unload};
+    let plan = |buffered: bool| {
+        let probe = filter(source("p", 1));
+        let probe: Box<dyn GpuNode> = match buffered {
+            true => Box::new(new_hold_buffer(probe)),
+            false => probe,
+        };
+        unload(join(coalesce_all(source("b", 1)), probe))
+    };
+    let (with, without) = (plan(true), plan(false));
+    let model = estimate(with.as_ref(), BUDGET).expect("estimate the plan");
+    let bare = estimate(without.as_ref(), BUDGET).expect("estimate the plan");
+    // Post-order: 0 b, 1 coalesce, 2 p, 3 filter, 4 buffer, 5 join, 6 unload.
+    let tree = Tree::of(&[with.as_ref()]);
+    assert_eq!(tree.nodes[4].name(), "GpuHoldBuffer");
+    let filter_bytes = tree.bytes(3);
+    assert!(filter_bytes > 0);
+    assert_eq!(model.resident[4], filter_bytes);
+    assert_eq!(
+        model.accumulator_bytes,
+        bare.accumulator_bytes + filter_bytes
+    );
+    assert_eq!(
+        tree.batch_bytes()[4],
+        tree.batch_bytes()[3],
+        "it emits the batches it was handed"
+    );
+}
+
+// -- several roots -----------------------------------------------------------------
+
+fn refs(roots: &[Box<dyn GpuNode>]) -> Vec<&dyn GpuNode> {
+    roots.iter().map(|root| root.as_ref()).collect()
+}
+
+#[test]
+fn a_shared_source_is_charged_once() {
+    use crate::tests::plans::{filter, project, shared, source, unload};
+    let s = shared("s", 2);
+    let roots = vec![
+        unload(filter(Box::new(s.clone()))),
+        unload(project(Box::new(s.clone()))),
+    ];
+    // Post-order: 0 S, 1 filter, 2 unload, 3 project, 4 unload.
+    let model = estimate_roots(&refs(&roots), BUDGET).expect("estimate the plan");
+    let alone = estimate(unload(filter(source("s", 2))).as_ref(), BUDGET).expect("estimate");
+    assert_eq!(model.resident.len(), 5, "S is one node");
+    assert_eq!(model.sources.len(), 1, "and one source the budget sizes");
+    assert_eq!(model.sources[0].seq, 0);
+    assert_eq!(
+        model.resident[0], alone.resident[0],
+        "charged one batch per lane"
+    );
+    assert_eq!(
+        model.share_per_source, alone.share_per_source,
+        "the whole remainder is its share"
+    );
+}
+
+#[test]
+fn a_buffered_reader_leaves_the_source_charged_one_batch() {
+    use crate::plan::new_hold_buffer;
+    use crate::tests::plans::{coalesce_all, filter, join, shared, source, unload};
+    let s = shared("s", 1);
+    let roots = vec![
+        unload(join(
+            coalesce_all(source("b", 1)),
+            Box::new(new_hold_buffer(filter(Box::new(s.clone())))),
+        )),
+        unload(filter(Box::new(s.clone()))),
+    ];
+    // Post-order: 0 b, 1 coalesce, 2 S, 3 filter, 4 buffer, 5 join, 6 unload, 7 filter,
+    // 8 unload.
+    let model = estimate_roots(&refs(&roots), BUDGET).expect("estimate the plan");
+    let tree = Tree::of(&refs(&roots));
+    assert_eq!(tree.nodes[2].name(), "GpuLoadParquet");
+    assert_eq!(tree.nodes[4].name(), "GpuHoldBuffer");
+    assert_eq!(model.resident[2], tree.batch_bytes()[2] * tree.lanes(2));
+    assert_eq!(
+        model.resident[4],
+        tree.bytes(3),
+        "what the buffer keeps is its own"
+    );
+}
+
+#[test]
+fn two_roots_estimate_as_the_sum_of_their_accumulators() {
+    use crate::tests::plans::{coalesce_all, join, shared, source, unload};
+    let s = shared("s", 1);
+    let first = || unload(coalesce_all(Box::new(s.clone())));
+    let second = || unload(join(coalesce_all(source("b", 1)), Box::new(s.clone())));
+    let roots = vec![first(), second()];
+    let model = estimate_roots(&refs(&roots), BUDGET).expect("estimate the plan");
+    let alone: u64 = [first(), second()]
+        .iter()
+        .map(|root| {
+            estimate(root.as_ref(), BUDGET)
+                .expect("estimate the plan")
+                .accumulator_bytes
+        })
+        .sum();
+    assert!(alone > 0);
+    assert_eq!(model.accumulator_bytes, alone);
+}
+
+#[test]
+fn a_shared_source_is_amplified_by_its_widest_reader() {
+    use crate::tests::plans::{emit, filter, merge, shared, unload};
+    let s = shared("s", 1);
+    let narrow = || unload(filter(Box::new(s.clone())));
+    let wide = || unload(merge(emit(Box::new(s.clone()), 4)));
+    let amplification = |roots: Vec<Box<dyn GpuNode>>| {
+        estimate_roots(&refs(&roots), BUDGET)
+            .expect("estimate the plan")
+            .sources[0]
+            .amplification
+    };
+    assert_eq!(amplification(vec![narrow()]), 1.0);
+    assert_eq!(
+        amplification(vec![wide()]),
+        4.0,
+        "four lanes live after the emit"
+    );
+    assert_eq!(
+        amplification(vec![narrow(), wide()]),
+        4.0,
+        "the second reader counts"
+    );
 }

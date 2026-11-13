@@ -201,7 +201,7 @@ Benchmark results carry per-node `batch_rows`/`batch_bytes`, and `load_us` (devi
 TPC-H q1-q22 and the 82 TPC-DS corpus queries at sf40 tp1_single on the H100, and DuckDB on 128
 cores for the same set; queries that fail at sf40 are skipped.
 
-### 6. [`dag-driver.md`](dag-driver.md) — closes no ticket — state: building
+### 6. [`dag-driver.md`](dag-driver.md) — closes no ticket — state: done — PR #199
 
 Production: the driver runs plans with shared sources and several roots, without deadlock, with
 per-consumer limits and an optional concurrency cap.

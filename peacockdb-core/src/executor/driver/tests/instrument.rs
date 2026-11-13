@@ -6,8 +6,8 @@
 //! a few cases, not a suite.
 
 use super::mock::{AccRule, EmitRule, Mock, Script, spec};
-use super::plans::*;
 use super::*;
+use crate::tests::plans::*;
 
 use super::mock::MockBatch;
 use crate::executor::Batch;

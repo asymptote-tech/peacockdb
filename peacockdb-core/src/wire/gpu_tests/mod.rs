@@ -315,6 +315,10 @@ impl Walk<'_> {
         if category == ExecutorCategory::BatchForwarder {
             return route(node, &kids);
         }
+        // The driver's store, with no recipe: what it keeps it hands on unchanged, in order.
+        if category == ExecutorCategory::HoldBuffer {
+            return kids.into_iter().next().expect("a buffer has one input");
+        }
         let recipe = self
             .recipes
             .get(index)
@@ -331,7 +335,9 @@ impl Walk<'_> {
             ExecutorCategory::PartitionAccumulator => self.over_all_lanes(recipe, &kids[0]),
             ExecutorCategory::Join => self.join(node, recipe, &kids[0], &kids[1]),
             ExecutorCategory::Unload => self.unload(node, recipe, &kids[0]),
-            ExecutorCategory::BatchForwarder => unreachable!("returned above"),
+            ExecutorCategory::BatchForwarder | ExecutorCategory::HoldBuffer => {
+                unreachable!("returned above")
+            }
         }
     }
 

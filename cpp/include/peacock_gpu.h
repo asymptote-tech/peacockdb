@@ -388,6 +388,14 @@ int peacock_handle_schema(peacock_executor_t* executor, uint64_t handle, uint8_t
 /// Release a resident intermediate handle (idempotent).
 void peacock_handle_release(peacock_executor_t* executor, uint64_t handle);
 
+/// A second handle over `handle`'s table, written to *out_handle, for a batch two consumers
+/// read: it shares the table's columns, so the call allocates nothing on the device, and
+/// each handle is consumed or released on its own. Does NOT consume `handle`. Under node
+/// timing the new handle is charged to the node that produced the original. An unknown
+/// handle ends the query, as slice_handle does.
+/// @return 0 on success, non-zero on failure.
+int peacock_handle_duplicate(peacock_executor_t* executor, uint64_t handle, uint64_t* out_handle);
+
 /// Drop the loaded plan and all remaining resident handles.
 void peacock_executor_end_plan(peacock_executor_t* executor);
 

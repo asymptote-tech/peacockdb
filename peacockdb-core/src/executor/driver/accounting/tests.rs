@@ -49,7 +49,7 @@ fn measured(bytes: usize) -> CallStats {
 #[test]
 fn resident_is_in_flight_plus_executor_state() {
     let mut acct = ResidentAccountant::new(2, None);
-    acct.hold(100);
+    acct.hold(&Charge::new(100));
     let held = Held {
         resident: 40,
         scratch: 0,
@@ -117,8 +117,8 @@ fn a_consuming_call_stops_the_slot_contributing() {
 #[test]
 fn releasing_a_batch_that_was_never_held_is_an_error() {
     let mut acct = ResidentAccountant::new(1, None);
-    acct.hold(10);
-    match acct.release(11) {
+    acct.hold(&Charge::new(10));
+    match acct.release(Charge::new(11)) {
         Err(RunError::Protocol(said)) => assert!(said.contains("without having been held")),
         other => panic!("expected a protocol error, got {other:?}"),
     }
@@ -127,7 +127,7 @@ fn releasing_a_batch_that_was_never_held_is_an_error() {
 #[test]
 fn the_pre_check_trips_before_the_call_runs() {
     let mut acct = ResidentAccountant::new(1, Some(100));
-    acct.hold(90);
+    acct.hold(&Charge::new(90));
     let hungry = Held {
         resident: 0,
         scratch: 20,
@@ -161,7 +161,7 @@ fn the_post_check_trips_on_residency_the_model_did_not_predict() {
 #[test]
 fn no_budget_means_it_accounts_without_tripping() {
     let mut acct = ResidentAccountant::new(1, None);
-    acct.hold(1 << 40);
+    acct.hold(&Charge::new(1 << 40));
     let huge = Held {
         resident: 1 << 40,
         scratch: 1 << 40,
@@ -175,8 +175,9 @@ fn no_budget_means_it_accounts_without_tripping() {
 #[test]
 fn the_peak_is_the_high_water_mark_not_the_final_value() {
     let mut acct = ResidentAccountant::new(1, None);
-    acct.hold(500);
-    acct.release(500).unwrap();
+    let charge = Charge::new(500);
+    acct.hold(&charge);
+    acct.release(charge).unwrap();
     assert_eq!((acct.in_flight(), acct.peak()), (0, 500));
 }
 
@@ -250,4 +251,20 @@ fn the_model_may_consult_the_batch_it_is_about_to_be_handed() {
         acct.begin_call(slot(0), &scales, 7, 95).is_err(),
         "the same executor over a bigger batch is what crosses the budget"
     );
+}
+
+#[test]
+fn a_charge_is_released_by_its_last_holder() {
+    let mut acct = ResidentAccountant::new(0, None);
+    let charge = Charge::new(64);
+    acct.hold(&charge);
+    let second = charge.clone();
+    acct.release(charge).expect("a holder");
+    assert_eq!(
+        (acct.in_flight(), acct.hops()),
+        (64, (1, 0)),
+        "one holder is left"
+    );
+    acct.release(second).expect("the last holder");
+    assert_eq!((acct.in_flight(), acct.hops()), (0, (1, 1)));
 }

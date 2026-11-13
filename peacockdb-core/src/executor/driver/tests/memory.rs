@@ -2,9 +2,9 @@
 //! finished run gave everything back.
 
 use super::mock::{JoinRule, Script, spec};
-use super::plans::*;
 use super::*;
 use crate::executor::When;
+use crate::tests::plans::*;
 
 fn chain(lanes: usize) -> Box<dyn GpuNode> {
     unload(filter(source("part", lanes)))

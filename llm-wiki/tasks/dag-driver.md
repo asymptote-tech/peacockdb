@@ -132,3 +132,15 @@ Component-level API:
   hand.
 - tp1_single is the mode query-fuser uses, but the driver rules hold for every mode, and the
   tests cover at least one multi-lane mode.
+
+## Signoff (2026-11-06)
+
+Solved under its constraints: shared sources loaded once and read through refcounted handles
+(`peacock_handle_duplicate`, `Batch::share`); several roots; hold buffers with validation and a
+wait-for check (`validate_dag`); per-consumer limits; an optional cap; estimator, display and wire
+DAG-correct; fused answers equal each query alone on the CPU and the L40S, q95 included; single-query
+plans unchanged. Shortcuts: item 1's order holds only where a root reads one source per stream (rows
+always match; pinned by a test); 15 cost goldens change in a category comment (`GpuHoldBuffer` at
+0.0); the property test's "stuck ⇒ refused" arm cannot fire (an unbuffered hold grows a queue instead)
+and `HoldCycle` occurs on no plan; `run` skips `validate_dag` (trees need no buffer); per-root limits,
+the cap and buffers are exercised on the mock backend only; buffer-kept rows are not counted abandoned.

@@ -36,13 +36,14 @@ mod tests;
 mod ffi_tests;
 
 use std::collections::{BTreeSet, HashMap};
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 use datafusion::arrow::array::RecordBatch;
 
 use crate::plan::ExecutorCategory;
 use crate::plan::PlanError;
-use crate::plan::{GpuNode, RowInterval};
+use crate::plan::{GpuNode, Reader, RowInterval};
 use crate::wire::{AbiSymbol, FbKind, Seq};
 
 #[cfg(not(feature = "rust-only"))]
@@ -52,15 +53,22 @@ use peacockdb_ffi::raw::PeacockExecutor;
 ///
 /// Ownership is by move — every executor method takes a batch by value, so reuse after
 /// consumption is a compile error rather than an unknown-handle throw from C++. Neither
-/// implementation is `Clone`: a `GpuBatch` cannot be, and the free `RecordBatch` clone
-/// is not worth the asymmetry (a future dual consumer writes an explicit copy, #140).
+/// implementation is `Clone`: a second consumer of one batch asks for it by name, through
+/// [`Batch::share`], so every second owner of a table is visible at its call site.
 pub trait Batch {
     fn num_rows(&self) -> usize;
     fn byte_size(&self) -> usize;
+    /// A second batch over the same rows, for a second consumer, copying no row: the CPU
+    /// clones the arrays' `Arc`s, the device duplicates the handle over the same columns.
+    /// Each is consumed or dropped on its own.
+    fn share(&self) -> Result<Self, BackendError>
+    where
+        Self: Sized;
 }
 
 /// The CPU backend's batch, and what leaves the device at the unload.
-/// Not `Clone`, deliberately — symmetry with `GpuBatch`, whose handle cannot be.
+/// Not `Clone`, deliberately — symmetry with `GpuBatch`, whose handle cannot be; a second
+/// consumer takes [`Batch::share`].
 #[derive(Debug)]
 pub struct CpuBatch {
     batch: RecordBatch,
@@ -453,6 +461,8 @@ pub enum NodeExecutors<B: Backend> {
     Unload(B::Unload),
     /// GpuMergePartitions, GpuUnion, GpuInterleave — routing only, no backend.
     BatchForwarder(Forwarder),
+    /// GpuHoldBuffer — a store the driver keeps per lane, no backend.
+    HoldBuffer,
 }
 
 impl<B: Backend> NodeExecutors<B> {
@@ -469,6 +479,7 @@ impl<B: Backend> NodeExecutors<B> {
             Self::Join(_) => ExecutorCategory::Join,
             Self::Unload(_) => ExecutorCategory::Unload,
             Self::BatchForwarder(_) => ExecutorCategory::BatchForwarder,
+            Self::HoldBuffer => ExecutorCategory::HoldBuffer,
         }
     }
 }
@@ -597,6 +608,9 @@ pub(crate) enum CallKind {
     LaneDone,
     Forward,
     ForwardDone,
+    /// A held buffer took a batch into its store and emitted nothing. What it emits once the
+    /// hold lifts is a `Forward`, and its end a `ForwardDone`.
+    Keep,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -634,7 +648,8 @@ pub(crate) struct EmittedBatch {
 #[derive(Debug)]
 pub struct RunReport {
     /// The answer. Never empty: a query whose sink received no batch answers one of zero rows
-    /// under the sink's input schema. That batch is the driver's, so it appears in neither
+    /// under the sink's input schema. A [`FusedRun`]'s report leaves it empty, its `answers`
+    /// carrying one per root. That batch is the driver's, so it appears in neither
     /// `emitted` nor the accounting totals, and `batches.len()` no longer relates to the
     /// unload's calls.
     pub batches: Vec<CpuBatch>,
@@ -666,19 +681,22 @@ pub struct RunReport {
     /// driver answered itself. A backend that reports nothing leaves every entry
     /// unmeasured rather than empty — the distinction `AbiCalls` carries.
     pub(crate) abi_calls: Vec<Vec<Vec<AbiCalls>>>,
-    /// Per node, per output lane, rows it emitted that nobody consumed — the queues an early
-    /// exit left standing. Zero everywhere on a run that drained, and what closes
-    /// `consumed + abandoned == the child's emitted` into an equality on every run.
+    /// Per node, per output lane, rows it emitted that a reader never took, summed over its
+    /// readers — the queues an early exit left standing, and every row a retired reader of a
+    /// shared source never took. Zero everywhere on a run that drained, and what closes
+    /// `Σ consumed over readers + abandoned == readers × emitted` into an equality on every
+    /// run; on a tree, one reader, the child's emitted. A hold buffer's store is not in it:
+    /// the buffer consumed each batch as it took it.
     pub(crate) abandoned: Vec<Vec<u64>>,
     /// Per node, per child, per that child's lane, the rows this node consumed from it.
     /// Indexed by the child's lane rather than the consumer's, so it lines up with that
     /// child's own [`emitted`](RunReport::emitted) where the two differ — an emitter
     /// redistributes, so nothing else would sum.
     pub(crate) consumed: Vec<Vec<Vec<u64>>>,
-    /// The nodes whose row interval was satisfied, in index order — empty on a run that
-    /// drained. What the golden's `early_exit=` marker names, and the reason a lane can be
-    /// short of what its plan called for: not a bool, because a reader of a smaller number
-    /// needs to know which limit produced it.
+    /// The nodes whose row interval was satisfied, and each source every reader of which
+    /// was, in index order — empty on a run that drained. What the golden's `early_exit=`
+    /// marker names, and the reason a lane can be short of what its plan called for: not a
+    /// bool, because a reader of a smaller number needs to know which limit produced it.
     pub(crate) satisfied: Vec<usize>,
 }
 
@@ -1076,24 +1094,33 @@ pub(crate) fn collect_regions(executor: *mut PeacockExecutor) -> Result<Vec<Regi
     gpu_backend::collect_regions(executor)
 }
 
-/// A join, as the schedule sees one: the range of its probe subtree, and how many lanes
-/// have yet to leave their build phase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A join, as the schedule sees one: the region its build holds, and how many lanes have
+/// yet to leave their build phase.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct JoinShape {
     pub(crate) node: usize,
-    /// `[start, end)` of the probe child's subtree in pre-order.
-    pub(crate) probe: (usize, usize),
+    /// The nodes all of whose paths to a root pass through the probe edge, ascending.
+    pub(crate) probe: Vec<usize>,
     pub(crate) lanes: usize,
 }
 
-/// The tree as plain numbers. Node indices are pre-order, so a subtree is a contiguous
-/// range and "order" — the leftmost tie-break — is the index itself.
+/// The plan as plain numbers. Node indices are `PlanDag`'s first-visit pre-order, which is
+/// "order", the leftmost tie-break. A height is the longest path to a root, so every reader
+/// is strictly lower than what it reads. `regions[n]` is what a hold on `n` covers: on a
+/// tree, its subtree. `buffers[n]` marks a `GpuHoldBuffer`, which a join's hold never takes
+/// out of the schedule: held, it still takes what it is offered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlanShape {
     pub(crate) heights: Vec<u32>,
     pub(crate) lanes: Vec<usize>,
-    pub(crate) subtree: Vec<(usize, usize)>,
+    pub(crate) regions: Vec<Vec<usize>>,
+    pub(crate) readers: Vec<Vec<Reader>>,
     pub(crate) joins: Vec<JoinShape>,
+    pub(crate) roots: Vec<usize>,
+    /// Per root, in root order, what the concurrency cap holds while that root waits: its
+    /// region, stopping at buffers, since the cap lifts. A shared source is in none.
+    pub(crate) cap_regions: Vec<Vec<usize>>,
+    pub(crate) buffers: Vec<bool>,
 }
 
 impl PlanShape {
@@ -1106,7 +1133,11 @@ pub(crate) struct IndexedNode<'a> {
     pub(crate) node: &'a dyn GpuNode,
     pub(crate) category: ExecutorCategory,
     pub(crate) children: Vec<usize>,
-    pub(crate) parent: Option<usize>,
+    /// One per edge into this node, in first-seen order; empty only at a root.
+    pub(crate) readers: Vec<Reader>,
+    /// Per child slot, this edge's ordinal among that child's `readers`: the cursor it reads
+    /// the child's queue by.
+    pub(crate) child_readers: Vec<usize>,
     pub(crate) lanes: usize,
     /// This node's position in a children-first walk, which is what `RecipePlan` indexes
     /// by and what a backend hands to `executors_for`. Pre-order is what the schedule
@@ -1134,7 +1165,12 @@ pub(crate) struct PlanIndex<'a> {
 
 impl<'a> PlanIndex<'a> {
     pub(crate) fn build(root: &'a dyn GpuNode) -> Result<Self, PlanError> {
-        driver::build_index(root)
+        Self::build_roots(&[root])
+    }
+
+    /// Several roots indexed as one plan, numbered in `PlanDag`'s pre-order across them.
+    pub(crate) fn build_roots(roots: &[&'a dyn GpuNode]) -> Result<Self, PlanError> {
+        driver::build_index(roots)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -1162,6 +1198,46 @@ pub fn run<B: Backend>(
 /// does. Production passes `None`; the corpus installs `test_support`'s schema validator.
 pub(crate) type OutputHook<'a, B> =
     Box<dyn FnMut(usize, usize, &<B as Backend>::Batch) -> Result<(), String> + 'a>;
+
+/// What a run over several roots answers.
+// Its producer is `run_roots`, whose callers are tests until the fuser runs a fused plan.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug)]
+pub(crate) struct FusedRun {
+    /// One answer per root, in the order the roots were given; each holds the rows that root
+    /// alone answers. The same rows; the same order where the root reads one source per
+    /// stream. Where it merges streams, a shared source is scheduled by its place in the
+    /// whole DAG, so the batches may come in another order.
+    pub(crate) answers: Vec<Vec<CpuBatch>>,
+    /// The run's figures over the whole DAG, indexed by `PlanIndex::build_roots`'s
+    /// pre-order. `batches` is empty here: `answers` carries them.
+    pub(crate) report: RunReport,
+}
+
+/// Run several roots as one plan, each shared source loaded once. `validate_dag` decides
+/// first that the plan cannot deadlock, and its refusal comes back as `RunError::Backend`.
+/// `cap` is how many roots may run at once, admitted in root order as earlier ones finish.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn run_roots<B: Backend>(
+    roots: &[&dyn GpuNode],
+    ctx: &B::Context,
+    budget: Option<usize>,
+    cap: Option<NonZeroUsize>,
+) -> Result<FusedRun, RunError> {
+    run_roots_with_hook::<B>(roots, ctx, budget, cap, None)
+}
+
+/// [`run_roots`] with an [`OutputHook`].
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn run_roots_with_hook<B: Backend>(
+    roots: &[&dyn GpuNode],
+    ctx: &B::Context,
+    budget: Option<usize>,
+    cap: Option<NonZeroUsize>,
+    hook: Option<OutputHook<'_, B>>,
+) -> Result<FusedRun, RunError> {
+    driver::run_roots_with_hook::<B>(roots, ctx, budget, cap, hook)
+}
 
 /// [`run`] with an [`OutputHook`]. `pub(crate)`: no caller outside the crate exists, and
 /// its callers inside it are test code — the device corpus, the end-to-end tier and the

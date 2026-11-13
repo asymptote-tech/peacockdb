@@ -6,10 +6,10 @@
 //! it, what a refusal becomes, and that `None` leaves the run exactly as `run` makes it.
 
 use super::mock::{AccRule, Mock, Script, spec};
-use super::plans::*;
 use super::*;
 use crate::executor::{Batch, OutputHook};
 use crate::plan::ExecutorCategory;
+use crate::tests::plans::*;
 
 /// Pre-order: the unload is 0, then down the chain.
 const PROJECT: usize = 4;

@@ -4,6 +4,8 @@ use datafusion::common::{JoinType, ScalarValue};
 use std::any::Any;
 use std::sync::Arc;
 
+mod holds;
+
 /// A node whose kind the test writes: the structural rules are about what a node
 /// declares of itself, and the translation layer is what makes those declarations
 /// agree with the schema — so a plan that breaks one is unreachable from sql.
@@ -94,7 +96,7 @@ fn a_limit_whose_only_consumer_is_the_sink_is_refused() {
         "a limit feeding only the sink is not a node",
     );
     invalid(
-        check_canonical_form(tree.as_ref()),
+        check_canonical_form_of_roots(&[tree.as_ref()]),
         "a limit feeding only the sink is not a node",
     );
 }
@@ -108,7 +110,7 @@ fn a_limit_with_a_real_consumer_above_it_is_the_shape_that_passes() {
             fetch: Some(5),
         },
     )))));
-    assert_eq!(check_canonical_form(tree.as_ref()), Ok(()));
+    assert_eq!(check_canonical_form_of_roots(&[tree.as_ref()]), Ok(()));
     assert_eq!(validate(tree.as_ref()), Ok(()));
 }
 
@@ -121,7 +123,7 @@ fn the_unloads_own_interval_is_the_root_adjacent_lowering_and_not_a_finding() {
             fetch: Some(20),
         }),
     ));
-    assert_eq!(check_canonical_form(tree.as_ref()), Ok(()));
+    assert_eq!(check_canonical_form_of_roots(&[tree.as_ref()]), Ok(()));
 }
 
 #[test]
@@ -130,11 +132,65 @@ fn a_plan_that_does_not_end_in_a_crossing_is_refused() {
 }
 
 #[test]
-fn a_sink_below_the_root_is_refused() {
-    // Two unloads: the inner one already moved its rows to the host, so the outer
-    // one is reading something that is no longer on the device.
+fn a_sink_below_a_root_is_refused() {
+    // The inner unload already moved its rows to the host, so whatever reads it is reading
+    // something no longer on the device — under one root, or under the second of two.
+    let message = "GpuUnload: a sink feeds another node — every GpuUnload is a root";
     let tree = rooted(rooted(plain_source()));
-    invalid(validate(tree.as_ref()), "already crossed to the host");
+    invalid(validate(tree.as_ref()), message);
+    let roots = [rooted(plain_source()), rooted(rooted(plain_source()))];
+    invalid(
+        validate_roots(&[roots[0].as_ref(), roots[1].as_ref()]),
+        message,
+    );
+}
+
+#[test]
+fn every_root_is_a_sink() {
+    let roots = [rooted(plain_source()), plain_source()];
+    invalid(
+        validate_roots(&[roots[0].as_ref(), roots[1].as_ref()]),
+        "the planner roots it in GpuUnload",
+    );
+}
+
+#[test]
+fn the_same_root_given_twice_is_refused() {
+    // Each root answers once, so a root given twice would have its rows twice, under two
+    // ordinals, from one run of one tree.
+    let root = rooted(plain_source());
+    invalid(
+        validate_roots(&[root.as_ref(), root.as_ref()]),
+        "GpuUnload: root 1 is root 0 given again — each root is its own query",
+    );
+}
+
+#[test]
+fn the_validation_walk_visits_a_shared_node_once() {
+    let load = crate::tests::plans::source("s", 1)
+        .into_any_box()
+        .downcast::<GpuLoadParquet>()
+        .expect("plans::source builds a loader");
+    let shared = SharedSource::new(*load);
+    let roots = [
+        rooted(crate::tests::plans::filter(Box::new(shared.clone()))),
+        rooted(crate::tests::plans::project(Box::new(shared))),
+    ];
+    let roots = [roots[0].as_ref(), roots[1].as_ref()];
+    let dag = PlanDag::of(&roots);
+    let names: Vec<&str> = super::walk_order(&dag).map(|node| node.name()).collect();
+    assert_eq!(
+        names,
+        [
+            "GpuLoadParquet",
+            "GpuFilter",
+            "GpuUnload",
+            "GpuProject",
+            "GpuUnload"
+        ]
+    );
+    assert_eq!(validate_roots(&roots), Ok(()));
+    assert_eq!(check_canonical_form_of_roots(&roots), Ok(()));
 }
 
 #[test]
