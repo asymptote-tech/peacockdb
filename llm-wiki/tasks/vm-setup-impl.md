@@ -920,17 +920,17 @@ run, made with the recipe `provision-vm.sh` prints (under `</dev/null` the run c
 one), and `nebius.yaml`. Claude Code's login is never run, and the login user's own Claude Code is
 left as it was.
 
-- [ ] **Step 1:** `test -s ~/.config/peacock/github-pat && test -s ~/.config/peacock/nebius.yaml`
+- [x] **Step 1:** `test -s ~/.config/peacock/github-pat && test -s ~/.config/peacock/nebius.yaml`
   (presence alone, never read); a missing PAT is made first, in a terminal, with the recipe
   `scripts/env/provision-vm.sh --new-pat` prints. Then from dev, sandbox off: `time
   scripts/env/provision-vm.sh <login>@<address> --user <user> --ref ENS-vm-setup </dev/null`
   (`<user>` the user to provision) → exit 0, ending in either "Claude Code is logged in on
   <user>@<address>" or the command that logs it in; record which.
-- [ ] **Step 2:** the same command again → exit 0, each done step skipped; record both wall times.
-- [ ] **Step 3:** as the developer on the VM: `cd ~/peacockdb && scripts/nebius.sh --instance-id
-  computeinstance-e01t2mm4265y8x88ey --profile eu-west1 status` → a state; `scripts/build-test.sh
-  --rust-only --build --run` → green.
-- [ ] **Step 4:** `## A fresh VM` in the detail file: each step's wall time, every refusal hit and
+- [x] **Step 2:** the same command again → exit 0, each done step skipped; record both wall times.
+- [x] **Step 3:** as the developer on the VM: `cd ~/peacockdb && scripts/nebius.sh --instance-id
+  computeinstance-e00tnrse7ayntnzcyt --profile editor-eu status` (nebius-gpu: nebius-cpu128 is
+  deleted) → a state; `scripts/build-test.sh --rust-only --build --run` → green.
+- [x] **Step 4:** `## A fresh VM` in the detail file: each step's wall time, every refusal hit and
   its fix. A refusal that needs code goes to the developer as a failing test, the fix is
   checkpointed, and the run after it is recorded too.
 

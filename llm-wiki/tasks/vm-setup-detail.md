@@ -16,6 +16,8 @@ Branch `ENS-vm-setup`, forked from `ENS-containers-only` at `7aeec989`; its PR t
 - Task 14a: a missing `nebius.yaml` is cut on first use; below.
 - Task 15: the branch's five images published; the table's 26.02 row run; below.
 - Task 16: nebius-gpu by hand, steps 1 to 3; image pulls name a full disk and a lost VM; below.
+- Task 17: a fresh verda VM, provisioned from this branch, its rust-only build and run green; a
+  second developer, the login user, beside the first; below.
 
 ## Plain builds
 
@@ -1000,3 +1002,93 @@ seconds.
   call alone, in the background group it starts, to `follow it again: scripts/env/run-gpu.sh …
   --dir <i> follow`. `test_a_dropped_ssh_names_follow` asserts it and no "run this step again": red
   before, green after.
+
+## A fresh VM
+
+### The run
+
+On dev, 2026-11-13, from this worktree, against a verda CPU VM: Ubuntu 26.04.1, 4 vCPU, 15 GiB,
+a spot instance, with only Claude Code installed and logged in for its login user, docker and git
+present. The developer's user is a new one, made by the run. Wall times in seconds.
+`P="scripts/env/provision-vm.sh <login>@<address> --user <user> --ref ENS-vm-setup </dev/null"`.
+
+| step | at | command | exit, wall |
+|---|---|---|---|
+| 1 | `3910b3c3` | `$P` | 2, 32: superpowers is not 7.0.0 at `bb92a777`; the marketplace installed 7.0.2 at `22f0b463` |
+| 1 | `8a0d54e9` | `$P` | 1, 2: `install: No such file or directory` (uutils, below) |
+| 1 | `7b7c9dad` | `$P` | 2, 8: the superpowers pin again, read from the VM's clone, still at `c6a807f4` (below) |
+| 1 | `7b7c9dad` | `git pull --ff-only` in the VM's clone, by hand, then `$P` | 0, 291: `Claude Code is not logged in on <user>@<address>: run ssh -t …` |
+| 2 | `7b7c9dad` | `$P` | 0, 22: every step skipped, the image `up to date` |
+| 3 | `7b7c9dad` | as the developer: `scripts/nebius.sh --instance-id computeinstance-e00tnrse7ayntnzcyt --profile editor-eu status` | 0, under 1: `STOPPED` |
+| 3 | `7b7c9dad` | as the developer: `scripts/build-test.sh --rust-only --build --run` | 1, 921: the disk full mid-build (below) |
+| 3 | `7b7c9dad` | the same, the disk grown | 1, 50: every corpus test `register the tables: … NotFound` (below) |
+| 1 | `f46a8e71` | `git pull --ff-only` in the VM's clone, by hand, then `$P` | 0, 19: the clone's `testdata/{tpch,tpcds}.sf1` linked to the machine's set |
+| 3 | `f46a8e71` | as the developer: `scripts/build-test.sh --rust-only --build --run` | 0, 288: `build-test.sh rust-only --run: green` |
+
+- Step 1 ends in the command that logs Claude Code in, not in a login: the run has no terminal.
+- Step 3's `status` names nebius-gpu with editor-eu: nebius-cpu128 is deleted.
+- The green run: `test_corpus_goldens` 66, `test_cost_model` 3, `test_cpu_corpus` 2451 (197 s),
+  `test_golden_format` 41, `peacockdb-core --lib` 1209 and 2 ignored.
+- The disk: 48 GB, 15 GB of it the OS's before the run. The build image is 15.5 GB unpacked and
+  `target-img-25.02` reached 12 GB, incremental, when rustc failed `No space left on device`. The
+  disk was grown to 100 GB (`growpart /dev/vda 1`, `resize2fs /dev/vda1`); after the green run
+  `target-img-25.02` holds 14 GB and the root 45 GB of 96.
+
+### A second developer: the login user
+
+The same VM, the login user provisioned as the developer too: `--user <login>`, where Claude Code
+2.1.304 was already installed and logged in, with superpowers 7.0.0 at `bb92a777` from an earlier
+install.
+
+| at | command | exit, wall |
+|---|---|---|
+| `f46a8e71` | `$P` with `--user <login>` | 2, 18: `plugin install` said `already installed` and changed nothing; the refusal said to bump the pins, which already matched the marketplace (below) |
+| `f46a8e71` and the plugin change | the same | 0, 42: `marketplace update`, then `superpowers updated from 7.0.0 to 7.0.2`; `Claude Code is logged in on <login>@<address>`; the machine's sf1 set reused, the clone's links made |
+| `661e8e61` | the same, the plugin change committed | 0, 20: every step skipped; `Claude Code is logged in on <login>@<address>` |
+| | as the login user: `claude -p "Reply with the single word OK"` | 0, 3: `OK` |
+| | both developers at once: `scripts/build-test.sh --rust-only --build --run` | 0, 596 (built target dir, tests only) and 0, 1541 (a cold build, then tests) |
+
+- At once: one build image and one sf1 set, the set's lock taken by each; each developer's own
+  clone, registry and `target-img-25.02` (14 GB each). Two containers at the peak, 5.6 GB of
+  15.6 GB in use; the root 58 GB of 96 after. `test_cpu_corpus` took 417 s beside the cold build,
+  197 s alone.
+
+### Findings fixed in the scripts
+
+- The superpowers pins: the marketplace had moved on to 7.0.2 at `22f0b463`, the same commit dev
+  holds. `docker/pins.env` bumped (`8a0d54e9`); the two pins are the machine's, so no image's
+  inputs change.
+- uutils' `install`: Ubuntu 26.04's coreutils are uutils 0.10.0, whose `install` refuses a source
+  that is not a regular file onto a destination that exists, exit 1, `install: No such file or
+  directory`; onto a new file, or from a regular file onto an existing one, it works. The first run
+  wrote `/etc/sudoers.d/peacock-<user>`, so every later run failed there. provision-vm.sh's sudoers
+  file and run-gpu-vm.sh's `peacock-profiling.conf` now go through a `mktemp` file, removed on every
+  path. The fakes' `install` refuses as uutils' does, and each fake VM has a `TMPDIR` of its own,
+  empty after a rerun. `test_a_second_provision_rewrites_the_sudoers_file` and
+  `test_a_second_prepare_rewrites_the_profiling_conf`: red before, green after; three existing
+  rerun tests of `test_provision.py` went red with the fakes alone (`7b7c9dad`).
+- sf1 outside the clone: bootstrap-vm.sh generates the set into the machine's data dir, and the
+  tests read the clone's `testdata/<ds>`. bootstrap-vm.sh now links each to the machine's set,
+  repointing a link into the data dir or a dangling one and keeping, and naming, anything else;
+  build-test.sh mounts a link's target read-only where the link points, when it lies outside the
+  tree, and refuses a dangling link, exit 2. `testdata/.gitignore`'s `/tpch.sf*` and `/tpcds.sf*`
+  lose their trailing slash, so git ignores the links. Four tests in `test_bootstrap.py` and five in
+  `test_build_test.py`; each of the mount loop's branches has a test that a mutation of it turns
+  red (`f46a8e71`).
+
+- An installed superpowers at another version: `plugin install` leaves an installed plugin as it
+  is, so a machine with an earlier pin's plugin never reached the new one, and the refusal blamed
+  the pins. bootstrap-vm.sh now refreshes the marketplace first (`marketplace add` when unknown,
+  else `marketplace update`), then installs an absent plugin or updates an installed one, counting
+  user-scope installs alone; each `claude` step that fails is named, exit 2; the refusals tell an
+  install that recorded nothing, an update that changed nothing and a marketplace that gives
+  another version apart, and only the last says to bump the pins. A record of another shape is
+  refused by name. The fake `claude` models the plugin commands as 2.1.304 runs them, matching the
+  run above; ten tests in `test_bootstrap.py`.
+### Left as they are
+
+- bootstrap-vm.sh never updates an existing clone, so a pin bumped in git reaches the VM only once
+  the clone is pulled; the refusal names `docker/pins.env`, not the clone's copy of it.
+- Neither bootstrap-vm.sh nor build-test.sh checks free space before it starts; CI's build-image
+  action asks for 25 GB. A machine like this one needs about 50 GB free for the image, the
+  incremental target dir and sf1.

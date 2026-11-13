@@ -189,7 +189,7 @@ Nebius GPU VM through `run-gpu.sh`. Each step has a gap:
    dev's `~/.config/peacock/` as it stands:
    `scripts/env/provision-vm.sh <login>@<address> --user <the user> --ref <this task's branch> </dev/null`,
    end to end, then once more to show that a rerun skips what is done. Then, as the developer on
-   the VM: `scripts/nebius.sh --instance-id <nebius-cpu128's id> --profile eu-west1 status`
+   the VM: `scripts/nebius.sh --instance-id <nebius-gpu's id> --profile editor-eu status`
    answers, and the table's rust-only build and run pass.
    - Claude Code's login is never run: only the account owner can log in. With no terminal,
      `provision-vm.sh` reports either that Claude Code is logged in for the developer's user, or the
