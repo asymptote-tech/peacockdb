@@ -7,8 +7,9 @@
 # and gh, nebius and Claude Code with the superpowers plugin at docker/pins.env's versions; makes
 # the data directory the machine's users share; clones the repository into ~/peacockdb at <ref>,
 # master by default. In the build image of cuDF <v> (25.02 by default) and of the clone's inputs,
-# by its inputs tag, it fills cargo's registry and generates sf1. Last, it checks out the clone's
-# third_party/cudf, which the C++ configure reads. A step already done is skipped.
+# by its inputs tag, it fills cargo's registry and generates sf1, which the clone's testdata/<ds>
+# links to. Last, it checks out the clone's third_party/cudf, which the C++ configure reads. A step
+# already done is skipped.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -149,6 +150,18 @@ ref=$MACHINE_IMAGE:$(image_inputs_tag "$clone" build "$cudf")
 machine_image_checked "$ref" "$clone" "$cudf"
 machine_cargo_fetch "$ref" "$clone"
 machine_data_set "$ref" "$clone"
+# The tests read testdata/<ds>; build-test.sh mounts a link's target where it lies. Nothing there,
+# a link that dangles or one into the machine's data dir is linked to this set, so a rerun after the
+# generator changed repoints it; anything else, a directory, a file or a link elsewhere, is the
+# developer's own set, kept.
+for entry in "${DATA_SETS[@]}"; do
+  link=$clone/testdata/${entry%% *}
+  if [ ! -e "$link" ] || { [ -L "$link" ] && [[ $(readlink "$link") == "$MACHINE_DATA"/* ]]; }; then
+    ln -sfn "$DATA_SET/${entry%% *}" "$link"
+  else
+    echo "bootstrap-vm.sh: $link is a set of its own, kept; the machine's is $DATA_SET/${entry%% *}"
+  fi
+done
 # The C++ configure, the FFI's too, reads cuDF's cmake files from the clone's own submodule; no step
 # above reads them, so a failed fetch stops nothing else. Two runs at once each check it out, so
 # the checkout is serialised under a lock in the clone's git dir, a linked worktree's common one.

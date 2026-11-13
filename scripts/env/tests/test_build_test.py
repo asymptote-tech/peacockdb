@@ -743,5 +743,80 @@ def test_runner_temp_is_mounted_when_set():
         assert "RUNNER_TEMP" not in values(argv, "-e"), argv
 
 
+def test_a_testdata_link_out_of_the_tree_gets_its_target_mounted_read_only():
+    # bootstrap-vm.sh links testdata/<ds> to the machine's data set, outside the tree.
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        target = (pathlib.Path(tmp) / "data" / "0123456789abcdef" / "tpch.sf1").resolve()
+        target.mkdir(parents=True)
+        (t.root / "testdata").mkdir(exist_ok=True)
+        (t.root / "testdata" / "tpch.sf1").symlink_to(target)
+        ok(t.run("--", "true"))
+        argv = t.runs()[-1]
+        assert f"{target}:{target}:ro" in values(argv, "-v"), argv
+
+
+def test_a_dangling_testdata_link_is_refused_before_docker_runs():
+    # docker would make the missing target, as root.
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        gone = pathlib.Path(tmp) / "data" / "gone" / "tpch.sf1"
+        (t.root / "testdata").mkdir(exist_ok=True)
+        (t.root / "testdata" / "tpch.sf1").symlink_to(gone)
+        r = t.run("--", "true")
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        for words in (str(t.root / "testdata" / "tpch.sf1"), str(gone), "bootstrap-vm.sh"):
+            assert words in r.stderr, (words, r.stderr)
+        assert t.runs() == [] and not gone.exists(), t.runs()
+
+
+def test_a_relative_testdata_link_out_of_the_tree_is_resolved_from_its_own_directory():
+    # Not from the cwd: the link's own directory is where a relative target starts.
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        target = (pathlib.Path(tmp) / "data" / "h" / "tpch.sf1").resolve()
+        target.mkdir(parents=True)
+        (t.root / "testdata").mkdir(exist_ok=True)
+        (t.root / "testdata" / "tpch.sf1").symlink_to("../../data/h/tpch.sf1")
+        ok(t.run("--", "true"))
+        argv = t.runs()[-1]
+        assert f"{target}:{target}:ro" in values(argv, "-v"), argv
+
+
+def test_a_testdata_link_through_an_alias_is_mounted_where_it_points():
+    # The source is the resolved target; the destination is the path the link names, so the link
+    # resolves in the container, where the alias does not exist.
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        base = pathlib.Path(tmp).resolve()
+        (base / "data" / "h" / "tpch.sf1").mkdir(parents=True)
+        (base / "alias").symlink_to(base / "data")
+        (t.root / "testdata").mkdir(exist_ok=True)
+        (t.root / "testdata" / "tpch.sf1").symlink_to(base / "alias" / "h" / "tpch.sf1")
+        ok(t.run("--", "true"))
+        argv = t.runs()[-1]
+        assert f"{base}/data/h/tpch.sf1:{base}/alias/h/tpch.sf1:ro" in values(argv, "-v"), argv
+
+
+def test_a_testdata_link_into_the_tree_gets_no_mount():
+    # The tree is mounted already; a read-only mount over part of it would hide what a build writes.
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        (t.root / "testdata" / "goldens").mkdir(parents=True, exist_ok=True)
+        (t.root / "testdata" / "x").symlink_to("goldens")
+        ok(t.run("--", "true"))
+        argv = t.runs()[-1]
+        assert [v for v in values(argv, "-v") if "goldens" in v or v.endswith("/x:ro")] == [], argv
+
+
+def test_a_testdata_directory_gets_no_mount_of_its_own():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        (t.root / "testdata" / "tpch.sf1").mkdir(parents=True)
+        ok(t.run("--", "true"))
+        argv = t.runs()[-1]
+        assert [v for v in values(argv, "-v") if "tpch.sf1" in v] == [], argv
+
+
 if __name__ == "__main__":
     raise SystemExit(main(globals()))

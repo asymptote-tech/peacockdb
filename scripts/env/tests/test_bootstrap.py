@@ -384,6 +384,61 @@ def test_bootstrap_generates_sf1_by_generator_inputs_once():
         assert len(generator_runs(m)) == 2, generator_runs(m)
 
 
+def sf1_links(m):
+    """Each sf1 set's entry in the clone's testdata/: the link's target, or the entry itself."""
+    entries = {}
+    for ds in ("tpch.sf1", "tpcds.sf1"):
+        path = m.clone / "testdata" / ds
+        entries[ds] = os.readlink(path) if path.is_symlink() else path
+    return entries
+
+
+def test_bootstrap_links_the_clone_s_sf1_to_the_machine_s_set():
+    # The tests read testdata/<ds>; build-test.sh mounts the target where it lies.
+    with Machine() as m:
+        bootstrap_whole(m)
+        data_set = m.data_dir / data_hash(m)
+        assert sf1_links(m) == {ds: str(data_set / ds) for ds in ("tpch.sf1", "tpcds.sf1")}, sf1_links(m)
+        assert git(m.clone, "status", "--porcelain", "--untracked-files=all", "testdata") == "", "git sees the links"
+
+
+def test_bootstrap_repoints_the_links_to_a_new_set():
+    with Machine() as m:
+        bootstrap_whole(m)
+        old = data_hash(m)
+        with open(m.clone / "testdata" / "generate_testdata.sh", "a") as f:
+            f.write("# another generator\n")
+        git(m.clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "generator")
+        bootstrap_whole(m)
+        new = data_hash(m)
+        assert new != old, new
+        assert sf1_links(m) == {ds: str(m.data_dir / new / ds) for ds in ("tpch.sf1", "tpcds.sf1")}, sf1_links(m)
+
+
+def test_bootstrap_keeps_a_set_of_the_clone_s_own_and_names_it():
+    with Machine() as m:
+        own = m.clone / "testdata" / "tpch.sf1"
+        own.mkdir()
+        (own / "lineitem.parquet").write_text("a developer's own\n")
+        r = bootstrap_whole(m)
+        assert not own.is_symlink() and (own / "lineitem.parquet").read_text() == "a developer's own\n"
+        assert str(own) in r.stdout + r.stderr and "kept" in r.stdout + r.stderr, (r.stdout, r.stderr)
+        assert sf1_links(m)["tpcds.sf1"] == str(m.data_dir / data_hash(m) / "tpcds.sf1"), sf1_links(m)
+
+
+def test_bootstrap_keeps_a_link_of_the_clone_s_own_and_names_it():
+    # Only a link into the machine's data dir, or one that dangles, is bootstrap's to repoint.
+    with Machine() as m:
+        own = m.home.parent / "my-sets" / "tpch.sf1"
+        own.mkdir(parents=True)
+        link = m.clone / "testdata" / "tpch.sf1"
+        link.symlink_to(own)
+        r = bootstrap_whole(m)
+        assert os.readlink(link) == str(own), os.readlink(link)
+        assert str(link) in r.stdout + r.stderr and "kept" in r.stdout + r.stderr, (r.stdout, r.stderr)
+        assert sf1_links(m)["tpcds.sf1"] == str(m.data_dir / data_hash(m) / "tpcds.sf1"), sf1_links(m)
+
+
 def test_bootstrap_checks_out_the_clone_s_third_party_cudf():
     """cpp/CMakeLists.txt includes cuDF's cmake files from the clone's own submodule, which a clone
     leaves empty; build-test.sh refuses a cpu or gpu build without it."""

@@ -21,7 +21,7 @@ import tempfile
 REPO = pathlib.Path(__file__).resolve().parents[3]
 CLONE_FILES = [
     "scripts/env/bootstrap-vm.sh", "scripts/lib/image-inputs.sh", "scripts/lib/data-inputs.sh",
-    "scripts/lib/machine.sh", "testdata/generate_testdata.sh", "cpp/CMakeLists.txt",
+    "scripts/lib/machine.sh", "testdata/generate_testdata.sh", "testdata/.gitignore", "cpp/CMakeLists.txt",
 ]
 # cuDF's origin here is a file:// repository, which git refuses a submodule clone by default.
 GITCONFIG = ("[user]\n\tname = Machine User\n\temail = machine@example.test\n"

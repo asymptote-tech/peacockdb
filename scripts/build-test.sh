@@ -9,9 +9,10 @@
 # $PEACOCK_BUILD_IMAGE, else in the image `scripts/env/image-ref.sh build <v>` finds, either refused
 # unless its peacockdb.inputs label is this tree's for <v>: docker run as
 # the caller's uid, the tree at its own path, cargo's target in <tree>/target-img-<v>, HOME in
-# <tree>/.home-img, the cargo registry and ccache under ~/.cache/peacock. A tree or a worktree's git
-# dir under the image's home, /home/peacock, is refused for a uid other than 1000, which cannot
-# enter it. Inside it:
+# <tree>/.home-img, the cargo registry and ccache under ~/.cache/peacock; a testdata/<ds> link out
+# of the tree has its target mounted read-only where it points, and a dangling one is refused. A
+# tree or a worktree's git dir under the image's home, /home/peacock, is refused for a uid other
+# than 1000, which cannot enter it. Inside it:
 #
 #   -- <command...>  runs the command; its exit is the script's
 #   (cpu, default)   --build: the C++ library and its tests into cpp/build, then every Rust target
@@ -34,8 +35,9 @@
 # are terminals and this is no background job of its terminal. HUP, INT or TERM kills it, one that
 # comes before docker has created it too. One left by a build-test.sh that is gone is refused.
 #
-# Exit 0; 1 a build or a test failed; 2 bad input, or a refused image, tree, target dir, cpp/build
-# or leftover container; 129, 130 or 143 interrupted. Outside the image, any other is the container's.
+# Exit 0; 1 a build or a test failed; 2 bad input, or a refused image, tree, target dir, cpp/build,
+# leftover container or dangling testdata link; 129, 130 or 143 interrupted. Outside the image, any
+# other is the container's.
 set -euo pipefail
 
 usage() { sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
@@ -156,6 +158,17 @@ if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
   read -r _ _ pgrp _ _ tpgid _ <<< "${stat##*) }"
   if [ -t 0 ] && [ -t 1 ] && { [ "$tpgid" = -1 ] || [ "$tpgid" = "$pgrp" ]; }; then args+=(-it); fi
   case "$common/" in "$root"/*) ;; *) args+=(-v "$common:$common") ;; esac
+  # testdata/<ds> may link a set outside the tree, as bootstrap-vm.sh links the machine's: its
+  # target is mounted read-only where the link points, so the link resolves inside. A dangling one
+  # is refused: docker would make the missing target, as root.
+  for link in "$root"/testdata/*; do
+    [ -L "$link" ] || continue
+    dest=$(readlink "$link")
+    [ -e "$link" ] || die "$link links $dest, which does not exist: on a VM, run scripts/env/bootstrap-vm.sh again (provision-vm.sh does), or remove the link"
+    case "$dest" in /*) ;; *) dest=${link%/*}/$dest ;; esac
+    dest=$(realpath -s -m -- "$dest")
+    case "$dest/" in "$root"/*) ;; *) args+=(-v "$(readlink -f -- "$link"):$dest:ro") ;; esac
+  done
   args+=(-w "$root" -e PEACOCK_IN_IMAGE=1 -e "PEACOCK_CUDF=$cudf" -e "HOME=$root/.home-img"
          -e "CARGO_TARGET_DIR=$target" -v "$registry:/opt/rust/cargo/registry" -v "$ccache:/tmp/ccache")
   # A CI step's report files; GITHUB_OUTPUT and the like stay the runner's, written by redirecting.
