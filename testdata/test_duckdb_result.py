@@ -300,6 +300,19 @@ class Answers(unittest.TestCase):
             text = (root / "goldens/tpch.sf40/duckdb-result.txt").read_text()
         self.assertTrue(text.startswith("== q6\n+"), text)
 
+    @NEEDS_DUCKDB
+    def test_out_names_the_file_and_the_default_is_untouched(self):
+        """Sirius's answers render in DuckDB's format into `sirius-result.txt` beside DuckDB's own,
+        which stays as it was."""
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            db = root / "answers.duckdb"
+            answers_db(db, "tpch", ["q6"])
+            out = root / "goldens/tpch.sf40/sirius-result.txt"
+            dr.generate("tpch", "40", None, answers=db, root=root, out=out)
+            self.assertTrue(out.read_text().startswith("== q6\n+"), out.read_text())
+            self.assertFalse((root / "goldens/tpch.sf40/duckdb-result.txt").exists())
+
     def test_a_streamed_fingerprint_is_the_in_memory_one(self):
         """An answer too large to hold, fingerprinted batch by batch through an outside sort,
         writes the same text: nulls, a float column, a non-ASCII cell and the separator's
@@ -343,6 +356,9 @@ class Answers(unittest.TestCase):
             (["--dataset", "tpch", "--sf", "1", "--answers", "a.duckdb"], ["--answers", "--sf 1"]),
             (["--dataset", "tpch", "--sf", "40"], ["--sf 40", "--answers"]),
             (["--sf", "40", "--answers", "a.duckdb"], ["--answers", "one --dataset"]),
+            (["--dataset", "tpch", "--dataset", "tpcds", "--sf", "40", "--answers", "a.duckdb", "--out", "x.txt"],
+             ["--out", "one --dataset"]),
+            (["--dataset", "tpch", "--out", "x.txt"], ["--out", "--answers"]),
         ]
         for argv, words in cases:
             r = subprocess.run([sys.executable, "-I", script, *argv], capture_output=True, text=True,

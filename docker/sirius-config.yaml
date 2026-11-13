@@ -1,0 +1,11 @@
+# Sirius's config for the benchmark (llm-wiki/tasks/sirius-bench.md, Done when 3): its defaults but
+# these three. pin_table refuses without the sirius cache, and at the default 0.8 pinned chunks
+# can be evicted. Quent telemetry is on by default. Read through SIRIUS_CONFIG_FILE.
+sirius:
+  executor:
+    scan_manager:
+      cache:
+        mode: sirius
+        eviction_threshold_fraction: 1.0
+  telemetry:
+    enable_quent: false

@@ -1,0 +1,84 @@
+# sirius=8d17afec481c56903b61b74a9787423b470298a1 duckdb=1.5.6 libcudf=26.08.01 cuda=13.0 driver=580.173.02 device=NVIDIA_H100_80GB_HBM3 host=computeinstance-e00e6yena4nzjgaym0
+query	ms_2nd_min	runs_ms	status	note
+q1	108.7	110.4,110.0,107.9,108.7,108.9,109.5,108.9,108.7,111.4,110.2	ok	-
+q2	-	-	failed	Not implemented Error: GPU plan generation failed: Unsupported expression in projection (falling back to CPU): round((CAST(sun_sales1 AS DOUBLE) // CAST(sun_sales2 AS DOUBLE)), 2)
+q3	328.9	352.5,329.7,359.7,347.1,342.8,328.9,346.0,333.7,324.6,345.9	ok	-
+q4	1131.4	1159.9,1134.7,1145.0,1161.1,1133.3,1141.3,1143.5,1163.6,1131.4,1104.8	ok	-
+q5	-	-	failed	Not implemented Error: GPU plan generation failed: ROLLUP, CUBE, GROUPING SETS and GROUPING() are not supported in GPU aggregates
+q6	-	-	failed	Not implemented Error: GPU plan generation failed: Distinct not supported
+q7	527.4	637.5,607.5,603.7,592.8,576.8,527.4,519.9,622.3,625.9,578.2	ok	-
+q8	-	-	failed	Not implemented Error: GPU plan generation failed: Distinct not supported
+q9	-	-	failed	Not implemented Error: GPU plan generation failed: Cross product not supported
+q10	504.5	528.8,484.3,531.2,504.5,542.3,513.5,568.0,552.8,556.4,539.4	ok	-
+q11	764.0	813.8,786.0,807.8,789.5,815.1,814.2,811.3,746.2,814.5,764.0	ok	-
+q13	-	-	failed	Not implemented Error: GPU plan generation failed: Unsupported filter predicate on column 'ss_sales_price' (falling back to CPU): (((#0 >= 100.00) AND (#0 <= 150.00)) OR ((#0 >= 50.00) AND (#0 <= 100.00)) OR ((#0 >= 150.00) AND constant_or_null(true, #0, 200.00)))
+q14	-	-	failed	Not implemented Error: GPU plan generation failed: Distinct not supported
+q15	-	-	failed	Not implemented Error: GPU plan generation failed: Unsupported filter predicate (falling back to CPU): ((ca_state IN ('CA', 'WA', 'GA')) OR constant_or_null(false, cs_sales_price, 500.00) OR ("substring"(ca_zip, 1, 5) IN ('85669', '86197', '88274', '83405', '86475', '85392', '85460', '80348', '81792')))
+q16	-	-	failed	Sirius GPU execution failed: Distinct aggregates not supported in GPU path yet
+q17	-	-	failed	Not implemented Error: GPU plan generation failed: Unsupported expression in aggregate (falling back to CPU): stddev_samp(#5)
+q18	-	-	failed	Not implemented Error: GPU plan generation failed: ROLLUP, CUBE, GROUPING SETS and GROUPING() are not supported in GPU aggregates
+q19	430.0	467.2,417.5,437.7,430.0,430.8,456.2,464.0,452.6,446.5,439.8	ok	-
+q21	64.5	68.2,64.7,65.0,64.8,65.7,66.7,66.7,67.2,64.5,64.4	ok	-
+q22	-	-	failed	Not implemented Error: GPU plan generation failed: ROLLUP, CUBE, GROUPING SETS and GROUPING() are not supported in GPU aggregates
+q23	-	-	failed	Not implemented Error: GPU plan generation failed: Cross product not supported
+q24	-	-	failed	Not implemented Error: GPU plan generation failed: Unsupported expression on the right side of a join condition (falling back to CPU): upper(ca_country)
+q25	583.7	607.2,609.8,605.8,607.3,583.7,606.7,564.9,632.8,652.4,654.7	unverified	-
+q26	295.4	349.4,332.8,319.0,340.6,343.5,318.1,295.4,292.0,336.1,336.8	ok	-
+q28	-	-	failed	Not implemented Error: GPU plan generation failed: Cross product not supported
+q29	580.5	687.6,673.4,606.7,585.3,578.5,588.4,597.3,600.0,580.5,584.0	unverified	-
+q30	164.9	166.2,163.6,165.6,164.9,169.5,168.8,166.8,165.6,164.9,166.1	ok	-
+q31	433.8	440.8,401.8,433.8,455.4,472.1,453.9,476.3,453.1,485.0,490.6	wrong	rows DuckDB lacks, with a negative last column, and rows missing
+q32	380.3	403.1,389.2,397.5,383.7,377.3,389.2,384.0,400.1,386.4,380.3	ok	-
+q33	-	-	failed	Sirius GPU execution failed: CUDF failure at: /vcpkg/buildtrees/cudf/src/v26.08.01-42f2a55139.clean/cpp/src/io/parquet/bloom_filter_reader.cu:82: Mismatched predicate column and literal types
+q34	519.9	526.2,541.0,501.0,544.2,520.0,539.6,524.2,519.9,547.4,535.4	ok	-
+q35	539.7	599.6,557.7,553.2,539.7,514.4,552.6,578.1,590.2,575.7,553.9	ok	-
+q37	230.2	244.7,233.1,231.9,238.9,244.6,223.8,236.4,244.9,242.4,230.2	ok	-
+q38	-	-	failed	Not implemented Error: GPU plan generation failed: Distinct not supported
+q39	-	-	failed	Not implemented Error: GPU plan generation failed: Unsupported expression in aggregate (falling back to CPU): stddev_samp(#4)
+q40	266.7	282.1,266.7,292.5,284.1,288.0,297.5,277.0,270.5,265.4,288.3	ok	-
+q41	-	-	failed	Not implemented Error: GPU plan generation failed: Distinct not supported
+q42	345.0	356.4,340.3,350.1,361.1,345.0,350.7,365.1,348.2,358.9,370.9	ok	-
+q43	-	-	failed	Sirius GPU execution failed: CUDF failure at: /vcpkg/buildtrees/cudf/src/v26.08.01-42f2a55139.clean/cpp/src/io/parquet/bloom_filter_reader.cu:82: Mismatched predicate column and literal types
+q45	183.1	191.0,182.6,184.7,184.6,183.1,187.4,183.7,185.2,190.9,188.9	ok	-
+q46	594.7	636.7,602.0,609.0,607.6,622.4,571.0,594.7,625.9,624.9,613.6	ok	-
+q48	-	-	failed	Not implemented Error: GPU plan generation failed: Unsupported filter predicate on column 'ss_sales_price' (falling back to CPU): (((#0 >= 100.00) AND (#0 <= 150.00)) OR ((#0 >= 50.00) AND (#0 <= 100.00)) OR ((#0 >= 150.00) AND constant_or_null(true, #0, 200.00)))
+q50	423.1	492.3,404.5,435.6,423.1,441.5,526.5,461.7,500.1,499.5,428.1	ok	-
+q52	319.2	379.1,337.0,370.0,374.0,335.0,313.2,319.2,363.8,325.2,328.2	ok	-
+q54	-	-	failed	Not implemented Error: GPU plan generation failed: Distinct not supported
+q55	323.2	340.7,319.5,323.2,330.2,366.6,372.7,354.9,368.5,385.3,375.6	ok	-
+q56	-	-	failed	Sirius GPU execution failed: CUDF failure at: /vcpkg/buildtrees/cudf/src/v26.08.01-42f2a55139.clean/cpp/src/io/parquet/bloom_filter_reader.cu:82: Mismatched predicate column and literal types
+q58	556.2	554.6,567.9,638.9,598.7,570.4,650.2,602.2,593.6,556.2,596.5	ok	-
+q59	405.1	408.2,393.9,405.1,411.0,416.0,423.0,456.6,464.0,469.3,460.3	ok	-
+q60	-	-	failed	Sirius GPU execution failed: CUDF failure at: /vcpkg/buildtrees/cudf/src/v26.08.01-42f2a55139.clean/cpp/src/io/parquet/bloom_filter_reader.cu:82: Mismatched predicate column and literal types
+q61	-	-	failed	Not implemented Error: GPU plan generation failed: Cross product not supported
+q62	151.8	166.3,153.8,147.2,151.8,166.5,154.5,165.4,165.5,158.5,169.4	ok	-
+q64	797.9	807.6,797.9,874.0,807.3,835.6,788.6,854.8,834.7,814.3,844.6	ok	-
+q65	519.0	548.0,522.2,542.9,514.5,521.5,591.0,524.2,519.0,524.5,526.0	ok	-
+q66	438.5	467.6,438.5,483.7,450.7,484.1,487.6,436.8,471.3,498.8,501.2	ok	-
+q68	601.8	664.4,601.8,629.6,638.5,585.1,648.1,669.6,665.1,645.2,661.4	ok	-
+q69	501.7	563.8,501.7,506.7,503.8,526.7,578.6,567.9,544.5,542.1,479.6	ok	-
+q71	538.4	551.0,536.7,540.8,546.3,542.4,551.1,538.4,543.2,572.9,577.8	ok	-
+q73	540.4	542.6,540.4,549.9,498.0,551.0,561.4,541.7,550.7,556.1,563.8	wrong	#306
+q74	583.6	611.0,653.1,614.4,619.4,585.6,583.6,644.6,626.6,582.2,590.5	ok	-
+q75	-	-	failed	Not implemented Error: GPU plan generation failed: Distinct not supported
+q76	672.6	731.5,680.4,689.6,692.0,660.4,672.6,777.7,756.8,756.7,736.5	ok	-
+q77	-	-	failed	Not implemented Error: GPU plan generation failed: ROLLUP, CUBE, GROUPING SETS and GROUPING() are not supported in GPU aggregates
+q78	-	-	failed	Not implemented Error: GPU plan generation failed: Unsupported expression in projection (falling back to CPU): round((CAST((ss_qty * 1.00) AS DOUBLE) // CAST(#4 AS DOUBLE)), 2)
+q79	566.0	573.6,608.8,566.0,608.3,556.3,615.4,566.1,578.0,584.0,597.3	ok	-
+q80	-	-	failed	Not implemented Error: GPU plan generation failed: ROLLUP, CUBE, GROUPING SETS and GROUPING() are not supported in GPU aggregates
+q81	158.4	159.6,154.6,160.3,160.5,160.9,160.6,158.4,158.5,161.3,160.0	ok	-
+q82	287.4	306.7,287.5,267.1,293.1,294.0,294.7,301.0,287.4,306.7,299.7	ok	-
+q83	122.9	130.5,137.5,122.9,126.8,132.0,127.7,127.7,127.4,119.6,129.8	ok	-
+q84	123.5	125.5,123.2,123.5,126.5,123.9,130.0,126.8,127.0,125.9,125.0	ok	-
+q85	264.6	268.9,243.5,267.0,266.3,267.4,268.8,266.8,272.5,270.4,264.6	ok	-
+q87	-	-	failed	Not implemented Error: GPU plan generation failed: Distinct not supported
+q88	-	-	failed	Not implemented Error: GPU plan generation failed: Cross product not supported
+q90	-	-	failed	Not implemented Error: GPU plan generation failed: Cross product not supported
+q91	-	-	failed	Sirius GPU execution failed: CUDF failure at: /vcpkg/buildtrees/cudf/src/v26.08.01-42f2a55139.clean/cpp/src/io/parquet/bloom_filter_reader.cu:82: Mismatched predicate column and literal types
+q92	229.9	253.4,229.9,219.9,244.4,244.4,257.7,246.9,248.7,255.1,250.5	ok	-
+q93	426.2	451.6,444.3,445.0,439.8,426.2,455.1,461.0,448.8,436.1,415.5	ok	-
+q94	-	-	failed	Sirius GPU execution failed: Distinct aggregates not supported in GPU path yet
+q95	-	-	failed	Sirius GPU execution failed: Distinct aggregates not supported in GPU path yet
+q96	329.0	385.1,362.9,379.1,369.2,348.3,322.5,329.0,336.5,329.2,362.4	ok	-
+q97	486.9	497.4,476.0,500.5,490.6,498.0,506.1,486.9,552.2,537.4,523.0	ok	-
+q99	-	-	failed	Not implemented Error: GPU plan generation failed: Unsupported expression in projection (falling back to CPU): lower(cc_name)

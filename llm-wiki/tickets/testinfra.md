@@ -10,6 +10,7 @@ Tests, CI, hosts, testdata etc
 - [#306 (no_sort ties by position) a `no_sort` comparison pairs rows by position, so tied rows in another order fail](#t306)
 - [#309 (no en_US in build image) the build image has no en_US.UTF-8 locale and no name for a foreign uid, so four script test files cannot run in it](#t309)
 - [#310 (nebius-gpu fills with images) `gpu-tests` keeps every image and sf1 set it pulls, so nebius-gpu's disk runs out](#t310)
+- [#311 (LIMIT without ORDER BY) a `LIMIT` with no `ORDER BY` is checked against DuckDB's own rows, so another engine's right rows fail](#t311)
 
 <a id="t178"></a>
 ### #178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault
@@ -58,10 +59,11 @@ every `ORDER BY` key swap (rows counted from 1):
 - tpcds q18 (`… LIMIT 100`): the `AAAAAAAAAACJAAAA` pair at 24/25 and the `AAAAAAAAAAHHAAAA`
   pair at 61/62, each a rollup group whose other keys are null.
 - tpcds q73 (`ORDER BY cnt DESC, c_last_name`): the Hamilton pair at 16/17 (Nicholas, Harry) and
-  the Jones pair at 22/23 (Cynthia, Robert).
+  the Jones pair at 22/23 (Cynthia, Robert). Sirius's q73 (sirius-bench) swaps the Jones pair and
+  rows 51/52, two with a null `c_last_name` at cnt 5.
 
-Both rows are `wrong #306` in the H100's `cases.csv` until the oracle accepts a permutation of
-tied rows. The fix needs the sort keys, which the oracle does not hold today.
+Both are `wrong #306` in the H100's `cases.csv`, and q73 in Sirius's `sirius.tsv`, until the oracle
+accepts a permutation of tied rows. The fix needs the sort keys, which the oracle does not hold.
 
 <a id="t309"></a>
 ### #309 (no en_US in build image) the build image has no en_US.UTF-8 locale and no name for a foreign uid, so four script test files cannot run in it
@@ -92,3 +94,13 @@ on 2026-11-08 (containers-only). #309's fix is itself such a change. After about
 The fix: `prepare` removes the VM's peacockdb images of the same kind and version whose
 `peacockdb.inputs` label is not this tree's and that no container uses, and sf1 sets older than the
 one it generates; or a prune step in `gpu-tests`'s cleanup.
+
+<a id="t311"></a>
+### #311 (LIMIT without ORDER BY) a `LIMIT` with no `ORDER BY` is checked against DuckDB's own rows, so another engine's right rows fail
+tpch `scan-limit` is a `LIMIT 10` with no `ORDER BY`, so any ten rows of the scan are a right
+answer. Its oracle is `duckdb(sort, exact)` (`corpus_cases.inc`), and DuckDB's stored answer holds
+only the ten DuckDB returned. Sirius's sf40 answer (sirius-bench, 2026-11-10) shares none of them
+and is `wrong #311` in its `sirius.tsv`. peacockdb passes only because its scan returns the same ten.
+
+The fix: an oracle for a bare `LIMIT` that checks the row count and that each row is in the
+unlimited result, as `data_fusion_subset` does on the CPU side.

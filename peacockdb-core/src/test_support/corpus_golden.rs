@@ -41,6 +41,13 @@ pub(crate) fn duckdb_golden(dataset: &str, sf: &str) -> PathBuf {
     golden_dir_for(dataset, sf).join("duckdb-result.txt")
 }
 
+/// `sirius-result.txt` — Sirius's answers on the H100, one section per query, rendered from
+/// its answers database by `testdata/duckdb_result.py --answers`, so in `duckdb-result.txt`'s
+/// format.
+pub(crate) fn sirius_result_golden(dataset: &str, sf: &str) -> PathBuf {
+    golden_dir_for(dataset, sf).join("sirius-result.txt")
+}
+
 /// `gpu-result.txt` — the device's own answers, one section per (query, mode), written only
 /// under `PCK_WRITE_GPU_RESULT` and brought home from whichever host held the card. A record,
 /// never an authority. `version` names a cuDF other than the committed 25.02, whose file is

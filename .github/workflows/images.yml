@@ -1,9 +1,10 @@
 name: Images
 
-# Builds and publishes the build and run images of each cuDF version (llm-wiki/build-test.md,
-# "Images"), one job per image, through scripts/env/image.sh: it tags the commit only from a clean
-# tree, and pushes only an image it built at HEAD. A run image passes test_run_tests.py before its
-# push. Started by hand only. GitHub can dispatch it
+# Builds and publishes the build and run images of each cuDF version, and the Sirius image at its
+# own (llm-wiki/build-test.md, "Images"), one job per image, through scripts/env/image.sh: it tags
+# the commit only from a clean tree, and pushes only an image it built at HEAD. A run image passes
+# test_run_tests.py and the Sirius image its self-test before the push. Only the Sirius job gets
+# the storage keys, which its build fetches the extension with. Started by hand only. GitHub can dispatch it
 # only once master holds it. A dispatch runs the workflow and the commit of the ref it names
 # (--ref, master by default). It pushes the inputs and commit tags; only a dispatch on the default
 # branch moves :cudf-<v>. 25.10 has no run image. If the job's push is denied, give this
@@ -14,12 +15,12 @@ on:
       kind:
         description: The image to build and push
         type: choice
-        options: [build, run, all]
+        options: [build, run, sirius, all]
         default: all
       cudf:
         description: The cuDF version
         type: choice
-        options: ['25.02', '25.10', '26.02', all]
+        options: ['25.02', '25.10', '26.02', '26.08', all]
         default: all
 
 permissions:
@@ -41,12 +42,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kind: ${{ fromJSON(inputs.kind == 'all' && '["build","run"]' || format('["{0}"]', inputs.kind)) }}
-        cudf: ${{ fromJSON(inputs.cudf == 'all' && '["25.02","25.10","26.02"]' || format('["{0}"]', inputs.cudf)) }}
-        # A build-only version: a spec and no DRIVER_MINIMUM_<v> pin (docker/pins.env).
+        kind: ${{ fromJSON(inputs.kind == 'all' && '["build","run","sirius"]' || format('["{0}"]', inputs.kind)) }}
+        cudf: ${{ fromJSON(inputs.cudf == 'all' && '["25.02","25.10","26.02","26.08"]' || format('["{0}"]', inputs.cudf)) }}
+        # A build-only version: a spec and no DRIVER_MINIMUM_<v> pin (docker/pins.env). 26.08 is
+        # the Sirius extension's cuDF, SIRIUS_LIBCUDF: the sirius image is built there alone.
         exclude:
           - kind: run
             cudf: '25.10'
+          - kind: build
+            cudf: '26.08'
+          - kind: run
+            cudf: '26.08'
+          - kind: sirius
+            cudf: '25.02'
+          - kind: sirius
+            cudf: '25.10'
+          - kind: sirius
+            cudf: '26.02'
     defaults:
       run:
         shell: bash
@@ -79,7 +91,11 @@ jobs:
             exit 1
           fi
 
+      # image.sh hands the keys to docker as BuildKit secrets; the other jobs get empty values.
       - name: Build
+        env:
+          AWS_ACCESS_KEY_ID: ${{ matrix.kind == 'sirius' && secrets.S3_ACCESS_KEY_ID || '' }}
+          AWS_SECRET_ACCESS_KEY: ${{ matrix.kind == 'sirius' && secrets.S3_SECRET_ACCESS_KEY || '' }}
         run: scripts/env/image.sh build "$KIND" "$CUDF"
 
       # docker/run-tests.sh is a run-image input, and only these tests prove its rules: a binary
@@ -94,6 +110,12 @@ jobs:
             IMAGE=$(scripts/env/image-ref.sh run "$CUDF")
             export IMAGE
             python3 scripts/env/tests/test_run_tests.py
+          fi
+          # The Sirius image's check without a GPU, which cannot load the extension: its sha256 against the
+          # pin, its footer, the libraries it needs, and the config (docker/sirius-bench.py --self-test).
+          if [ "$KIND" = sirius ]; then
+            IMAGE=$(scripts/env/image-ref.sh sirius "$CUDF")
+            docker run --rm "$IMAGE" python3 /opt/sirius/sirius-bench.py --self-test
           fi
 
       - name: Push

@@ -1,0 +1,5 @@
+# sirius=8d17afe duckdb=1.5.6 libcudf=26.08.01 cuda=13.0 driver=580.173 device=NVIDIA_H100_80GB_HBM3 host=nebius-h100
+query	ms_2nd_min	runs_ms	status	note
+q1	412.0	431.0,412.0,409.0,415.0,420.0,413.0,418.0,425.0,414.0,416.0	ok	-
+q2	-	-	failed	NotImplemented: INTERSECT
+q3	-	-	skipped	accumulator budget exceeded

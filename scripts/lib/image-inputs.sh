@@ -5,9 +5,41 @@
 # declared only in another cuDF version's stage (GCC_26_02 in `AS cudf-26.02`); and for the build
 # image the two sources its prefetch fixes. image.sh writes them into the image's
 # `peacockdb.inputs` label, one line joined by spaces; up.sh compares that label with a worktree's
-# own, so an instance never runs an image built from other inputs than its tree.
+# own, so an instance never runs an image built from other inputs than its tree. The sirius image
+# has no conda spec: its extension links libcudf in, at the one cuDF image_sirius_cudf names.
 
-# image_inputs <tree> <build|run> <cudf>
+# image_sirius_cudf <tree> — the sirius image's cuDF: major.minor of pins.env's SIRIUS_LIBCUDF.
+image_sirius_cudf() {
+  local line
+  line=$(grep -E '^SIRIUS_LIBCUDF=[0-9]+\.[0-9]+\.[0-9]+$' "$1/docker/pins.env") \
+    || { echo "image_sirius_cudf: $1/docker/pins.env has no SIRIUS_LIBCUDF=<major>.<minor>.<patch>" >&2; return 2; }
+  line=${line#*=}
+  echo "${line%.*}"
+}
+
+# image_refusal <tree> <build|run|sirius> <cudf> — one line saying why there is no such image, or
+# nothing. A build image needs a conda spec, a run image also a DRIVER_MINIMUM_<cudf> pin; the
+# sirius image is its own cuDF's alone, and no other kind is built at it.
+image_refusal() {
+  local tree=$1 kind=$2 cudf=$3 sirius known="" spec
+  sirius=$(image_sirius_cudf "$tree") || return 2
+  if [ "$kind" = sirius ]; then
+    [ "$cudf" = "$sirius" ] || echo "the sirius image is cuDF $sirius's alone, not $cudf"
+    return 0
+  fi
+  if [ "$cudf" = "$sirius" ]; then
+    echo "cuDF $sirius is the sirius image's alone: no $kind image is built at it"
+    return 0
+  fi
+  for spec in "$tree"/docker/conda/cudf-*.spec; do spec=${spec##*/cudf-}; known+="${spec%.spec} "; done
+  if [ ! -f "$tree/docker/conda/cudf-$cudf.spec" ]; then
+    echo "no cuDF $cudf: docker/conda holds specs for ${known% }"
+  elif [ "$kind" = run ] && ! grep -q "^DRIVER_MINIMUM_${cudf//./_}=" "$tree/docker/pins.env"; then
+    echo "cuDF $cudf has a build image only: docker/pins.env has no DRIVER_MINIMUM_${cudf//./_}"
+  fi
+}
+
+# image_inputs <tree> <build|run|sirius> <cudf>
 image_inputs() {
   local tree=$1 kind=$2 cudf=$3 f sum mode commit tags names spec versions=""
   local files=("docker/conda/cudf-$cudf.spec" "docker/$kind.Dockerfile" "docker/$kind.Dockerfile.dockerignore")
@@ -16,6 +48,8 @@ image_inputs() {
     build) files+=(docker/venv.lock docker/cmake-wrapper.sh)
            [ "$cudf" = 26.02 ] || files+=(docker/conda/cudf-26.02.spec) ;;
     run) files+=(docker/runtime-spec.sh docker/run-tests.sh) ;;
+    sirius) files=("docker/$kind.Dockerfile" "docker/$kind.Dockerfile.dockerignore" docker/sirius-venv.lock
+                   docker/sirius-fetch.sh docker/sirius-config.yaml docker/sirius-bench.py docker/sirius-LICENSE) ;;
     *) echo "image_inputs: no image kind $kind" >&2; return 2 ;;
   esac
   for f in "${files[@]}"; do
@@ -51,7 +85,7 @@ image_inputs() {
   echo "cpp/CMakeLists.txt:flatbuffers=$tags"
 }
 
-# image_inputs_tag <tree> <build|run> <cudf> — the tag naming an image by its inputs,
+# image_inputs_tag <tree> <build|run|sirius> <cudf> — the tag naming an image by its inputs,
 # cudf-<cudf>-in-<h>: <h> is the first 12 hex digits of the sha256 of image_inputs' lines. A tree
 # finds the image built from its own inputs by it, whatever :cudf-<cudf> points at.
 image_inputs_tag() {

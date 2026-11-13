@@ -9,9 +9,10 @@ use std::path::{Path, PathBuf};
 use super::benchmark_checks::{fused_problem, rows_problem, section_problem};
 use peacockdb_core::prototypes::{fused_report_tables, parse_fused_section};
 use peacockdb_core::test_support::{
-    BUILD, FAILED, MODES, Mode, SKIPPED, benchmark_report_path, device_slug, line_difference,
-    load_csv, ordered_sections, parse_benchmark_section, render_benchmark_report,
-    rewrite_source_file, testdata_root, write_benchmark_report,
+    BUILD, FAILED, MODES, Mode, SKIPPED, benchmark_report_path, benchmarks_csv_path, device_slug,
+    line_difference, load_csv, ordered_sections, parse_benchmark_section, render_benchmark_report,
+    render_benchmarks_csv, rewrite_source_file, testdata_root, write_benchmark_report,
+    write_benchmarks_csv,
 };
 
 /// One `corpus_query_benchmark!` line: the query and its timed modes as written.
@@ -401,12 +402,13 @@ fn the_benchmark_cases_follow_the_registry() {
     );
 }
 
-/// The committed page is, byte for byte, what the trees under `testdata/benchmark-results/`
-/// render through `parse_benchmark_section`, the main list's order giving the row order: the
-/// registry's, which writes the list (`the_benchmark_cases_follow_the_registry`). The fused
-/// files under it add a table each, through `fused_report_tables`. Under
-/// `UPDATE_CANONICAL=1` the page is rewritten and the test passes. A commit that changes a tree
-/// and not the page fails here, naming the first line that moved.
+/// The committed page and `benchmarks.csv` are, byte for byte, what the trees under
+/// `testdata/benchmark-results/` render through `parse_benchmark_section`, the main list's order
+/// giving the row order: the registry's, which writes the list
+/// (`the_benchmark_cases_follow_the_registry`). The fused files under it add a table each to the
+/// page, through `fused_report_tables`, and nothing to the CSV. Under `UPDATE_CANONICAL=1` both
+/// are rewritten and the test passes. A commit that changes a tree and not both files fails here,
+/// naming the first line that moved.
 #[test]
 fn the_benchmark_report_matches_the_trees() {
     let order: Vec<(String, String)> = registry_cases()
@@ -414,23 +416,29 @@ fn the_benchmark_report_matches_the_trees() {
         .map(|(dataset, query, _)| (dataset, query))
         .collect();
     let root = testdata_root().join("benchmark-results");
-    let want = render_benchmark_report(&root, &order, &fused_report_tables(&root));
+    let page = render_benchmark_report(&root, &order, &fused_report_tables(&root));
+    let csv = render_benchmarks_csv(&root, &order);
     if std::env::var("UPDATE_CANONICAL").is_ok() {
-        write_benchmark_report(&want);
+        write_benchmark_report(&page);
+        write_benchmarks_csv(&csv);
         return;
     }
-    let path = benchmark_report_path();
     let rewrite = "UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test \
                    test_corpus_goldens -- the_benchmark_report_matches_the_trees";
-    let have = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{}: {e} — write the page with {rewrite}", path.display()));
-    if have != want {
-        panic!(
-            "{} is not what the trees under testdata/benchmark-results/ render: {}. Rewrite it \
-             with {rewrite}",
-            path.display(),
-            line_difference(&have, &want)
-        );
+    for (path, want) in [
+        (benchmark_report_path(), page),
+        (benchmarks_csv_path(), csv),
+    ] {
+        let have = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{}: {e} — write it with {rewrite}", path.display()));
+        if have != want {
+            panic!(
+                "{} is not what the trees under testdata/benchmark-results/ render: {}. Rewrite \
+                 it with {rewrite}",
+                path.display(),
+                line_difference(&have, &want)
+            );
+        }
     }
 }
 

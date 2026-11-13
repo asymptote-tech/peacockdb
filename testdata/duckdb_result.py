@@ -25,6 +25,10 @@ the 128-core VM) and stores each answer as a table; `--answers` renders those in
 Usage (DuckDB 1.5.4, the version CI pins for generate_testdata.sh):
     python3 testdata/duckdb_result.py [--dataset tpch|tpcds|pbench] [--only q1,q2]
     python3 testdata/duckdb_result.py --dataset <ds> --sf 40 --answers <answers.duckdb> [--only …]
+                                      [--out <file>]
+
+--out writes the one dataset's text there instead: Sirius's answers, stored by its runner as
+DuckDB's are, render into `goldens/<ds>.sf40/sirius-result.txt` (scripts/env/bench-sirius.sh).
 """
 
 import argparse
@@ -412,14 +416,14 @@ def answer_sections(dataset, answers, only, root=ROOT):
     return sections(dataset, stems, answer)
 
 
-def generate(dataset, sf, only, answers=None, root=ROOT):
-    """`goldens/<dataset>.sf<sf>/duckdb-result.txt`: sf1's from the parquet, another scale's from
-    the answers database DuckDB stored there."""
+def generate(dataset, sf, only, answers=None, root=ROOT, out=None):
+    """`goldens/<dataset>.sf<sf>/duckdb-result.txt`, or `out`: sf1's from the parquet, another
+    scale's from the answers database stored there."""
     if answers is None:
         text = parquet_sections(dataset, only, root)
     else:
         text = answer_sections(dataset, answers, only, root)
-    target = root / "goldens" / f"{dataset}.sf{sf}" / "duckdb-result.txt"
+    target = out or root / "goldens" / f"{dataset}.sf{sf}" / "duckdb-result.txt"
     # A dataset's first golden arrives before its directory does, and this writer is the one
     # that may run before any Rust tier has written a thing.
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -434,6 +438,7 @@ def main():
     parser.add_argument("--sf", help="the scale --answers was stored at; sf1 without it")
     parser.add_argument("--answers", type=pathlib.Path,
                         help="an answers database (duckdb_minimal.sh --answers), one dataset's")
+    parser.add_argument("--out", type=pathlib.Path, help="the file to write, for --answers' one dataset")
     args = parser.parse_args()
     if args.answers is not None and args.sf is None:
         parser.error("--answers needs --sf: the scale its answers were stored at")
@@ -443,13 +448,15 @@ def main():
         parser.error(f"--sf {args.sf} needs --answers: only sf1's parquet is run here")
     if args.answers is not None and len(args.dataset or []) != 1:
         parser.error("--answers holds one dataset's answers: name exactly one --dataset")
+    if args.out is not None and args.answers is None:
+        parser.error("--out writes an answers database's text: name it with --answers")
     import duckdb  # deferred for the reason `session` gives
 
     if duckdb.__version__ != PINNED:
         sys.exit(f"duckdb {duckdb.__version__}; the oracle is pinned at {PINNED}")
     only = set(args.only.split(",")) if args.only else None
     for dataset in args.dataset or ["tpch", "tpcds", "pbench"]:
-        generate(dataset, args.sf or "1", only, answers=args.answers)
+        generate(dataset, args.sf or "1", only, answers=args.answers, out=args.out)
 
 if __name__ == "__main__":
     main()

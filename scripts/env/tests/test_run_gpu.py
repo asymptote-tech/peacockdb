@@ -15,7 +15,7 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
-from gpu_host import DRIVER_MINIMUM, H100, HOSTNAME, L40S, Host, label, log_lines  # noqa: E402
+from gpu_host import DRIVER_MINIMUM, H100, HOSTNAME, L40S, SIRIUS_CUDF, Host, label, log_lines  # noqa: E402
 from machine import KEYS, NO_HOST, REPO, UNPUBLISHED, lib  # noqa: E402
 
 VERBS = [("prepare",), ("ship",), ("run", "list"), ("pull",)]
@@ -1177,6 +1177,186 @@ def test_fused_profile_lists_a_failed_capture_and_goes_on():
             assert (fused_dir(tree) / f"{b}.calls.tsv").is_file(), b
         assert not (fused_dir(tree) / "first10.calls.tsv").exists()
         assert "failed.tsv" in r.stderr, r.stderr
+
+
+# --- Sirius --------------------------------------------------------------------------------------
+
+# The H100's driver, which CUDA 13 runs on; the fake VM's default, 550, is older than 580.65.06.
+SIRIUS_DRIVER = "580.173"
+RUNNER = ["--dataset", "tpch", "--sf", "40", "--queries", "q6,aggregate-groupby", "--runs", "10",
+          "--timeout", "900"]
+
+
+def sirius_prepared(h):
+    h.world(driver=SIRIUS_DRIVER)
+    ok(h.gpu("prepare", "--sirius"))
+    return h
+
+
+def sirius_runs(h):
+    return [a for a in h.docker_runs() if h.sirius_ref in a]
+
+
+def test_prepare_sirius_pulls_the_sirius_image_and_ships_its_profile():
+    with Host() as h:
+        sirius_prepared(h)
+        pulled = [a[-1] for a in h.docker_calls() if a[0] == "pull"]
+        assert pulled[-1] == h.sirius_ref and set(pulled) == {h.run_ref, h.build_ref, h.sirius_ref}, pulled
+        shipped = h.vm_dir() / "docker" / "sirius-seccomp.json"
+        assert shipped.read_bytes() == (REPO / "docker" / "sirius-seccomp.json").read_bytes()
+
+
+def test_prepare_sirius_short_of_disk_stops_before_the_pull_naming_both_numbers():
+    with Host() as h:
+        h.world(driver=SIRIUS_DRIVER, free_bytes=8 * 10**9)
+        refused(h.gpu("prepare", "--sirius"), 2, "8 GB free under /var/lib/docker", "needs 14")
+        assert h.sirius_ref not in [a[-1] for a in h.docker_calls() if a[0] == "pull"]
+
+
+def test_prepare_sirius_with_the_image_on_the_vm_measures_no_disk():
+    with Host() as h:
+        h.world(driver=SIRIUS_DRIVER, free_bytes=8 * 10**9, absent=[])
+        ok(h.gpu("prepare", "--sirius"))
+
+
+def test_prepare_sirius_refuses_a_driver_older_than_the_sirius_image_needs():
+    with Host() as h:
+        refused(h.gpu("prepare", "--sirius"), 3, "550.54.15", "580.65.06")
+
+
+def test_prepare_sirius_refuses_a_sirius_image_of_other_inputs():
+    with Host() as h:
+        images = h.world()["images"]
+        images[h.sirius_ref]["labels"]["peacockdb.inputs"] = label(h.tree, "sirius", change="docker/sirius-bench.py",
+                                                                   cudf=SIRIUS_CUDF)
+        h.world(images=images, driver=SIRIUS_DRIVER)
+        refused(h.gpu("prepare", "--sirius"), 2, "docker/sirius-bench.py", h.sirius_ref)
+
+
+def test_prepare_sirius_without_sf40_is_refused():
+    with Host() as h:
+        refused(h.gpu("prepare", "--sirius", "--no-sf40"), 2, "--sirius", "--no-sf40")
+        assert h.nebius_calls() == []
+
+
+def test_sirius_runs_the_runner_in_the_sirius_image_with_no_install():
+    with Host() as h:
+        sirius_prepared(h)
+        r = ok(h.gpu("sirius", "--", *RUNNER))
+        assert "run-tests.sh list: green" in r.stdout, r.stdout
+        [run] = sirius_runs(h)
+        at = run.index(h.sirius_ref)
+        options, command = run[:at], run[at + 1:]
+        base = h.vm_dir()
+        assert values(options, "--security-opt") == [f"seccomp={base}/docker/sirius-seccomp.json"], options
+        assert values(options, "--ulimit") == ["memlock=-1:-1"], options
+        assert values(options, "--hostname") == [HOSTNAME], options
+        assert values(options, "--gpus") == ["all"] and values(options, "--name") == ["peacock-chain-l"], options
+        assert values(options, "--label") == ["peacock.log=sirius"], options
+        mounts = values(options, "-v")
+        assert f"{h.data}:{h.data}:ro" in mounts and f"{base}/testdata:/peacock/testdata" in mounts, mounts
+        assert not [o for o in options if o == "--privileged" or o.startswith("--cap-add")], options
+        assert command == ["python3", "/opt/sirius/sirius-bench.py", *RUNNER, "--data", f"{h.data}/tpch.sf40",
+                           "--out", "/peacock/testdata"], command
+        assert (base / "testdata" / "tpch-queries" / "q01.sql").read_text() == "select 1;\n"
+        assert not (base / "cpp" / "install").exists()
+        assert [a for a in h.docker_calls() if a[0] == "pull"].count(["pull", h.sirius_ref]) == 1, "run pulled"
+
+
+def test_sirius_ships_the_sirius_results_a_resume_keeps():
+    with Host() as h:
+        sirius_prepared(h)
+        tsv = h.tree / "testdata/benchmark-results/h100-80gb-hbm3/tpch.sf40/sirius.tsv"
+        tsv.parent.mkdir(parents=True)
+        tsv.write_text("# rows of an earlier run\n")
+        ok(h.gpu("sirius", "--", *RUNNER, "--resume"))
+        shipped = h.vm_dir() / "testdata/benchmark-results/h100-80gb-hbm3/tpch.sf40/sirius.tsv"
+        assert shipped.read_text() == "# rows of an earlier run\n"
+        assert sirius_runs(h)[0][-5] == "--resume", sirius_runs(h)
+
+
+def test_sirius_ships_the_answers_a_narrowed_or_resumed_run_keeps():
+    """A narrowed run (--list) keeps the other queries' answers and --resume the kept rows', and
+    `pull` brings the VM's database home over the laptop's: so the VM gets the laptop's first, a
+    newer one there kept. A whole run starts its answers afresh and is sent none."""
+    with Host() as h:
+        sirius_prepared(h)
+        answers = h.tree / "testdata/calibration/sirius/tpch.sf40/answers.duckdb"
+        answers.parent.mkdir(parents=True)
+        answers.write_bytes(b"every query's answers")
+        shipped = h.vm_dir() / "testdata/calibration/sirius/tpch.sf40/answers.duckdb"
+        ok(h.gpu("sirius", "--", *RUNNER))
+        assert not shipped.exists(), "a whole run was sent the answers it removes"
+        for extra in (["--list", "q1,q6,aggregate-groupby"], ["--resume"]):
+            shipped.unlink(missing_ok=True)
+            h.world(containers={})
+            ok(h.gpu("sirius", "--", *RUNNER, *extra))
+            assert shipped.read_bytes() == b"every query's answers", extra
+        shipped.write_bytes(b"a newer run's answers")
+        later = answers.stat().st_mtime + 60
+        os.utime(shipped, (later, later))
+        h.world(containers={})
+        ok(h.gpu("sirius", "--", *RUNNER, "--list", "q1,q6,aggregate-groupby"))
+        assert shipped.read_bytes() == b"a newer run's answers", "a newer database on the VM was replaced"
+
+
+def test_sirius_detached_is_judged_by_status_and_pulled():
+    with Host() as h:
+        sirius_prepared(h)
+        r = ok(h.gpu("sirius", "--detach", "--", *RUNNER))
+        assert "detached" in r.stdout, r.stdout
+        assert "-d" in sirius_runs(h)[0]
+        assert ok(h.gpu("status")).stdout.startswith("exited 0"), "status"
+        ok(h.gpu("pull"))
+        assert (h.laptop / ".cache/peacock/run-gpu/chain-l/sirius.log").is_file()
+
+
+def test_sirius_exits_as_the_runner_did():
+    with Host() as h:
+        sirius_prepared(h)
+        for code, want in [(0, 0), (1, 1), (2, 2), (139, 1)]:
+            h.world(run_code=code, containers={})
+            r = h.gpu("sirius", "--", *RUNNER)
+            assert r.returncode == want, (code, r.returncode, r.stderr)
+
+
+def test_sirius_before_prepare_is_refused():
+    with Host() as h:
+        h.world(driver=SIRIUS_DRIVER)
+        refused(h.gpu("sirius", "--", *RUNNER), 2, "prepare --sirius")
+        assert sirius_runs(h) == []
+
+
+def test_sirius_arguments_are_refused_before_any_call():
+    with Host() as h:
+        cases = [(RUNNER, "--"), (["--", "--sf", "40", "--queries", "q6"], "--dataset"),
+                 (["--", "--dataset", "tpch", "--queries", "q6"], "--sf"),
+                 (["--", *RUNNER, "--out", "/x"], "--out"), (["--", *RUNNER, "--data", "/x"], "--data"),
+                 (["--detach"], "--")]
+        for args, word in cases:
+            refused(h.gpu("sirius", *args), 2, word)
+        assert h.nebius_calls() == []
+
+
+# Moby's default profile as Docker 29.9 vendors it (github.com/moby/profiles seccomp/v0.2.4, commit
+# 245180c51918481c0525424b3ee025d2b435d46c), as the sha256 of its canonical JSON: sorted keys, no
+# spaces. The Sirius profile is that and one rule more.
+MOBY_DEFAULT_SHA256 = "20ef2b6bfd980e7dd56a971d9ec0d71bc0f2d1184415f2d968a19bbcff9ee2b2"
+SIRIUS_CALLS = ["io_uring_setup", "io_uring_enter", "io_uring_register", "mbind", "set_mempolicy", "get_mempolicy"]
+
+
+def test_the_sirius_profile_is_dockers_default_and_one_rule_for_six_calls():
+    import hashlib
+    profile = json.loads((REPO / "docker" / "sirius-seccomp.json").read_text())
+    assert "245180c51918481c0525424b3ee025d2b435d46c" in profile["comment"], profile["comment"]
+    assert "seccomp/default.json" in profile["comment"] and "moby/profiles" in profile["comment"]
+    *default_rules, added = profile["syscalls"]
+    assert added["names"] == SIRIUS_CALLS and added["action"] == "SCMP_ACT_ALLOW", added
+    assert set(added) == {"names", "action", "comment"}, "the rule holds no condition: no includes or excludes"
+    default = {k: v for k, v in profile.items() if k != "comment"}
+    default["syscalls"] = default_rules
+    canonical = json.dumps(default, sort_keys=True, separators=(",", ":")).encode()
+    assert hashlib.sha256(canonical).hexdigest() == MOBY_DEFAULT_SHA256, "not moby's default beside the rule"
 
 
 if __name__ == "__main__":

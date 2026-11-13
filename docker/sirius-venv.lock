@@ -1,0 +1,5 @@
+# The Sirius image's venv, whole, installed with --require-hashes --no-deps: the DuckDB the
+# extension was built for (pins.env SIRIUS_DUCKDB), and pyarrow for the runner's Arrow fetch, at the
+# build image's version (pins.env PYARROW_VERSION). Each hash is the cp313 manylinux x86_64 wheel.
+duckdb==1.5.6 --hash=sha256:644f54ce99b3b61844bc9a3fe80e0aecb1ea4084b1fffc4396d1569db6111679
+pyarrow==25.0.1 --hash=sha256:0befcf816e45a1af33ac775a9970b749e4868a230c7372f0ae5e932bee27039f

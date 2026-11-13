@@ -7,6 +7,11 @@
 
 use std::collections::BTreeSet;
 
+// A test target's child modules resolve against tests/ itself, and a file there would be
+// another target. The path keeps it under a directory named for this one.
+#[path = "test_cpu_corpus/sirius.rs"]
+mod sirius;
+
 use peacockdb_core::test_support::{
     AnswerVerdict, CaseStatus, CorpusDeclaration, DeviceCase, DuckdbOracle, MODES, RegistryEntry,
     assert_registry_matches_csv, authoritative_mode, cpu_case, device_cases_path,
@@ -852,6 +857,9 @@ fn row_problem(row: &DeviceCase, verdict: Option<AnswerVerdict>) -> Option<Strin
             row.note
         )),
         (_, Some(AnswerVerdict::Unanswered(said))) => Some(format!("{at}: {said}")),
+        (_, Some(AnswerVerdict::NoReference)) => {
+            Some(format!("{at}: DuckDB has no sf40 answer to hold it to"))
+        }
         (status, None) => unreachable!("{at}: a {status:?} row is always judged"),
     }
 }

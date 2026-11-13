@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 8269 test cases — Rust 6323, C++ 286, Python 1660.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes two sets run by hand: the external-embeddings sidecar recount and the 35 tests under `scripts/env/tests/` that need the images built. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 8379 test cases — Rust 6355, C++ 286, Python 1738.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes two sets run by hand: the external-embeddings sidecar recount and the 35 tests under `scripts/env/tests/` that need the images built. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -25,11 +25,11 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3732 cases: `--lib` 1212, `test_cpu_corpus` 2451, `test_corpus_goldens` 66, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3763 cases: `--lib` 1239, `test_cpu_corpus` 2455, `test_corpus_goldens` 66, `test_cost_model` 3
 
 *crate integration, external*
 
-| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs) | 2450 |
+| Corpus, cpu | [test_cpu_corpus](../peacockdb-core/tests/test_cpu_corpus.rs), [sirius](../peacockdb-core/tests/test_cpu_corpus/sirius.rs) | 2455 |
 |---|---|--:|
 
 one `corpus_query!` line per query declaring its cpu and gpu modes, its THREE oracles —
@@ -73,14 +73,19 @@ enabled device cell has its `gpu-result.txt` section and no other, and the commi
 `gpu-result.txt` carries cuDF 25.02's `cudf=` line — a dataset with no enabled device cell has
 no file, and neither guard asks for one
 
-Then the sf40 tier, 4 of the count. `every_sf40_device_answer_meets_duckdb` reads the H100's
+Then the sf40 tier, 8 of the count. `every_sf40_device_answer_meets_duckdb` reads the H100's
 `cases.csv` and holds each row's answer at sf40, `goldens/<ds>.sf40/gpu-result.txt` at
 `tp1-single`, to `duckdb-result.txt` beside it, under the sf1 registry row's `duckdb_oracle`. The
 cells' kinds are planned at sf1, so CI needs no sf40 data. An `ok` row must meet DuckDB. A `wrong`
 row must still differ, so a mark that outlived its fix fails. A `skipped` row is not judged. A row
 with no recorded answer, or whose DuckDB answer `failed:`, fails either way. A tree without its
 `cases.csv` fails naming the file; with neither, the case reads nothing. Three cases pin the list
-rule, a stale `wrong` mark, and an `ok` row with no answer
+rule, a stale `wrong` mark, and an `ok` row with no answer. `every_sf40_sirius_status_meets_its_answer`
+holds each timed row of every `<ds>.sf40/sirius.tsv` to its answer in `sirius-result.txt`, by the
+same rules: `ok` meets DuckDB, `wrong` differs, and `unverified` has no DuckDB sf40 answer. Under
+`UPDATE_CANONICAL=1` it sets those statuses and nothing else, so a row's note stays. A row with no
+Sirius answer fails either way. Three cases pin a `wrong` mark on an answer that meets, a `wrong`
+row's note kept by the rewrite, and a query DuckDB has no sf40 answer for
 
 Then the order tier, 202 of the count: one `device_order_<ds>_<q>` case per line with a device
 cell. It refuses the line if its answer depends on an order a device join does not keep. A hash
@@ -122,8 +127,8 @@ batch, one `batch_bytes` entry gone, or `prefill_us` deleted. Every
 committed tree reports a release build, every timed (query, mode) is enabled on a device in
 `corpus_cases.inc`, and the case list is, byte for byte, what the registry's enabled device cells
 for tpch and tpcds write. `testdata/benchmark-report.html` is, byte for byte, what the trees render
-through that reader, and each fused file's table through `fused_report_tables`; a page that is
-missing or stale fails, naming its first moved line and the command that rewrites it.
+through that reader, and each fused file's table through `fused_report_tables`, and so is
+`testdata/benchmarks.csv`; a page or CSV that is missing or stale fails, naming its first moved line and the command that rewrites it.
 Every case the list declares has its section, timed or a failure's record, in every device's tree
 that holds no `cases.csv`. A tree that holds one is held to its `ok` and `wrong` rows instead:
 `h200/` is held to `h200/cases.csv`, the list it was measured from. Those rows must be main-list
@@ -619,7 +624,7 @@ peak, provenance last; an `h200/` section reads with no batches and no `load_us`
 its load the loaders' totals; a tree with no loader loads `0`; a marker and a failed case's
 record are not timed; an unknown key beneath a node and a trailer key held twice are refused
 
-| Benchmark report page | [test_support::benchmark_report::tests](../peacockdb-core/src/test_support/benchmark_report/tests.rs) | 18 |
+| Benchmark report page | [test_support::benchmark_report::tests](../peacockdb-core/src/test_support/benchmark_report/tests.rs) | 28 |
 |---|---|--:|
 
 the page over temp trees: a timed section's load, execute, total and peak, the total linked to its
@@ -635,7 +640,15 @@ with no temp path in it; a later task's extra table under its heading; a file ho
 twice refused, naming both lines; a temp tree's name taken once per process, so parallel tests
 never share one; `section_href`'s line; a DuckDB tree a column of its own after the devices, last in each Modes
 table too, its time linked to its line, a time not warm saying its verdict, `failed` and `—`,
-and its version, threads, host and `SELECT 1` floor named in the intro, with what one time holds
+and its version, threads, host and `SELECT 1` floor named in the intro, with what one time holds.
+A `sirius.tsv` adds its group before DuckDB, its total alone, a failed row showing its reason, a
+`wrong` row its note as a device's does; the
+ratio line counts only rows `ok` on both sides; a dataset without the file has dashes and no line,
+and no file anywhere no group. The intro calls the device-side times PeacockDB's; a `sirius.tsv`
+adds a paragraph before DuckDB's: what Sirius's total is, the reads outside the pin, and each file's
+commit, DuckDB, libcudf, driver and device. `benchmarks.csv` holds every result in the page's order, takes the
+list's `skipped` over a failed section, and one status flip moves the page, the ratio and the CSV
+together
 
 | DuckDB results reader | [test_support::duckdb_results::tests](../peacockdb-core/src/test_support/duckdb_results/tests.rs) | 9 |
 |---|---|--:|
@@ -645,6 +658,17 @@ same literal): the shared fixture to a literal, the values
 `benchmarks/tests/test_duckdb_minimal.py` holds the script's output to; a working set it could not
 size reads as none; a short row, an unknown status, a failed row with a time, an `ok` row without
 one, a missing preamble, a column line out of order and a query listed twice refused, naming the line
+
+| Sirius results reader | [test_support::sirius_results::tests](../peacockdb-core/src/test_support/sirius_results/tests.rs) | 17 |
+|---|---|--:|
+
+`sirius.tsv`'s reader and Rust writer, each the other's inverse: the shared fixture
+`testdata/fixtures/sirius-results.tsv` read to a literal and written back; a `wrong` and an
+`unverified` row keep their times. Refused, naming the line: a missing preamble or one out of
+order, a wrong column line, six fields, a query listed twice, an `ok`, `wrong` or `unverified` row
+without a time, a `failed` or `skipped` row with one, and an unknown status. A timed row's status
+comes from its answer's verdict; `failed` and `skipped` keep theirs; a timed row whose answer is
+missing is refused, saying why
 
 | Benchmark prefill | [test_support::benchmark_prefill::tests](../peacockdb-core/src/test_support/benchmark_prefill/tests.rs) | 5 |
 |---|---|--:|
@@ -1239,7 +1263,7 @@ that crate is never staged: no peacockdb-core test reads the checkout beyond tes
 | Cost-report renderer (Rust) | glyphs, links and the anchors they resolve to, ratio bucket, regression gate, history, every tpch and tpcds registry query has DuckDB's figure, every micro-query PeacockDB's, by its hyphenated section; the PR comment under the body cap with no Features column and pbench as its summary line, while the html page and the `--widget-md` tables keep both. No comment row is wider than its header. The checked-in `testdata/report.html` has a Features header per dataset and a row per pbench query, so a page laid out from the comment's `--md` goes red | [bucket_threshold_is_1_4](../cost-report/src/main.rs), [regression_count_drives_exit_decision](../cost-report/src/main.rs), [every_refusal_names_a_ticket_that_exists](../cost-report/src/main.rs), [a_registry_row_with_a_quoted_oracle_parses](../cost-report/src/main.rs), [the_checked_in_report_keeps_features_and_every_pbench_row](../cost-report/src/main.rs) | cost-report | 49 |
 | DPhyp join enumeration (Rust) | the optimum against a brute-force DP over every split, on chains, stars, cliques, cycles and hypergraphs; the connected pairs it enumerates against the paper's closed forms; the pair budget, malformed input, and the C ABI's postfix tree | [dphyp_finds_the_brute_force_optimum_on_every_shape_up_to_six_relations](../peacockdb-dphyp/src/tests.rs), [each_connected_pair_is_enumerated_once_as_the_paper_counts](../peacockdb-dphyp/src/tests.rs) | cost-report | 6 |
 | DuckDB cost extraction (Python) | classifier / pruning / dynamic-filter logic — fails CI before generation | [scan_count_mismatch_fails_loud](../testdata/test_duckdb_cost.py), [compute_pruning_from_rowgroups](../testdata/test_duckdb_cost.py) | cost-report | 41 |
-| DuckDB result rendering (Python) | the only side that can get the result oracle's rendering wrong on its own: a timestamp must read as arrow-rs prints it (`…00.001`, not `isoformat()`'s `…00.001000`) or every row carrying one is a false divergence, and the over-cap fingerprint must be the text `test_golden_format.rs` pins, byte for byte, or the two writers compare nothing; a `no_sort` query's rows kept in DuckDB's order, read off a quoted registry cell. sf40's answers database renders byte for byte as the sf1 parquet does, a query with no table `failed: no answer recorded`, an empty database refused, the file written under `goldens/<ds>.sf40/`; `--answers` needs `--sf` other than 1 and one `--dataset`, refused before DuckDB is imported. An answer over the cap by its row count alone (sf40's 96M-row filter-project) fingerprinted in batches through an outside sort and never rendered, the streamed fingerprint byte for byte the in-memory one. The five that render need the duckdb wheel and `tpch.sf1`, and skip in CI, which has neither | [test_a_timestamp_renders_as_arrow_rs_prints_it](../testdata/test_duckdb_result.py), [test_both_writers_fingerprint_the_same_rows_the_same_way](../testdata/test_duckdb_result.py), [test_render_keeps_order_when_asked](../testdata/test_duckdb_result.py) | cost-report | 29 |
+| DuckDB result rendering (Python) | the only side that can get the result oracle's rendering wrong on its own: a timestamp must read as arrow-rs prints it (`…00.001`, not `isoformat()`'s `…00.001000`) or every row carrying one is a false divergence, and the over-cap fingerprint must be the text `test_golden_format.rs` pins, byte for byte, or the two writers compare nothing; a `no_sort` query's rows kept in DuckDB's order, read off a quoted registry cell. sf40's answers database renders byte for byte as the sf1 parquet does, a query with no table `failed: no answer recorded`, an empty database refused, the file written under `goldens/<ds>.sf40/`; `--answers` needs `--sf` other than 1 and one `--dataset`, refused before DuckDB is imported. An answer over the cap by its row count alone (sf40's 96M-row filter-project) fingerprinted in batches through an outside sort and never rendered, the streamed fingerprint byte for byte the in-memory one. `--out` writes Sirius's answers to the file it names and leaves `duckdb-result.txt` alone, and needs `--answers`. The six that render need the duckdb wheel and `tpch.sf1`, and skip in CI, which has neither | [test_a_timestamp_renders_as_arrow_rs_prints_it](../testdata/test_duckdb_result.py), [test_both_writers_fingerprint_the_same_rows_the_same_way](../testdata/test_duckdb_result.py), [test_render_keeps_order_when_asked](../testdata/test_duckdb_result.py) | cost-report | 30 |
 | Report widget (Python) | the registry read — a quoted oracle cell is one field, a registry older than `duckdb_oracle` or `stored` still renders, and the include fallback reads a line on the grammar — and the four columns after Query: Result stored (the registry's `stored`), DuckDB, cpu ↔ DataFusion and gpu ↔ cpu, each header's hover text saying what its comparison does. q2's stored and DuckDB cells divide into labelled halves, a one-word cell does not, a row with no line keeps four cells, and the fingerprint's text says what it compares. The widget's input flag is `--widget-md`; the old `--md` is refused before a page is written | [test_a_quoted_oracle_cell_is_one_field](../scripts/test_ticket_widget.py), [test_q2s_two_cells_split](../scripts/test_ticket_widget.py), [test_the_old_md_flag_is_refused_before_the_page_is_written](../scripts/test_ticket_widget.py) | cost-report | 11 |
 | Exec-model prototype (Python) | the scheduler over mock traits, plus pandas-backed operators checked against a single-shot oracle at five partitioning configs, both limit lowerings, the scalar expressions pinned to what `expr.cpp` does rather than what pandas defaults to, and every join mode against an oracle written from the SQL — the hash join and the nested loop at all nine types, each streaming its probe and answering a call as the device's join session does, a residual on every family, `null_equals_null` counted by hand, a guard that the prototype names every join type `join_session.cpp` dispatches on, the hash table's bytes a row held to the Rust, and a residual crossing where a conjunct reads both sides — no project code. Over the committed `tpch.minimal`: `LayoutInjector`'s own guarantees (each preset a different layout, an unshuffled join's lanes kept, empty batches really emitted, a seed that reproduces), and a stream fitting a budget the collected table does not. And the optimizer's half, still without data: the engine's plan goldens of all three datasets read back, lowered and built node for node — pbench's types, `GpuEmpty`, a scan of no column, a LIKE against a column, a cast between timestamp units, a month interval, whole days of one on a date, and a remainder among them — the layout each node declares, statistics, selectivity, row estimates and C_out, every other mode's joins among the one mode the cardinality golden holds, the per-call model (a semi join's keys taken distinct per probe call at the device width, that width's rule held to the Rust), dynamic-filter candidates — a key lifted into every branch of a union and through every join type, a join equating NULLs pruning nothing by a build holding one and an anti or mark join without the flag pruning as an inner join does, a build filtered only by the planner's null-key filter no candidate, nested builds and builds over a scan another filter prunes probed after them, a second pass's names after the first's — and the second pass over toy tables: a joined build its estimate overcounts still pruning, a build that misses replanning inside its probe, a probe whose build holds its whole cluster costing no more than the plan without it, a probe's refused miss, a probe whose root is hashed on four lanes keeping that hash through its replan, and a probe with no miss equal to its side run whole; join clusters assembled, a non-inner join with a residual among them, named — their ids kept through a reorder, a flip and a replan — read through the planner's null-key filter below a shuffle, which reassembly puts back on the sides `null_key_droppable` names (that table held to the Rust), where it tests only columns the shuffle hashes and the join keys on, on a side that drops NULL keys of a join not equating them, any other filter rooting a relation, tp1 and tp4 holding the same clusters over every plan golden, and disassembled, non-inner joins in them placed by their TES — every order the conflicts admit over three relations and a sample over four, with NULLs, NULL held equal or not and residuals sampled, answering as the plan does — and the four named non-inner queries' shapes reordered over toy tables, a left join's estimate no lower than its preserved side and an anti join's above 0, build side or probe, where the key domain is wider than both key counts, the adaptive loop — its build events, the replan they stop a run for, and the memory sources it feeds the builds back through — and DPhyp through its C ABI — the files that call it need a build, the crate's `.so` named by `PEACOCK_DPHYP_LIB`. The optimizer's report of a run over toy tables, each rule recorded where it fires and nothing where it does not — each relation's rows, how they are known, width and key NDVs, an aggregate's output column, a non-inner join's type on both trees — its `.optimizer.txt` rendering, and its `.optimizer.md` page: a cluster reordered, flipped and replanned as one table of the orders that changed it, a kept one as a line, a probe's part of a cluster, legends closed over the sources they name, both passes' filters by scan and build, and the anchors GitHub gives its headings. The report's names: a relation by its table, filter and aggregate, the planner's null-key filter no filter, a table the plan reads twice numbered, an aggregate's column kept through a memory source, a join tree with its build bracketed and its kind as SQL names it, a missed join in words. A clustered join's id in the `cpu.txt` render, the answer compare `run.py` holds an optimized run to, and `run.py`'s section merge, a page's preamble and headings, corpus order, mode table, checks before any work and a failing query's section, a report no renderer can write among them. The engine's cost function read from `cost_model.conf` — a hand-priced run, the total summed and rounded as the Rust does, lines split as Rust's `lines()`, a kind the conf lacks, a memory source free, and every committed `-mini.cost.txt` derived again from its `cpu.txt` — the optimized cost as the final run's, the probe plans' and the stopped runs', and `cost_report.html` from hand-built rows: its columns, a skipped and a failed run, the ratios, a ratio other than 1.00 linking to its query's section of the mode's page, relatively or at a commit, the rules a line per mode — the multi-joins reordered, the filters applied per pass, the replans, or that the plan changed — each linking to its lines of the mode's log, and "nothing changed the plan" only where no log says it did, the summary counted by totals rather than the shown ratio, a cost file priced under another conf refused naming it; those counts and lines read from a `.optimizer.txt` section and from what `report_text` writes, a call inside a probe's replan and a replan keeping its order among them, and the committed page rendered with pandas, pyarrow and numpy blocked. A cost that raises stops DPhyp's solve with its exception. A scan's columns read once per task, and the shuffle's digests pinned per dtype | [test_a_join_in_its_build_phase_holds_back_its_probe_subtree](../scripts/exec_model/tests/engine/test_scheduling.py), [test_every_join_type_matches_the_oracle](../scripts/exec_model/tests/operators/test_join_capability.py), [test_a_dphyp_call_records_its_input_the_sets_it_priced_its_tree_and_each_flip](../scripts/exec_model/tests/optimizer/test_report.py), [test_the_engine_s_cost_goldens_are_what_this_function_derives_from_their_cpu_runs](../scripts/exec_model/tests/plans/test_cost_model.py) | cost-report | 523 |
 | Exec-model statistics and estimates (Python) | the committed NDV sidecars counted again from the generated data by `gen_stats.py` and compared byte for byte, each column they list served by the reader, and every join's row estimate against the engine's own CPU run, one golden line per join. And `run.py` over two small tpch queries and a refused tpcds one, by two workers into a temp directory: each optimized answer the planned one, its three files per bench and the cost report, the engine's tree and join rows where no rule changed the plan, the optimized cost the planned one where nothing fired, and a filtered run of the query DPhyp is called for that leaves the other sections alone. And every tpch and tpcds golden plan at every mode ordered without a run (pbench has no sidecar): it builds, and no final aggregate at more than one lane meets its rows unhashed on its group keys. They ride dataset-matrix because that is where sf1 and its DuckDB are | [test_the_tpch_sidecar_is_what_gen_stats_counts_from_its_data](../scripts/exec_model/tests/optimizer/test_stats_sidecar.py), [test_tpcds_join_estimates_match_the_golden](../scripts/exec_model/tests/optimizer/test_cardinality_corpus.py), [test_run_corpus.py](../scripts/exec_model/tests/test_run_corpus.py), [test_ordered_corpus.py](../scripts/exec_model/tests/optimizer/test_ordered_corpus.py) | dataset-matrix (25.02 leg) | 10 |
@@ -1248,7 +1272,7 @@ that crate is never staged: no peacockdb-core test reads the checkout beyond tes
 | Exec-model per-call model, measured (Python) | the per-call model fitted from the sf40 calibration record orders each query's modes as the device did: at least fifteen pairs of modes whose measured times differ by more than 10 %, none the wrong way round — 25 of the record's 30 today. The record is not in git: the job fetches it from S3, and the test fails naming the fetch script when it is absent | [test_the_measured_record_orders_each_query_s_modes_as_they_were_measured](../scripts/exec_model/tests/optimizer/test_call_cost_measured.py) | manual — exec-model-corpus.yml, call-cost job | 1 |
 | Calibration scripts (Python) | the three capture readers and the plotter over a synthetic two-case Nsight export written by the test: two cases stay two row sets, each case is checked against its own dataset's plan golden, a join's build, probe and finish calls checked as the `CudfJoin` its recipe declares, a region's walk reading its own calls and not the rest of its thread, by index and never by a slice or an `islice`, and the reader walking every region that way, a golden's first section found, `hbm_bytes` lands on the right tuple, a call is the median of its executions, a capture of two datasets joins onto their two records, a case captured alone is refused under another case's name and parts merge into one file only when they cover the record, or that mode's calls of it under `--mode`, and a missing `--peak-bw` exits non-zero, a gap in the sampling after the case's last range accepted and one inside it refused, and a ten-row record draws the six panel directories and `index.html`, two datasets as two series in every pooled panel, a kind one dataset makes in that dataset's run-wide colour, an hbm file a row per execution draws the same per-call points as its fold, and a fold takes rows of both shapes each by its own. And the split a record is published by: a run of one dataset is its file byte for byte, two datasets are two files under one heading, a query is spelled as the benchmark macro spells it, and a run missing a declared case, timing an undeclared one, captured under Nsight or naming no device or two is refused naming why, with nothing written; each file lies under its device's slug, the harness's rule. And the fetch: a device's record from its own key into its own directory, the H200's pin, which names no device, as it was, and a name that is not a pin path refused before any fetch. A capture is refused unless every GPU it lists is the card the record's heading names, a record naming none being the H200's, and refused naming the table when it has no GPU table or lists no GPU. And the load breakdown: a load's copies split from its decompression and decode, pinned from pageable, with the reader thread's work counted as the load's; work after the load is not its own, a read or kernel reaching past it is clipped to it, and a launch where two loads are open is neither's, printed as ambiguous; the median over executions and the sum of a batched load's calls; OS reads preferred over kvikio's ranges; a load with no copies at zero rates; and a capture without kernel names, without a load, or with copies but no memory-kind enum refused, with nothing written; a copy's kind read off the export's own enum. And the device list's reader for scripts: the shared fixture reads to the values Rust reads, a note keeps its commas, the rows Rust refuses are refused, and the CLI prints the `ok` and `wrong` rows in file order, narrowed by `--dataset` and `--mode`, and exits 1 naming a refused line; the split reading a device list's `ok` and `wrong` rows as its cases. And a run's segments joined, every segment after one `--record` or each after its own: a case's rows from its highest attempt, by the number in its name and never by argument order, a joined record counting as attempt 0; the pool's free memory spanned as `<min>-<max>`; another device, a capture, an allocator that differs otherwise and two segments of one attempt refused, with nothing written. And the publish from dev, over a fake aws: each file under its sha256, read back, pinned in name order with the other pins kept and moved home; a republished name replaces its own line; a missing file or a bad name refused before any upload; a read-back that differs not pinned. And the query-batching page's generator, over a fixture tree: a batch is its fused section's own queries, and today's prefix of the device list's counted queries, the TPC-H micro queries out, is what it is held to. A section that is not that prefix (reordered, a query gained or lost, a marker either way) is named stale under its table, never refused. A missing fused section, and a batched query with no timed unfused section or no profile row, are refused, naming them. A batch the list does not exceed reads `same set as all`, and an out-of-memory batch its cap. A shared load's folded scans count a query's own repeats apart. A failed DuckDB or tp4_sized query is counted out as `(n/N)` and named, and a DuckDB time not warm named. DuckDB's `SELECT 1` floor is named, a file without it refused, and a ratio of its own takes it off each query. A failed profile's reason is the row when its loads file is missing, and a line under the table when both exist. The largest prefill names every section that ties. Its DuckDB reader reads the shared fixture as Rust does. The provenance lists every distinct value, and names each section whose cache was not on, was not prefilled, or fell back. `--check` fails a stale page. No project code, no device | [test_calls.py](../scripts/calibration/tests/test_calls.py), [test_hbm.py](../scripts/calibration/tests/test_hbm.py), [test_loads.py](../scripts/calibration/tests/test_loads.py), [test_plot.py](../scripts/calibration/tests/test_plot.py), [test_split.py](../scripts/calibration/tests/test_split.py), [test_fetch.py](../scripts/calibration/tests/test_fetch.py), [test_device_cases.py](../scripts/calibration/tests/test_device_cases.py), [test_join_records.py](../scripts/calibration/tests/test_join_records.py), [test_publish_record.py](../scripts/calibration/tests/test_publish_record.py), [test_batching_report.py](../scripts/calibration/tests/test_batching_report.py) | cost-report | 121 |
 | Nebius scripts (Python) | `nebius.sh` against fake nebius, ssh and ssh-keyscan: every exit code, and the host-key rule; `--instance-id`/`--profile`, the per-instance alias, and the soft stop on a CPU VM; `install-watch`'s one profile, its embedded key and the install file; the idle watcher's decision over a process snapshot and a clock, for both kinds, a fused benchmark run among the test processes, and the hourly checker's verdict over the watcher's last log line; `watch.sh` and the hourly workflow's three legs, each skipped with a notice rather than failed; that only an actor on `GPU_ALLOWED_ACTORS` reaches the host; `nebius-sync.sh`'s transport with the instance passed through, and no data generated with or without `--no-data`. No VM, no secret | [test_nebius.py](../scripts/nebius/tests/test_nebius.py), [test_idle_watch.py](../scripts/nebius/tests/test_idle_watch.py), [test_install_watch.py](../scripts/nebius/tests/test_install_watch.py), [test_watch.py](../scripts/nebius/tests/test_watch.py), [test_nebius_instances.py](../scripts/nebius/tests/test_nebius_instances.py), [test_idle_watch_kinds.py](../scripts/nebius/tests/test_idle_watch_kinds.py), [test_watch_workflow.py](../scripts/nebius/tests/test_watch_workflow.py) | cost-report | 153 |
-| Images (Python) | the images' committed inputs and the scripts that build and run them: `docker/pins.env` against the specs, the specs' hashes and the venv lock; `image.sh`'s build line, its tags, its `peacockdb.inputs` label holding every `docker/` file its Dockerfile reads and only the pins it declares, a pin left out only where another version's stage declares it, the same in every locale (failing, not skipping, where no locale sorts unlike C), and the pushes it refuses; the cmake wrapper's redirects to the prefetched rapids-cmake and flatbuffers; the DuckDB extension directory; the static-cudart guard; `images.yml` started by a dispatch alone, its five steps unconditional and of a fixed shape, building and pushing through `image.sh` with the job's own token and nothing else, a run image tested with `test_run_tests.py` on the image of the job's cuDF between the two, its disk gate run over fakes, and the reader it is parsed with refusing what it does not read. The embeddings cache over its pinned origins, with a fake curl: CI, GITHUB_ACTIONS and PEACOCK_NO_FETCH refusing before any call; nothing fetched that a full cache holds, and a missing query set fetched from its origin, resumed; through a symlink, the cache beside the link; an unzip killed midway leaving no GloVe text a re-run accepts; and the committed pin naming each artifact once. The calibration bucket's endpoint and region from `AWS_ENDPOINT_URL` and `AWS_REGION`, keeping the old storage when no endpoint is named and refusing an endpoint without a region. `bootstrap-vm.sh` over a fake docker and sudo: what it refuses before its first install, root among it; a `--ref` the clone is not on refused, naming both branches; one `apt-get update` before any install; the machine-wide data directory, `/var/lib/peacock` unless `PEACOCK_DATA_DIR` names another, before any download; and a whole run: no marker, `DISABLE_AUTOUPDATER=1` in `~/.bashrc` and no `CLAUDE_CONFIG_DIR`, no other script named; the image of the clone's inputs, by its inputs tag, and a clone older than that tag refused; an unpublished one exit 2 naming the `images.yml` dispatch; an image of other inputs or without the label refused before any run in it; the registry fetched with the clone read-only; sf1 chosen by generator inputs and generated once, offline; one cuDF checkout a commit, sparse, reused, the clone's own submodule never read, and a commit it cannot fetch refused; what it writes in the data directory group-writable; two runs at once generating once and fetching in turn. `provision-vm.sh` over a fake ssh and VM: the laptop's files and their modes, the developer's user, groups and keys, bootstrap on every run, the GPU key `--gpu-key` names copied to the VM and a missing key or `.pub` refused with no key made, the secrets on ssh's stdin alone, the PAT in no argv and not in the VM's env file, another key in `peacock.env` refused by name, an incomplete env file, a missing git identity and a token it cannot use refused, the env file kept with no CR and a final newline, `--env` naming the laptop's own file too, and its comments skipped, a `--ref` the VM's clone is not on refused, a rerun skipping what is done, without a terminal Claude's login named as a command that works rather than run, `--new-pat` on every VM it reaches, help printed without sed and a bash older than 4.4 refused. `fetch-sf40.sh` over a fake aws and buckets: the endpoint and region from the env file, the keys in no argv and in no environment but aws's, from a file or stdin, one missing refused; a second run fetching nothing; a short file refetched, a short download refused and not kept; a parquet the manifest does not name, a manifest naming a path, an unknown dataset refused; the aggregate in C order against its pin, a wrong one refused, an unpinned one printed; the pinned aws CLI installed when there is none, a zip of another sha refused. `install-duckdb.sh` over a fake curl: the pinned CLI installed, a zip of another sha or version refused with nothing installed, a failed download named, the pinned version skipped, another replaced, sudo where the prefix is not writable. `run-gpu.sh` over a fake `nebius.sh` and VM: every call through `nebius.sh`, with `--instance-id` and `--profile` as given, none without `--instance-id`, and never `start` or `stop`; its exit 64 as 2, and 69 and 75 passed on; a stale build or run image refused naming the file, `run` too, an unpublished one exit 2 naming the `images.yml` dispatch of its kind and another failed pull docker's exit, reading the label without a pull, and a VM without the run image refused as `prepare` first, an old driver as 3 naming both versions, admin-only counters as 4 after `update-initramfs`; the storage keys on stdin alone; `prepare --no-sf40` with no env file, no sf40 and none of Nsight's setup; the images of the tree's inputs, by their inputs tag, and those `PEACOCK_RUN_IMAGE` and `PEACOCK_BUILD_IMAGE` name pulled, checked and run in their place; CI's three calls against nebius-gpu's id, in `~/peacock/ci/` as container `peacock-ci`; the cuDF prefix copied once per image; the install shipped by `--dir`, the staged one by default, a missing one or one without `lib/` or `rust-tests/` refused; the committed testdata shipped, the datasets linked at their absolute paths and mounted at their own, sf40 only when the VM has it; four rsync streams at once, each with zstd, `--partial-dir` and `--checksum`, a failed one retried and resumed, one failing five times exit 1 naming it; symlinks and exec bits kept, a rebuilt file of the same size and second sent, a committed file a run changed restored; `run --detach` returning while the run goes on, and `status` as `none`, `running` with its log's tail, then `exited <code>` with the whole log kept; the run's hostname, filter, resume, case timeout, answer switch and the pinned cache's and scan reader's switches passed on when set, a run in progress refused, its exit as the run's; results, record, the device's answers and log pulled home; a binary staged in `rust-benchmarks/` run by name as the run image's entrypoint with run-tests.sh's environment and no mode word, a filter or `--exact`, judged as run-tests.sh judges (a failed exit, a segfault, no test run), an unstaged name refused on the VM and `--exact` beside a filter before any call. `check-build-image.sh` over the same fakes: the build image of the tree's inputs pulled, then its label read, on the VM, the one `PEACOCK_BUILD_IMAGE` names in its place, and the ref alone printed; one of other inputs or without a label refused; an unpublished one exit 2 naming the `images.yml` dispatch, and another failed pull docker's exit naming it too; none without `--instance-id`. `stage-install.sh` over a fake cargo: four gpu binaries and two release benchmarks, the fused prototype's with `gpu,test-support`, staged from empty and stripped, `--no-release-bench` building neither benchmark and leaving no `rust-benchmarks/`, a failed build named, another image's cuDF refused. `create_nsys_profile.sh --ssh`: every call and rsync through the given command, the two switches exported on the host, and the load breakdown written when the call breakdown refuses the capture; `--cases` a device list's `ok` and `wrong` rows as both passes' cases, the trace pass by name and narrowed by a filter, a missing list refused, and `--device` the records from the device's directory; `--mode` one mode of a two-mode list for both passes, with the merge held to that mode, refused without `--cases`, with `--fused`, or naming a mode the list does not know or no row carries. `--fused`: a capture per batch by `--exact`, in batch order, a batch's derived files beside its record, each batch joined against its own record with the captured run's rows elsewhere, the merge over the batches that joined, a failed capture or join listed in `failed.tsv` while the next batch runs, and a filter, `--cases` or `--device` beside it refused before any call. `bench-each.sh` over a fake `run-gpu.sh` and `nebius.sh`: one process per query in file order, at its mode's lines only and within a device list's `ok` and `wrong` rows; resume, the case timeout and the answer switch on every run, `--dir` to `run-gpu.sh` alone; a failed section kept on a rerun; the device learnt from the section a run kept, by the VM's host, when no pull changes the tree; each record set aside by attempt, the VM's removed; a record a killed run left set aside first; a killed case measured again and exit 1 until it is; a host it cannot reach stopping the run with that exit; bad input, and a run without `--instance-id`, refused before any call. `image-ref.sh` over a fake docker: the local image of the tree's inputs tag before the published one, the published one as its digest, and none, a label of other inputs (each named) or none, and the run image of a build-only version refused; `--ref` holding a given image to the same checks, a 25.02 one for 26.02 refused. `build-test.sh` over a fake docker and cargo: outside the image one `docker run` as the caller, the tree and a worktree's git dir at their own paths, the target dir per version and inside the tree, the forwarded variables and `--pass-env` names by name and never by value, `RUNNER_TEMP` mounted when set, a stale image, found or given, refused before any run, the container with `--init`, `-it` only on a terminal and not for a background job of it, named by tree, version and pid, killed on HUP, INT or TERM with exit 129, 130 or 143, a signal before the container exists included, and one a gone `build-test.sh` left refused, the removed flags each naming what replaced it; inside, `cpp/build` stamped with its version and one of another version or a host configure refused, the cpu build's C++ then every derived target and the CLI, `--rust-only` leaving `cpp/build` alone, `--gpu --build` as `stage-install.sh`, `--gpu --run` refused naming `run-gpu.sh`, every target run after a failure, a target with no test failed unless a filter excuses it, and a command's exit as the script's. With the images built: each image as a uid it does not know with no network, every library the staged binaries need resolving in the run image, and `run-tests.sh` over fake binaries, in the image `IMAGE` names | [test_image.py](../scripts/env/tests/test_image.py), [test_image_ref.py](../scripts/env/tests/test_image_ref.py), [test_build_test.py](../scripts/env/tests/test_build_test.py), [test_images_workflow.py](../scripts/env/tests/test_images_workflow.py), [test_embeddings.py](../scripts/env/tests/test_embeddings.py), [test_s3.py](../scripts/env/tests/test_s3.py), [test_bootstrap.py](../scripts/env/tests/test_bootstrap.py), [test_provision.py](../scripts/env/tests/test_provision.py), [test_fetch_sf40.py](../scripts/env/tests/test_fetch_sf40.py), [test_install_duckdb.py](../scripts/env/tests/test_install_duckdb.py), [test_run_gpu.py](../scripts/env/tests/test_run_gpu.py), [test_check_build_image.py](../scripts/env/tests/test_check_build_image.py), [test_stage_install.py](../scripts/env/tests/test_stage_install.py), [test_run_tests.py](../scripts/env/tests/test_run_tests.py), [test_bench_each.py](../scripts/env/tests/test_bench_each.py) | cost-report, four files on the runner; the 35 that need the images, by hand, and `test_run_tests.py` in `images.yml`'s run job | 336 |
+| Images (Python) | the images' committed inputs and the scripts that build and run them: `docker/pins.env` against the specs, the specs' hashes and the venv lock; `image.sh`'s build line, its tags, its `peacockdb.inputs` label holding every `docker/` file its Dockerfile reads and only the pins it declares, a pin left out only where another version's stage declares it, the same in every locale (failing, not skipping, where no locale sorts unlike C), and the pushes it refuses; the cmake wrapper's redirects to the prefetched rapids-cmake and flatbuffers; the DuckDB extension directory; the static-cudart guard; `images.yml` started by a dispatch alone, its five steps unconditional and of a fixed shape, building and pushing through `image.sh` with the job's own token, and the Sirius build also with the storage keys, a run image tested with `test_run_tests.py` on the image of the job's cuDF between the two, its disk gate run over fakes, and the reader it is parsed with refusing what it does not read. The embeddings cache over its pinned origins, with a fake curl: CI, GITHUB_ACTIONS and PEACOCK_NO_FETCH refusing before any call; nothing fetched that a full cache holds, and a missing query set fetched from its origin, resumed; through a symlink, the cache beside the link; an unzip killed midway leaving no GloVe text a re-run accepts; and the committed pin naming each artifact once. The calibration bucket's endpoint and region from `AWS_ENDPOINT_URL` and `AWS_REGION`, keeping the old storage when no endpoint is named and refusing an endpoint without a region. `bootstrap-vm.sh` over a fake docker and sudo: what it refuses before its first install, root among it; a `--ref` the clone is not on refused, naming both branches; one `apt-get update` before any install; the machine-wide data directory, `/var/lib/peacock` unless `PEACOCK_DATA_DIR` names another, before any download; and a whole run: no marker, `DISABLE_AUTOUPDATER=1` in `~/.bashrc` and no `CLAUDE_CONFIG_DIR`, no other script named; the image of the clone's inputs, by its inputs tag, and a clone older than that tag refused; an unpublished one exit 2 naming the `images.yml` dispatch; an image of other inputs or without the label refused before any run in it; the registry fetched with the clone read-only; sf1 chosen by generator inputs and generated once, offline; one cuDF checkout a commit, sparse, reused, the clone's own submodule never read, and a commit it cannot fetch refused; what it writes in the data directory group-writable; two runs at once generating once and fetching in turn. `provision-vm.sh` over a fake ssh and VM: the laptop's files and their modes, the developer's user, groups and keys, bootstrap on every run, the GPU key `--gpu-key` names copied to the VM and a missing key or `.pub` refused with no key made, the secrets on ssh's stdin alone, the PAT in no argv and not in the VM's env file, another key in `peacock.env` refused by name, an incomplete env file, a missing git identity and a token it cannot use refused, the env file kept with no CR and a final newline, `--env` naming the laptop's own file too, and its comments skipped, a `--ref` the VM's clone is not on refused, a rerun skipping what is done, without a terminal Claude's login named as a command that works rather than run, `--new-pat` on every VM it reaches, help printed without sed and a bash older than 4.4 refused. `fetch-sf40.sh` over a fake aws and buckets: the endpoint and region from the env file, the keys in no argv and in no environment but aws's, from a file or stdin, one missing refused; a second run fetching nothing; a short file refetched, a short download refused and not kept; a parquet the manifest does not name, a manifest naming a path, an unknown dataset refused; the aggregate in C order against its pin, a wrong one refused, an unpinned one printed; the pinned aws CLI installed when there is none, a zip of another sha refused. `install-duckdb.sh` over a fake curl: the pinned CLI installed, a zip of another sha or version refused with nothing installed, a failed download named, the pinned version skipped, another replaced, sudo where the prefix is not writable. `run-gpu.sh` over a fake `nebius.sh` and VM: every call through `nebius.sh`, with `--instance-id` and `--profile` as given, none without `--instance-id`, and never `start` or `stop`; its exit 64 as 2, and 69 and 75 passed on; a stale build or run image refused naming the file, `run` too, an unpublished one exit 2 naming the `images.yml` dispatch of its kind and another failed pull docker's exit, reading the label without a pull, and a VM without the run image refused as `prepare` first, an old driver as 3 naming both versions, admin-only counters as 4 after `update-initramfs`; the storage keys on stdin alone; `prepare --no-sf40` with no env file, no sf40 and none of Nsight's setup; the images of the tree's inputs, by their inputs tag, and those `PEACOCK_RUN_IMAGE` and `PEACOCK_BUILD_IMAGE` name pulled, checked and run in their place; CI's three calls against nebius-gpu's id, in `~/peacock/ci/` as container `peacock-ci`; the cuDF prefix copied once per image; the install shipped by `--dir`, the staged one by default, a missing one or one without `lib/` or `rust-tests/` refused; the committed testdata shipped, the datasets linked at their absolute paths and mounted at their own, sf40 only when the VM has it; four rsync streams at once, each with zstd, `--partial-dir` and `--checksum`, a failed one retried and resumed, one failing five times exit 1 naming it; symlinks and exec bits kept, a rebuilt file of the same size and second sent, a committed file a run changed restored; `run --detach` returning while the run goes on, and `status` as `none`, `running` with its log's tail, then `exited <code>` with the whole log kept; the run's hostname, filter, resume, case timeout, answer switch and the pinned cache's and scan reader's switches passed on when set, a run in progress refused, its exit as the run's; results, record, the device's answers and log pulled home; a binary staged in `rust-benchmarks/` run by name as the run image's entrypoint with run-tests.sh's environment and no mode word, a filter or `--exact`, judged as run-tests.sh judges (a failed exit, a segfault, no test run), an unstaged name refused on the VM and `--exact` beside a filter before any call. `check-build-image.sh` over the same fakes: the build image of the tree's inputs pulled, then its label read, on the VM, the one `PEACOCK_BUILD_IMAGE` names in its place, and the ref alone printed; one of other inputs or without a label refused; an unpublished one exit 2 naming the `images.yml` dispatch, and another failed pull docker's exit naming it too; none without `--instance-id`. `stage-install.sh` over a fake cargo: four gpu binaries and two release benchmarks, the fused prototype's with `gpu,test-support`, staged from empty and stripped, `--no-release-bench` building neither benchmark and leaving no `rust-benchmarks/`, a failed build named, another image's cuDF refused. `create_nsys_profile.sh --ssh`: every call and rsync through the given command, the two switches exported on the host, and the load breakdown written when the call breakdown refuses the capture; `--cases` a device list's `ok` and `wrong` rows as both passes' cases, the trace pass by name and narrowed by a filter, a missing list refused, and `--device` the records from the device's directory; `--mode` one mode of a two-mode list for both passes, with the merge held to that mode, refused without `--cases`, with `--fused`, or naming a mode the list does not know or no row carries. `--fused`: a capture per batch by `--exact`, in batch order, a batch's derived files beside its record, each batch joined against its own record with the captured run's rows elsewhere, the merge over the batches that joined, a failed capture or join listed in `failed.tsv` while the next batch runs, and a filter, `--cases` or `--device` beside it refused before any call. `bench-each.sh` over a fake `run-gpu.sh` and `nebius.sh`: one process per query in file order, at its mode's lines only and within a device list's `ok` and `wrong` rows; resume, the case timeout and the answer switch on every run, `--dir` to `run-gpu.sh` alone; a failed section kept on a rerun; the device learnt from the section a run kept, by the VM's host, when no pull changes the tree; each record set aside by attempt, the VM's removed; a record a killed run left set aside first; a killed case measured again and exit 1 until it is; a host it cannot reach stopping the run with that exit; bad input, and a run without `--instance-id`, refused before any call. `image-ref.sh` over a fake docker: the local image of the tree's inputs tag before the published one, the published one as its digest, and none, a label of other inputs (each named) or none, and the run image of a build-only version refused; `--ref` holding a given image to the same checks, a 25.02 one for 26.02 refused. `build-test.sh` over a fake docker and cargo: outside the image one `docker run` as the caller, the tree and a worktree's git dir at their own paths, the target dir per version and inside the tree, the forwarded variables and `--pass-env` names by name and never by value, `RUNNER_TEMP` mounted when set, a stale image, found or given, refused before any run, the container with `--init`, `-it` only on a terminal and not for a background job of it, named by tree, version and pid, killed on HUP, INT or TERM with exit 129, 130 or 143, a signal before the container exists included, and one a gone `build-test.sh` left refused, the removed flags each naming what replaced it; inside, `cpp/build` stamped with its version and one of another version or a host configure refused, the cpu build's C++ then every derived target and the CLI, `--rust-only` leaving `cpp/build` alone, `--gpu --build` as `stage-install.sh`, `--gpu --run` refused naming `run-gpu.sh`, every target run after a failure, a target with no test failed unless a filter excuses it, and a command's exit as the script's. The Sirius image (*Sirius on the H100*): built at 26.08 alone, and 26.08 for it alone; its label naming its files and pins; the storage keys as BuildKit secrets, from `peacock.env` for a local build, refused before docker when missing, given to its build alone, mounted in the fetch stage alone and in no argv, output, label or input; a fetch of another sha256 or size installing nothing; `images.yml` running its self-test; the mirror named by its content; Sirius's LICENSE at its commit committed, pinned by its sha256, checked by the build and installed beside the extension. `sirius-bench.py` over a fake DuckDB that writes a Sirius-shaped log: the self-test and each way it fails; every table pinned once, outside the timeout; ten runs and the second-smallest; the answer the `SELECT`'s Arrow result; an error, a hang and a crash each a `failed` row, the next query on a fresh worker that pins again; `--resume` keeping this commit's and host's rows alone; `--list` replacing a narrowed run's own rows and answer tables alone, in the list's order, a query's old answer dropped before it runs, and a file of another commit or host refused; a kept timed row whose answer the database lacks refused, and with no row kept the old answers removed; ten runs timed on a scripted clock; a row `ok` only where its own warm-up's log shows GPU execution with `GPU_SCAN` and no fallback, across an older run's log, a rotated file and a crash; the file parsing as the Rust fixture does. `run-gpu.sh prepare --sirius` and `sirius`: the image pulled and the profile shipped; a short disk stopping before the pull; an old driver, other inputs and `--no-sf40` refused; the runner in the Sirius image with no install; the results a resume keeps shipped, and the answers database for `--list` or `--resume`, a newer one on the VM kept; a detached run judged by `status` and pulled; a run before `prepare --sirius` refused; the profile Docker's default and one rule. `bench-sirius.sh` over a fake `run-gpu.sh`: run, pull and render per dataset, tpch first; each flag reaching the runner; `--query` by ident or stem, with the dataset's whole list as `--list`; a `skipped` list row run like any other; bad input refused and `--dry-run` calling nothing; a failed `run-gpu.sh` stopping the run with its exit. With the images built: each image as a uid it does not know with no network, every library the staged binaries need resolving in the run image, and `run-tests.sh` over fake binaries, in the image `IMAGE` names | [test_image.py](../scripts/env/tests/test_image.py), [test_image_ref.py](../scripts/env/tests/test_image_ref.py), [test_build_test.py](../scripts/env/tests/test_build_test.py), [test_images_workflow.py](../scripts/env/tests/test_images_workflow.py), [test_embeddings.py](../scripts/env/tests/test_embeddings.py), [test_s3.py](../scripts/env/tests/test_s3.py), [test_bootstrap.py](../scripts/env/tests/test_bootstrap.py), [test_provision.py](../scripts/env/tests/test_provision.py), [test_fetch_sf40.py](../scripts/env/tests/test_fetch_sf40.py), [test_install_duckdb.py](../scripts/env/tests/test_install_duckdb.py), [test_run_gpu.py](../scripts/env/tests/test_run_gpu.py), [test_check_build_image.py](../scripts/env/tests/test_check_build_image.py), [test_stage_install.py](../scripts/env/tests/test_stage_install.py), [test_run_tests.py](../scripts/env/tests/test_run_tests.py), [test_bench_each.py](../scripts/env/tests/test_bench_each.py), [test_sirius_bench.py](../scripts/env/tests/test_sirius_bench.py), [test_bench_sirius.py](../scripts/env/tests/test_bench_sirius.py) | cost-report, four files on the runner; the 35 that need the images, by hand, and `test_run_tests.py` in `images.yml`'s run job | 413 |
 | DuckDB benchmark script (Python) | `duckdb_minimal.sh` against the real DuckDB CLI 1.5.4 over the sf1 parquet: a device list's `ok` and `wrong` rows timed in file order, the `skipped` row not, saying once that nothing is verified; the answers one table per query, in DuckDB's row order, under the oracle's integer division; the results file's preamble (version, threads as DuckDB reports them, host, a one-word CPU, the `SELECT 1` floor in whole ms) and its columns, in the shared fixture's shape; tpcds's tables every parquet file; `--answers` without `--cases` or with `--skip-verify`, tpcds without a query set and a missing list refused with nothing written; `--build-only` checking the row counts and timing nothing; the default run's minimal set unchanged. Needs `duckdb` on PATH and the generated sf1 | [test_duckdb_minimal.py](../benchmarks/tests/test_duckdb_minimal.py) | dataset-matrix (25.02 leg) | 9 |
 | C++ CPU/FFI unit | decimal binop typing, AST routability, lifecycle, the row-range clamp rule over the same shared case table the Rust clamp reads, the two refusals of the test-only upload symbol, `peacock_handle_duplicate` refused with no plan loaded, a session indexing a node two parents hold once and several roots in order and refusing a plan that sets both `root` and `roots`, and the timing switch — its mode round-trips, the ABI refuses a mode it does not name and a null region buffer with a capacity, and a second harness NVTX push replaces the first rather than nesting; `TableResult::of`'s two refusals, Final and Single modes refused by name, and a `ColumnRef` resolved by index and name, and `MERGE_M2`'s count type — `INT32` before cuDF 25.06, `INT64` from it, and the type this build's headers pick. The pinned host file cache over a counting `malloc` allocator: a hit reuses the buffer; eviction is least recently used, never of a leased entry, also while another thread reads one; a second reader waits for a fill, and a failed fill wakes its waiters; concurrent fills stay under the capacity; a changed file is reloaded while a reader keeps the old bytes; short and interrupted reads are looped, a short read at EOF is a changed file; a scan that does not fit, a refused allocation and a capacity of 0 read every path, the fallback said once; the default capacity and the cgroup parse; the device classification; the prefill: idempotent, refusing before pinning anything with leases counted against its limit, reloading, evicting, and its `Io` and `Off` outcomes; and the process's cache: `PEACOCK_PINNED_HOST_CACHE_BYTES` a decimal count or refused by name, the environment over the session over the default, nothing pinned without a device or on an integrated one, and the line its first use says. The scan's reader switch, `PEACOCK_SCAN_READER`: unset or `chunked` is the chunked reader, `read_parquet` the whole-file call, any other value refused by name, and the variable read once per process; no GPU needed | [DecimalScale.BinopOutputType](../cpp/tests/cpu/test_executor.cpp), [AstRouting.CudfAstCanEvaluate](../cpp/tests/cpu/test_executor.cpp), [PinnedHostCache.ConcurrentReadAndEviction](../cpp/tests/cpu/test_pinned_host_cache.cpp), [ScanReader.TheSwitchIsReadOnce](../cpp/tests/cpu/test_scan_reader_switch.cpp) | dataset-matrix (`ctest -L cpu`) + shad-gpu | 67 |
 | cuDF GPU smoke (C++) | the GPU is alive; the RMM pool reserves the budget the binary declared; `peacock_device_info` names the device, gives the runtime's version, and refuses a null output; the pinned cache's allocator returns host-pinned memory, and a refused `cudaHostAlloc` leaves no CUDA error for cuDF's next read. The two hardcoded-comet partition-id cases are gone: they were a third copy of the lane rule, and the live gate proves the kernel against the production rule instead | [CudfGpu.SequenceSum](../cpp/tests/gpu/test_cudf.cpp), [RmmPool.ReservesTheDeclaredBudget](../cpp/tests/gpu/test_cudf.cpp), [PeacockGpu.DeviceInfoDescribesTheDevice](../cpp/tests/gpu/test_cudf.cpp), [PinnedHostCache.RefusedAllocationClearsTheCudaError](../cpp/tests/gpu/test_cudf.cpp) | shad-gpu | 5 |
@@ -1386,7 +1410,7 @@ sha256 matches local). Notes on the rows above:
 ## Golden files
 
 All goldens are committed, under `testdata/goldens/`: `tpch.sf1` (61 files), `tpcds.sf1`
-(117), `pbench.sf1` (18), `tpch.sf40` (16), plus `recipe-payloads.txt` at the top, the recipe
+(117), `pbench.sf1` (18), `tpch.sf40` (19), `tpcds.sf40` (3), plus `recipe-payloads.txt` at the top, the recipe
 payloads with a digest each. pbench's 18 are the five `.plans.txt`, the five `-mini.cpu.txt`, the
 five `-mini.cost.txt`, `mini.result.txt`, `duckdb-result.txt` and `gpu-result.txt`: `gen_duckdb_cost.sh`
 profiles tpch and tpcds only, so it has no per-query DuckDB cost oracle. Most of each sf1 count is the
@@ -1415,6 +1439,9 @@ The generator scripts live in `testdata/`.
 | `<bench>/<mode>.cpu.txt`, `<mode>.optimizer.txt`, `<mode>.plandiff.txt`, `<mode>.costs.txt` and `<mode>.optimizer.md`, in `scripts/exec_model/testdata/goldens/` | `scripts/exec_model/run.py`; with `--query` it rewrites only its own sections | the plan golden, the sf1 tables and sidecar, the whole optimizer, `cost_model.conf`, and pandas' byte counts. A `== <query>` section each: the optimized run in the `.cpu.txt` format plus each clustered join's `mj=`, what each rule did, the plan's diff, and both runs priced by the engine's cost function with the rules counted. The page has a `## <query>` section each, from the same report as `.optimizer.txt`: each cluster's successive orders and the dynamic filters. `.costs.txt` is not a function of the `.cpu.txt` beside it: it prices the planned run, the probe plans and the stopped runs too | nothing: generation only |
 | `cost_report.html`, in `scripts/exec_model/testdata/goldens/` | `run.py` at the end of every run, or `scripts/exec_model/cost_report.py` alone; committed with relative links | every `<bench>/<mode>.costs.txt` and `.optimizer.txt` beside it, the engine's `-mini.cost.txt` and the `<q>.duckdb_cost.txt` | the cost-report job renders it again with `--sha`, its links at the commit, and on master publishes it at `join-optimizer/` |
 | `benchmark-report.html` | `the_benchmark_report_matches_the_trees` in `test_corpus_goldens` with `UPDATE_CANONICAL=1`, published by rename | every device tree under `testdata/benchmark-results/` and its `cases.csv`, and its fused files; the registry's row order, which is the main list's | that test, byte for byte |
+| `benchmarks.csv` | the same test and run as `benchmark-report.html`, beside it | the same trees: every result the page holds but the fused batches, one row each (*The page*) | that test, byte for byte |
+| `benchmark-results/h100-80gb-hbm3/<ds>.sf40/sirius.tsv` | `bench-sirius.sh` on the H100 (*Sirius on the H100*); `every_sf40_sirius_status_meets_its_answer` with `UPDATE_CANONICAL=1` sets each timed row's status | the Sirius image, the sf40 parquet, the H100's `cases.csv` | that test, against the answers; `parse_sirius_results` refuses a malformed file |
+| `<ds>.sf40/sirius-result.txt` | `bench-sirius.sh`'s render at home: `duckdb_result.py --dataset <ds> --sf 40 --answers testdata/calibration/sirius/<ds>.sf40/answers.duckdb --out …`, in the build image | the Sirius runner's answers database, rendered by `duckdb-result.txt`'s rules | `every_sf40_sirius_status_meets_its_answer`, against `duckdb-result.txt` |
 | `peacockdb-core/tests/common/corpus_benchmark_cases.inc` (source, not testdata) | `the_benchmark_cases_follow_the_registry` in `test_corpus_goldens` with `UPDATE_CANONICAL=1`, published by rename | `testdata/cost-registry.csv`'s `gpu_*` columns, tpch and tpcds rows, timed at sf40 | that test, byte for byte |
 | `tpch.sf40/duckdb_<q>.csv`, `.count.csv` | `gen_duckdb_goldens.sh --sf 40`<br>on shad-gpu | sf40 parquet, query text from `tpch_query_sql.sh` | `peacock_tpch_tests` / `peacock_tpchv_tests` |
 
@@ -1677,6 +1704,13 @@ tpch.sf40, tpcds.sf40 on nebius-cpu128, as DuckDB databases (duckdb_minimal.sh -
               └── duckdb_result.py --sf 40 --answers <db>
                     └──► goldens/<dataset>.sf40/duckdb-result.txt
                           └── every_sf40_device_answer_meets_duckdb ↔ the H100's gpu-result.txt
+
+tpch.sf40, tpcds.sf40 on the H100, under the Sirius image (bench-sirius.sh over run-gpu.sh sirius)
+  ├──► benchmark-results/h100-80gb-hbm3/<dataset>.sf40/sirius.tsv   one worker per dataset
+  └──► calibration/sirius/<dataset>.sf40/answers.duckdb and log/   (gitignored)
+        └── duckdb_result.py --sf 40 --answers <db> --out
+              └──► goldens/<dataset>.sf40/sirius-result.txt
+                    └── every_sf40_sirius_status_meets_its_answer ↔ duckdb-result.txt sets sirius.tsv's statuses
 ```
 
 `<device>` is the card's slug, `h100-80gb-hbm3` for `NVIDIA H100 80GB HBM3`. The H200's two
@@ -1901,8 +1935,9 @@ cost-report ──► deploy-pages (master push only)          s3-datasets
 - **nebius-watch.yml** — hourly and on dispatch: the hourly checker, which hard-stops an
   unused Nebius VM, one matrix leg per VM (*Nebius host*). GitHub reads its schedule from master
   only.
-- **images.yml** — on dispatch only: builds and publishes the build and run images (*Images*).
-  A run image passes `test_run_tests.py` before its push. GitHub can dispatch it only once
+- **images.yml** — on dispatch only: builds and publishes the build, run and Sirius images
+  (*Images*). A run image passes `test_run_tests.py` before its push, and the Sirius image its
+  self-test. GitHub can dispatch it only once
   master holds it.
 - **cost-report** — the report crate and its inputs, and the cheap script tests, in the 25.02
   build image. The `./.github/actions/build-image` action frees the runner's disk, stopping short
@@ -2276,6 +2311,7 @@ same checks.
   image's `/opt/cudf` to `~/peacock/cudf-<v>/`, for Nsight on the VM itself.
   `prepare --no-sf40` is for the L40S list alone. It reads no env file and fetches no sf40. It
   skips Nsight's setup: no nsys, no counters, no `/opt/cudf` copy, so never exit 4.
+  `prepare --sirius` and `sirius [--detach] -- <runner args>` are Sirius's (*Sirius on the H100*).
 - `ship [--install <dir>]` sends the staged install (this tree's `cpp/install` by default) and the
   tree's committed testdata to `~/peacock/<i>/`, with the datasets linked in. sf40 is linked only
   when the VM has it. The install must hold `lib/` and `rust-tests/`. It goes as four rsync
@@ -2556,9 +2592,10 @@ nebius-gpu's boot disk is 96 GB in all, and two chains and CI share it.
 - Record what you removed in the task's detail file.
 
 On nebius-h100 and nebius-cpu128, run `df -h / /var/lib/peacock` before `prepare` or a fetch. sf40
-is about 56 GB, and the two images about 15 GB.
+is about 56 GB, the build and run images about 15 GB, and the Sirius image 2 GB.
 
-- nebius-h100's root is 174 GB. After `prepare` 81 GB is free.
+- nebius-h100's root is 174 GB. After `prepare --sirius` 60 GB is free (2026-11-10). That
+  includes an older Sirius tag, 2 GB, which can go when space is short.
 - nebius-cpu128's root is 213 GB. After sf40, the tpch database and the build image 89 GB is free.
 - A grown disk's root grew at the next boot on both. If `df -h /` still shows the old size, run
   `sudo growpart /dev/vda 1 && sudo resize2fs /dev/vda1`.
@@ -2713,12 +2750,15 @@ keeps its own scripts (*Remote hosts*, "shad-gpu").
 A build image and a run image per cuDF version, built from `docker/` and published on
 `ghcr.io/asymptote-tech/`. `<v>` is a version with a committed spec in `docker/conda/`: 25.02,
 25.10 or 26.02. 25.10 is for CI only: a build image and no run image. A version is build-only
-when `docker/pins.env` has no `DRIVER_MINIMUM_<v>`. Sizes are docker's, in GB of 10^9 bytes.
+when `docker/pins.env` has no `DRIVER_MINIMUM_<v>`. The Sirius image is a third kind, at 26.08
+alone, its extension's cuDF, which has no spec (*Sirius on the H100*). Sizes are docker's, in GB of
+10^9 bytes.
 
 | image | holds | size (25.02, 25.10, 26.02) |
 |---|---|---|
 | `peacockdb-build:cudf-<v>` | every build mode: rust-only, the FFI build, `--features gpu`, the staged binaries | 10.0 GB, 10.8 GB, 9.74 GB |
 | `peacockdb-run:cudf-<v>` | the runtime of the same cuDF and `run-tests.sh`; nothing to build with | 5.09 GB, none, 6.17 GB |
+| `peacockdb-sirius:cudf-26.08` | Sirius's prebuilt extension, Python DuckDB 1.5.6 and the runner `docker/sirius-bench.py` | 1.97 GB, at 26.08 |
 
 Each image carries three tags. `:cudf-<v>` is the latest published from master.
 `:cudf-<v>-in-<h>`, the inputs tag, names what it was built from: `<h>` is the first 12 hex digits
@@ -2727,7 +2767,7 @@ A tree finds the image of its own inputs by it: `image-ref.sh`, `build-test.sh`,
 `check-build-image.sh` and `bootstrap-vm.sh` all do, so none needs `:cudf-<v>` to have moved. `:cudf-<v>-<commit>` names the commit it was built
 from, 12 hex digits; the label `org.opencontainers.image.revision` holds the same commit.
 Pulling needs no login: `docker pull ghcr.io/asymptote-tech/peacockdb-run:cudf-25.02`.
-No image holds a secret, a host or Claude Code. Both run as any uid: pass
+No image holds a secret, a host or Claude Code. Each runs as any uid: pass
 `--user "$(id -u):$(id -g)"`. The default user is `peacock`, uid 1000, never root.
 
 #### The build image
@@ -2786,11 +2826,11 @@ The binaries and data are mounted, never in the image:
 
 #### Rebuilding and publishing
 
-- `scripts/env/image.sh build <build|run> <v>` builds from the working tree. `--dry-run` prints
+- `scripts/env/image.sh build <build|run|sirius> <v>` builds from the working tree. `--dry-run` prints
   the `docker build` line instead.
 - **The commit tag comes only from a clean tree**: `git status --porcelain` empty, untracked files
   included. A dirty build gets `:cudf-<v>` and the inputs tag, and the revision `<commit>-dirty`.
-- `scripts/env/image.sh push <build|run> <v>` pushes the inputs tag and the commit tag.
+- `scripts/env/image.sh push <build|run|sirius> <v>` pushes the inputs tag and the commit tag.
   `--moving` pushes `:cudf-<v>` too. It refuses unless HEAD's commit tag, the inputs tag and
   `:cudf-<v>` all exist locally and are one image. So: commit, build, push.
 - `image.sh build run <v>` and `push run <v>` refuse a build-only version, exit 2.
@@ -2799,11 +2839,12 @@ The binaries and data are mounted, never in the image:
   `gh auth token | docker login ghcr.io -u <github user> --password-stdin`. A package pushed for
   the first time can be private: check its visibility in its settings and set it public.
 - **From GitHub**, `.github/workflows/images.yml`:
-  `gh workflow run images.yml -f kind=<build|run|all> -f cudf=<v|all>`. GitHub can dispatch it
+  `gh workflow run images.yml -f kind=<build|run|sirius|all> -f cudf=<v|all>`. GitHub can dispatch it
   only once master holds it. A dispatch runs the workflow and the commit of the ref it names
   (`--ref`, master by default). Only a dispatch on master moves `:cudf-<v>`; one on another
   branch pushes the inputs and commit tags alone, so the chain's earlier trees keep their image.
-  One job per image, pushing with the job's own token. A build-only version gets no run job. If
+  One job per image, pushing with the job's own token. A build-only version gets no run job. The
+  Sirius job alone gets the storage keys, and runs the image's self-test before its push. If
   the job's push is denied, give this repository the Write role under the package's "Manage
   Actions access".
 - **A tree whose images were never published.** `run-gpu.sh prepare`, `check-build-image.sh` and
@@ -3225,8 +3266,8 @@ record instead (above).
 
 **The page**, `testdata/benchmark-report.html`, is committed. Per (dataset, sf), a main table at
 tp1_single: one row per query in the main list's order, four columns per device by name, every
-device but `MODES_ONLY` (h200, whose tree predates the pinned cache and the peak), then DuckDB; a
-query no such device has a cell for is left out. Below it, a collapsed `<details>` "Modes, <ds>
+device but `MODES_ONLY` (h200, whose tree predates the pinned cache and the peak), then Sirius, then
+DuckDB; a query no such device has a cell for is left out. Below it, a collapsed `<details>` "Modes, <ds>
 sf<sf>": one table per device with a section in the group, each measure (load, execute, total,
 peak) a column group with one sub-column per mode the device has, in `MODES` order, then DuckDB.
 A Modes table leaves out a query whose every cell is `—`, the peak group where no cell has a
@@ -3243,8 +3284,20 @@ device's `cases.csv` has a `skipped` row for the query, its note is shown instea
 row adds `wrong answer #NN`. Any other cell is `—`. After the devices, one column per DuckDB tree
 (below), `warm (ms)`: on every row of a query its file holds, `ms_2nd_min` with one decimal,
 linked to its line, or `failed`; else `—`. A time whose `warm` verdict is not `yes` adds
-`not warm: <verdict>`. The intro says what one DuckDB time is, a CLI process's wall time, and
-names each DuckDB file's `duckdb`, `threads`, `host` and floor (`floor_ms`). Last, one
+`not warm: <verdict>`. The intro says the device-side times, load plus execute, are PeacockDB's. It says what one DuckDB
+time is, a CLI process's wall time, and names each DuckDB file's `duckdb`, `threads`, `host` and
+floor (`floor_ms`). Before that, where some `sirius.tsv` exists, a paragraph says what one Sirius
+total is (*Sirius on the H100*, the protocol's step 3, from the pin of step 2), that on some rows
+Sirius's log counts reads outside the pin, likely bloom filters, inside the timed runs, and each
+file's `sirius`, `duckdb`, `libcudf`, `driver` and `device`. Before DuckDB, a
+device tree with a `<ds>.sf<sf>/sirius.tsv` adds the group `sirius · <device>` (*Sirius on the
+H100*): `load (ms)` and `execute (ms)` always `—`, and `total (ms)`, `ms_2nd_min` with one decimal,
+linked to its line. A `wrong` row adds `wrong answer` and its note, as a device's row does, an
+`unverified` row `unverified`; a `failed`
+or `skipped` row shows its reason as a device's does; a query with no row is `—`. A dataset with a
+`sirius.tsv` has one line between its heading and its table:
+`Σ total Sirius / Σ total DuckDB = <r> over <n> of <m> queries`, where `<n>` counts the rows `ok`
+on both sides and `<m>` the table's rows. The Modes and fused tables have no Sirius column. Last, one
 fused-batches table per `<device>/fused/<ds>.sf<sf>/tp1_single.fused.txt` (*Fused batches*,
 below), read through the fused format's own reader: per batch its queries (ten to a line),
 outcome, nonfused total load, fused load, nonfused total execute and fused execute (ms), the
@@ -3254,15 +3307,22 @@ device's `<ds>.sf<sf>/tp1_single.benchmark.txt`: `load_us` and `execute_us` summ
 table's `GpuLoadParquet` nodes across them. A cell's `\n` renders as `<br>`. An out-of-memory batch shows `out of memory (cap k)`, a marker `same set as
 all`. No fused file, no table. `render_benchmark_report` in `test_support` writes it through `parse_benchmark_section`
 and `parse_duckdb_results`, with no time and no absolute path, in `testdata/report.html`'s look.
+**`testdata/benchmarks.csv`** holds every result the page holds but the fused batches, one row
+each, under the header `dataset,sf,query,engine,device,mode,load_ms,exec_ms,total_ms,peak_gib,status`.
+`engine` is `peacockdb`, `sirius` or `duckdb`, and `device` the tree's directory. Every device and
+mode peacockdb has a section for is there, h200 included. Sirius's `mode` is `tp1_single`;
+DuckDB's is empty and its warm time is `total_ms`. Neither has `load_ms`, `exec_ms` or `peak_gib`.
+`status` is the page's, so a list's `skipped` stands over a failed section. A `failed` or `skipped`
+row has no times. Rows go by dataset, sf, the page's query order, engine, device, then mode.
 **A commit that changes a results tree, a fused file or the registry's device cells regenerates
-the page**, since the registry gives its row order:
+the page and the CSV**, since the registry gives their row order:
 
 ```
 UPDATE_CANONICAL=1 scripts/build-test.sh -- cargo test --features rust-only -p peacockdb-core \
     --test test_corpus_goldens -- the_benchmark_report_matches_the_trees
 ```
 
-The same test without the variable enforces it: a page that differs from the render fails. The reported execution is the
+The same test without the variable enforces it: a page or CSV that differs from the render fails. The reported execution is the
 second-smallest by `run_us` of ten, after one discarded warm-up: the fastest run is the one most
 likely to have caught a scheduling accident, and a whole run is reported rather than a per-node
 minimum, which would be a tree belonging to no execution. Both counts are constants in
@@ -3458,6 +3518,137 @@ oracle of the query's sf1 registry line. An `ok` row must meet DuckDB and a `wro
 differ; a `skipped` row is not judged. No registry line is written for sf40, so the two sections
 are compared by fingerprint whenever either holds one: at sf40 an answer passes the cap by scale,
 whatever the sf1 line declares. Near the cap DuckDB's longer floats can pass it alone.
+
+### Sirius on the H100
+
+SiriusDB (`github.com/sirius-db/sirius`) is a DuckDB extension that runs a query on the GPU with
+libcudf. It is timed on the H100 over the H100's list at sf40, beside peacockdb and DuckDB. Spec:
+`llm-wiki/tasks/sirius-bench.md`.
+
+**The image**, `peacockdb-sirius:cudf-26.08` (*Images*), is built from `docker/sirius.Dockerfile`
+by `image.sh build sirius 26.08` and published by `images.yml`, under the same tag rules as the
+others. It holds Sirius `stable`'s prebuilt extension (commit `8d17afe`: DuckDB 1.5.6, CUDA 13, and
+libcudf 26.08.01 linked statically), Python `duckdb==1.5.6` and pyarrow
+(`docker/sirius-venv.lock`), the config and the runner. It has no libcudf runtime and no conda. The
+driver must be 580.65.06 or later (`peacockdb.driver-minimum`).
+
+- The extension is Apache-2.0, and the image redistributes it. So Sirius's `LICENSE` at the pinned
+  commit is committed as `docker/sirius-LICENSE` and installed as `/opt/sirius/LICENSE`.
+  `SIRIUS_LICENSE_SHA256` in `docker/pins.env` pins it; the build checks it, and so do the
+  self-test and `test_image.py`.
+
+- Sirius replaces `stable`'s release asset whenever it promotes a commit. So the `.gz` is mirrored
+  in the calibration bucket, under its sha256. The bucket is private. `docker/pins.env` pins the
+  object, its size, its sha256 and the unpacked file's sha256.
+- The build fetches it with the storage keys as BuildKit secrets. `image.sh` takes
+  `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` from the environment, else from
+  `~/.config/peacock/peacock.env`. In `images.yml` they are the repository's `S3_*` secrets, given
+  to the Sirius job alone. Only the fetch stage mounts them (`docker/sirius-fetch.sh`), and the
+  image takes one file from that stage, so no layer, label or input holds them. A wrong size or
+  sha256 installs nothing.
+- Without a GPU the extension cannot load. So the self-test, `sirius-bench.py --self-test`, checks
+  the sha256, the `LICENSE`, the extension's footer (`v1.5.6 linux_amd64`), its library list and the config.
+  `images.yml` runs it before the push.
+
+**The config**, `docker/sirius-config.yaml`, read through `SIRIUS_CONFIG_FILE`, departs from
+Sirius's defaults in three settings. `scan_manager.cache.mode: sirius` and
+`eviction_threshold_fraction: 1.0` are what pinning needs. Quent telemetry is off. Sirius's memory
+is its own: its GPU pool and its pinned host cache, not peacockdb's.
+
+**The container** needs three things the run image's does not, each confirmed on the H100:
+
+- `docker/sirius-seccomp.json`: Docker's default profile (moby's `profiles` at `seccomp/v0.2.4`,
+  named in its `comment` key) plus one rule that allows `io_uring_setup`, `io_uring_enter`,
+  `io_uring_register`, `mbind`, `set_mempolicy` and `get_mempolicy`. Docker's default refuses the
+  io_uring calls, and then every scan fails. It allows the NUMA calls only with `SYS_NICE`.
+- `--ulimit memlock=-1:-1`. At the default 8 MiB Sirius drops to a slower path.
+- `--hostname`, the VM's. The runner writes it as `host=`, and `--resume` matches it.
+
+`run-gpu.sh` ships the profile on every `prepare` and passes all three.
+
+**The run** goes from the laptop, with the H100 started and stopped as for any H100 step:
+
+```
+H="--instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"
+scripts/env/run-gpu.sh $H prepare --sirius     # a fresh VM, or when sirius refuses its image
+scripts/env/bench-sirius.sh $H --dataset all
+```
+
+- `prepare --sirius` is `prepare` plus the Sirius image of the tree's inputs, with its label and
+  driver checked (exit 3 for an old driver). A VM without the image needs 14 GB free under
+  Docker's root before the pull. `--no-sf40` beside it is refused.
+- `run-gpu.sh … sirius [--detach] -- <runner args>` runs `docker/sirius-bench.py` in the Sirius
+  image, with no install. It ships `testdata/{tpch,tpcds}-queries/` and the H100's results tree,
+  keeping a newer `sirius.tsv` on the VM. For `--list` or `--resume` it also ships the dataset's
+  `calibration/sirius/<ds>.sf<sf>/answers.duckdb`, a newer one on the VM kept: `pull` brings the
+  VM's home over the laptop's, so it must hold the answers the run keeps. It gives the runner `--data` (the VM's sf40) and `--out`
+  (the shipped testdata). `status` and `pull` work as for `run`.
+- `bench-sirius.sh`, per dataset, tpch first: `run-gpu.sh … sirius`, then `pull`, then the answers
+  rendered at home into `goldens/<ds>.sf40/sirius-result.txt` by `duckdb_result.py --out`, in the
+  build image. Its flags: `--instance-id` and `--profile` (to every `run-gpu.sh` call),
+  `--dataset tpch|tpcds|all`, `--sf` (40), `--cases` (the H100's `cases.csv`), `--query <q>`
+  (repeatable, an ident or a stem; see below), `--runs` (10, `MEASURED_RUNS`), `--timeout` (900 s a query,
+  the pin excluded), `--resume`, `--dry-run` and `--help`. Bad input is exit 2 before any call. A
+  failed `run-gpu.sh` call stops the run with its exit, with no pull and no render.
+- A run `--query` narrows replaces only its own rows and answers. `bench-sirius.sh` gives the
+  runner the dataset's whole list as `--list`. The runner keeps the file's other rows as they are,
+  in the list's order, and the answers database's other tables. It drops a query's old table
+  before the query runs. A file of another `sirius` or `host` is refused, exit 2: run the whole
+  list, or remove the file. Each timed row a narrowed or resumed run keeps needs its table in the
+  database, or the run is refused the same way. That happens with no database, or another
+  worktree's: get the database home with `pull` from the run that wrote it, or run the whole
+  dataset. A narrowed run that keeps no row removes the database, as a whole run does. So the
+  render writes every timed row's answer, as after a whole run.
+- Then, at home: `UPDATE_CANONICAL=1 … every_sf40_sirius_status_meets_its_answer` (in
+  `test_cpu_corpus`) sets each timed row's status from its answer, and
+  `the_benchmark_report_matches_the_trees` regenerates the page and the CSV (*The page*).
+
+**The protocol** is peacockdb's. The queries are every row of the H100's `cases.csv` at sf40,
+`skipped` rows too, each named by its stem. One worker process per dataset:
+
+1. It loads the extension, sets `enable_duckdb_fallback = false` and the answers pass's two
+   settings (`duckdb_minimal.sh`'s), and makes a view per table over `read_parquet`. Under
+   `integer_division = true` DuckDB spells a plain `/` as `//`. tpcds q2 and q78 fail on
+   `round(x // y, 2)` in a projection, while a bare `//` runs (q59); whether the setting costs them
+   is unmeasured.
+2. It pins every table once, `CALL pin_table(…, tier = 'parquet')`: the raw parquet bytes go into
+   Sirius's pinned host cache. The pin is untimed and outside any timeout. It holds the column
+   chunks alone. Sirius's log counts cache misses on every run of 34 of the 84 timed sf40 rows
+   (listed in `tasks/sirius-bench-detail.md`), most in tpch q19 and q10: reads from disk
+   (`O_DIRECT`) inside the timed run. The likely cause is the bloom filters after the column
+   chunks, which the pin leaves out; the logs give counts, not bytes, and some queries with equality
+   or `IN` filters (tpch q5, q12) read none. Kept as measured; the cost is unmeasured.
+3. Per query: one warm-up, then `--runs` timed runs, each the wall time around the statement and
+   an Arrow fetch of its result. The second-smallest is reported. There is a total only: no load,
+   no execute and no peak.
+4. The last result is stored as table `"<stem>"` in
+   `testdata/calibration/sirius/<ds>.sf40/answers.duckdb`, through a plain DuckDB connection.
+
+An error is a `failed` row with its first line. A query past `--timeout`, or a worker that dies,
+is `failed`, and the next query gets a fresh worker, which pins again.
+
+**Per-query GPU evidence.** Fallback off is not proof: a statement Sirius declines runs on
+DuckDB's CPU with no error. So Sirius logs at info, its default, into
+`testdata/calibration/sirius/<ds>.sf40/log/`, which git ignores and `pull` brings home. The runner
+calls `sirius_set_query_label` before and after each warm-up, and reads the log between those two
+`QueryBegin` lines. The query is timed only when that part shows
+`Transparent GPU execution: executing query`, then `GPU_SCAN` in the plan, and no fallback line.
+Otherwise its row is `failed: not run on the GPU (<what the log showed>)`.
+
+**`sirius.tsv`**, `testdata/benchmark-results/h100-80gb-hbm3/<ds>.sf40/sirius.tsv`, is tab-separated:
+
+- a `# ` line of seven `key=value`s, in this order: `sirius duckdb libcudf cuda driver device host`.
+  A space in a value is written as `_`.
+- the column line `query ms_2nd_min runs_ms status note`.
+- a row per query. `runs_ms` is comma-joined, times have one decimal, and a missing value is `-`.
+  `status` is `ok`, `wrong`, `unverified` (timed, with no DuckDB sf40 answer to check it against),
+  `failed` or `skipped`. The first three have times and the last two none. `note` is the reason.
+
+`parse_sirius_results` and `write_sirius_results` in `test_support` are its reader and its Rust
+writer. Both are held to `testdata/fixtures/sirius-results.tsv`, and so is the runner. `--resume`
+keeps the file's rows only when its `sirius` and `host` are this run's. `--list` keeps the rows of
+the queries the run does not name, and refuses a file of another `sirius` or `host`. Without
+either, the file and the answers database are the run's alone.
 
 ### Fused batches — `prototype_fused_benchmarks` (by hand)
 
