@@ -405,3 +405,19 @@ fn nested(groups: &[Vec<Vec<u32>>]) -> String {
         .collect();
     format!("[{}]", partitions.join(","))
 }
+
+/// `[[a,b],[c]]` — the bracket style `partition_groups` renders in, so the two nestings a
+/// reader compares index for index also read alike. The execution golden and the benchmark
+/// tree both write their batch lists through it, so the two files agree token for token.
+pub(crate) fn lanes_of<T>(lanes: &[Vec<T>], of: impl Fn(&T) -> u64) -> String {
+    let rendered: Vec<String> = lanes
+        .iter()
+        .map(|lane| numbers(&lane.iter().map(&of).collect::<Vec<u64>>()))
+        .collect();
+    format!("[{}]", rendered.join(","))
+}
+
+pub(crate) fn numbers(values: &[u64]) -> String {
+    let rendered: Vec<String> = values.iter().map(u64::to_string).collect();
+    format!("[{}]", rendered.join(","))
+}

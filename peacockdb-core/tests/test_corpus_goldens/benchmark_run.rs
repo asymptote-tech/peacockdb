@@ -22,11 +22,14 @@ fn this_run() -> Provenance {
     }
 }
 
-/// A timed section's body as the harness writes one: a node, the trailer, the five.
+/// A timed section's body as the harness writes one: a node with its batches, the trailer's
+/// seventeen keys, the five last.
 fn timed(provenance: &Provenance, run_us: u64) -> String {
     format!(
-        "0.0 CudfScan\n  time_us=[[{run_us}]] total_us={run_us}\n--- run ---\n\
-         run_us={run_us}\ndevice_us={run_us}\nruns=[{}]\nbuild=release\nallocator=rmm-pool\n\
+        "GpuUnload\n  time_us=[[{run_us}]] total_us={run_us} batch_rows=[[1]] batch_bytes=[[8]]\n\
+         --- run ---\nrun_us={run_us}\ndevice_us={run_us}\nload_us=0\nexecute_us={run_us}\n\
+         peak_bytes=8\nruns=[{}]\nbuild=release\nallocator=rmm-pool\npinned_cache=off no-device\n\
+         prefill_files=0\nprefill_bytes=0\nprefill_us=0\n\
          device={}\ndriver={}\ncuda={}\ncudf={}\nhost={}\n",
         vec![run_us.to_string(); 10].join(","),
         provenance.device,
@@ -173,6 +176,50 @@ async fn test_partial_run_keeps_completed_cases() {
         "q1 is the interrupted run's"
     );
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Sections under this run's own five that lack what the harness writes now: an older binary's,
+/// with neither batches nor the load (as the H100's tree held for q1, q6 and q8), and one short of
+/// either half. A resumed run measures each again rather than keeping what the page and the
+/// checks would then refuse.
+#[tokio::test]
+async fn a_section_short_of_the_batches_or_the_load_is_measured_again() {
+    let run = this_run();
+    let now = timed(&run, 5);
+    let older_binary = format!(
+        "GpuUnload\n  time_us=[[5]] total_us=5\n--- run ---\nrun_us=5\ndevice_us=5\n\
+         runs=[{}]\nbuild=release\nallocator=rmm-pool\ndevice={}\ndriver={}\ncuda={}\n\
+         cudf={}\nhost={}\n",
+        vec!["5"; 10].join(","),
+        run.device,
+        run.driver,
+        run.cuda,
+        run.cudf,
+        run.host,
+    );
+    let no_batches = now.replacen(" batch_rows=[[1]] batch_bytes=[[8]]", "", 1);
+    let no_load = now.replacen("load_us=0\n", "", 1);
+    for (case, body) in [
+        ("older-binary", older_binary),
+        ("no-batches", no_batches),
+        ("no-load", no_load),
+    ] {
+        assert_ne!(body, now, "{case}: the mutation changed nothing");
+        let (root, path) = scratch_file(case);
+        let q1 = declared(&["q1"]);
+        into(&path, &q1, "q1", &run, Resume::No, measured(body)).await;
+        let outcome = into(
+            &path,
+            &q1,
+            "q1",
+            &run,
+            Resume::KeepMeasured,
+            measured(timed(&run, 9)),
+        );
+        assert_eq!(outcome.await, CaseOutcome::Measured, "{case} was kept");
+        assert_eq!(section(&path, "q1"), timed(&run, 9), "{case}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
 
 /// The record's rows go in before the section: the section is what a resumed run keeps, so a

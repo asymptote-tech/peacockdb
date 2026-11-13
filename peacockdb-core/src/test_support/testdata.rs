@@ -26,7 +26,7 @@ pub(crate) fn rewrite_source_file(rel: &str, text: &str) {
 
 /// `text` staged as `<path>.new` and renamed over `path`, so a reader sees the old file or the
 /// new one, never a part.
-fn rewrite(path: &Path, text: &str) {
+pub(crate) fn rewrite(path: &Path, text: &str) {
     let mut staged = path.as_os_str().to_owned();
     staged.push(".new");
     std::fs::write(&staged, text).unwrap_or_else(|e| panic!("staging {}: {e}", path.display()));

@@ -243,7 +243,7 @@ pub(crate) fn parse_run_section(body: &str) -> (String, Vec<RunNode<'_>>) {
 }
 
 /// `[[1,2],[3]]` — the bracket style every nested list in the format renders in.
-fn nested_numbers(text: &str) -> Vec<Vec<u64>> {
+pub(crate) fn nested_numbers(text: &str) -> Vec<Vec<u64>> {
     let inner = text
         .strip_prefix('[')
         .and_then(|text| text.strip_suffix(']'))
