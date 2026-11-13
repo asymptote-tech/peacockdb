@@ -1047,7 +1047,7 @@ field with no consumer reads as a knob (#132).
 
 | Node | What steers it | The cuDF it becomes |
 |---|---|---|
-| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `cudf::io::read_parquet(opts)`, with `set_row_groups(...)` and `set_columns(projected)` set on `opts` first. Columns are read by their declared names; `survivor_metadata` refuses at plan time a declared schema that renames or reorders a column the scan reads. `limit` is deprecated, its slot kept: a scan's limit is a `GpuLimit` above it or the unload's interval. Under `rows_only` it decodes nothing: it reads the counts of the call's row groups (all of them if the call names none) from the footer and builds `__rowmarker__` |
+| [`CudfScan`](../flatbuffers/gpu_plan.fbs) | `file_paths`, `projection`, `rows_only`, and the row groups — which every load supplies per call (`execute_scan_rowgroups`, how one node loads a batch at a time) rather than in the node, leaving `row_groups` and `batches[p]` read but unwritten; `batch_size` **is read by nobody** (#132) | [`scan.cpp`](../cpp/src/operators/scan.cpp) — `read_scan_table(opts)`, a one-chunk `cudf::io::chunked_parquet_reader` ([cuDF options](#cudf-options)), over the file's bytes in the process's pinned host cache when it holds them, else over the path, with `set_row_groups(...)` and `set_columns(projected)` set on `opts` first. Columns are read by their declared names; `survivor_metadata` refuses at plan time a declared schema that renames or reorders a column the scan reads. `limit` is deprecated, its slot kept: a scan's limit is a `GpuLimit` above it or the unload's interval. Under `rows_only` it decodes nothing: it reads the counts of the call's row groups (all of them if the call names none) from the footer and builds `__rowmarker__` |
 | [`CudfFilter`](../flatbuffers/gpu_plan.fbs) | `predicate`, `projection` | [`filter.cpp`](../cpp/src/operators/filter.cpp) — the mask from `cudf::compute_column(tv, predicate)`, or from `build_column` when the AST cannot take the predicate (LIKE, CASE, a scalar function), then `cudf::apply_boolean_mask(tv, mask->view())` |
 | [`CudfProject`](../flatbuffers/gpu_plan.fbs) | `exprs`, `aliases` | [`project.cpp`](../cpp/src/operators/project.cpp) — `cudf::compute_column(tv, ast)` per AST-able expr; a bare `ColumnRef` is the input's own column, shared, and what `cudf_ast_can_evaluate` refuses takes `build_column` instead — among others LIKE, CASE, a scalar function, a binary with a decimal operand or a string literal, and a decimal literal not directly under a cast to `Float64` or `Int64`. No expression at all is refused |
 | [`CudfAggregate`](../flatbuffers/gpu_plan.fbs) | `mode` (Partial or Merge; any other mode is refused, naming it), `group_exprs`, `aggr_funcs` (each with `args` and `state_names`; its `ddof` is read by nobody, since the finalize is a project), `grouping_sets`, `aggr_input_schema` | [`aggregate.cpp`](../cpp/src/operators/aggregate.cpp) — one request builder, `add_requests`, turns each function into cuDF requests over the columns its `args` name, once per node; `grouped_aggregate` runs `gb.aggregate(requests)` over `groupby{keys, null_policy::INCLUDE}`, and `grouping_set_aggregate` runs the same requests once per set. Every state column is named from `state_names`. With no group keys and no `stddev` or `var` it is `cudf::reduce` to one row; a keyless node holding one runs the groupby on one constant key, dropped after; handed no input — an init's done call — it aggregates a zero-row table of `aggr_input_schema`'s types |
@@ -1114,7 +1114,7 @@ other code is written against them, so changing one breaks a caller that never n
 Rust side's own traits — `Backend`, the executor families, `GpuNode` — are in
 [Execution](#traits) above, beside the reasons for their shape.
 
-The ABI is twenty-six symbols in six groups: lifecycle (`peacock_gpu_version`,
+The ABI is twenty-nine symbols in seven groups: lifecycle (`peacock_gpu_version`,
 `peacock_executor_create` / `_destroy`, `peacock_last_error`, `peacock_result_free`); the
 node-by-node session (`begin_plan`, `execute_node`, `handle_release`, `end_plan`); the per-call
 entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`, and
@@ -1122,7 +1122,9 @@ entry points (`execute_scan_rowgroups`, `slice_handle`, `result_from_handle`, an
 session (`peacock_join_build`, `_probe`, `_finish`, `_release`, below);
 instrumentation (`install_rmm_pool`, `set_node_timing`, `set_nvtx_ranges`, `nvtx_push_range`,
 `nvtx_pop_range`, `executor_collect_node_regions`, and `device_info`, the card's name and CUDA
-runtime a benchmark's provenance names); and two test hooks:
+runtime a benchmark's provenance names); the pinned host file cache, which is the process's and
+not an executor's (`set_pinned_host_cache_bytes`, how the session option `pinned_host_cache_bytes`
+reaches it; `pinned_host_cache_stats`; and `pinned_cache_prefill`); and two test hooks:
 `peacock_spark_partition_ids`, which runs the murmur3 kernel over one Arrow C-data batch so the
 Rust side can compare it against the production lane rule, and `peacock_handle_from_arrow`, which adopts one such
 batch into the live session as a handle so the operator harness can hand an executor a table it
@@ -1280,7 +1282,8 @@ copies together.
 handle registry, the multi-partition dispatch — scan-map emission, collapse, k-way merge,
 hash repartition, 1:1 map — the join-session map and its four entry points, and the timed
 regions, the NVTX domain and the harness range),
-`expr.cpp` (expression and AST building), `interval.cpp` (a date or timestamp ± an interval
+`expr.cpp` (expression and AST building), `pinned_host_cache.cpp` (the process's pinned
+host file cache: leases, eviction, reload on a changed file, the prefill, its size), `interval.cpp` (a date or timestamp ± an interval
 literal, the column path's one interval arm),
 `table_result.cpp` (the handle's five constructors), `column_refs.cpp` (`column_ordinal` and
 `column_at`),
@@ -1337,11 +1340,14 @@ whose corpus line names a result golden or an oracle.
 cuDF's defaults are not SQL's, and they are not DataFusion's. Every option below is a place
 where taking the default would produce a plausible wrong answer rather than an error, so each
 one is either set explicitly or carried in the flat buffers — and the ones carried in the flat buffers are carried
-precisely so cuDF cannot infer something the CPU side did not.
+precisely so cuDF cannot infer something the CPU side did not. Two rows are the exception: the parquet reader and
+the parquet source are set for speed, and every reader and source gives the same answer.
 
 | Option | Set at | Value | What the default would do |
 |---|---|---|---|
-| `parquet_reader_options` | [`scan.cpp`](../cpp/src/operators/scan.cpp) | `.columns(projected)`, `set_row_groups(map ∥ pruned)` | read every column and every row group; the row-group list is also how a partition reads only its own slice |
+| `parquet_reader_options` | [`scan.cpp`](../cpp/src/operators/scan.cpp), passed to `read_scan_table` | `.columns(projected)`, `set_row_groups(map ∥ pruned)` | read every column and every row group; the row-group list is also how a partition reads only its own slice |
+| the parquet reader | [`scan.cpp`](../cpp/src/operators/scan.cpp), `read_scan_table` | `chunked_parquet_reader` with `chunk_read_limit` 0 (`kScanChunkReadLimit`), which is one chunk per call. If several chunks come back, they are concatenated. `PEACOCK_SCAN_READER=read_parquet` switches to `cudf::io::read_parquet`, for a measurement. Unset or `chunked` is the default; any other value is refused by name. The variable is read once per process. `PEACOCK_LOG_SCAN_ROWS` prints `reader=` and `chunks=` | the same, on cuDF 25.02 and the H100: one chunk and `read_parquet` load sf40 `lineitem` within 0.2 % of each other, from the path or from pinned memory ([#232](archive/archived-tickets.md#t232)). It was chosen for a GB10 on 26.02, where `read_parquet` loaded q6 in 340 ms against about 60 ms. A limit above 0 splits the batch the plan already sized, and pays a concatenate. The answer is the same either way |
+| the parquet source | [`scan.cpp`](../cpp/src/operators/scan.cpp), [`pinned_host_cache.cpp`](../cpp/src/pinned_host_cache.cpp) | the file's bytes in the process's pinned host file cache when the scan's lease holds them, else the path. The cache keeps whole files, least recently used out, and reloads one whose size or mtime moved. Its size is the session option `pinned_host_cache_bytes`, under `PEACOCK_PINNED_HOST_CACHE_BYTES`; unset is `min(host RAM, the cgroup memory limit) × 3/4`; `0` is off. **The cache and its option are process-wide:** one cache per process, and the last value applied wins (the human's decision, 2026-11-03). Only the benchmark harness applies the option (`apply_pinned_host_cache`), so any other run gets the default or the environment's. `peacock_pinned_cache_prefill` pins named files whole, or refuses before pinning any when they exceed the limit; the benchmark prefills its cases' files once per process, so no measured round reads the disk | each load `pread`s the page cache into kvikio's pinned bounce buffers before every copy, most of a large load's time ([#149](archive/archived-tickets.md#t149)). **The cost:** up to the capacity is pinned until eviction or exit, never swappable. A lease, not timing, keeps a buffer alive: eviction may run during another query but never takes a leased entry. Off with no CUDA device (`off no-device`) or on an integrated one. The cgroup limit is read from the root cgroup files, so it is seen inside a container's namespace and not outside one (`--cgroupns=host`) |
 | `cudf::order`, `cudf::null_order` | [`sort.cpp`](../cpp/src/operators/sort.cpp), [`node_session.cpp`](../cpp/src/node_session.cpp) | per key from the flat buffers's `asc` / `nulls_first`, through `null_order_of` (`sort.cpp`), which both sites call: `BEFORE` when `nulls_first == asc`, since cuDF applies the null order before it flips a descending key | cuDF has no notion of the query's ORDER BY; the two sites must agree or a k-way merge would order differently from a sort |
 | `cudf::null_equality` | [`join_session.cpp`](../cpp/src/operators/join_session.cpp), [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) | `CudfJoin.null_equals_null`, for every type ([Joins](#joins)) | `EQUAL` — NULL keys match, inventing rows SQL excludes |
 | `cudf::out_of_bounds_policy` | [`join_session.cpp`](../cpp/src/operators/join_session.cpp), [`join_columns.cpp`](../cpp/src/operators/join_columns.cpp) | `NULLIFY` on the side that can be unmatched, `DONT_CHECK` otherwise | `DONT_CHECK` reads the `JoinNoneValue` sentinel (`INT32_MIN`) as an index and faults with `cudaErrorIllegalAddress` |
@@ -1355,7 +1361,7 @@ precisely so cuDF cannot infer something the CPU side did not.
 
 ### What the Rust side puts in the flat buffers
 
-Half of the table above is not a choice the C++ side makes — it reads a value the planner
+Several rows of the table above are not a choice the C++ side makes — it reads a value the planner
 already computed and the recipe writer wrote down. That is deliberate: an option carried in
 the flat buffers cannot be re-derived differently by the two engines, so anything where
 cuDF's own inference could drift from DataFusion's is serialized rather than inferred. The

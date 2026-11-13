@@ -14,6 +14,7 @@ mod errors;
 mod forwarder;
 #[cfg(not(feature = "rust-only"))]
 mod instrument;
+mod pinned_cache;
 mod row_range;
 
 mod cpu_backend;
@@ -34,7 +35,8 @@ mod tests;
 #[cfg(all(test, not(feature = "rust-only")))]
 mod ffi_tests;
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::path::PathBuf;
 
 use datafusion::arrow::array::RecordBatch;
 
@@ -905,6 +907,140 @@ pub(crate) fn device_info() -> Option<DeviceInfo> {
 #[cfg(not(feature = "rust-only"))]
 pub(crate) fn install_rmm_pool(bytes: u64) -> RmmPool {
     instrument::install_rmm_pool(bytes)
+}
+
+/// The session's `peacock.*` options, registered by `build_session_state`.
+/// `pinned_host_cache_bytes`: unset is the engine's default, `0` turns the cache off. The
+/// cache is the process's, so whichever session applied its option last sizes it for all.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PeacockOptions {
+    pub(crate) pinned_host_cache_bytes: Option<u64>,
+}
+
+// The cache's Rust side has one caller, the benchmark harness behind `test-support`, and a
+// rust-only build compiles only its pure half (`benchmark_prefill`), where the FFI wrappers
+// build nothing. Each attribute below leaves with a production caller.
+
+/// The process's pinned host file cache as the C++ side counts it. `Display` is one token
+/// run, the benchmark trailer's `pinned_cache=` value.
+#[cfg_attr(
+    any(not(feature = "test-support"), feature = "rust-only"),
+    allow(dead_code)
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct PinnedCache {
+    pub(crate) state: PinnedCacheState,
+    pub(crate) source: PinnedCacheSource,
+    pub(crate) capacity_bytes: u64,
+    /// Every pinned buffer still allocated, a stale copy a reader holds included.
+    pub(crate) resident_bytes: u64,
+    pub(crate) files: u64,
+    pub(crate) fills: u64,
+    pub(crate) fill_bytes: u64,
+    /// Host IO into pinned memory, the allocation included: apart from the device's load.
+    pub(crate) fill_us: u64,
+    /// Scans that read their path because the file did not fit or could not be pinned.
+    pub(crate) fallbacks: u64,
+    pub(crate) evictions: u64,
+    pub(crate) reloads: u64,
+}
+
+#[cfg_attr(
+    any(not(feature = "test-support"), feature = "rust-only"),
+    allow(dead_code)
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum PinnedCacheState {
+    On,
+    /// `pinned_host_cache_bytes` is 0.
+    #[default]
+    Off,
+    /// The device reads pageable memory itself (`pageableMemoryAccess`): pinning gains nothing.
+    Integrated,
+    /// No CUDA device, or the query for one failed.
+    NoDevice,
+}
+
+/// Where the capacity came from. The environment's `PEACOCK_PINNED_HOST_CACHE_BYTES` wins
+/// over a session, and a session over the default.
+#[cfg_attr(
+    any(not(feature = "test-support"), feature = "rust-only"),
+    allow(dead_code)
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum PinnedCacheSource {
+    #[default]
+    Default,
+    Session,
+    Env,
+}
+
+/// What one prefill read from disk (`files`, `bytes`, `us`; zero for a file already resident
+/// and unchanged), and the total it checked against the cache's limit.
+#[cfg_attr(
+    any(not(feature = "test-support"), feature = "rust-only"),
+    allow(dead_code)
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct PrefillStats {
+    pub(crate) files: u64,
+    pub(crate) bytes: u64,
+    pub(crate) us: u64,
+    pub(crate) needed: u64,
+    pub(crate) limit: u64,
+}
+
+/// Why a prefill did not make every file resident. `Display` is what the benchmark's refusal
+/// says after `prefill: `.
+#[cfg_attr(
+    any(not(feature = "test-support"), feature = "rust-only"),
+    allow(dead_code)
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PrefillError {
+    /// The files together exceed the limit; refused before anything was pinned.
+    DoesNotFit { needed: u64, limit: u64 },
+    /// This file could not be read or pinned; the files before it may be resident.
+    Io { path: PathBuf, error: String },
+    /// The cache is off, integrated or without a device.
+    Off,
+}
+
+/// Every file the trees' loads read, once each: what a prefill makes resident so that the
+/// trees read pinned bytes only. A load of no column is skipped, since the device answers it
+/// from the footer before any read.
+#[cfg_attr(
+    any(not(feature = "test-support"), feature = "rust-only"),
+    allow(dead_code)
+)]
+pub(crate) fn plan_files(roots: &[&dyn GpuNode]) -> BTreeSet<PathBuf> {
+    pinned_cache::plan_files(roots)
+}
+
+/// Size the process's pinned host cache from this session's option, and report the cache.
+#[cfg(not(feature = "rust-only"))]
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
+pub(crate) fn apply_pinned_host_cache(
+    config: &datafusion::execution::context::SessionConfig,
+) -> PinnedCache {
+    instrument::apply_pinned_host_cache(config)
+}
+
+#[cfg(not(feature = "rust-only"))]
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
+pub(crate) fn pinned_host_cache() -> PinnedCache {
+    instrument::pinned_host_cache()
+}
+
+/// Make every file resident in the process's cache, whole, from disk. `executor` only carries
+/// the C side's error text; the cache is not the executor's.
+#[cfg(not(feature = "rust-only"))]
+#[cfg_attr(not(feature = "test-support"), allow(dead_code))]
+pub(crate) fn prefill_on(
+    executor: *mut PeacockExecutor,
+    files: &[PathBuf],
+) -> Result<PrefillStats, PrefillError> {
+    instrument::prefill_on(executor, files)
 }
 
 /// Select the per-node timing mode (process-global, `Off` by default).

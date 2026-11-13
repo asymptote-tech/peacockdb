@@ -2,19 +2,26 @@
 
 #include "peacock/operators.h"
 #include "peacock/expr.h"
+#include "peacock/pinned_host_cache.h"
 
 #include <cudf/column/column_factories.hpp>
 #include <cudf/io/parquet.hpp>
 #include <cudf/io/parquet_metadata.hpp>
 #include <cudf/concatenate.hpp>
 #include <cudf/table/table.hpp>
+#include <cudf/table/table_view.hpp>
 #include <cudf/scalar/scalar.hpp>
 #include <cudf/unary.hpp>
 #include <cudf/utilities/default_stream.hpp>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace peacock {
 
@@ -34,6 +41,33 @@ static TableResult rows_of(std::vector<std::string> const& paths,
   std::vector<std::unique_ptr<cudf::column>> cols;
   cols.push_back(cudf::make_column_from_scalar(zero, static_cast<cudf::size_type>(rows)));
   return TableResult::owning(std::make_unique<cudf::table>(std::move(cols)), {"__rowmarker__"});
+}
+
+ScanReader parse_scan_reader(const char* value) {
+  if (value == nullptr || std::string_view(value) == "chunked") return ScanReader::Chunked;
+  if (std::string_view(value) == "read_parquet") return ScanReader::ReadParquet;
+  throw std::runtime_error("PEACOCK_SCAN_READER=\"" + std::string(value) +
+                           "\" names no reader: chunked or read_parquet");
+}
+
+ScanReader scan_reader() {
+  static const ScanReader reader = parse_scan_reader(std::getenv("PEACOCK_SCAN_READER"));
+  return reader;
+}
+
+ScanRead read_scan_table(cudf::io::parquet_reader_options const& opts, ScanReader reader,
+                         std::size_t chunk_read_limit) {
+  if (reader == ScanReader::ReadParquet) return {cudf::io::read_parquet(opts), 1};
+  // has_next() is true once even for an empty read, so at least one chunk comes back.
+  cudf::io::chunked_parquet_reader chunked(chunk_read_limit, opts);
+  std::vector<cudf::io::table_with_metadata> chunks;
+  while (chunked.has_next()) chunks.push_back(chunked.read_chunk());
+  if (chunks.size() == 1) return {std::move(chunks.front()), 1};
+  std::vector<cudf::table_view> views;
+  views.reserve(chunks.size());
+  for (auto const& chunk : chunks) views.push_back(chunk.tbl->view());
+  auto whole = cudf::concatenate(views);
+  return {{std::move(whole), std::move(chunks.front().metadata)}, chunks.size()};
 }
 
 TableResult execute_scan(const fb::CudfScan* scan,
@@ -89,22 +123,32 @@ TableResult execute_scan(const fb::CudfScan* scan,
     projected_names = all_names;
   }
 
-  auto opts = cudf::io::parquet_reader_options::builder(cudf::io::source_info{paths})
-                  .columns(projected_names)
-                  .build();
+  // Every file pinned, or none and the paths: a scan never mixes sources. The lease outlives
+  // the read, whose copies from the spans have synced by the time it returns.
+  const auto lease = pinned_host_cache().acquire(paths);
+  std::vector<cudf::host_span<std::byte const>> spans;
+  for (auto const& span : lease.spans()) spans.emplace_back(span.data(), span.size());
+  auto source =
+      lease.cached()
+          ? cudf::io::source_info(cudf::host_span<cudf::host_span<std::byte const>>(spans))
+          : cudf::io::source_info{paths};
+  auto opts = cudf::io::parquet_reader_options::builder(source).columns(projected_names).build();
   if (!rgs.empty()) {
     opts.set_row_groups({rgs});
   }
 
-  auto result = cudf::io::read_parquet(opts);
+  const auto reader = scan_reader();
+  auto [result, chunks] = read_scan_table(opts, reader);
 
   // Optional diagnostic (PEACOCK_LOG_SCAN_ROWS=1): rows actually decoded and
   // whether row-group pruning applied — evidence that a clustered-predicate scan
   // reads only surviving groups (q6 lineitem -> 983040, not 6001215).
   if (std::getenv("PEACOCK_LOG_SCAN_ROWS")) {
-    std::fprintf(stderr, "[PEACOCK_SCAN] %s rows=%ld row_groups=%s(%zu)\n",
+    std::fprintf(stderr,
+                 "[PEACOCK_SCAN] %s rows=%ld row_groups=%s(%zu) source=%s reader=%s chunks=%zu\n",
                  paths.empty() ? "?" : paths[0].c_str(), static_cast<long>(result.tbl->num_rows()),
-                 rgs.empty() ? "all" : "pruned", rgs.size());
+                 rgs.empty() ? "all" : "pruned", rgs.size(), lease.cached() ? "pinned" : "path",
+                 reader == ScanReader::Chunked ? "chunked" : "read_parquet", chunks);
   }
 
   // Use column names from the reader metadata.

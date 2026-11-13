@@ -75,6 +75,55 @@ pub mod raw {
         pub device_us: u64,
     }
 
+    /// What the process's pinned host file cache is and has done. Mirrors
+    /// `PeacockPinnedCacheStats` in `cpp/include/peacock_gpu.h`.
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    pub struct PeacockPinnedCacheStats {
+        /// One of `PEACOCK_PINNED_CACHE_ON`, `_OFF`, `_INTEGRATED`, `_NO_DEVICE`.
+        pub state: i32,
+        /// One of `PEACOCK_PINNED_CACHE_FROM_DEFAULT`, `_SESSION`, `_ENV`.
+        pub source: i32,
+        pub capacity_bytes: u64,
+        pub resident_bytes: u64,
+        pub files: u64,
+        pub fills: u64,
+        pub fill_bytes: u64,
+        pub fill_us: u64,
+        pub fallbacks: u64,
+        pub evictions: u64,
+        pub reloads: u64,
+    }
+
+    pub const PEACOCK_PINNED_CACHE_ON: i32 = 0;
+    pub const PEACOCK_PINNED_CACHE_OFF: i32 = 1;
+    pub const PEACOCK_PINNED_CACHE_INTEGRATED: i32 = 2;
+    pub const PEACOCK_PINNED_CACHE_NO_DEVICE: i32 = 3;
+    pub const PEACOCK_PINNED_CACHE_FROM_DEFAULT: i32 = 0;
+    pub const PEACOCK_PINNED_CACHE_FROM_SESSION: i32 = 1;
+    pub const PEACOCK_PINNED_CACHE_FROM_ENV: i32 = 2;
+    /// Asks [`peacock_set_pinned_host_cache_bytes`] for the engine's default capacity.
+    pub const PEACOCK_PINNED_CACHE_DEFAULT_BYTES: u64 = u64::MAX;
+
+    /// What one [`peacock_pinned_cache_prefill`] read, and the total it checked against
+    /// the limit. Mirrors `peacock_prefill_stats_t` in `cpp/include/peacock_gpu.h`.
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    pub struct PeacockPrefillStats {
+        /// Files read from disk; on `PEACOCK_PREFILL_IO`, the index of the failed path.
+        pub files: u64,
+        pub bytes: u64,
+        pub us: u64,
+        pub needed: u64,
+        pub limit: u64,
+    }
+
+    pub const PEACOCK_PREFILL_OK: i32 = 0;
+    pub const PEACOCK_PREFILL_DOES_NOT_FIT: i32 = 1;
+    pub const PEACOCK_PREFILL_IO: i32 = 2;
+    pub const PEACOCK_PREFILL_OFF: i32 = 3;
+    pub const PEACOCK_PREFILL_BAD_ARGUMENT: i32 = -1;
+
     /// The default, and the only mode a shipping query runs in.
     pub const PEACOCK_NODE_TIMING_OFF: i32 = 0;
     /// CUDA events around the device work and the host clock around the whole call, with
@@ -119,6 +168,33 @@ pub mod raw {
         /// resource. The caller decides whether that is fatal, and for anything being
         /// timed it is.
         pub fn peacock_install_rmm_pool(bytes: u64, out_info: *mut PeacockRmmPoolInfo) -> i32;
+
+        /// Size the process's pinned host file cache: `bytes`, or the engine's default for
+        /// [`PEACOCK_PINNED_CACHE_DEFAULT_BYTES`]. Process-wide, so the last set wins;
+        /// shrinking evicts unleased files at once. `PEACOCK_PINNED_HOST_CACHE_BYTES` wins
+        /// over every set. Fills `out` with the cache after the set. Returns 0; non-zero for
+        /// a null `out`, and -1 when that variable is not a byte count (said on stderr).
+        pub fn peacock_set_pinned_host_cache_bytes(
+            bytes: u64,
+            out: *mut PeacockPinnedCacheStats,
+        ) -> i32;
+
+        /// The cache's state and counters, with the same returns as the set.
+        pub fn peacock_pinned_host_cache_stats(out: *mut PeacockPinnedCacheStats) -> i32;
+
+        /// Make every named file resident in the process's cache, whole, from disk. A file
+        /// resident and unchanged costs nothing, so a repeat reads nothing. Refuses before
+        /// pinning anything when the total exceeds the limit (`PEACOCK_PREFILL_DOES_NOT_FIT`,
+        /// `needed` and `limit` set). The executor only carries the error text: on
+        /// `PEACOCK_PREFILL_IO`, `out.files` indexes the failed path and
+        /// [`peacock_last_error`] reads `<path>: <reason>`. A null executor or `out`, or null
+        /// `paths` with `n_paths > 0`, is `PEACOCK_PREFILL_BAD_ARGUMENT`.
+        pub fn peacock_pinned_cache_prefill(
+            executor: *mut PeacockExecutor,
+            paths: *const *const c_char,
+            n_paths: usize,
+            out: *mut PeacockPrefillStats,
+        ) -> i32;
 
         /// Select the per-node timing mode (process-global; [`PEACOCK_NODE_TIMING_OFF`]
         /// by default). Opt-in because the events mode is not free: it allocates a CUDA

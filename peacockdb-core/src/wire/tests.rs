@@ -796,6 +796,7 @@ fn filter_over_scan(predicate: impl FnOnce(Expr) -> Expr) -> GpuFilter {
             index: 0,
             rows: 10,
             bytes: 100,
+            compressed_bytes: 0,
         }],
         can_be_null: vec![false],
     };

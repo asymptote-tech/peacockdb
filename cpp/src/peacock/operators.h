@@ -7,9 +7,12 @@
 #include "peacock/plan_types.h"
 #include "plan_executor.h"
 
+#include <cudf/io/parquet.hpp>
+#include <cudf/io/types.hpp>
 #include <cudf/types.hpp>
 #include <cudf/utilities/span.hpp>
 
+#include <cstddef>
 #include <vector>
 
 namespace peacock {
@@ -35,6 +38,25 @@ struct NodeInputs {
 // per-batch loader supplies one; EMPTY means "no override".
 TableResult execute_scan(const fb::CudfScan* scan,
                          cudf::host_span<const uint32_t> row_groups_override = {});
+
+// The scan's parquet reader (#232). PEACOCK_SCAN_READER switches it for a measurement:
+// unset or "chunked" is the one-chunk chunked reader, "read_parquet" the whole-file call.
+enum class ScanReader { Chunked, ReadParquet };
+// 0 = cuDF's "no limit": the call's row groups come back as one chunk. The read limit is the
+// plan's batch, which the loader already sized; a second size here is what #232 warns against.
+inline constexpr std::size_t kScanChunkReadLimit = 0;
+// A null value is the variable unset; anything but the two names throws, naming the value.
+ScanReader parse_scan_reader(const char* value);
+// PEACOCK_SCAN_READER, read at the first call of the process.
+ScanReader scan_reader();
+
+struct ScanRead {
+  cudf::io::table_with_metadata table;
+  std::size_t chunks;  // read_parquet's is 1
+};
+// Several chunks are concatenated, with the first chunk's metadata.
+ScanRead read_scan_table(cudf::io::parquet_reader_options const& opts, ScanReader reader,
+                         std::size_t chunk_read_limit = kScanChunkReadLimit);
 TableResult execute_filter(const fb::CudfFilter* filter, NodeInputs* in);
 TableResult execute_project(const fb::CudfProject* proj, NodeInputs* in);
 TableResult execute_aggregate(const fb::CudfAggregate* agg, NodeInputs* in);

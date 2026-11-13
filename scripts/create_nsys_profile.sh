@@ -31,11 +31,13 @@
 #       --ssh 'scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu rsh' \
 #       --remote-dir /home/dmitry/peacock/<dir> --remote-cudf-root /home/dmitry/peacock/cudf-25.02
 # The HBM defaults below are an H200's; another card overrides PCK_BENCH_HBM_SET and
-# PCK_BENCH_HBM_PEAK_BW, and nsys and python3 must be on that host's PATH.
+# PCK_BENCH_HBM_PEAK_BW (the H100 80GB HBM3: gh100 and 3.35e12), and nsys and python3 must be
+# on that host's PATH.
 #
 # WRITES (under testdata/calibration/)
 #   capture.sqlite           the trace capture's export
 #   calls.tsv                what one ABI call splits into, derived from it
+#   loads.tsv                where each parquet load's time goes, derived from it (not committed)
 #   hbm.tsv                  the counters pass's traffic, a row per call of the pinned records
 # The counters pass is one capture per case, each joined on the host and deleted before the
 # next: sampling the whole set at the default frequency writes ~27 MB of export a second of
@@ -51,6 +53,7 @@ BENCH_STAGING=cpp/install/rust-benchmarks
 # Relative to testdata/ on both sides, so one name drives the remote write and the pull.
 CAPTURE_REL=calibration/capture
 CALLS_REL=calibration/calls.tsv
+LOADS_REL=calibration/loads.tsv
 METRICS_CAPTURE_REL=calibration/capture-metrics
 # That pass's own record, written on the host and left there: see the header.
 METRICS_RECORD_REL=calibration/records-metrics.tsv
@@ -162,6 +165,11 @@ remote_ssh test -x "$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET" \
 # Exported on the machine that captured, since `nsys export` needs the same nsys, and even
 # after a failure: a capture of the executions that did happen is the only copy of them.
 # <filter> is the test binary's own: a substring, or a name and --exact.
+# The engine's two measurement switches, set here, exported there: ssh forwards no environment.
+switches=""
+for name in PEACOCK_PINNED_HOST_CACHE_BYTES PEACOCK_SCAN_READER; do
+  [ -z "${!name:-}" ] || switches+="export $name=$(printf '%q' "${!name}")"$'\n'
+done
 remote_pass() {    # remote_pass <label> <capture rel> <record rel|""> <filter> <nsys flags…>
   local label=$1 capture_rel=$2 record_rel=$3 filter=$4; shift 4
   local flags="$*"
@@ -170,7 +178,7 @@ set -uo pipefail
 # The harness finds each dataset as <dataset>.sf<sf> under this, so the host's symlinks
 # (build-test-shadgpu.sh's run makes them) are the only dataset configuration there is.
 export PEACOCK_TESTDATA_DIR=$REMOTE_REPO/testdata
-# The one variable that turns the harness's NVTX ranges on. It also stamps the record's
+$switches# The one variable that turns the harness's NVTX ranges on. It also stamps the record's
 # heading and stops the run publishing a .benchmark.txt: the tree belongs to the clean run,
 # and either pass would overwrite each section with times taken under a profiler.
 export PEACOCK_BENCHMARK_CAPTURE=$label
@@ -217,7 +225,11 @@ if [ "$TRACE" -eq 1 ]; then
   pull_one "$CAPTURE_REL.sqlite" "the trace capture" \
     || die "the trace pass left no capture on $REMOTE; its log is /tmp/$BENCH_TARGET.trace.log there."
   # Derived here rather than on the host: the reader is a local script over local goldens,
-  # it costs seconds, and the capture comes home anyway.
+  # it costs seconds, and the capture comes home anyway. Loads first: they read no golden, so a
+  # call breakdown that refuses the capture still fails the run without losing them.
+  python3 scripts/calibration/nsys_loads.py \
+    --capture "testdata/$CAPTURE_REL.sqlite" --out "testdata/$LOADS_REL"
+  echo "==> the load breakdown: $(grep -vc '^#' "testdata/$LOADS_REL") rows"
   python3 scripts/calibration/nsys_calls.py \
     --capture "testdata/$CAPTURE_REL.sqlite" --plans-dir "$PLANS_DIR" \
     --out "testdata/$CALLS_REL"

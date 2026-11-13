@@ -340,6 +340,19 @@ def test_run_passes_the_filter_and_resume():
         assert [a[i + 1] for i, x in enumerate(a) if x == "-e"] == ["PEACOCK_BENCH_RESUME=1"], a
 
 
+def test_run_passes_the_pinned_cache_and_scan_reader_switches():
+    """A load's fixes are measured one at a time by these two; a run that drops them measures the
+    engine's default under every name."""
+    with Host() as h:
+        prepared(h)
+        ok(h.gpu("ship"))
+        ok(h.gpu("run", "bench", env={"PEACOCK_PINNED_HOST_CACHE_BYTES": "0",
+                                      "PEACOCK_SCAN_READER": "read_parquet"}))
+        a = h.docker_runs()[0]
+        envs = [a[i + 1] for i, x in enumerate(a) if x == "-e"]
+        assert envs == ["PEACOCK_PINNED_HOST_CACHE_BYTES=0", "PEACOCK_SCAN_READER=read_parquet"], envs
+
+
 def test_run_refuses_a_run_in_progress():
     with Host() as h:
         prepared(h)
@@ -405,7 +418,9 @@ FAKE_RSH = r'''#!/usr/bin/env python3
 import json, os, subprocess, sys
 with open(os.environ["FAKE_RSH_LOG"], "a") as f:
     f.write(json.dumps(sys.argv[1:]) + "\n")
-env = {**os.environ, "PATH": os.environ["FAKE_HOST_PATH"]}
+# ssh forwards none of dev's environment: a switch reaches the host only if the script sends it.
+env = {k: v for k, v in os.environ.items() if not k.startswith(("PEACOCK_", "PCK_"))}
+env["PATH"] = os.environ["FAKE_HOST_PATH"]
 # argv: --vm <name> <host> <command…>, as `nebius.sh … rsh` takes it; the host is dropped.
 sys.exit(subprocess.run(["bash", "-c", " ".join(sys.argv[4:])], env=env).returncode)
 '''
@@ -422,46 +437,59 @@ if a[0] == "profile":
 if a[0] == "export":
     out.write_text("sqlite")
 '''
-FAKE_BENCH = '#!/bin/sh\necho "running 1 test"\necho "test result: ok. 1 passed; 0 failed; 0 ignored"\n'
+FAKE_BENCH = ('#!/bin/sh\necho "running 1 test"\n'
+              'echo "switches: cache=${PEACOCK_PINNED_HOST_CACHE_BYTES-unset} reader=${PEACOCK_SCAN_READER-unset}"\n'
+              'echo "test result: ok. 1 passed; 0 failed; 0 ignored"\n')
 LOUD_SSH = '#!/bin/sh\nprintf "%s\\n" "ssh $*" >> "$FAKE_DEV_LOG"\nexit 97\n'
 STUB_CALLS = r'''import sys
 a = sys.argv[1:]
 open(a[a.index("--out") + 1], "w").write("# calls\nrow\n")
 '''
+# As nsys_calls.py refuses a capture of a query with a join: a message and exit 1, nothing written.
+REFUSING_CALLS = 'import sys\nsys.exit("capture does not match q3\'s recipes")\n'
+
+
+def nsys_profile(tmp, extra_env=None, calls=STUB_CALLS):
+    """`create_nsys_profile.sh --trace` over fakes, the VM a directory and nsys a stub: the run
+    and the tree it ran in."""
+    tmp = pathlib.Path(tmp)
+    tree = tmp / "tree"
+    for rel in ("scripts/create_nsys_profile.sh", "scripts/lib/shadgpu-env.sh", "scripts/lib/calibration-bucket.sh",
+                "scripts/lib/stage-cargo.sh", "peacockdb-core/tests/common/corpus_benchmark_cases.inc"):
+        if (REPO / rel).exists():
+            (tree / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO / rel, tree / rel)
+    (tree / "scripts/calibration").mkdir()
+    (tree / "scripts/calibration/nsys_calls.py").write_text(calls)
+    (tree / "scripts/calibration/nsys_loads.py").write_text(STUB_CALLS)
+    cases = (tree / "peacockdb-core/tests/common/corpus_benchmark_cases.inc").read_text()
+    for ds in set(re.findall(r"corpus_query_benchmark!\(\s*(\w+)\s*,", cases)):
+        (tree / "testdata/goldens" / f"{ds}.sf1").mkdir(parents=True)
+    vm = tmp / "vm" / "peacock" / "chain-l"
+    (vm / "cpp/install/rust-benchmarks").mkdir(parents=True)
+    bench = vm / "cpp/install/rust-benchmarks/peacock_gpu_benchmarks"
+    bench.write_text(FAKE_BENCH)
+    bench.chmod(0o755)
+    bins = {"host-bin": {"nsys": FAKE_NSYS}, "dev-bin": {"ssh": LOUD_SSH}, ".": {"rsh": FAKE_RSH}}
+    for d, files in bins.items():
+        (tmp / d).mkdir(exist_ok=True)
+        for name, text in files.items():
+            (tmp / d / name).write_text(text)
+            (tmp / d / name).chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp / 'dev-bin'}:{os.environ['PATH']}",
+           "FAKE_HOST_PATH": f"{tmp / 'host-bin'}:{os.environ['PATH']}", "FAKE_RSH_LOG": str(tmp / "rsh.log"),
+           "FAKE_DEV_LOG": str(tmp / "ssh.log"), "PCK_TEST_FILTER": "bench_tpch_sf40_q6_tp1_single",
+           "CARGO_TARGET_DIR": str(tmp / "target"), **(extra_env or {})}
+    r = subprocess.run(["bash", "scripts/create_nsys_profile.sh", "--trace", "--ssh", f"{tmp / 'rsh'} --vm h100",
+                        "--host", "nebius-h100", "--remote-dir", str(vm), "--remote-cudf-root", str(tmp / "cudf")],
+                       cwd=tree, env=env, capture_output=True, text=True, timeout=120)
+    return r, tree
 
 
 def test_nsys_profile_uses_the_given_ssh():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
-        tree = tmp / "tree"
-        for rel in ("scripts/create_nsys_profile.sh", "scripts/lib/shadgpu-env.sh", "scripts/lib/calibration-bucket.sh",
-                    "scripts/lib/stage-cargo.sh", "peacockdb-core/tests/common/corpus_benchmark_cases.inc"):
-            if (REPO / rel).exists():
-                (tree / rel).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(REPO / rel, tree / rel)
-        (tree / "scripts/calibration").mkdir()
-        (tree / "scripts/calibration/nsys_calls.py").write_text(STUB_CALLS)
-        cases = (tree / "peacockdb-core/tests/common/corpus_benchmark_cases.inc").read_text()
-        for ds in set(re.findall(r"corpus_query_benchmark!\(\s*(\w+)\s*,", cases)):
-            (tree / "testdata/goldens" / f"{ds}.sf1").mkdir(parents=True)
-        vm = tmp / "vm" / "peacock" / "chain-l"
-        (vm / "cpp/install/rust-benchmarks").mkdir(parents=True)
-        bench = vm / "cpp/install/rust-benchmarks/peacock_gpu_benchmarks"
-        bench.write_text(FAKE_BENCH)
-        bench.chmod(0o755)
-        bins = {"host-bin": {"nsys": FAKE_NSYS}, "dev-bin": {"ssh": LOUD_SSH}, ".": {"rsh": FAKE_RSH}}
-        for d, files in bins.items():
-            (tmp / d).mkdir(exist_ok=True)
-            for name, text in files.items():
-                (tmp / d / name).write_text(text)
-                (tmp / d / name).chmod(0o755)
-        env = {**os.environ, "PATH": f"{tmp / 'dev-bin'}:{os.environ['PATH']}",
-               "FAKE_HOST_PATH": f"{tmp / 'host-bin'}:{os.environ['PATH']}", "FAKE_RSH_LOG": str(tmp / "rsh.log"),
-               "FAKE_DEV_LOG": str(tmp / "ssh.log"), "PCK_TEST_FILTER": "bench_tpch_sf40_q6_tp1_single",
-               "CARGO_TARGET_DIR": str(tmp / "target")}
-        r = subprocess.run(["bash", "scripts/create_nsys_profile.sh", "--trace", "--ssh", f"{tmp / 'rsh'} --vm h100",
-                            "--host", "nebius-h100", "--remote-dir", str(vm), "--remote-cudf-root", str(tmp / "cudf")],
-                           cwd=tree, env=env, capture_output=True, text=True, timeout=120)
+        r, tree = nsys_profile(tmp)
         ok(r)
         assert "the trace pass ran 1 tests" in r.stdout, r.stdout
         assert (tree / "testdata/calibration/calls.tsv").is_file()
@@ -473,6 +501,25 @@ def test_nsys_profile_uses_the_given_ssh():
         assert any(c.startswith("test -x") for c in commands), commands
         assert any(c == "bash" for c in commands), commands
         assert any(c.startswith("rsync --server") for c in commands), commands
+        assert "switches: cache=unset reader=unset" in r.stdout, r.stdout
+
+
+def test_nsys_profile_writes_the_load_breakdown_when_the_call_breakdown_refuses():
+    """nsys_calls.py refuses any capture of a query with a join; loads.tsv does not depend on it,
+    so it is written, and the run still fails for the refusal."""
+    with tempfile.TemporaryDirectory() as tmp:
+        r, tree = nsys_profile(pathlib.Path(tmp), calls=REFUSING_CALLS)
+        assert r.returncode != 0, (r.stdout, r.stderr)
+        assert (tree / "testdata/calibration/loads.tsv").is_file(), (r.stdout, r.stderr)
+
+
+def test_nsys_profile_passes_the_pinned_cache_and_scan_reader_switches():
+    """The traced binary runs on the host, so a switch set here must reach it there."""
+    with tempfile.TemporaryDirectory() as tmp:
+        r, _ = nsys_profile(pathlib.Path(tmp), {"PEACOCK_PINNED_HOST_CACHE_BYTES": "0",
+                                                "PEACOCK_SCAN_READER": "read_parquet"})
+        ok(r)
+        assert "switches: cache=0 reader=read_parquet" in r.stdout, r.stdout
 
 
 if __name__ == "__main__":
