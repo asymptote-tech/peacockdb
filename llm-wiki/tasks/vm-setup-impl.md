@@ -885,7 +885,7 @@ pushed, and must before any CI run on the branch is read or any VM pulls an imag
   it in `## The table, run as written` (exit, wall time). Then `rm -rf cpp/build cpp/install`, so
   Task 16's 25.02 build is not refused.
 - [ ] **Step 4:** the PR's CI green on the branch's last commit; a red job reaches the developer
-  as a failing test.
+  as a failing test. *Open: no L40S capacity.*
 
 ### Task 16 *(coordinator)*: nebius-gpu by hand; CI's `gpu-tests` through the runner
 
@@ -906,10 +906,10 @@ sandbox off; an actor in `GPU_ALLOWED_ACTORS`.
   `$G pull --clear` → the run's log and record home, gone from the VM
   (`scripts/nebius.sh ssh 'ls ~/peacock/<dir>/logs'`); `scripts/nebius.sh stop`.
 - [ ] **Step 4:** `gh workflow run pipeline.yml --ref ENS-vm-setup` → `gpu-tests` green: its log
-  shows `run-tests.sh list: green`, the cleanup's `cancel` saying no run goes, and the VM stopped.
+  shows `run-tests.sh list: green`, the cleanup's `cancel` saying no run goes, and the VM stopped. *Open: no L40S capacity.*
 - [ ] **Step 5:** record every command, exit and wall time in `## nebius-gpu by hand`, and the VM
   times. A failure reaches the developer as a failing test; the fix is checkpointed and the step
-  run again.
+  run again. *Open: no L40S capacity.*
 
 ### Task 17 *(coordinator)*: a fresh verda CPU VM, provisioned from this branch
 

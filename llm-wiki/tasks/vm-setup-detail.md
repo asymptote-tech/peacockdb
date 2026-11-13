@@ -27,6 +27,9 @@ The record below names commits as they were before the rebase; on this branch th
 - Task 16: nebius-gpu by hand, steps 1 to 3; image pulls name a full disk and a lost VM; below.
 - Task 17: a fresh verda VM, provisioned from this branch, its rust-only build and run green; a
   second developer, the login user, beside the first; below.
+- Done with Task 15 Step 4 and Task 16 Steps 4 and 5 open: nebius-gpu's L40S had no capacity in
+  its region, so `gpu-tests` could not start, and the PR's CI cannot go green until it can. The
+  runner it would exercise ran by hand on nebius-gpu in Task 16 Steps 2 and 3.
 
 ## Plain builds
 
