@@ -419,3 +419,12 @@ since the run uses the ID. Each rewrite beyond those:
 - shellcheck (0.11.0, image pulled and removed) over pipeline.yml's 13 files: rc 0.
 - Reviewer re-check of 36ddf639: closed, 0 blocking, 0 important. Edge noted: a whole run cancelled while waiting for the card has already cleared the VM's unpulled answers; bench-sirius.sh always pulls after each run.
 - Signoff written; board to `completeness approved`. Branch then squashed to two commits (replay, port) and force-pushed; only the `done` board commit may follow.
+- Squashed and force-pushed 2026-11-13: 7009456e (rk00's replay; differs from 668272ff only by
+  the board line and this file) and 21c6dec8 (the port, tree identical to pre-squash ae0dbd7c).
+  PR #206 shows 2 commits.
+- Hard stop at `completeness approved`: nebius-gpu and nebius-h100 already STOPPED;
+  nebius-cpu128 (`computeinstance-e01t2mm4265y8x88ey`) answered 69, instance not found. For the
+  human: rebuilding it is theirs.
+- No `gh workflow run` dispatch: the spec forbids dispatching a workflow, and plan Task 5 says
+  `GPU Tests (nebius-gpu)` is not dispatched. `done` waits on PR run 43516069925 (21c6dec8).
+- PR run 43516069925 on 21c6dec8: every CPU job green; GPU Tests skipped (not dispatched, per spec). Hard stop again; board to `done`. This board commit folds into the port at merge.
