@@ -206,5 +206,23 @@ def test_refuses_bad_arguments_before_docker():
         assert r.run("build").calls == []
 
 
+def test_finds_the_sirius_image_by_its_inputs():
+    with Repo() as r:
+        label, tag = r.inputs("sirius", "26.08")
+        assert tag.startswith("cudf-26.08-in-"), tag
+        local = f"{REGISTRY}/peacockdb-sirius:{tag}"
+        p = r.run("sirius", "26.08", local={local: label})
+        assert p.returncode == 0, (p.returncode, p.stderr)
+        assert p.stdout == f"{local}\n", p.stdout
+
+
+def test_refuses_26_08_for_any_kind_but_sirius_and_sirius_at_any_other():
+    with Repo() as r:
+        for args in (["run", "26.08"], ["build", "26.08"], ["sirius", "25.02"]):
+            p = r.run(*args)
+            assert p.returncode == 2 and "26.08" in p.stderr and "sirius" in p.stderr, (args, p.returncode, p.stderr)
+            assert p.calls == [], (args, p.calls)
+
+
 if __name__ == "__main__":
     raise SystemExit(main(globals()))

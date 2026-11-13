@@ -27,6 +27,9 @@ import json, os, sys
 log = os.environ["FAKE_DOCKER_LOG"]
 with open(log, "a") as f:
     f.write(json.dumps(sys.argv[1:]) + "\n")
+if "FAKE_DOCKER_ENV_LOG" in os.environ:
+    with open(os.environ["FAKE_DOCKER_ENV_LOG"], "a") as f:
+        f.write(json.dumps({k: v for k, v in os.environ.items() if k.startswith("AWS_")}) + "\n")
 images = json.loads(os.environ.get("FAKE_DOCKER_IMAGES", "{}"))
 a = sys.argv[1:]
 if a[:2] == ["image", "inspect"]:
@@ -53,7 +56,8 @@ class Run:
         return [shlex.split(line) for line in self.stdout.splitlines() if line.startswith("docker ")]
 
 
-def run(*args, script=SCRIPT, images=None):
+def run(*args, script=SCRIPT, images=None, env=None):
+    """`env` replaces variables of the caller's environment; a None value removes one."""
     with tempfile.TemporaryDirectory() as tmp:
         bin_dir = pathlib.Path(tmp) / "bin"
         bin_dir.mkdir()
@@ -62,12 +66,21 @@ def run(*args, script=SCRIPT, images=None):
         docker.chmod(0o755)
         log = pathlib.Path(tmp) / "docker.log"
         log.touch()
-        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_DOCKER_LOG": str(log),
-               "FAKE_DOCKER_IMAGES": json.dumps(images or {})}
-        proc = subprocess.run([str(script), *args], capture_output=True, text=True, env=env,
+        env_log = pathlib.Path(tmp) / "docker-env.log"
+        env_log.touch()
+        full = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_DOCKER_LOG": str(log),
+                "FAKE_DOCKER_IMAGES": json.dumps(images or {}), "FAKE_DOCKER_ENV_LOG": str(env_log)}
+        for name, value in (env or {}).items():
+            if value is None:
+                full.pop(name, None)
+            else:
+                full[name] = value
+        proc = subprocess.run([str(script), *args], capture_output=True, text=True, env=full,
                               stdin=subprocess.DEVNULL, timeout=60)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
-    return Run(proc, calls)
+        result = Run(proc, calls)
+        result.docker_env = [json.loads(line) for line in env_log.read_text().splitlines()]
+    return result
 
 
 def git(repo, *args):
@@ -80,7 +93,8 @@ class Repo:
     def __enter__(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name) / "repo"
-        for rel in ["scripts/env/image.sh", "scripts/lib/image-inputs.sh", "cpp/CMakeLists.txt"]:
+        for rel in ["scripts/env/image.sh", "scripts/lib/image-inputs.sh", "scripts/lib/peacock-config.sh",
+                    "scripts/lib/calibration-bucket.sh", "scripts/lib/s3.sh", "cpp/CMakeLists.txt"]:
             (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / rel, self.root / rel)
         shutil.copytree(REPO / "docker", self.root / "docker")
@@ -338,9 +352,9 @@ def test_the_dockerfiles_declare_every_pin_but_the_machine_s():
     """image.sh passes every pin to both Dockerfiles and BuildKit is silent about an unused one, so
     a pin neither declares is a pin nothing reads."""
     declared = {kind: set(re.findall(r"^ARG (\w+)", (REPO / "docker" / f"{kind}.Dockerfile").read_text(), re.M))
-                for kind in ["build", "run"]}
+                for kind in ["build", "run", "sirius"]}
     assert MACHINE_PINS <= set(read_pins()), "pins.env lost a machine pin"
-    missing = sorted((set(read_pins()) - MACHINE_PINS | {"CUDF", "CUDF_SUBMODULE"}) - (declared["build"] | declared["run"]))
+    missing = sorted((set(read_pins()) - MACHINE_PINS | {"CUDF", "CUDF_SUBMODULE"}) - set().union(*declared.values()))
     assert not missing, f"no Dockerfile declares: {missing}"
     assert "CUDF" in declared["run"], "run.Dockerfile never declares CUDF"
     for kind, names in declared.items():
@@ -348,7 +362,7 @@ def test_the_dockerfiles_declare_every_pin_but_the_machine_s():
 
 
 def test_no_claude_code_is_installed_in_the_image():
-    for kind in ["build", "run"]:
+    for kind in ["build", "run", "sirius"]:
         text = (REPO / "docker" / f"{kind}.Dockerfile").read_text()
         found = re.findall(r"claude\.ai/install\.sh|claude plugin|@anthropic-ai/claude-code", text)
         assert not found, f"{kind}.Dockerfile installs Claude Code: {found}"
@@ -523,6 +537,222 @@ def test_the_inputs_refuse_a_flatbuffers_tag_named_twice():
         r = run("build", "build", "25.02", "--dry-run", script=repo.script)
         assert r.returncode == 2 and "flatbuffers" in r.stderr, (r.returncode, r.stderr)
         assert r.stdout == "", r.stdout
+
+
+# --- the Sirius image ---------------------------------------------------------------------------
+
+# Values no input, label, argv or output may hold: the storage keys a Sirius build fetches with.
+KEY_ID, SECRET = "AKIA-sentinel-key-id", "sentinel-secret-access-key"
+CI_KEYS = {"AWS_ACCESS_KEY_ID": KEY_ID, "AWS_SECRET_ACCESS_KEY": SECRET, "AWS_ENDPOINT_URL": None,
+           "AWS_REGION": None}
+SECRETS = ["id=aws_access_key_id,env=AWS_ACCESS_KEY_ID", "id=aws_secret_access_key,env=AWS_SECRET_ACCESS_KEY",
+           "id=aws_endpoint_url,env=AWS_ENDPOINT_URL", "id=aws_region,env=AWS_REGION"]
+
+
+def keys_nowhere(result):
+    seen = [text for text in (result.stdout, result.stderr, json.dumps(result.calls)) if KEY_ID in text or SECRET in text]
+    assert not seen, f"a storage key reached the output or argv: {seen}"
+
+
+def test_build_sirius_tags_its_three_names():
+    with Repo() as repo:
+        r = run("build", "sirius", "26.08", "--dry-run", script=repo.script, env=CI_KEYS)
+        assert r.returncode == 0, r.stderr
+        line = build_line(r)
+        name = f"{REGISTRY}/peacockdb-sirius"
+        assert flag_values(line, "-t") == [f"{name}:cudf-26.08", f"{name}:{inputs_tag(repo.root, 'sirius', '26.08')}",
+                                           f"{name}:cudf-26.08-{repo.sha}"], line
+        assert flag_values(line, "-f") == [str(repo.root / "docker" / "sirius.Dockerfile")], line
+        assert "org.opencontainers.image.version=cudf-26.08" in flag_values(line, "--label"), line
+        assert r.calls == [], f"a dry run called docker: {r.calls}"
+
+
+def test_sirius_is_26_08_alone_and_26_08_is_sirius_s_alone():
+    for args in [("build", "sirius", "25.02"), ("build", "run", "26.08"), ("build", "build", "26.08")]:
+        r = run(*args, "--dry-run", env=CI_KEYS)
+        assert r.returncode == 2, (args, r.returncode, r.stderr)
+        assert len(r.stderr.strip().splitlines()) == 1 and r.stderr.startswith("image.sh: "), (args, r.stderr)
+        assert "26.08" in r.stderr and "sirius" in r.stderr, (args, r.stderr)
+        assert r.stdout == "" and r.calls == [], args
+
+
+def test_the_sirius_label_names_its_files_and_pins_and_no_cudf_spec():
+    with Repo() as repo:
+        got = label(build_line(run("build", "sirius", "26.08", "--dry-run", script=repo.script, env=CI_KEYS)))
+        assert got == image_inputs(repo.root, "sirius", "26.08"), got
+        assert set(got) == files_read("sirius", "26.08") | {"docker/sirius.Dockerfile",
+                                                             "docker/sirius.Dockerfile.dockerignore",
+                                                             "docker/pins.env"}, got
+        assert not [k for k in got if k.startswith("docker/conda/") or k.startswith("third_party/")], got
+        every = IMAGES + [("sirius", "26.08")]
+
+        def all_labels():
+            return {image: label(build_line(run("build", *image, "--dry-run", script=repo.script, env=CI_KEYS)))
+                    for image in every}
+        before = all_labels()
+        bump(repo, "SIRIUS_EXTENSION_SHA256")
+        after = all_labels()
+        moved = sorted(image for image in every if before[image] != after[image])
+        assert moved == [("sirius", "26.08")], moved
+
+
+def test_the_sirius_build_takes_the_keys_as_secrets_and_holds_them_nowhere_else():
+    """CI's keys are in the environment: docker gets them by name, as BuildKit secrets, with the
+    calibration bucket's storage, and no argv, output, label or input holds a value."""
+    with Repo() as repo:
+        r = run("build", "sirius", "26.08", script=repo.script, env=CI_KEYS)
+        assert r.returncode == 0, r.stderr
+        [line] = [["docker", *c] for c in r.calls if c[:1] == ["build"]]
+        assert flag_values(line, "--secret") == SECRETS, line
+        assert r.docker_env == [{"AWS_ACCESS_KEY_ID": KEY_ID, "AWS_SECRET_ACCESS_KEY": SECRET,
+                                 "AWS_ENDPOINT_URL": "https://storage.eu-north1.nebius.cloud:443",
+                                 "AWS_REGION": "eu-north-1"}], r.docker_env
+        keys_nowhere(r)
+        inputs = json.dumps(image_inputs(repo.root, "sirius", "26.08")) + inputs_tag(repo.root, "sirius", "26.08")
+        assert KEY_ID not in inputs and SECRET not in inputs
+
+
+def test_a_local_sirius_build_reads_the_keys_and_storage_from_peacock_env():
+    with Repo() as repo, tempfile.TemporaryDirectory() as home:
+        config = pathlib.Path(home) / ".config" / "peacock"
+        config.mkdir(parents=True)
+        (config / "peacock.env").write_text(f"AWS_ACCESS_KEY_ID={KEY_ID}\nAWS_SECRET_ACCESS_KEY={SECRET}\n"
+                                            "AWS_ENDPOINT_URL=https://s3.example:443\nAWS_REGION=r-1\n")
+        env = {"HOME": home, "AWS_ACCESS_KEY_ID": None, "AWS_SECRET_ACCESS_KEY": None, "AWS_ENDPOINT_URL": None,
+               "AWS_REGION": None}
+        r = run("build", "sirius", "26.08", script=repo.script, env=env)
+        assert r.returncode == 0, r.stderr
+        assert r.docker_env == [{"AWS_ACCESS_KEY_ID": KEY_ID, "AWS_SECRET_ACCESS_KEY": SECRET,
+                                 "AWS_ENDPOINT_URL": "https://s3.example:443", "AWS_REGION": "r-1"}], r.docker_env
+        keys_nowhere(r)
+
+
+def test_a_sirius_build_without_keys_is_refused_before_docker():
+    with tempfile.TemporaryDirectory() as home:
+        for env in [{"HOME": home, "AWS_ACCESS_KEY_ID": None, "AWS_SECRET_ACCESS_KEY": None},
+                    {"HOME": home, "AWS_ACCESS_KEY_ID": KEY_ID, "AWS_SECRET_ACCESS_KEY": None}]:
+            r = run("build", "sirius", "26.08", env=env)
+            assert r.returncode == 2, (env, r.returncode, r.stderr)
+            assert len(r.stderr.strip().splitlines()) == 1 and "AWS_SECRET_ACCESS_KEY" in r.stderr, r.stderr
+            assert r.calls == [], r.calls
+            keys_nowhere(r)
+
+
+def test_only_the_sirius_build_gets_keys():
+    r = run("build", "run", "26.02", env=CI_KEYS)
+    assert r.returncode == 0, r.stderr
+    [line] = [c for c in r.calls if c[:1] == ["build"]]
+    assert "--secret" not in line, line
+
+
+def instructions(stage):
+    """A Dockerfile stage's instructions, continuation lines joined and comments dropped."""
+    joined = re.sub(r"\\\n\s*", " ", "\n".join(l for l in stage.splitlines() if not l.lstrip().startswith("#")))
+    return [line.strip() for line in joined.splitlines() if line.strip()]
+
+
+def test_the_sirius_keys_are_read_under_a_secret_mount_in_the_fetch_stage_alone():
+    """No ARG or ENV can carry a key into a layer or the inputs: the keys exist only as BuildKit
+    secrets, mounted for the one RUN that fetches, in a stage the image takes one file from."""
+    text = (REPO / "docker" / "sirius.Dockerfile").read_text()
+    stages = re.split(r"^FROM ", text, flags=re.M)[1:]
+    named = {stage.split("\n", 1)[0].split()[-1]: instructions(stage) for stage in stages[:-1]}
+    final = instructions(stages[-1])
+    every = [line for stage in [*named.values(), final] for line in stage]
+    storage = r"\bAWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|ENDPOINT_URL|REGION)\b"
+    assert not [line for line in every if re.match(r"(ARG|ENV)\b", line) and re.search(storage, line)], \
+        "an ARG or ENV names a storage variable"
+    secret = [line for line in every if "secret" in line]
+    assert len(secret) == 1 and secret[0] in named["fetch"], secret
+    assert secret[0].startswith("RUN --mount=type=secret,id=aws_access_key_id,required=true "), secret
+    for name in ("aws_secret_access_key", "aws_endpoint_url", "aws_region"):
+        assert f"--mount=type=secret,id={name},required=true " in secret[0], (name, secret)
+    assert [line for line in final if line.startswith("COPY --from=fetch ")] == [
+        "COPY --from=fetch /out/sirius.duckdb_extension /opt/sirius/sirius.duckdb_extension"], final
+
+
+def test_the_sirius_image_ships_sirius_s_licence_at_its_pinned_commit():
+    """The extension is Apache-2.0, and the image redistributes it: Sirius's LICENSE at SIRIUS_COMMIT
+    is committed as docker/sirius-LICENSE, pinned by its sha256, checked by the build against the pin,
+    and installed beside the extension, where the self-test holds it to the PIN."""
+    licence = (REPO / "docker" / "sirius-LICENSE").read_bytes()
+    assert hashlib.sha256(licence).hexdigest() == read_pins()["SIRIUS_LICENSE_SHA256"]
+    assert licence.decode().split()[:4] == ["Apache", "License", "Version", "2.0,"], licence[:80]
+    final = instructions(re.split(r"^FROM ", (REPO / "docker" / "sirius.Dockerfile").read_text(), flags=re.M)[-1])
+    assert "COPY docker/sirius-LICENSE /opt/sirius/LICENSE" in final, final
+    [pin] = [line for line in final if "/opt/sirius/PIN" in line and line.startswith("RUN ")]
+    assert '"license_sha256=${SIRIUS_LICENSE_SHA256}"' in pin, pin
+    assert 'echo "${SIRIUS_LICENSE_SHA256}  /opt/sirius/LICENSE" | sha256sum -c' in pin, pin
+    ignore = (REPO / "docker" / "sirius.Dockerfile.dockerignore").read_text().splitlines()
+    assert "!docker/sirius-LICENSE" in ignore, ignore
+
+
+FETCH = REPO / "docker" / "sirius-fetch.sh"
+
+FAKE_AWS = r'''#!/usr/bin/env python3
+import json, os, shutil, sys
+with open(os.environ["FAKE_AWS_LOG"], "a") as f:
+    f.write(json.dumps({"argv": sys.argv[1:], "env": {k: v for k, v in os.environ.items() if k.startswith("AWS_")}}) + "\n")
+shutil.copyfile(os.environ["FAKE_AWS_OBJECT"], sys.argv[-1])
+'''
+
+
+def fetch(payload, secrets=("aws_access_key_id", "aws_secret_access_key", "aws_endpoint_url", "aws_region"),
+          **pins):
+    """sirius-fetch.sh over a fake aws that serves the gzip of `payload`: (proc, out file or None,
+    aws calls)."""
+    import gzip
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        gz = gzip.compress(payload, mtime=0)
+        (tmp / "object.gz").write_bytes(gz)
+        (tmp / "bin").mkdir()
+        (tmp / "bin" / "aws").write_text(FAKE_AWS)
+        (tmp / "bin" / "aws").chmod(0o755)
+        values = {"aws_access_key_id": KEY_ID, "aws_secret_access_key": SECRET,
+                  "aws_endpoint_url": "https://s3.example:443", "aws_region": "r-1"}
+        (tmp / "secrets").mkdir()
+        for name in secrets:
+            (tmp / "secrets" / name).write_text(values[name])
+        env = {"PATH": f"{tmp / 'bin'}:{os.environ['PATH']}", "FAKE_AWS_LOG": str(tmp / "aws.log"),
+               "FAKE_AWS_OBJECT": str(tmp / "object.gz"),
+               "SIRIUS_EXTENSION_S3": "s3://calibration/sirius/x.duckdb_extension.gz",
+               "SIRIUS_EXTENSION_SHA256": hashlib.sha256(gz).hexdigest(),
+               "SIRIUS_EXTENSION_BYTES": str(len(gz)),
+               "SIRIUS_EXTENSION_UNPACKED_SHA256": hashlib.sha256(payload).hexdigest(), **pins}
+        out = tmp / "out" / "sirius.duckdb_extension"
+        proc = subprocess.run(["bash", str(FETCH), str(tmp / "secrets"), str(out)], env=env, capture_output=True,
+                              text=True, timeout=60)
+        log = tmp / "aws.log"
+        calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+        return proc, out.read_bytes() if out.exists() else None, calls
+
+
+def test_the_fetch_installs_the_extension_it_was_pinned():
+    proc, out, calls = fetch(b"extension bytes")
+    assert proc.returncode == 0, proc.stderr
+    assert out == b"extension bytes"
+    [call] = calls
+    assert call["argv"][-2:][0] == "s3://calibration/sirius/x.duckdb_extension.gz", call
+    assert call["env"] == {"AWS_ACCESS_KEY_ID": KEY_ID, "AWS_SECRET_ACCESS_KEY": SECRET,
+                           "AWS_ENDPOINT_URL": "https://s3.example:443", "AWS_REGION": "r-1"}, call
+    assert KEY_ID not in json.dumps(call["argv"]) and SECRET not in json.dumps(call["argv"]), call
+    assert KEY_ID not in proc.stdout + proc.stderr and SECRET not in proc.stdout + proc.stderr
+
+
+def test_a_wrong_sha256_or_byte_count_fails_the_fetch_and_installs_nothing():
+    for pins in [{"SIRIUS_EXTENSION_SHA256": "0" * 64}, {"SIRIUS_EXTENSION_BYTES": "921613272"},
+                 {"SIRIUS_EXTENSION_UNPACKED_SHA256": "0" * 64}]:
+        proc, out, _ = fetch(b"extension bytes", **pins)
+        assert proc.returncode != 0, (pins, proc.stdout, proc.stderr)
+        assert out is None, pins
+        assert next(iter(pins)) in proc.stderr, (pins, proc.stderr)
+
+
+def test_the_fetch_without_its_secrets_calls_nothing():
+    proc, out, calls = fetch(b"x", secrets=("aws_access_key_id",))
+    assert proc.returncode != 0 and out is None and calls == [], (proc.stderr, calls)
+    assert "aws_secret_access_key" in proc.stderr, proc.stderr
 
 
 if __name__ == "__main__":

@@ -201,3 +201,12 @@ Component-level API: none. No engine change in peacockdb.
 
 Fused batches in `benchmarks.csv`; Sirius on any other device or mode; a Sirius load/execute
 split or peak; Sirius's TPC-DS fixes past `stable`.
+
+## Signoff (completeness pass, 2026-11-10)
+
+Solved under its constraints: Sirius `stable` from a pinned, licensed image; every row timed warm from `pin_table` with GPU evidence from Sirius's log (84 of 84 timed rows); answers held to DuckDB's; page group, ratio lines (tpch 1.29 over 35 of 48, tpcds 1.32 over 42 of 82) and `benchmarks.csv`. Shortcuts, each recorded in the detail file:
+- 34 of 84 timed rows read outside the pin on every run, likely bloom filters `pin_table` leaves out (about 41% of tpch's Σ Sirius). Kept as measured, said on the page; the cost is unmeasured. The human may want a no-bloom or tmpfs rerun, or q19/q10/q21/q17 timed both ways.
+- `integer_division = true` (the answers' setting) may cost tpcds q2 and q78, which fail on `round(x // y, 2)`; unmeasured.
+- Timed runs log at info, Sirius's default; logging against no logging was never measured.
+- The committed run used `run-gpu.sh sirius --detach` with a manual pull and render, not `bench-sirius.sh` end to end (same runner arguments).
+- Two oracle defects make right answers `wrong`: q73 (#306) and scan-limit (#311).

@@ -548,9 +548,17 @@ pub(crate) async fn device_verdict(
     verdict(dataset, sf, kinds_sf, query, oracle, Some(ours), side).await
 }
 
-/// The benchmark's sf40 answer at `tp1_single` against DuckDB's sf40 answer, under the oracle of
-/// the registry row the benchmark's cell is declared at. `query` as a case list names it.
-pub(crate) async fn sf40_verdict(dataset: &str, query: &str) -> AnswerVerdict {
+/// Whose sf40 answer [`sf40_verdict`] holds to DuckDB's.
+pub(crate) enum Sf40Answer {
+    /// The H100's, at `tp1_single`, in `gpu-result.txt`.
+    Device,
+    /// Sirius's, in `sirius-result.txt`.
+    Sirius,
+}
+
+/// An sf40 answer against DuckDB's sf40 answer, under the oracle of the registry row the
+/// benchmark's cell is declared at. `query` as a case list names it.
+pub(crate) async fn sf40_verdict(dataset: &str, query: &str, answer: Sf40Answer) -> AnswerVerdict {
     const SF: &str = "40";
     let declared = corpus_golden::declared_sf(SF);
     let query = registry::stem(query);
@@ -560,16 +568,47 @@ pub(crate) async fn sf40_verdict(dataset: &str, query: &str) -> AnswerVerdict {
             row.dataset == dataset && row.sf == declared && registry::stem(&row.query) == query
         })
         .unwrap_or_else(|| panic!("{dataset}/{query}: no sf{declared} registry row"));
-    device_verdict(
-        dataset,
-        SF,
-        declared,
-        &query,
-        "tp1_single",
-        &row.duckdb_oracle,
-        true,
-    )
-    .await
+    let oracle = &row.duckdb_oracle;
+    match answer {
+        Sf40Answer::Device => {
+            device_verdict(dataset, SF, declared, &query, "tp1_single", oracle, true).await
+        }
+        Sf40Answer::Sirius => sirius_verdict(dataset, SF, declared, &query, oracle).await,
+    }
+}
+
+/// Sirius's recorded answer against DuckDB's, compared as the device's is at a scale no line is
+/// written for. No DuckDB section at all is [`AnswerVerdict::NoReference`]; a missing Sirius file
+/// or section, or one that records no answer, is unanswered.
+async fn sirius_verdict(
+    dataset: &str,
+    sf: &str,
+    kinds_sf: &str,
+    query: &str,
+    oracle: &str,
+) -> AnswerVerdict {
+    if section(&corpus_golden::duckdb_golden(dataset, sf), query).is_none() {
+        return AnswerVerdict::NoReference;
+    }
+    let path = corpus_golden::sirius_result_golden(dataset, sf);
+    let record =
+        "Record it with scripts/env/bench-sirius.sh, which renders the file after its pull.";
+    if !path.is_file() {
+        return AnswerVerdict::Unanswered(format!(
+            "{} does not exist, so no Sirius answer is recorded. {record}",
+            path.display()
+        ));
+    }
+    let ours = section(&path, query)
+        .filter(|section| !section.starts_with("failed:") && !section.starts_with(super::SKIPPED));
+    let Some(ours) = ours else {
+        return AnswerVerdict::Unanswered(format!(
+            "{} holds no answer for {query}. {record}",
+            path.display()
+        ));
+    };
+    let side = Side::Scaled("tp1_single");
+    verdict(dataset, sf, kinds_sf, query, oracle, Some(ours), side).await
 }
 
 /// Whose answer [`verdict`] holds to DuckDB's: the cpu's, which has no mode because the cpu
@@ -633,6 +672,7 @@ fn held(dataset: &str, query: &str, side: Side<'_>, verdict: AnswerVerdict) {
     let said = match verdict {
         AnswerVerdict::Meets => return,
         AnswerVerdict::Differs(said) | AnswerVerdict::Unanswered(said) => said,
+        AnswerVerdict::NoReference => "DuckDB has no answer to hold it to".to_string(),
     };
     let at = match side {
         Side::Cpu => "the cpu".to_string(),

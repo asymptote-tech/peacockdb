@@ -28,3 +28,9 @@ to the same literal, so a drift fails the drifting side.
 and a `failed` row. `parse_duckdb_results` in Rust reads it to a literal, and
 `benchmarks/tests/test_duckdb_minimal.py` holds the script's output to its keys and columns. A
 script that reads the format is tested against it too, so a drift fails the drifting side.
+
+`sirius-results.tsv` is Sirius's results file (`benchmark-results/h100-80gb-hbm3/<ds>.sf<sf>/sirius.tsv`):
+the `# ` line's seven keys, the column line, an `ok` row with ten runs, a `failed` row and a
+`skipped` row, each with its note. `parse_sirius_results` in Rust reads it to a literal and
+`write_sirius_results` writes it back byte for byte. A script that writes or reads the format is
+tested against it too, so a drift fails the drifting side.

@@ -1,0 +1,8 @@
+# The build context is the repository; the Sirius image needs its venv lock, its fetch, its config,
+# its runner and Sirius's LICENSE.
+*
+!docker/sirius-venv.lock
+!docker/sirius-fetch.sh
+!docker/sirius-config.yaml
+!docker/sirius-bench.py
+!docker/sirius-LICENSE

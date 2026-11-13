@@ -49,6 +49,7 @@ mod record;
 mod registry;
 mod result_text;
 mod schema_validation;
+mod sirius_results;
 mod testdata;
 #[cfg(test)]
 mod tests;
@@ -779,13 +780,24 @@ pub enum AnswerVerdict {
     /// A side has no answer the line expects: no recorded section or file, a file another cuDF
     /// recorded, or DuckDB's `failed:`. The text says how to record the missing one.
     Unanswered(String),
+    /// DuckDB has no section for the query at all, so there is nothing to hold the answer to.
+    /// Only [`sf40_sirius_verdict`] says it: the H100 list's `skipped` rows were never run on
+    /// DuckDB, and Sirius runs them.
+    NoReference,
 }
 
 /// The H100's sf40 answer to `query` (a case list's ident) at `tp1_single`, recorded in
 /// `goldens/<dataset>.sf40/gpu-result.txt`, against DuckDB's sf40 answer beside it, under the
 /// oracle of the sf1 registry row the benchmark's cell comes from.
 pub async fn sf40_answer_verdict(dataset: &str, query: &str) -> AnswerVerdict {
-    duckdb_oracle::sf40_verdict(dataset, query).await
+    duckdb_oracle::sf40_verdict(dataset, query, duckdb_oracle::Sf40Answer::Device).await
+}
+
+/// Sirius's sf40 answer to `query`, recorded in `goldens/<dataset>.sf40/sirius-result.txt`,
+/// against DuckDB's sf40 answer beside it, under the same oracle and comparison as
+/// [`sf40_answer_verdict`]. [`AnswerVerdict::NoReference`] where DuckDB has no section for it.
+pub async fn sf40_sirius_verdict(dataset: &str, query: &str) -> AnswerVerdict {
+    duckdb_oracle::sf40_verdict(dataset, query, duckdb_oracle::Sf40Answer::Sirius).await
 }
 
 /// Whether `query`'s plan, at one partition, ends in a sort — under any limit or projection —
@@ -882,6 +894,11 @@ pub fn result_golden(dataset: &str, sf: &str) -> PathBuf {
 /// `duckdb-result.txt` — DuckDB's answer to every query of this dataset, one section each.
 pub fn duckdb_golden(dataset: &str, sf: &str) -> PathBuf {
     corpus_golden::duckdb_golden(dataset, sf)
+}
+
+/// `sirius-result.txt` — Sirius's answer to each query it ran, in `duckdb-result.txt`'s format.
+pub fn sirius_result_golden(dataset: &str, sf: &str) -> PathBuf {
+    corpus_golden::sirius_result_golden(dataset, sf)
 }
 
 /// `gpu-result.txt` — the device's own answers, one section per (query, mode). `version`
@@ -1379,6 +1396,76 @@ pub fn parse_duckdb_results(text: &str) -> DuckdbResults {
     duckdb_results::parse(text)
 }
 
+// --- Sirius's results -------------------------------------------------------------
+
+/// What became of a query on Sirius, spelled `ok`, `wrong`, `unverified`, `failed`, `skipped` in
+/// the file. The first three carry a time; `unverified` is a timed answer DuckDB has none to
+/// check against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SiriusStatus {
+    Ok,
+    Wrong,
+    Unverified,
+    Failed,
+    Skipped,
+}
+
+/// One row of a `sirius.tsv`: a query's timing on Sirius from pinned parquet.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SiriusRow {
+    /// The query's stem (`aggregate-groupby`).
+    pub query: String,
+    /// The second-smallest wall time; `None` when failed or skipped (`-`).
+    pub ms_2nd_min: Option<f64>,
+    /// Every timed run, in order; empty when failed or skipped.
+    pub runs_ms: Vec<f64>,
+    pub status: SiriusStatus,
+    /// Why the row is not `ok`, free text; empty when there is nothing to say (`-`).
+    pub note: String,
+}
+
+/// A `sirius.tsv`: its `# ` line's `key=value` words (sirius, duckdb, libcudf, cuda, driver,
+/// device, host, in that order), then its rows in file order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SiriusResults {
+    pub preamble: Vec<(String, String)>,
+    pub rows: Vec<SiriusRow>,
+}
+
+/// The file the Sirius runner writes. Panics naming the line on a preamble that is missing or not
+/// the seven keys in order, a wrong column line, a row not of five fields, a timed status without
+/// its time, a failed or skipped row with one, an unknown status, and a query listed twice.
+pub fn parse_sirius_results(text: &str) -> SiriusResults {
+    sirius_results::parse(text)
+}
+
+/// The text `parse_sirius_results` reads back to `results`: an `UPDATE_CANONICAL` rewrite of the
+/// statuses goes through it.
+pub fn write_sirius_results(results: &SiriusResults) -> String {
+    sirius_results::write(results)
+}
+
+/// `testdata/benchmark-results/<device>/<dataset>.sf<sf>/sirius.tsv`.
+pub fn sirius_results_path(device: &str, dataset: &str, sf: &str) -> PathBuf {
+    sirius_results::path(device, dataset, sf)
+}
+
+/// Replaces a `sirius.tsv` with `text`, staged and renamed, for an `UPDATE_CANONICAL` rewrite.
+pub fn replace_sirius_results(device: &str, dataset: &str, sf: &str, text: &str) {
+    testdata::rewrite(&sirius_results::path(device, dataset, sf), text)
+}
+
+/// The status a row's answer sets: `failed` and `skipped` keep theirs (their `verdict` is
+/// `None`); a timed row is `ok` where its answer meets DuckDB's, `wrong` where it differs, and
+/// `unverified` where DuckDB has none. `Err` where a timed row's answer or DuckDB's is missing,
+/// saying how to record it.
+pub fn sirius_status_for(
+    recorded: SiriusStatus,
+    verdict: Option<AnswerVerdict>,
+) -> Result<SiriusStatus, String> {
+    sirius_results::status_for(recorded, verdict)
+}
+
 // --- the benchmark report page ---------------------------------------------------
 
 /// `ticket_widget.py`'s `DEFAULT_REPO`: the page links each section on GitHub, as `report.html`
@@ -1419,6 +1506,23 @@ pub fn render_benchmark_report(
     extra: &[ReportTable],
 ) -> String {
     benchmark_report::render(root, order, extra)
+}
+
+/// `testdata/benchmarks.csv`.
+pub fn benchmarks_csv_path() -> PathBuf {
+    benchmark_report::csv_path()
+}
+
+/// Replaces `benchmarks.csv` with `text`, staged and renamed, for an `UPDATE_CANONICAL` rewrite.
+pub fn write_benchmarks_csv(text: &str) {
+    testdata::rewrite(&benchmark_report::csv_path(), text)
+}
+
+/// Every result of the trees under `root` the page shows but the fused batches, one CSV row each
+/// (`dataset,sf,query,engine,device,mode,load_ms,exec_ms,total_ms,peak_gib,status`), in the page's
+/// order: `order` as [`render_benchmark_report`] takes it.
+pub fn render_benchmarks_csv(root: &Path, order: &[(String, String)]) -> String {
+    benchmark_report::render_csv(root, order)
 }
 
 /// `https://github.com/{REPORT_REPO}/blob/master/testdata/{rel}#L{line}`.

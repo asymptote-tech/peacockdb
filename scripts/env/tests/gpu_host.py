@@ -83,19 +83,23 @@ def flag(name):
     return a[a.index(name) + 1]
 
 if a[0] == "info":
-    if "--format" in a:
+    if "--format" in a and "DockerRootDir" in flag("--format"):
+        print(w["docker_root"])
+    elif "--format" in a:
         print(json.dumps({r: {} for r in w["runtimes"]}))
     sys.exit(0)
 # A pull of an image the world lacks fails as dev's docker does on an unpublished tag, or with the
 # world's pull_error, such as a network error.
 if a[0] == "pull":
     if a[-1] in w["images"]:
+        w["absent"] = [ref for ref in w.get("absent", []) if ref != a[-1]]
+        save()
         sys.exit(0)
     print(w.get("pull_error") or f'Error response from daemon: failed to resolve reference "{a[-1]}": {a[-1]}: not found',
           file=sys.stderr)
     sys.exit(1)
 if a[:2] == ["image", "inspect"]:
-    image = w["images"].get(a[-1])
+    image = None if a[-1] in w.get("absent", []) else w["images"].get(a[-1])
     if image is None:
         print(f"Error: No such image: {a[-1]}", file=sys.stderr)
         sys.exit(1)
@@ -164,6 +168,9 @@ HOST_BIN = {
     "nvidia-smi": '#!/usr/bin/env python3\nimport json, os\n'
                   'print(json.load(open(os.environ["FAKE_DOCKER_WORLD"]))["driver"])\n',
     "hostname": f'#!/bin/sh\necho {HOSTNAME}\n',
+    # The bytes free under Docker's root, from the world: `df --output=avail -B1 <dir>`.
+    "df": '#!/usr/bin/env python3\nimport json, os\nprint("Avail")\n'
+          'print(json.load(open(os.environ["FAKE_DOCKER_WORLD"]))["free_bytes"])\n',
     "sudo": '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_HOST_LOG"\nexec "$@"\n',
     "install": r'''#!/usr/bin/env python3
 import os, pathlib, sys
@@ -189,18 +196,22 @@ HOST_BIN["apt-get"] += "exit 1\n"
 LOUD = '#!/bin/sh\nprintf "%s\\n" "$0 $*" >> "$FAKE_DEV_LOG"\nexit 97\n'
 
 
-def label(tree, kind, change=None):
+# The Sirius image's cuDF: its extension's (docker/pins.env SIRIUS_LIBCUDF).
+SIRIUS_CUDF = "26.08"
+
+
+def label(tree, kind, change=None, cudf=CUDF):
     """The image's peacockdb.inputs label for <tree>; with `change`, that input's value is another."""
-    text = lib(tree, "image-inputs.sh", f'image_inputs "{tree}" {kind} {CUDF}')
+    text = lib(tree, "image-inputs.sh", f'image_inputs "{tree}" {kind} {cudf}')
     lines = [f"{ln.split('=')[0]}=0000" if change and ln.startswith(change + "=") else ln
              for ln in text.splitlines()]
     return " ".join(lines)
 
 
-def inputs_ref(tree, kind):
+def inputs_ref(tree, kind, cudf=CUDF):
     """The image of the tree's own inputs, by its inputs tag: what the scripts default to."""
     return f"ghcr.io/asymptote-tech/peacockdb-{kind}:" + lib(tree, "image-inputs.sh",
-                                                             f'image_inputs_tag "{tree}" {kind} {CUDF}')
+                                                             f'image_inputs_tag "{tree}" {kind} {cudf}')
 
 
 def log_lines(path):
@@ -239,13 +250,20 @@ class Host:
         self.host_log, self.dev_log, self.fetch_log = tmp / "vm.log", tmp / "dev.log", tmp / "fetch.log"
         self.world_path = tmp / "world.json"
         self.run_ref, self.build_ref = inputs_ref(self.tree, "run"), inputs_ref(self.tree, "build")
+        self.sirius_ref = inputs_ref(self.tree, "sirius", SIRIUS_CUDF)
         self.world_path.write_text(json.dumps({
             "images": {
                 self.run_ref: {"id": "sha256:run1",
                                "labels": {"peacockdb.inputs": label(self.tree, "run"),
                                           "peacockdb.driver-minimum": DRIVER_MINIMUM}},
                 self.build_ref: {"id": "sha256:build1", "labels": {"peacockdb.inputs": label(self.tree, "build")}},
+                self.sirius_ref: {"id": "sha256:sirius1",
+                                  "labels": {"peacockdb.inputs": label(self.tree, "sirius", cudf=SIRIUS_CUDF),
+                                             "peacockdb.driver-minimum": "580.65.06"}},
             },
+            # Published, and not on the VM until a pull brings it.
+            "absent": [self.sirius_ref],
+            "docker_root": "/var/lib/docker", "free_bytes": 60 * 10**9,
             "containers": {}, "driver": "550.54.15", "runtimes": ["nvidia", "runc"],
             "run_code": 0, "run_output": "==> run-tests.sh list: green\n",
         }))

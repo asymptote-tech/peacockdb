@@ -225,11 +225,13 @@ Retire the non-container paths: CI in the build images (25.02, and a CI-only 25.
 local and verda builds through the image, the conda install and init scripts deleted, one path in
 the wiki. shad-gpu stays as it is, since it has no Docker.
 
-### 11. [`sirius-bench.md`](sirius-bench.md) — closes no ticket — state: approved to build
+### 11. [`sirius-bench.md`](sirius-bench.md) — closes no ticket — state: done — PR #204
 
 SiriusDB (`stable`, prebuilt) on the H100, warm from pinned parquet bytes, one process per
 dataset: its total beside peacockdb's and DuckDB's on the page, with a Σ Sirius / Σ DuckDB line,
 and `testdata/benchmarks.csv` of every result. Starts after the report rebase (note above).
+Every Sirius row needs GPU evidence from Sirius's own log, or it is failed (detail file, human
+instruction 2026-11-10).
 
 ## Chain M (base: master)
 

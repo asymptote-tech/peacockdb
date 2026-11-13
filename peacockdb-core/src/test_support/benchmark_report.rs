@@ -1,15 +1,17 @@
-//! The benchmark report page, `testdata/benchmark-report.html`: every device tree under
-//! `benchmark-results/` side by side, through the tree's one reader. Its rules are build-test.md's
-//! **The page**.
+//! The benchmark report page, `testdata/benchmark-report.html`, and `testdata/benchmarks.csv`:
+//! every device tree under `benchmark-results/` side by side, through the tree's one reader. The
+//! rules are build-test.md's **The page**.
 //!
-//! - A device is a directory holding a `<ds>.sf<sf>/<mode>.benchmark.txt` for one of `MODES`.
 //! - Per dataset, a main table at tp1_single for every device but `MODES_ONLY`, then a collapsed
-//!   Modes section: a table per device, its modes side by side under each measure.
-//! - A timed cell is load, execute, total and peak; in the main table any other cell spans the
-//!   four, in a Modes table it stands in the total and the rest are `—`.
-//! - A DuckDB tree holds `<ds>.sf<sf>/duckdb.tsv`: one column after the devices.
+//!   Modes section with a table per device, its modes side by side under each measure.
+//! - A device's `sirius.tsv` is a Sirius group after the devices, with a ratio line above the
+//!   table; a DuckDB tree's `duckdb.tsv` is one column after that.
 //! - No time, no absolute path, and no host but a DuckDB file's own: the same trees, same bytes.
+//! - The CSV is every result of the same trees, its statuses decided where the page's are.
 
+mod csv;
+mod decided;
+mod sirius;
 #[cfg(test)]
 mod tests;
 
@@ -18,10 +20,11 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use super::{
-    CaseStatus, DeviceCase, DuckdbResults, DuckdbStatus, FAILED, MODES, REPORT_REPO, ReportCell,
-    ReportTable, SKIPPED, duckdb_results, ordered_sections, parse_benchmark_section,
-    parse_device_cases, testdata_root,
+    DeviceCase, DuckdbResults, DuckdbStatus, MODES, REPORT_REPO, ReportCell, ReportTable,
+    duckdb_results, ordered_sections, parse_device_cases, testdata_root,
 };
+use decided::{Decided, decided};
+use sirius::{Sirius, ratio_line, sirius_cells, sirius_intro, siriuses};
 
 /// What the peak column claims, and no more.
 const PEAK_MEANS: &str = "the accountant's peak, a lower bound on device memory";
@@ -64,6 +67,10 @@ pub(crate) fn path() -> PathBuf {
     testdata_root().join("benchmark-report.html")
 }
 
+pub(crate) fn csv_path() -> PathBuf {
+    testdata_root().join("benchmarks.csv")
+}
+
 pub(crate) fn section_href(rel: &str, line: usize) -> String {
     format!("https://github.com/{REPORT_REPO}/blob/master/testdata/{rel}#L{line}")
 }
@@ -96,7 +103,31 @@ struct Duckdb {
     files: BTreeMap<(String, String), DuckdbResults>,
 }
 
+/// Everything the page and the CSV are rendered from: the device trees' sections by row and
+/// device, and the Sirius and DuckDB files beside them.
+struct Trees {
+    devices: Vec<Device>,
+    siriuses: Vec<Sirius>,
+    duckdbs: Vec<Duckdb>,
+    rows: BTreeMap<Place, BTreeMap<usize, Found>>,
+}
+
 pub(crate) fn render(root: &Path, order: &[(String, String)], extra: &[ReportTable]) -> String {
+    let trees = trees(root, order);
+    page(
+        &trees.devices,
+        &trees.siriuses,
+        &trees.duckdbs,
+        &trees.rows,
+        extra,
+    )
+}
+
+pub(crate) fn render_csv(root: &Path, order: &[(String, String)]) -> String {
+    csv::render(&trees(root, order), order)
+}
+
+fn trees(root: &Path, order: &[(String, String)]) -> Trees {
     let devices = devices(root);
     let mut rows: BTreeMap<Place, BTreeMap<usize, Found>> = BTreeMap::new();
     for (at, device) in devices.iter().enumerate() {
@@ -127,7 +158,12 @@ pub(crate) fn render(root: &Path, order: &[(String, String)], extra: &[ReportTab
             }
         }
     }
-    page(&devices, &duckdbs(root), &rows, extra)
+    Trees {
+        siriuses: siriuses(root, &devices),
+        duckdbs: duckdbs(root),
+        devices,
+        rows,
+    }
 }
 
 /// Every directory directly under `root` holding a `<ds>.sf<sf>/duckdb.tsv`, by name.
@@ -248,6 +284,7 @@ fn mode_rank(mode: &str) -> usize {
 
 fn page(
     devices: &[Device],
+    siriuses: &[Sirius],
     duckdbs: &[Duckdb],
     rows: &BTreeMap<Place, BTreeMap<usize, Found>>,
     extra: &[ReportTable],
@@ -266,11 +303,12 @@ fn page(
          test_corpus_goldens from testdata/benchmark-results/ · section links @ master</p>\n\
          <p><b>PeacockDB benchmark results</b> — per dataset, a table at {MAIN_MODE}, one row \
          per query, with every device but {} beside DuckDB. Below it, collapsed, the Modes: a \
-         table per device, its modes side by side under each measure. Times are device-side, in \
-         ms: the total is load plus execute. The peak is {PEAK_MEANS}, in GiB. A load marked \
+         table per device, its modes side by side under each measure. PeacockDB's times are \
+         device-side, in ms: the total is load plus execute. The peak is {PEAK_MEANS}, in GiB. A load marked \
          unpinned was {UNPINNED_MEANS}.</p>\n",
         MODES_ONLY.join(", ")
     );
+    html.push_str(&sirius_intro(siriuses));
     html.push_str(&duckdb_intro(duckdbs));
     html.push_str("<ul>\n");
     for ((dataset, sf), places) in &groups {
@@ -295,7 +333,7 @@ fn page(
     html.push_str("</ul>\n");
     for ((dataset, sf), places) in &groups {
         html.push_str(&dataset_table(
-            &dataset.1, &sf.1, places, devices, duckdbs, rows,
+            &dataset.1, &sf.1, places, devices, siriuses, duckdbs, rows,
         ));
         html.push_str(&modes_section(
             &dataset.1, &sf.1, places, devices, duckdbs, rows,
@@ -363,13 +401,15 @@ fn at_mode(place: &Place, mode: usize) -> Place {
     }
 }
 
-/// The main table: one row per query, each device but `MODES_ONLY` at `MAIN_MODE`, then DuckDB.
-/// A query no such device has a cell for is left out.
+/// The main table: one row per query, each device but `MODES_ONLY` at `MAIN_MODE`, then each
+/// Sirius group, then DuckDB, under the ratio lines. A query no such device has a cell for is
+/// left out.
 fn dataset_table(
     dataset: &str,
     sf: &str,
     places: &[&Place],
     devices: &[Device],
+    siriuses: &[Sirius],
     duckdbs: &[Duckdb],
     rows: &BTreeMap<Place, BTreeMap<usize, Found>>,
 ) -> String {
@@ -379,16 +419,20 @@ fn dataset_table(
         .enumerate()
         .filter(|(_, device)| !MODES_ONLY.contains(&device.name.as_str()))
         .collect();
-    let id = escape(&format!("{dataset}-sf{sf}"));
-    let mut html = format!(
-        "<h2 id=\"{id}\">{}</h2>\n<table>\n<tr><th rowspan=\"2\">query</th>",
-        escape(&format!("{dataset} sf{sf}"))
-    );
+    let key = (dataset.to_string(), sf.to_string());
+    let mut html = "<table>\n<tr><th rowspan=\"2\">query</th>".to_string();
     for (_, device) in &shown {
         let _ = write!(
             html,
             "<th colspan=\"4\">{} · {MAIN_MODE}</th>",
             escape(&device.name)
+        );
+    }
+    for sirius in siriuses {
+        let _ = write!(
+            html,
+            "<th colspan=\"3\">sirius · {}</th>",
+            escape(&sirius.device)
         );
     }
     for duckdb in duckdbs {
@@ -403,10 +447,14 @@ fn dataset_table(
             escape(PEAK_MEANS)
         );
     }
+    for _ in siriuses {
+        html.push_str("<th>load (ms)</th><th>execute (ms)</th><th>total (ms)</th>");
+    }
     for _ in duckdbs {
         html.push_str("<th>warm (ms)</th>");
     }
     html.push_str("</tr>\n");
+    let mut main_queries = Vec::new();
     for query in queries_of(places) {
         let place = at_mode(query, main);
         let cells: Vec<Shown> = shown
@@ -416,9 +464,17 @@ fn dataset_table(
         if cells.iter().all(Shown::is_empty) {
             continue;
         }
+        main_queries.push(query.query.1.as_str());
         let _ = write!(html, "<tr><td>{}</td>", escape(&place.query.1));
         for cell in &cells {
             html.push_str(&cell.spanned());
+        }
+        for sirius in siriuses {
+            let rel = format!(
+                "benchmark-results/{}/{dataset}.sf{sf}/sirius.tsv",
+                sirius.device
+            );
+            html.push_str(&sirius_cells(&place, sirius.files.get(&key), &rel));
         }
         for duckdb in duckdbs {
             html.push_str(&duckdb_cell(&place, duckdb, ""));
@@ -426,7 +482,27 @@ fn dataset_table(
         html.push_str("</tr>\n");
     }
     html.push_str("</table>\n");
-    html
+    let mut head = format!(
+        "<h2 id=\"{}\">{}</h2>\n",
+        escape(&format!("{dataset}-sf{sf}")),
+        escape(&format!("{dataset} sf{sf}"))
+    );
+    // With no DuckDB tree the line still stands, over no query.
+    let duckdb_files: Vec<Option<&DuckdbResults>> = match duckdbs.is_empty() {
+        true => vec![None],
+        false => duckdbs
+            .iter()
+            .map(|duckdb| duckdb.files.get(&key))
+            .collect(),
+    };
+    for sirius in siriuses {
+        for duckdb in &duckdb_files {
+            if let Some(line) = ratio_line(&main_queries, sirius.files.get(&key), *duckdb) {
+                head.push_str(&line);
+            }
+        }
+    }
+    head + &html
 }
 
 /// The collapsed Modes section: per device with a section in the group, a table whose measures
@@ -659,65 +735,52 @@ fn unpinned_mark(unpinned: bool) -> String {
     }
 }
 
+/// The mark after a `wrong` row's time: `wrong answer`, then the row's note where it has one.
+fn wrong_mark(note: &str) -> String {
+    let text = match note {
+        "" => "wrong answer".to_string(),
+        note => format!("wrong answer {note}"),
+    };
+    format!(" <span class=\"missing\">{}</span>", escape(&text))
+}
+
 /// One device's cell for a row at `place`'s mode.
 fn shown_of(place: &Place, device: &Device, found: Option<&Found>) -> Shown {
-    let mode = MODES[place.mode].ident();
-    // The first is the only one: `parse_device_cases` refuses a case listed twice.
-    let case = device.cases.iter().find(|case| {
-        case.dataset == place.dataset.1
-            && case.sf == place.sf.1
-            && case.query.replace('_', "-") == place.query.1
-    });
-    let timed = found.and_then(|found| parse_benchmark_section(&found.body).map(|s| (found, s)));
-    if let Some((found, section)) = timed {
-        let total = section
-            .count("device_us")
-            .unwrap_or_else(|| panic!("{}:{}: no device_us", found.rel, found.line));
-        let load = section
-            .count("load_us")
-            .unwrap_or_else(|| section.tree_load_us());
-        let execute = section.count("execute_us").unwrap_or(total - load);
-        let pinned = section
-            .field("pinned_cache")
-            .is_some_and(|cache| cache.split(' ').next() == Some("on"));
-        let wrong = case
-            .filter(|case| {
-                case.status == CaseStatus::Wrong && case.modes.iter().any(|m| *m == mode)
-            })
-            .map_or(String::new(), |case| {
-                format!(
-                    " <span class=\"missing\">wrong answer {}</span>",
-                    escape(&case.note)
-                )
-            });
-        return Shown::Timed {
-            load: ms(load),
-            unpinned: !pinned,
-            execute: ms(execute),
-            total: format!("{}{wrong}", linked(&ms(total), found)),
-            peak: section.count("peak_bytes").map(|bytes| escape(&gib(bytes))),
-        };
-    }
-    let skipped = case.filter(|case| case.status == CaseStatus::Skipped);
-    let (text, class) = match (skipped, found) {
-        (Some(case), _) => (format!("skipped: {}", case.note), "skip"),
-        (None, Some(found)) => match found.body.strip_prefix(FAILED) {
-            Some(rest) => (format!("failed: {}", first_line(rest)), "off"),
-            None => (
-                format!(
-                    "skipped: {}",
-                    first_line(found.body.trim_start_matches(SKIPPED))
-                ),
-                "skip",
-            ),
+    match decided(place, device, found) {
+        Decided::Timed {
+            found,
+            load_us,
+            execute_us,
+            total_us,
+            peak_bytes,
+            pinned,
+            wrong,
+        } => {
+            let wrong = wrong.map_or(String::new(), |note| wrong_mark(&note));
+            Shown::Timed {
+                load: ms(load_us),
+                unpinned: !pinned,
+                execute: ms(execute_us),
+                total: format!("{}{wrong}", linked(&ms(total_us), found)),
+                peak: peak_bytes.map(|bytes| escape(&gib(bytes))),
+            }
+        }
+        Decided::Untimed {
+            outcome,
+            text,
+            found,
+        } => Shown::Other {
+            text: match found {
+                Some(found) => linked(&text, found),
+                None => escape(&text),
+            },
+            class: outcome.class(),
         },
-        (None, None) => ("—".to_string(), "na"),
-    };
-    let text = match found {
-        Some(found) => linked(&text, found),
-        None => escape(&text),
-    };
-    Shown::Other { text, class }
+        Decided::Missing => Shown::Other {
+            text: "—".to_string(),
+            class: "na",
+        },
+    }
 }
 
 /// A DuckDB tree's cell for a row: its time, linked to its line, or `failed`, or `—`. A time

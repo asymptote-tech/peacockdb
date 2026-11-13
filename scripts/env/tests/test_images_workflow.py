@@ -137,6 +137,12 @@ def committed_cudf_versions():
     return sorted(p.name[len("cudf-"):-len(".spec")] for p in (REPO / "docker" / "conda").glob("cudf-*.spec"))
 
 
+def sirius_cudf_version():
+    """The Sirius image's cuDF, major.minor of its extension's libcudf (docker/pins.env)."""
+    (libcudf,) = re.findall(r"^SIRIUS_LIBCUDF=(\d+\.\d+)\.\d+$", (REPO / "docker" / "pins.env").read_text(), re.M)
+    return libcudf
+
+
 def build_only_versions():
     """The versions with a spec and no DRIVER_MINIMUM_<v> pin: a build image and no run image."""
     pins = (REPO / "docker" / "pins.env").read_text()
@@ -169,8 +175,8 @@ def test_a_dispatch_is_the_only_trigger():
 def test_the_choices_are_the_kinds_and_the_committed_cudf_versions():
     inputs = read_workflow()["on"]["workflow_dispatch"]["inputs"]
     assert inputs["kind"]["type"] == inputs["cudf"]["type"] == "choice"
-    assert inputs["kind"]["options"] == ["build", "run", "all"]
-    assert inputs["cudf"]["options"] == committed_cudf_versions() + ["all"]
+    assert inputs["kind"]["options"] == ["build", "run", "sirius", "all"]
+    assert inputs["cudf"]["options"] == committed_cudf_versions() + [sirius_cudf_version(), "all"]
 
 
 def test_all_runs_every_other_choice_and_one_choice_runs_itself():
@@ -183,15 +189,28 @@ def test_all_runs_every_other_choice_and_one_choice_runs_itself():
                               f"|| format('[\"{{0}}\"]', inputs.{name})) }}}}"), expression
 
 
-def test_a_build_only_version_has_no_run_job():
+def test_a_build_only_version_has_no_run_job_and_sirius_builds_its_version_alone():
     assert build_only_versions() == ["25.10"], build_only_versions()
-    assert job()["strategy"]["matrix"]["exclude"] == [{"kind": "run", "cudf": v} for v in build_only_versions()]
+    sirius = sirius_cudf_version()
+    assert sirius == "26.08" and sirius not in committed_cudf_versions(), sirius
+    assert job()["strategy"]["matrix"]["exclude"] == (
+        [{"kind": "run", "cudf": v} for v in build_only_versions()]
+        + [{"kind": kind, "cudf": sirius} for kind in ("build", "run")]
+        + [{"kind": "sirius", "cudf": v} for v in committed_cudf_versions()])
+
+
+# The storage keys the Sirius build fetches its extension with, and only the Sirius job's Build step
+# gets them: image.sh hands them to docker as BuildKit secrets.
+BUILD_ENV = {"AWS_ACCESS_KEY_ID": "${{ matrix.kind == 'sirius' && secrets.S3_ACCESS_KEY_ID || '' }}",
+             "AWS_SECRET_ACCESS_KEY": "${{ matrix.kind == 'sirius' && secrets.S3_SECRET_ACCESS_KEY || '' }}"}
 
 
 def test_the_token_writes_packages_and_only_reads_the_repository():
     assert read_workflow()["permissions"] == {"contents": "read", "packages": "write"}
     assert "permissions" not in job()
-    assert re.findall(r"secrets\.\w+", WORKFLOW.read_text()) == []
+    assert sorted(re.findall(r"secrets\.\w+", WORKFLOW.read_text())) == ["secrets.S3_ACCESS_KEY_ID",
+                                                                         "secrets.S3_SECRET_ACCESS_KEY"]
+    assert step("Build")["env"] == BUILD_ENV
 
 
 PUSH = """set -euo pipefail
@@ -209,7 +228,7 @@ def test_the_job_runs_its_five_steps_unconditionally():
     the disk gate, a failed build or a failed test should have stopped."""
     assert set(job()) == {"name", "runs-on", "timeout-minutes", "strategy", "defaults", "env", "steps"}, set(job())
     shapes = [(s.get("name"), set(s)) for s in job()["steps"]]
-    assert shapes == [(None, {"uses", "with"}), ("Free the disk", {"name", "run"}), ("Build", {"name", "run"}),
+    assert shapes == [(None, {"uses", "with"}), ("Free the disk", {"name", "run"}), ("Build", {"name", "env", "run"}),
                       ("Test", {"name", "run"}), ("Push", {"name", "env", "run"})], shapes
     assert job()["steps"][0] == {"uses": "actions/checkout@v4", "with": {"persist-credentials": "false"}}
 
@@ -232,6 +251,12 @@ if [ "$KIND" = run ]; then
   export IMAGE
   python3 scripts/env/tests/test_run_tests.py
 fi
+# The Sirius image's check without a GPU, which cannot load the extension: its sha256 against the
+# pin, its footer, the libraries it needs, and the config (docker/sirius-bench.py --self-test).
+if [ "$KIND" = sirius ]; then
+  IMAGE=$(scripts/env/image-ref.sh sirius "$CUDF")
+  docker run --rm "$IMAGE" python3 /opt/sirius/sirius-bench.py --self-test
+fi
 """
 
 
@@ -246,6 +271,7 @@ def run_test_step(kind, image_ref_exit=0):
         root = pathlib.Path(tmp)
         log = root / "log"
         fakes = {root / "bin" / "python3": 'echo "python3 $* IMAGE=$IMAGE" >> "$FAKE_LOG"\n',
+                 root / "bin" / "docker": 'echo "docker $*" >> "$FAKE_LOG"\n',
                  root / "scripts" / "env" / "image-ref.sh":
                      f'echo "image-ref.sh $*" >> "$FAKE_LOG"\necho "ref-of-$2"\nexit {image_ref_exit}\n'}
         for path, body in fakes.items():
@@ -267,6 +293,15 @@ def test_the_test_step_runs_test_run_tests_in_the_run_image_of_the_job_s_cudf():
     assert proc.returncode == 0 and calls == [], (proc, calls)
     proc, calls = run_test_step("run", image_ref_exit=2)
     assert proc.returncode != 0 and not [c for c in calls if c.startswith("python3")], (proc, calls)
+
+
+def test_the_test_step_runs_the_sirius_self_test_in_the_sirius_image():
+    proc, calls = run_test_step("sirius")
+    assert proc.returncode == 0, proc
+    assert calls == ["image-ref.sh sirius 26.02",
+                     "docker run --rm ref-of-26.02 python3 /opt/sirius/sirius-bench.py --self-test"], calls
+    proc, calls = run_test_step("sirius", image_ref_exit=2)
+    assert proc.returncode != 0 and not [c for c in calls if c.startswith("docker")], (proc, calls)
 
 
 FAKES = {

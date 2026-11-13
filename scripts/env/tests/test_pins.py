@@ -48,6 +48,18 @@ PINS = {
     "NEBIUS_SHA256": SHA256,
     "MICROMAMBA_VERSION": r"\d+\.\d+\.\d+-\d+",
     "MICROMAMBA_SHA256": SHA256,
+    # Sirius `stable` (llm-wiki/tasks/sirius-bench.md): its commit, and its CUDA 13 linux_amd64
+    # extension as the release published it, mirrored in the private calibration bucket.
+    "SIRIUS_COMMIT": "8d17afec481c56903b61b74a9787423b470298a1",
+    "SIRIUS_EXTENSION_S3": r"s3://calibration/sirius/[0-9a-f]{64}\.duckdb_extension\.gz",
+    "SIRIUS_EXTENSION_SHA256": "01e4797cff315985e66ff829dde3e3bec715482ced2a6142ff1334577638ed1b",
+    "SIRIUS_EXTENSION_BYTES": "921613272",
+    "SIRIUS_EXTENSION_UNPACKED_SHA256": SHA256,
+    # Sirius's Apache-2.0 LICENSE at SIRIUS_COMMIT, committed as docker/sirius-LICENSE.
+    "SIRIUS_LICENSE_SHA256": "027e24575ca837b017b90fd60a6424126fcc886ba09acf44cfc55797e8e187b2",
+    "SIRIUS_DUCKDB": r"1\.5\.6",
+    "SIRIUS_LIBCUDF": r"26\.08\.01",
+    "DRIVER_MINIMUM_SIRIUS": r"580\.65\.06",
 }
 
 # (name, version, build or None) each spec must hold: the cuDF the committed device answers ran on.
@@ -126,6 +138,28 @@ def test_a_build_only_version_has_no_driver_minimum():
         assert f"DRIVER_MINIMUM_{version.replace('.', '_')}" not in pins, version
     for version in set(IDENTITY) - set(BUILD_ONLY):
         assert f"DRIVER_MINIMUM_{version.replace('.', '_')}" in pins, version
+
+
+def test_the_sirius_mirror_is_named_by_its_content():
+    """The calibration bucket never replaces an object: a new extension is a new key."""
+    pins = read_pins()
+    assert pins["SIRIUS_EXTENSION_S3"] == (
+        f"s3://calibration/sirius/{pins['SIRIUS_EXTENSION_SHA256']}.duckdb_extension.gz"), pins
+
+
+LOCK_LINE = re.compile(r"(?P<name>[a-z0-9][a-z0-9._-]*)==(?P<version>[^\s=]+) --hash=sha256:[0-9a-f]{64}")
+
+
+def test_the_sirius_venv_is_duckdb_and_pyarrow_at_their_pins():
+    """Sirius's Python: the DuckDB its extension was built for, and pyarrow for the Arrow fetch,
+    at the version the build image's venv holds. Nothing else, every line hashed."""
+    lines = [line for line in (DOCKER / "sirius-venv.lock").read_text().splitlines()
+             if line and not line.startswith("#")]
+    bad = [line for line in lines if not LOCK_LINE.fullmatch(line)]
+    assert not bad, f"sirius-venv.lock lines not `name==version --hash=sha256:<64 hex>`: {bad}"
+    pins = read_pins()
+    locked = {m["name"]: m["version"] for m in map(LOCK_LINE.fullmatch, lines)}
+    assert locked == {"duckdb": pins["SIRIUS_DUCKDB"], "pyarrow": pins["PYARROW_VERSION"]}, locked
 
 
 if __name__ == "__main__":
