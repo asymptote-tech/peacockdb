@@ -190,6 +190,18 @@ def test_provision_rerun_skips_what_is_done():
         assert (lap.config / "vm").read_text() == f"vm1.test {user}@vm1.test\n"
 
 
+def test_a_second_provision_rewrites_the_sudoers_file():
+    # uutils' install (Ubuntu 26.04) refuses /dev/stdin onto a file that exists.
+    with Laptop() as lap:
+        readied(lap)
+        sudoers = lap.vms / "vm1.test" / "root" / "etc" / "sudoers.d" / "peacock-dev1"
+        assert sudoers.is_file()
+        quiet(ok(lap.provision(TARGET, "--user", "dev1", "--name", "first", stdin="")))
+        assert sudoers.read_text() == "dev1 ALL=(ALL) NOPASSWD:ALL\n" and mode(sudoers) == 0o440, oct(mode(sudoers))
+        vm_tmp = lap.vms / "vm1.test" / "tmp"
+        assert list(vm_tmp.iterdir()) == [], list(vm_tmp.iterdir())
+
+
 def test_provision_without_a_terminal_names_the_claude_login():
     with Laptop() as lap:
         lap.add_vm("vm1.test")

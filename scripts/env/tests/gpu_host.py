@@ -13,11 +13,12 @@ does, refusing one into the VM user's home. A device run (`--gpus`) is attached:
 in the world, prints the world's run_output, and holds while the file FAKE_HOLD names exists, then
 ends with run_code; `docker stop` ends it with 143 and `docker rm -f` with 137. With run_record, it
 first writes those rows to its calibration record, as a bench does. A second device run while one is
-on the card fails, as two pools on one card do. nvidia-smi answers its one query from
-the world's cards; sudo records and runs its command, install writes /etc into the VM's root, and
-hostname names the machine. On dev, ssh and docker are fakes that fail loudly: no call may bypass
-nebius.sh. The card lock is PEACOCK_CARD_LOCK, under the test's temp dir, shared by every VM user.
-"""
+on the card fails, as two pools on one card do. nvidia-smi answers its one query from the world's
+cards; sudo records and runs its command, install writes /etc into the VM's root, refusing a source
+that is not a regular file onto a file that exists as uutils' does, the VM's commands with a TMPDIR
+of its own, vm/tmp, and hostname names the machine. On dev, ssh and docker are fakes that fail
+loudly: no call may bypass nebius.sh. The card lock is PEACOCK_CARD_LOCK, under the test's temp dir,
+shared by every VM user."""
 import copy
 import fcntl
 import json
@@ -86,7 +87,8 @@ else:
     sys.exit(0)
 env = {k: v for k, v in os.environ.items() if k.startswith("FAKE_")}
 env.update(HOME=os.environ["FAKE_HOST_HOME"], PATH=os.environ["FAKE_HOST_PATH"], LANG="C.UTF-8",
-           PEACOCK_DATA_DIR=os.environ["FAKE_HOST_DATA"], PEACOCK_NVIDIA_PARAMS=os.environ["FAKE_HOST_PARAMS"])
+           PEACOCK_DATA_DIR=os.environ["FAKE_HOST_DATA"], PEACOCK_NVIDIA_PARAMS=os.environ["FAKE_HOST_PARAMS"],
+           TMPDIR=os.environ["FAKE_HOST_TMP"])
 sys.exit(subprocess.run(["bash", "-c", command], env=env, cwd=os.environ["FAKE_HOST_HOME"]).returncode)
 '''
 
@@ -305,6 +307,11 @@ while i < len(a):
         paths.append(a[i]); i += 1
 src, dst = paths
 dst = pathlib.Path(os.environ["FAKE_HOST_ROOT"]) / dst.lstrip("/")
+# As uutils' install 0.10 does (Ubuntu 26.04): a source that is not a regular file (/dev/stdin,
+# /dev/fd/N) onto a file that exists fails.
+if not pathlib.Path(src).is_file() and dst.exists():
+    print("install: No such file or directory", file=sys.stderr)
+    sys.exit(1)
 dst.parent.mkdir(parents=True, exist_ok=True)
 dst.write_bytes(sys.stdin.buffer.read() if src == "/dev/stdin" else pathlib.Path(src).read_bytes())
 ''',
@@ -375,6 +382,8 @@ class Host:
         self.data = tmp / "vm" / "var-lib-peacock"
         self.data.mkdir()
         self.root = tmp / "vm" / "root"
+        self.vm_tmp = tmp / "vm" / "tmp"
+        self.vm_tmp.mkdir()
         self.params = tmp / "vm" / "nvidia-params"
         self.params.write_text("ResmanDebugLevel: 4294967295\nRmProfilingAdminOnly: 0\n")
         self.host_bin, self.dev_bin = tmp / "vm-bin", tmp / "dev-bin"
@@ -408,7 +417,7 @@ class Host:
             "FAKE_HOST_LOG": str(self.host_log), "FAKE_DEV_LOG": str(self.dev_log),
             "FAKE_FETCH_LOG": str(self.fetch_log), "FAKE_HOST_HOME": str(self.home),
             "FAKE_HOST_PATH": f"{self.host_bin}:{os.environ['PATH']}", "FAKE_HOST_DATA": str(self.data),
-            "FAKE_HOST_PARAMS": str(self.params), "FAKE_HOST_ROOT": str(self.root),
+            "FAKE_HOST_PARAMS": str(self.params), "FAKE_HOST_ROOT": str(self.root), "FAKE_HOST_TMP": str(self.vm_tmp),
             "FAKE_HOLD": str(tmp / "hold"), "PEACOCK_CARD_LOCK": str(tmp / "vm" / "run-lock" / "peacock-card.lock"),
             "PEACOCK_SSH_PAUSES": "0 0 0",
         }

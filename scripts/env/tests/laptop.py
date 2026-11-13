@@ -1,23 +1,24 @@
 """A laptop and the VMs it provisions, for provision-vm.sh's tests.
 
 The laptop is a home with a git identity and a clone of the scripts whose origin is the GitHub
-repository. `ssh` is a fake that records each call's argv and stdin and runs the remote command in
-a fake VM: a directory per address holding passwd, group, the users' homes, and `root/` for what is
-written under /etc and /var. A user is reached only with an authorized_keys. As ssh does, `-t`
-gives the far end a terminal only when the laptop's stdin is one, and otherwise says so. Its own
-lines go to its `-E` log when it has one, with `Authenticated to` once a user is reached; `-G`
-prints the `loglevel` and is not a call. FAKE_SSH_REFUSALS=<n> refuses the first n calls before
-authenticating, reading none of stdin and recording no call, and counts them in <ssh log>.refused.
-On a VM, sudo runs its command as the caller; getent, groupadd, useradd, usermod and install act on
-that directory; gh keeps its login in ~/.config/gh/hosts.yml on the laptop and on a VM alike. The
-clone's bootstrap-vm.sh is a stub that records its user and arguments, exits FAKE_BOOTSTRAP_RC when
-it is set, installs a fake claude, whose login needs a terminal, into ~/.local/bin, which is not on
-ssh's PATH, and makes an empty clone on the --ref branch; like the real one, it refuses a --ref
-other than the branch an existing clone is on, naming both. The laptop holds a GPU key pair where
-provision-vm.sh looks by default, and ssh-keygen is a fake that records any call. Its nebius is
-`nebius_cli.py`'s fake, first on PATH, logging to <tmp>/nebius.log; `~/.config/peacock/nebius.yaml`
-holds editor-eu, active, and eu-west1, both keys embedded; `~/.nebius/config.yaml` is mode 000.
-"""
+repository. `ssh` is a fake that records each call's argv and stdin and runs the remote command in a
+fake VM: a directory per address holding passwd, group, the users' homes, and `root/` for what is
+written under /etc and /var. A user is reached only with an authorized_keys. As ssh does, `-t` gives
+the far end a terminal only when the laptop's stdin is one, and otherwise says so. Its own lines go
+to its `-E` log when it has one, with `Authenticated to` once a user is reached; `-G` prints the
+`loglevel` and is not a call. FAKE_SSH_REFUSALS=<n> refuses the first n calls before authenticating,
+reading none of stdin and recording no call, and counts them in <ssh log>.refused. On a VM, sudo
+runs its command as the caller; getent, groupadd, useradd, usermod and install act on that
+directory, install refusing a source that is not a regular file onto a file that exists, as uutils'
+does, and each VM's commands get a TMPDIR of its own, <vm>/tmp; gh keeps its login in
+~/.config/gh/hosts.yml on the laptop and on a VM alike. The clone's bootstrap-vm.sh is a stub that
+records its user and arguments, exits FAKE_BOOTSTRAP_RC when it is set, installs a fake claude,
+whose login needs a terminal, into ~/.local/bin, which is not on ssh's PATH, and makes an empty
+clone on the --ref branch; like the real one, it refuses a --ref other than the branch an existing
+clone is on, naming both. The laptop holds a GPU key pair where provision-vm.sh looks by default,
+and ssh-keygen is a fake that records any call. Its nebius is `nebius_cli.py`'s fake, first on PATH,
+logging to <tmp>/nebius.log; `~/.config/peacock/nebius.yaml` holds editor-eu, active, and eu-west1,
+both keys embedded; `~/.nebius/config.yaml` is mode 000."""
 import json
 import os
 import pathlib
@@ -79,8 +80,9 @@ if log is not sys.stderr:
     print(f'Authenticated to {address} ([{address}]:22) using "publickey".', file=log)
     log.close()
 env = {k: v for k, v in os.environ.items() if k.startswith("FAKE_")}
+(vm / "tmp").mkdir(exist_ok=True)
 env.update(HOME=home, USER=user, LOGNAME=user, FAKE_VM=str(vm), FAKE_USER_NAME=user, LANG="C.UTF-8",
-           PATH=f"{os.environ['FAKE_VM_BIN']}:{os.environ['FAKE_BASE_PATH']}")
+           PATH=f"{os.environ['FAKE_VM_BIN']}:{os.environ['FAKE_BASE_PATH']}", TMPDIR=str(vm / "tmp"))
 if tty:
     env["FAKE_SSH_TTY"] = "1"
 sys.exit(subprocess.run(["bash", "-c", command], input=stdin, env=env, cwd=home).returncode)
@@ -240,6 +242,11 @@ if directory:
             p.chmod(mode)
 else:
     src, dst = paths[0], place(paths[1])
+    # As uutils' install 0.10 does (Ubuntu 26.04): a source that is not a regular file (/dev/stdin,
+    # /dev/fd/N) onto a file that exists fails.
+    if not pathlib.Path(src).is_file() and dst.exists():
+        print("install: No such file or directory", file=sys.stderr)
+        sys.exit(1)
     dst.parent.mkdir(parents=True, exist_ok=True)
     data = sys.stdin.buffer.read() if src == "/dev/stdin" else pathlib.Path(src).read_bytes()
     dst.unlink(missing_ok=True)  # as install does when it cannot open the destination

@@ -154,7 +154,7 @@ vm_system() {
 # vm_nsight: what Nsight on the VM needs: nsys, and the GPU's counters open to non-root (exit 4
 # until a restart).
 vm_nsight() {
-  local params=${PEACOCK_NVIDIA_PARAMS:-/proc/driver/nvidia/params} keyring repo found nsys
+  local params=${PEACOCK_NVIDIA_PARAMS:-/proc/driver/nvidia/params} keyring repo found nsys conf rc=0
   # nsys on PATH: a copy already on the VM (the CUDA toolkit's), else the CLI from NVIDIA's
   # devtools repository.
   if ! command -v nsys > /dev/null; then
@@ -177,9 +177,13 @@ vm_nsight() {
     [ -n "$found" ] || { echo "run-gpu.sh: no nsys on the VM, even after installing nsight-systems-cli" >&2; exit 1; }
     command -v nsys > /dev/null || sudo ln -sfn "$found" /usr/local/bin/nsys
   fi
-  # The module option takes effect when the nvidia module loads, from the initramfs: at boot.
-  sudo install -m 644 /dev/stdin /etc/modprobe.d/peacock-profiling.conf \
-    <<< 'options nvidia NVreg_RestrictProfilingToAdminUsers=0'
+  # The module option takes effect when the nvidia module loads, from the initramfs: at boot. From a
+  # file: uutils' install (Ubuntu 26.04) refuses /dev/stdin onto a file that exists.
+  conf=$(mktemp)
+  { echo 'options nvidia NVreg_RestrictProfilingToAdminUsers=0' > "$conf" \
+      && sudo install -m 644 "$conf" /etc/modprobe.d/peacock-profiling.conf; } || rc=$?
+  rm -f "$conf"
+  [ "$rc" -eq 0 ] || exit "$rc"
   if grep -qs '^RmProfilingAdminOnly: 1' "$params"; then
     sudo update-initramfs -u
     echo "run-gpu.sh: the GPU's performance counters are admin-only until the nvidia module reloads:" \

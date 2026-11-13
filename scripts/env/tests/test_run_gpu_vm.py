@@ -1,6 +1,7 @@
 """`run-gpu.sh` and the VM's reach: a sync is retried whole when its transport drops; the build
 image reaches what prepare generates at a container path; a run is given the image whose labels
-were read, by its ID; every card's driver is held to what that image needs.
+were read, by its ID; every card's driver is held to what that image needs; a second prepare
+rewrites the files it wrote on the VM.
 
 gpu_host.py has the fakes; test_run_gpu.py has the verbs themselves.
 """
@@ -138,6 +139,17 @@ def test_a_driver_answer_that_is_no_version_is_refused():
         h.world(cards=[])
         refused(h.gpu("run", "list"), 2, "nvidia-smi", "no GPU")
         assert h.docker_runs() == []
+
+
+def test_a_second_prepare_rewrites_the_profiling_conf():
+    # uutils' install (Ubuntu 26.04) refuses /dev/stdin onto a file that exists.
+    with Host() as h:
+        conf = h.root / "etc/modprobe.d/peacock-profiling.conf"
+        conf.parent.mkdir(parents=True, exist_ok=True)
+        conf.write_text("an earlier prepare's\n")
+        ok(h.gpu("prepare"))
+        assert conf.read_text() == "options nvidia NVreg_RestrictProfilingToAdminUsers=0\n", conf.read_text()
+        assert list(h.vm_tmp.iterdir()) == [], list(h.vm_tmp.iterdir())
 
 
 def test_a_driver_query_that_exits_255_is_not_a_dropped_ssh():

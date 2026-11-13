@@ -143,7 +143,11 @@ if [ "$user" != "$login" ]; then
     install -m 600 -o "$user" -g "$gid" "$(getent passwd "$login" | cut -d: -f6)/.ssh/authorized_keys" \
       "$home/.ssh/authorized_keys"
   fi
-  echo "$user ALL=(ALL) NOPASSWD:ALL" | install -m 440 /dev/stdin "/etc/sudoers.d/peacock-$user"
+  # From a file: uutils' install (Ubuntu 26.04) refuses /dev/stdin onto a file that exists.
+  sudoers=$(mktemp)
+  trap 'rm -f "$sudoers"' EXIT
+  echo "$user ALL=(ALL) NOPASSWD:ALL" > "$sudoers"
+  install -m 440 "$sudoers" "/etc/sudoers.d/peacock-$user"
 fi
 ROOT
 
