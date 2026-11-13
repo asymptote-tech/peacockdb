@@ -64,25 +64,3 @@ directly (new-hosts has not landed), stops only VMs it started, and keeps to its
 Prototype with a PR against master, no reviewer. `llm-wiki/reports/comet-gpu.md`: go, conditional
 go or no-go against 2× lower cost per query than Comet on CPU, from desk research, S3 throughput on
 three VMs, Comet on 128 cores (1 × 128 and 8 × 16) and a cost model; on a go, the alpha design.
-
-## Chain N (base: master)
-
-vm-setup (PR #205, rk00's `ENS-vm-setup`) landed on master after chain L's squash, with Sirius out of
-`run-gpu.sh` and in a script of its own on vm-setup's runner. Offline only: no VM is started and no
-workflow dispatched. `ENS-vm-setup` is never pushed to. Task 1 of the plan commits the replay with
-Roman as its author; every later commit is the coordinator's own.
-
-### 1. [`vm-setup-rebase.md`](vm-setup-rebase.md) — closes no ticket — state: done — PR #206
-
-vm-setup replayed onto master as Roman's commit; `scripts/env/run-sirius.sh` (`prepare`, `run`) on
-a client library shared with `run-gpu.sh`; Sirius runs under the card lock, stamped for `pull`, its
-image run by ID; `bench-sirius.sh` and the docs follow. A new PR supersedes #205.
-
-### 2. [`vm-setup.md`](vm-setup.md) — closes [#313](../archive/archived-tickets.md#t313) — state: done — PR #205
-
-A plain `docker build` of either image; ssh retried only before a session authenticates; the
-`nebius` CLI and the developer's two-profile `nebius.yaml` on the VM; `run-gpu.sh` gains
-`follow`, `cancel`, a card lock, one tree per VM dir, per-run records cleared once home, the image
-by ID and a per-card driver check; one table of build and test lines; a fresh verda CPU VM
-provisioned. It branches from containers-only, beside sirius-bench, and its PR targets that.
-`gpu-tests` through the runner is unproven in CI: the L40S had no capacity.
