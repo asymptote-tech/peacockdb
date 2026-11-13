@@ -114,7 +114,7 @@ pub(crate) fn lib_rung_of(line: &str) -> Option<(String, String)> {
 
 /// The GPU test binaries `scripts/build-test-shadgpu.sh` stages, from its `RUST_TESTS`
 /// array — what a developer's own run ships to the host.
-fn shadgpu_staged_targets() -> BTreeSet<String> {
+pub(crate) fn shadgpu_staged_targets() -> BTreeSet<String> {
     let text =
         std::fs::read_to_string(repo_root().join(SHADGPU)).expect("read build-test-shadgpu.sh");
     let start = text.find("RUST_TESTS=(").expect(

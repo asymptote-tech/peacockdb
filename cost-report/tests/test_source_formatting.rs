@@ -17,6 +17,8 @@ mod ci_coverage;
 mod near_miss;
 #[path = "test_source_formatting/privacy.rs"]
 mod privacy;
+#[path = "test_source_formatting/prototypes.rs"]
+mod prototypes;
 #[path = "test_source_formatting/runners.rs"]
 mod runners;
 #[path = "test_source_formatting/split_blocks.rs"]

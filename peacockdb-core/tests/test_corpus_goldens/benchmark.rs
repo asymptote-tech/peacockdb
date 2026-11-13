@@ -6,7 +6,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use super::benchmark_checks::{rows_problem, section_problem};
+use super::benchmark_checks::{fused_problem, rows_problem, section_problem};
+use peacockdb_core::prototypes::{fused_report_tables, parse_fused_section};
 use peacockdb_core::test_support::{
     BUILD, FAILED, MODES, Mode, SKIPPED, benchmark_report_path, device_slug, line_difference,
     load_csv, ordered_sections, parse_benchmark_section, render_benchmark_report,
@@ -142,6 +143,33 @@ fn every_total_us_is_the_sum_of_the_time_us_beside_it() {
         "not one timing line in the committed tree: the format moved and this check is \
          reading past it"
     );
+}
+
+/// Every committed `*.fused.txt` section passes `fused_problem`; with none committed yet, there
+/// is nothing to check.
+#[test]
+fn every_fused_section_adds_up() {
+    let mut files = Vec::new();
+    fn walk(dir: &Path, into: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            match path.is_dir() {
+                true => walk(&path, into),
+                false if path.to_string_lossy().ends_with(".fused.txt") => into.push(path),
+                false => {}
+            }
+        }
+    }
+    walk(&testdata_root().join("benchmark-results"), &mut files);
+    for path in files {
+        let text = std::fs::read_to_string(&path).expect("a fused file");
+        for (batch, body) in ordered_sections(&text) {
+            if let Some(section) = parse_fused_section(&body) {
+                let at = format!("{} {batch}", path.display());
+                fused_problem(&section, &batch, &at).unwrap_or_else(|problem| panic!("{problem}"));
+            }
+        }
+    }
 }
 
 /// The committed trees were written by a release build.
@@ -375,7 +403,8 @@ fn the_benchmark_cases_follow_the_registry() {
 
 /// The committed page is, byte for byte, what the trees under `testdata/benchmark-results/`
 /// render through `parse_benchmark_section`, the main list's order giving the row order: the
-/// registry's, which writes the list (`the_benchmark_cases_follow_the_registry`). Under
+/// registry's, which writes the list (`the_benchmark_cases_follow_the_registry`). The fused
+/// files under it add a table each, through `fused_report_tables`. Under
 /// `UPDATE_CANONICAL=1` the page is rewritten and the test passes. A commit that changes a tree
 /// and not the page fails here, naming the first line that moved.
 #[test]
@@ -384,7 +413,8 @@ fn the_benchmark_report_matches_the_trees() {
         .into_iter()
         .map(|(dataset, query, _)| (dataset, query))
         .collect();
-    let want = render_benchmark_report(&testdata_root().join("benchmark-results"), &order, &[]);
+    let root = testdata_root().join("benchmark-results");
+    let want = render_benchmark_report(&root, &order, &fused_report_tables(&root));
     if std::env::var("UPDATE_CANONICAL").is_ok() {
         write_benchmark_report(&want);
         return;

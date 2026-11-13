@@ -8,7 +8,8 @@
 # staged from empty, the gpu test binaries into cpp/install/rust-tests/ (test_gpu_corpus,
 # test_node_timing, peacock_gpu_benchmarks, and the crate's own as peacockdb_core_gpu_lib) and
 # the release build of peacock_gpu_benchmarks into cpp/install/rust-benchmarks/, as
-# build-test-shadgpu.sh --build and --build-benchmarks stage them; each stripped of debug info.
+# build-test-shadgpu.sh --build and --build-benchmarks stage them, and beside it the release build of
+# prototype_fused_benchmarks (query-fuser), which run-gpu.sh runs by name; each stripped of debug info.
 # cargo builds into target-img-<v> in the tree, unless CARGO_TARGET_DIR is set.
 #
 # Exit 0; 2 bad input, or not the build image of <v>; 1 a build failed.
@@ -56,6 +57,9 @@ staged+=("$TESTS/$LIB_STAGED")
 # measure a debug build.
 stage_cargo_test_binary peacock_gpu_benchmarks "$BENCH" --release
 staged+=("$BENCH/peacock_gpu_benchmarks")
+# Its Cargo.toml entry requires both features; no CI step builds it.
+stage_cargo_test_binary prototype_fused_benchmarks "$BENCH" --release --features gpu,test-support
+staged+=("$BENCH/prototype_fused_benchmarks")
 
 # --strip-debug keeps the dynamic symbol table; the debug info is most of each binary's size.
 for f in "${staged[@]}"; do strip --strip-debug "$f"; done

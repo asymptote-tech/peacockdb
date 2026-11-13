@@ -10,9 +10,10 @@
 use super::mock::{EmitRule, Script, spec};
 use super::*;
 use crate::executor::{AbiCall, AbiCalls, AbiTarget};
-use crate::executor::{Region, join_regions, nodes_as_recorded};
+use crate::executor::{Region, join_regions, nodes_as_recorded, nodes_as_recorded_of_roots};
 use crate::plan_text::{
     render_plan, render_run, render_runs, render_timings, timed_device_us, timed_load_us,
+    timed_load_us_of_roots,
 };
 use crate::tests::plans::*;
 use crate::wire::FbKind;
@@ -276,6 +277,47 @@ fn the_load_is_every_loaders_total() {
         timed_device_us(&times) - timed_load_us(plan.as_ref(), &times),
         7
     );
+}
+
+/// Over several roots, a load they share is one node, so its time is counted once.
+#[test]
+fn the_load_of_several_roots_counts_a_shared_load_once() {
+    let script = Script::default()
+        .source("s", vec![vec![spec(4, 32)]])
+        .source("b", vec![vec![spec(10, 80)]]);
+    let s = shared("s", 1);
+    // Pre-order: 0 unload, 1 filter, 2 S, 3 unload, 4 join, 5 b; S builds, and is not walked again.
+    let roots = [
+        unload(filter(read(&s))),
+        unload(join(read(&s), source("b", 1))),
+    ];
+    let refs: Vec<&dyn GpuNode> = roots.iter().map(|root| root.as_ref()).collect();
+    let mut fused = run_roots(&refs, &script);
+    for (node, seq) in [(2, 8u32), (5, 9)] {
+        let mut made = AbiCalls::armed(true);
+        made.record(call_of(seq, 0));
+        fused.report.abi_calls[node][0][0] = made;
+    }
+    let regions = [region(8, 0, 40), region(9, 0, 25)];
+    let times = join_regions(&fused.report, &regions).expect("every region belongs to a call");
+    assert_eq!(timed_load_us_of_roots(&refs, &times), 40 + 25);
+}
+
+/// Several roots are recorded in the driver's pre-order over all of them, a shared node once.
+#[test]
+fn the_recorded_nodes_of_several_roots_hold_a_shared_load_once() {
+    let s = shared("s", 1);
+    let roots = [unload(filter(read(&s))), unload(read(&s))];
+    let refs: Vec<&dyn GpuNode> = roots.iter().map(|root| root.as_ref()).collect();
+    let recorded = nodes_as_recorded_of_roots(&refs).expect("the roots index");
+    let names: Vec<&str> = recorded.iter().map(|(name, _)| *name).collect();
+    assert_eq!(
+        names,
+        ["GpuUnload", "GpuFilter", "GpuLoadParquet", "GpuUnload"]
+    );
+    let mut post: Vec<usize> = recorded.iter().map(|(_, post)| *post).collect();
+    post.sort();
+    assert_eq!(post, [0, 1, 2, 3], "one post-order position per node");
 }
 
 /// The two node indexes stay apart: `node_seq` is the tree's post-order, and the report is

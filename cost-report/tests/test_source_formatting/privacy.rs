@@ -67,40 +67,67 @@ pub(crate) fn private_name_in(signature: &str, names: &[String]) -> Option<Strin
         .cloned()
 }
 
-/// A `pub` in `test_support/mod.rs` whose signature names a type from a component.
+/// The two facades whose API is bare `pub`, each with the components it may name: its own,
+/// and for the prototypes the harness they are built on.
+const FACADES: [(&str, &[&str]); 2] = [
+    ("test_support/mod.rs", &["test_support"]),
+    ("prototypes/mod.rs", &["prototypes", "test_support"]),
+];
+
+/// A `pub` in `test_support/mod.rs` or `prototypes/mod.rs` whose signature names a type from
+/// an engine component.
 ///
 /// The harness is what the corpus binaries reach the engine through, and it is a facade only
 /// while nothing it declares hands a component type across: `pub fn tree() -> Box<dyn GpuNode>`
-/// puts `GpuNode` back on the surface under another name, and it compiles. One file, because
-/// `a_components_api_is_declared_in_its_mod_rs` keeps every `pub` there; fields as well as
-/// parameters and returns, since a `pub` field is read across the same boundary. The components
-/// are read off `lib.rs` rather than listed, so an eighth is inside the rule the day it arrives.
+/// puts `GpuNode` back on the surface under another name, and it compiles. The prototypes'
+/// facade is under the same rule, and may hand the harness's own types across. One file each,
+/// because `a_components_api_is_declared_in_its_mod_rs` keeps every `pub` there; fields as well
+/// as parameters and returns, since a `pub` field is read across the same boundary. The
+/// components are read off `lib.rs`, so an eighth is inside the rule the day it arrives.
 #[test]
 fn no_test_support_signature_names_a_component_type() {
-    let rel = Path::new("test_support/mod.rs");
-    let text = read(rel);
-    let components: Vec<String> = components()
-        .into_iter()
-        .filter(|c| c != "test_support")
-        .collect();
-    let imported = component_imports(&text, &components);
-    assert!(
-        !imported.iter().any(|name| name == "*"),
-        "test_support/mod.rs glob-imports a component, so the names a signature can use \
-         cannot be read off the file; import them by name"
-    );
-    let found: Vec<String> = component_types_on_the_surface(&text, &components)
-        .into_iter()
-        .map(|(n, head, name)| format!("  {}:{}: {head} names `{name}`", rel.display(), n + 1))
-        .collect();
+    let mut found = Vec::new();
+    for (file, own) in FACADES {
+        let rel = Path::new(file);
+        let text = read(rel);
+        let components = engine_components(own);
+        let imported = component_imports(&text, &components);
+        assert!(
+            !imported.iter().any(|name| name == "*"),
+            "{file} glob-imports a component, so the names a signature can use cannot be read \
+             off the file; import them by name"
+        );
+        found.extend(
+            component_types_on_the_surface(&text, &components)
+                .into_iter()
+                .map(|(n, head, name)| format!("  {file}:{}: {head} names `{name}`", n + 1)),
+        );
+    }
     assert!(
         found.is_empty(),
-        "a `pub` in test_support names a type from a component, so the type is on the surface \
-         under the harness's name and the facade is a rename:\n{}\n\nNo parameter, return or \
+        "a `pub` in test_support or prototypes names a type from a component, so the type is \
+         on the surface under the facade's name and the facade is a rename:\n{}\n\nNo parameter, return or \
          `pub` field names a component's type; std, arrow and the harness's own types are what \
          remain. The engine type stays behind a pub(crate) body.",
         found.join("\n")
     );
+}
+
+/// The components a facade may not name: every one `lib.rs` declares but `own`.
+fn engine_components(own: &[&str]) -> Vec<String> {
+    components()
+        .into_iter()
+        .filter(|c| !own.contains(&c.as_str()))
+        .collect()
+}
+
+#[test]
+fn a_prototype_signature_may_name_the_harness_and_no_engine_type() {
+    let doctored = "use crate::plan::GpuNode;\nuse crate::test_support::BenchNode;\n\
+                    pub fn nodes() -> Vec<BenchNode> {}\npub fn tree() -> Box<dyn GpuNode> {}\n";
+    let found = component_types_on_the_surface(doctored, &engine_components(FACADES[1].1));
+    let named: Vec<&str> = found.iter().map(|(_, _, name)| name.as_str()).collect();
+    assert_eq!(named, ["GpuNode"]);
 }
 
 /// Every declaration in a `test_support/mod.rs` text that puts a component type on the

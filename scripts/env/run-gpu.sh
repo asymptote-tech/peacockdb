@@ -17,6 +17,13 @@
 #                                log followed; PCK_TEST_FILTER, PEACOCK_BENCH_RESUME,
 #                                PEACOCK_BENCH_CASE_TIMEOUT_S and PCK_WRITE_GPU_RESULT pass on
 #                                when set
+#   run <name> [--exact <test>]
+#                              a binary staged in the install's rust-benchmarks/ (stage-install.sh's
+#                                prototype_fused_benchmarks), run in the unchanged run image as its
+#                                entrypoint with run-tests.sh's environment, --nocapture
+#                                --test-threads=1, and <test> or PCK_TEST_FILTER as the filter;
+#                                PEACOCK_BENCH_RESUME passes on when set. Judged as run-tests.sh
+#                                judges: a failed exit, a segfault or `running 0 tests` is exit 1
 #   pull                       testdata/benchmark-results/, testdata/calibration/ and the device's
 #                                answers (testdata/goldens/*/gpu-result*.txt) into this tree, and
 #                                the runs' logs into ~/.cache/peacock/run-gpu/<i>/
@@ -38,7 +45,7 @@ die() { echo "run-gpu.sh: $*" >&2; exit 2; }
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(git -C "$here" rev-parse --show-toplevel)
 NEBIUS=("${NEBIUS_SH:-$root/scripts/nebius.sh}")
-dir=$(basename "$root") cudf=25.02 install="" mode="" instance=""
+dir=$(basename "$root") cudf=25.02 install="" mode="" instance="" staged="" exact=""
 while [ $# -gt 0 ]; do
   case $1 in
     -h|--help) usage ;;
@@ -62,8 +69,22 @@ case $verb in
       esac
     done ;;
   run)
-    [ $# -eq 1 ] || die "run takes one mode: list, filter or bench"
-    case $1 in list|filter|bench) mode=$1 ;; *) die "unknown mode $1: list, filter or bench" ;; esac ;;
+    [ $# -ge 1 ] || die "run takes a mode, list, filter or bench, or a staged binary's name"
+    case $1 in
+      list|filter|bench) [ $# -eq 1 ] || die "run $1 takes no argument: ${*:2}"; mode=$1 ;;
+      *)
+        [[ "$1" =~ ^[A-Za-z0-9_]+$ ]] || die "run $1: neither list, filter, bench nor a binary's name"
+        staged=$1
+        shift
+        while [ $# -gt 0 ]; do
+          case $1 in
+            --exact) [ -n "${2:-}" ] || die "--exact needs a test name"; exact=$2; shift 2 ;;
+            *) die "unknown argument to run $staged: $1" ;;
+          esac
+        done
+        [ -z "$exact" ] || [ -z "${PCK_TEST_FILTER:-}" ] \
+          || die "--exact $exact and PCK_TEST_FILTER=$PCK_TEST_FILTER both name the tests: give one" ;;
+    esac ;;
   *) die "unknown verb ${verb:-(none)}: prepare, ship, run or pull" ;;
 esac
 # Not cudf-*: ~/peacock/cudf-<v>/ is the run image's prefix.
@@ -290,6 +311,33 @@ vm_run() {
   case $code in 0|2) return "$code" ;; *) return 1 ;; esac
 }
 
+# vm_run_staged <i> <run image> <name> <NAME=value>… -- <argument>…: the install's
+# rust-benchmarks/<name> as peacock-<i>'s entrypoint in the run image, with the run's mounts;
+# refuses, exit 2, a name staged there as no executable. Returns 0, else 1, as run-tests.sh judges.
+vm_run_staged() {
+  local dir=$1 ref=$2 name=$3 base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock}
+  local container=peacock-$1 entry=/peacock/install/rust-benchmarks/$3 envs=() code log
+  shift 3
+  while [ "$1" != -- ]; do envs+=(-e "$1"); shift; done
+  shift
+  vm_docker
+  vm_not_running "$dir"
+  [ -x "$base/cpp/install/rust-benchmarks/$name" ] \
+    || { echo "run-gpu.sh: no executable $base/cpp/install/rust-benchmarks/$name: stage and ship it first" >&2; exit 2; }
+  mkdir -p "$base/logs"
+  log=$base/logs/$name.log
+  docker run -d --name "$container" --gpus all --user "$(id -u):$(id -g)" --hostname "$(hostname)" \
+    -v "$base/cpp/install:/peacock/install:ro" -v "$base/testdata:/peacock/testdata" -v "$data:$data:ro" \
+    -e LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib -e PEACOCK_TESTDATA_DIR=/peacock/testdata \
+    "${envs[@]}" --entrypoint "$entry" "$ref" "$@" > /dev/null
+  docker logs -f "$container" 2>&1 | tee "$log"
+  code=$(docker wait "$container")
+  docker rm "$container" > /dev/null
+  if [ "$code" -ne 0 ]; then echo "run-gpu.sh: $name exited $code" >&2; return 1; fi
+  if grep -qE 'Segmentation fault|core dumped' "$log"; then echo "run-gpu.sh: $name: a segfault in its log" >&2; return 1; fi
+  if grep -qE '^running 0 tests' "$log"; then echo "run-gpu.sh: $name ran 0 tests" >&2; return 1; fi
+}
+
 # vm_pull_ready <i>: refuses, exit 2, before anything was shipped; makes what pull reads.
 vm_pull_ready() {
   local base=$HOME/peacock/$1
@@ -347,6 +395,16 @@ cmd_run() {
   on_vm vm_run "$dir" "$RUN_REF" "$mode" "${envs[@]}"
 }
 
+cmd_run_staged() {
+  local envs=() args=(--nocapture --test-threads=1)
+  driver_checked
+  machine_image_label_checked "$RUN_REF" "$root" "$cudf" run
+  [ -z "${PCK_TEST_FILTER:-}" ] || envs+=("PCK_TEST_FILTER=$PCK_TEST_FILTER")
+  [ -z "${PEACOCK_BENCH_RESUME:-}" ] || envs+=("PEACOCK_BENCH_RESUME=$PEACOCK_BENCH_RESUME")
+  if [ -n "$exact" ]; then args+=(--exact "$exact"); elif [ -n "${PCK_TEST_FILTER:-}" ]; then args+=("$PCK_TEST_FILTER"); fi
+  on_vm vm_run_staged "$dir" "$RUN_REF" "$staged" "${envs[@]}" -- "${args[@]}"
+}
+
 cmd_pull() {
   local logs=${XDG_CACHE_HOME:-$HOME/.cache}/peacock/run-gpu/$dir
   on_vm vm_pull_ready "$dir"
@@ -360,4 +418,4 @@ cmd_pull() {
   echo "==> pull: testdata/benchmark-results/, testdata/calibration/ and testdata/goldens/*/gpu-result*.txt; the runs' logs in $logs"
 }
 
-"cmd_$verb"
+if [ -n "$staged" ]; then cmd_run_staged; else "cmd_$verb"; fi

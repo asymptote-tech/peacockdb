@@ -121,6 +121,22 @@ def test_cpu_duckdb_is_activity_and_capped():
     assert len(x.stops()) == 1
 
 
+def test_a_fused_run_is_a_test_process():
+    """`prototype_fused_benchmarks`, which `ps` shows by its 15-character comm."""
+    x = World(install={"instance_id": GPU_ID, "kind": "gpu"})
+    x.ps = " 1 900 bash\n 7 60 prototype_fused\n"
+    x.go()
+    line = x.line()
+    assert line["decision"] == "keep" and not x.stops(), line
+    assert [p["pid"] for p in line["test_procs"]] == [7]
+    x = World(install={"instance_id": GPU_ID, "kind": "gpu"})
+    x.ps = " 1 900 bash\n 7 14411 prototype_fused\n"
+    x.go()
+    line = x.line()
+    assert line["decision"] == "cap-stop" and "pid 7" in line["reason"], line
+    assert len(x.stops()) == 1
+
+
 def test_cpu_fetch_is_activity():
     x = cpu()
     x.ps = " 1 900 bash\n 9 60 aws\n"

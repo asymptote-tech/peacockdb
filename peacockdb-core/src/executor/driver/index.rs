@@ -127,7 +127,15 @@ pub(crate) const PROBE_CHILD: usize = 1;
 pub(crate) fn nodes_as_recorded(
     root: &dyn GpuNode,
 ) -> Result<Vec<(&'static str, usize)>, PlanError> {
-    Ok(build(&[root])?
+    nodes_as_recorded_of_roots(&[root])
+}
+
+/// [`nodes_as_recorded`] over several roots, a node they share once.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+pub(crate) fn nodes_as_recorded_of_roots(
+    roots: &[&dyn GpuNode],
+) -> Result<Vec<(&'static str, usize)>, PlanError> {
+    Ok(build(roots)?
         .nodes
         .iter()
         .map(|node| (node.node.name(), node.post_order))

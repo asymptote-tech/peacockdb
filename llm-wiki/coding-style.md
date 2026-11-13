@@ -154,7 +154,8 @@ crate; `common.rs` is a file rather than a directory, what the components share,
 place. **A subcomponent** — `executor/cpu_backend`, `executor/driver`, `planner/translator` and
 the rest — is declared `mod`, reachable only from inside its parent, its API its own `mod.rs`.
 **`test_support`** is a component-shaped child of the crate root whose API is bare `pub` behind a
-feature, with signatures free of engine types.
+feature, with signatures free of engine types. **`prototypes`** sits behind the same feature under
+the same rules, and may name the harness's types.
 
 - **The crate's API is the CLI's.** Bare `pub` in `src/` means "the binary calls this", and
   everything a component exposes to its siblings is `pub(crate)`. The surface is `run`,
@@ -167,7 +168,7 @@ feature, with signatures free of engine types.
   row in `SURFACE` needs the receipt: `cargo build -p peacockdb` failing without it, or
   `private_interfaces` (or `private_bounds`) on a row already listed.
 - **`SURFACE` is the gate; `#![warn(unreachable_pub)]` is the signal.** A `pub` item written
-  anywhere in `src/` outside `test_support` and the table fails
+  anywhere in `src/` outside `test_support`, `prototypes/mod.rs` and the table fails
   `bare_pub_is_the_surface_and_nothing_else` in the layout test, which CI runs; a `pub` field
   on a `pub(crate)` struct is outside both the guard and the lint, and stays by convention. The lint says so first, at the compile the developer is already
   watching — but it is `warn`, and nothing in CI counts warnings, so it fails nothing on its
@@ -176,8 +177,9 @@ feature, with signatures free of engine types.
   module is ever opened, and for `private_interfaces`, which passes silently over a `pub` type
   nothing can name and fires on the `pub(crate)` one.
 - **`pub mod` appears in `lib.rs` and nowhere else**: six components unconditionally, and
-  `test_support` behind its feature. No exemption, no register; a `pub mod` below `lib.rs` is a
-  violation with no sanctioned form.
+  `test_support` and `prototypes` behind `test-support`, the second under the first's rules.
+  `pub_mod_declares_a_component_and_nothing_else` pins both lists. No exemption, no register; a
+  `pub mod` below `lib.rs` is a violation with no sanctioned form.
 - **A subcomponent is declared `mod`, not `pub mod`** — `mod scan_mapping;`, never
   `pub mod scan_mapping;`, which would make `planner::translator::scan_mapping::Mapping`
   nameable crate-wide and leave the wall on paper. What a sibling component needs is declared in
@@ -191,7 +193,8 @@ feature, with signatures free of engine types.
   name, and it compiles. The engine type stays behind a `pub(crate)` body. The components are
   whatever `lib.rs` declares, and `no_test_support_signature_names_a_component_type` scans
   `test_support/mod.rs`, the one file `a_components_api_is_declared_in_its_mod_rs` lets a `pub`
-  appear in.
+  appear in. It scans `prototypes/mod.rs` the same way, where the harness counts as the
+  prototypes' own.
 - **Nesting may go three deep** where the innermost earns it — `planner/translator/scan_mapping/`
   is 720 lines behind three entry points — under the same `mod` rule at each level. A directory
   with a one-item facade and a hundred lines behind it is an implementation module wearing one.

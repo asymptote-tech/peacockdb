@@ -103,21 +103,41 @@ pub(crate) fn survivor_metadata(parquet: &ParquetExec) -> Result<ScanMetadata, P
         }
     }
     let survivors = surviving_row_groups(parquet);
+    groups_of(&reader, path, &projected, survivors.as_deref())
+}
 
+/// The row groups of the file at `path` that `keep` names (every one where it is `None`), with
+/// their rows and their bytes over the file ordinals `projected`, and whether each projected
+/// column can hold a NULL in them. A fused scan's union is re-read through here, so its bytes
+/// and its NULLs are the union's own.
+pub(crate) fn row_group_metadata(
+    path: &str,
+    projected: &[usize],
+    keep: Option<&[u32]>,
+) -> Result<ScanMetadata, PlanError> {
+    let file = std::fs::File::open(path).map_err(|e| PlanError::Invalid(format!("{path}: {e}")))?;
+    let reader =
+        SerializedFileReader::new(file).map_err(|e| PlanError::Invalid(format!("{path}: {e}")))?;
+    groups_of(&reader, path.to_string(), projected, keep)
+}
+
+fn groups_of(
+    reader: &SerializedFileReader<std::fs::File>,
+    path: String,
+    projected: &[usize],
+    keep: Option<&[u32]>,
+) -> Result<ScanMetadata, PlanError> {
     let mut metadata = Vec::new();
     let mut can_be_null = vec![false; projected.len()];
     for (index, group) in reader.metadata().row_groups().iter().enumerate() {
         let index = index as u32;
-        if survivors
-            .as_ref()
-            .is_some_and(|kept| !kept.contains(&index))
-        {
+        if keep.is_some_and(|kept| !kept.contains(&index)) {
             continue;
         }
         // A projection index with no column chunk would silently make the source look
         // smaller, and bytes decide both the batch size and the lane count.
         let (mut bytes, mut compressed_bytes): (i64, i64) = (0, 0);
-        for column in &projected {
+        for column in projected {
             let chunk = group.columns().get(*column).ok_or_else(|| {
                 PlanError::Invalid(format!(
                     "{path}: projected column {column} has no chunk in row group {index}, so \

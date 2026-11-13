@@ -20,6 +20,7 @@ mod interval;
 mod join;
 mod layout;
 mod partition_ops;
+mod rebuild;
 mod shared;
 mod source;
 mod union;
@@ -1025,6 +1026,19 @@ pub(crate) fn new_hold_buffer(input: Box<dyn GpuNode>) -> GpuHoldBuffer {
     hold_buffer::over(input)
 }
 
+/// `node` rebuilt over `children`, the rewritten children in the order [`GpuNode::children`]
+/// reports them. Handed a node's own children back it is the identity.
+#[allow(dead_code)] // callers: src/tests and prototypes::fuser, both outside a release build
+pub(crate) fn rebuild(node: &dyn GpuNode, children: Vec<Box<dyn GpuNode>>) -> Box<dyn GpuNode> {
+    rebuild::rebuild(node, children)
+}
+
+/// The metadata read a loader was built from, back out of the fields it kept.
+#[allow(dead_code)] // callers: src/tests and prototypes::fuser, both outside a release build
+pub(crate) fn scan_of(load: &GpuLoadParquet) -> ScanMetadata {
+    rebuild::scan_of(load)
+}
+
 /// Output lanes are the sum of its branches', and output lane k is served by exactly one
 /// of them, so no row changes lane and no lane waits on another. The hash a branch
 /// carried says nothing about the union's numbering, so it goes.
@@ -1591,6 +1605,13 @@ pub(crate) fn validate_cap(
     cap: Option<NonZeroUsize>,
 ) -> Result<(), PlanError> {
     validate::validate_cap(roots, cap)
+}
+
+/// Whether `node` keeps state that grows with what it is fed: an accumulator or a join. A root
+/// waiting for the cap may have none below its buffers ([`validate_cap`]).
+#[allow(dead_code)] // caller: prototypes::fuser, outside a release build
+pub(crate) fn holds_state(node: &dyn GpuNode) -> bool {
+    validate::holds_state(node)
 }
 
 /// The canonical-form rules a driver needs to have been applied before it runs, so a mock

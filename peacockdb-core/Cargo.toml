@@ -53,4 +53,10 @@ paste = "1"   # derive test fn idents from the unified (dataset, sf, query, devi
 # test binary verifies the columns it owns — see test_support::assert_registry_matches_csv.
 inventory = "0.3"
 
+# The fused batches (query-fuser), run by hand on the H100 and by no CI step: the device and
+# the harness, so no CPU build compiles it.
+[[test]]
+name = "prototype_fused_benchmarks"
+required-features = ["gpu", "test-support"]
+
 # No [patch] section needed

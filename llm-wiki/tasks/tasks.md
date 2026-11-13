@@ -206,7 +206,7 @@ cores for the same set; queries that fail at sf40 are skipped.
 Production: the driver runs plans with shared sources and several roots, without deadlock, with
 per-consumer limits and an optional concurrency cap.
 
-### 7. [`query-fuser.md`](query-fuser.md) — closes no ticket — state: approved to build
+### 7. [`query-fuser.md`](query-fuser.md) — closes no ticket — state: done — PR #200
 
 Production (its code under `src/prototypes/`): fuse the first 3/10/20/all queries into one DAG
 sharing scans, with mergeability and pipelining hints and a memory cap; run them on the H100.

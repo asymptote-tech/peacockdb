@@ -405,11 +405,7 @@ fn cells(place: &Place, mode: &str, device: &Device, found: Option<&Found>) -> S
                 escape(UNPINNED_MEANS)
             ),
         };
-        let peak = section
-            .count("peak_bytes")
-            .map_or("—".to_string(), |bytes| {
-                format!("{:.2}", bytes as f64 / 1073741824.0)
-            });
+        let peak = section.count("peak_bytes").map_or("—".to_string(), gib);
         let wrong = case
             .filter(|case| case.status == CaseStatus::Wrong && case.modes.iter().any(|m| m == mode))
             .map_or(String::new(), |case| {
@@ -509,13 +505,16 @@ fn extra_table(table: &ReportTable) -> String {
     html
 }
 
+/// A cell's text may span lines: each `\n` is a `<br>`, so a long list stacks its items rather
+/// than widening the page.
 fn report_cell(cell: &ReportCell) -> String {
     let class = cell.class.map_or(String::new(), |class| {
         format!(" class=\"{}\"", escape(class))
     });
+    let shown = escape(&cell.text).replace('\n', "<br>");
     let text = match &cell.href {
-        Some(href) => format!("<a href=\"{}\">{}</a>", escape(href), escape(&cell.text)),
-        None => escape(&cell.text),
+        Some(href) => format!("<a href=\"{}\">{shown}</a>", escape(href)),
+        None => shown,
     };
     format!("<td{class}>{text}</td>")
 }
@@ -534,8 +533,13 @@ fn first_line(text: &str) -> &str {
 }
 
 /// Microseconds as milliseconds with one decimal.
-fn ms(us: u64) -> String {
+pub(crate) fn ms(us: u64) -> String {
     format!("{:.1}", us as f64 / 1000.0)
+}
+
+/// Bytes as GiB with two decimals: the peak column's unit.
+pub(crate) fn gib(bytes: u64) -> String {
+    format!("{:.2}", bytes as f64 / 1073741824.0)
 }
 
 /// As Python's `html.escape`, which `ticket_widget.py` writes `report.html` with.

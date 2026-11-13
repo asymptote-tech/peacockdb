@@ -11,10 +11,11 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
 
 use crate::executor::{CpuBackend, PlanIndex, RunError, run_with_hook};
+use crate::plan::rebuild;
 use crate::plan::{GpuNode, GpuProject, NodeRef, Schema, as_node_ref};
 use crate::planner;
 use crate::test_support::{MODES, cpu_schema_validator, data_dir_for, queries_dir_for};
-use crate::tests::rebuild::{rebuild, schema_of};
+use crate::tests::rebuild::schema_of;
 
 /// A field no planned column is declared as, so the retype always diverges.
 const RETYPED_TO: DataType = DataType::Int16;

@@ -313,20 +313,24 @@ pub(crate) fn append_records(rows: &[String], meta: &RunMeta<'_>) {
     let Ok(path) = std::env::var(RECORD_PATH_ENV) else {
         return;
     };
-    let path = PathBuf::from(path);
+    append_records_to(&PathBuf::from(path), rows, meta);
+}
+
+/// [`append_records`] to `path`: a run whose record is not `$PEACOCK_RECORD_PATH`'s.
+pub(crate) fn append_records_to(path: &Path, rows: &[String], meta: &RunMeta<'_>) {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).ok();
     }
-    let fresh = std::fs::metadata(&path)
+    let fresh = std::fs::metadata(path)
         .map(|m| m.len() == 0)
         .unwrap_or(true);
-    if let Some(mismatch) = heading_mismatch(&path, meta) {
+    if let Some(mismatch) = heading_mismatch(path, meta) {
         panic!("{mismatch}");
     }
     let f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&path)
+        .open(path)
         .unwrap_or_else(|e| panic!("cannot open {} for records: {e}", path.display()));
     let mut text = String::new();
     if fresh {
