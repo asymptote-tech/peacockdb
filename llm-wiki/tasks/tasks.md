@@ -211,7 +211,7 @@ per-consumer limits and an optional concurrency cap.
 Production (its code under `src/prototypes/`): fuse the first 3/10/20/all queries into one DAG
 sharing scans, with mergeability and pipelining hints and a memory cap; run them on the H100.
 
-### 8. [`batching-report.md`](batching-report.md) — closes no ticket — state: rebase needed(done)
+### 8. [`batching-report.md`](batching-report.md) — closes no ticket — state: done — PR #201
 
 `llm-wiki/reports/query-batching.md`: fused vs unfused vs DuckDB per batch size.
 

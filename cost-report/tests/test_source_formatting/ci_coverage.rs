@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 
 use crate::repo_root;
 use crate::runners::{
-    NEBIUS_TEST, GPU_STAGING_STEP, gpu_job_lib_rung, gpu_job_staged_by_name, gpu_job_staged_lib,
+    GPU_STAGING_STEP, NEBIUS_TEST, gpu_job_lib_rung, gpu_job_staged_by_name, gpu_job_staged_lib,
     gpu_job_staged_targets, is_rust_gpu_runner_invocation, lib_rung_of,
     rust_gpu_runner_invocations, shadgpu_staged_targets, staged_by_name_of,
 };
@@ -199,6 +199,38 @@ fn line_builds_the_cli(line: &str) -> bool {
 /// is the likelier way it stops running than deleting it.
 fn line_runs_the_pbench_check(line: &str) -> bool {
     !line.trim_start().starts_with('#') && line.contains("generate_pbench.sh --check")
+}
+
+/// Does this workflow line RUN `batching_report.py --check` over the query-batching page?
+///
+/// Tokens of one folded line: the step continues its command with `\`. A comment is rejected
+/// for the reason `line_runs_the_pbench_check` gives.
+fn line_runs_the_batching_check(line: &str) -> bool {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    !line.trim_start().starts_with('#')
+        && words.iter().any(|w| w.ends_with("batching_report.py"))
+        && words.contains(&"llm-wiki/reports/query-batching.md")
+        && words.contains(&"--check")
+}
+
+/// The matcher's own guard: a live line is coverage, a commented-out one and one without
+/// `--check` (which rewrites the page instead of checking it) are not.
+#[test]
+fn the_batching_check_matcher_rejects_a_commented_out_invocation() {
+    let live = "          python3 scripts/calibration/batching_report.py --testdata testdata \\\n            --report llm-wiki/reports/query-batching.md --check";
+    let folded = fold_continuations(live);
+    assert_eq!(folded.len(), 1, "{folded:?}");
+    assert!(line_runs_the_batching_check(&folded[0]), "{}", folded[0]);
+    let commented = format!("          # {}", folded[0].trim_start());
+    assert!(
+        !line_runs_the_batching_check(&commented),
+        "a commented-out invocation does not run, and must not read as coverage"
+    );
+    let writes = folded[0].replace(" --check", "");
+    assert!(
+        !line_runs_the_batching_check(&writes),
+        "without --check the line regenerates the page and checks nothing"
+    );
 }
 
 /// The matcher's own guard, pinning the mode a bare `contains` lets through.
@@ -765,5 +797,24 @@ fn the_pbench_determinism_check_is_named_by_a_ci_step() {
          committed and nothing regenerates it, so without that step a gen.sql change — or a \
          hand-edited parquet — passes every tier. Add it to dataset-matrix's generation step, \
          beside the two `generate_testdata.sh` calls."
+    );
+}
+
+/// The step that proves the query-batching page's numbers are what `batching_report.py`
+/// makes from the committed results.
+///
+/// Like pbench's, a script guard the target sweep cannot see: one `run:` line in
+/// dataset-matrix. Without it a changed input or a hand-edited number passes every tier.
+#[test]
+fn the_batching_report_check_is_named_by_a_ci_step() {
+    let named = workflow_lines()
+        .iter()
+        .any(|line| line_runs_the_batching_check(line));
+    assert!(
+        named,
+        "no workflow line runs `scripts/calibration/batching_report.py … --report \
+         llm-wiki/reports/query-batching.md --check`. The page's tables are generated from \
+         committed results, and without that step an input can move under them with nothing \
+         red. Add it to dataset-matrix, beside `generate_pbench.sh --check`."
     );
 }
