@@ -2,7 +2,7 @@
 
 Kind: production
 
-**This task closes no ticket.**
+**This task closes [#313](../archive/archived-tickets.md#t313)**, a one-line fix in `benchmarks/duckdb_minimal.sh`.
 
 A developer gets a CPU VM from `provision-vm.sh`, builds there in the build image, and runs on a
 Nebius GPU VM through `run-gpu.sh`. Each step has a gap:

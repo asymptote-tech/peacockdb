@@ -3,6 +3,15 @@
 Branch `ENS-vm-setup`, forked from `ENS-containers-only` at `7aeec989` and rebased onto its
 rewritten head, `1eaefe39`, beside sirius-bench; its PR targets `ENS-containers-only`.
 
+The record below names commits as they were before the rebase; on this branch they are:
+
+| before | after | before | after | before | after |
+|---|---|---|---|---|---|
+| `fed95745` | `eb1f4fe8` | `aace33f5` | `43602866` | `7b7c9dad` | `2daac55b` |
+| `ad19c967` | `d3b96449` | `8c1bf1b8` | `69c29b32` | `f46a8e71` | `0b2bdba6` |
+| `60e99496` | `850be236` | `c6a807f4` | `b7f155b0` | `661e8e61` | `c62e29b2` |
+| `3910b3c3` | `56040080` | `8a0d54e9` | `9764e21c` | | |
+
 ## Progress
 
 - 2026-11-09: spec, plan and board entry committed (`fed95745`); Task 1 committed (`ad19c967`).
@@ -1038,7 +1047,9 @@ present. The developer's user is a new one, made by the run. Wall times in secon
 
 The same VM, the login user provisioned as the developer too: `--user <login>`, where Claude Code
 2.1.304 was already installed and logged in, with superpowers 7.0.0 at `bb92a777` from an earlier
-install.
+install. The spec leaves the login user's Claude Code as it is; here the login user is itself the
+developer, so the run brought its superpowers to the pin and added the `.bashrc` line, as for any
+developer.
 
 | at | command | exit, wall |
 |---|---|---|

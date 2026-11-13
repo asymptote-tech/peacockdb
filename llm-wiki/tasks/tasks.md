@@ -231,7 +231,7 @@ SiriusDB (`stable`, prebuilt) on the H100, warm from pinned parquet bytes, one p
 dataset: its total beside peacockdb's and DuckDB's on the page, with a Σ Sirius / Σ DuckDB line,
 and `testdata/benchmarks.csv` of every result. Starts after the report rebase (note above).
 
-### 12. [`vm-setup.md`](vm-setup.md) — closes no ticket — state: building
+### 12. [`vm-setup.md`](vm-setup.md) — closes [#313](../archive/archived-tickets.md#t313) — state: reviewing — PR #205
 
 A plain `docker build` of either image; ssh retried only before a session authenticates; the
 `nebius` CLI and the developer's two-profile `nebius.yaml` on the VM; `run-gpu.sh` gains
