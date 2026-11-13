@@ -4,6 +4,7 @@ Each test runs the script from a clone on a fake laptop (`laptop.py`): ssh, gh a
 user and group tools are fakes, and the VM is a directory, so nothing leaves the machine.
 """
 import getpass
+import hashlib
 import json
 import pathlib
 import shlex
@@ -14,8 +15,9 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
-from laptop import GPU_KEY_NAMES, PAT, Laptop, make_key  # noqa: E402
+from laptop import EMBEDDED, GPU_KEY_NAMES, HELD_NAMES, PAT, Laptop, make_key  # noqa: E402
 from machine import KEYS, path_without  # noqa: E402
+from nebius_cli import nebius_config  # noqa: E402
 
 TARGET = "ubuntu@vm1.test"
 
@@ -25,16 +27,23 @@ def ok(r):
     return r
 
 
+def quiet(r):
+    """Nothing the nebius CLI said reached the output."""
+    assert "FAKE-KEY-MATERIAL" not in r.stdout + r.stderr, (r.stdout, r.stderr)
+    return r
+
+
 def refused(r, lap, *names):
     """Exit 2, one stderr line naming each of `names`, no ssh made and nothing kept on the laptop
-    beside the GPU key it held."""
+    beside the GPU key and nebius.yaml it held."""
     assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
     assert len(r.stderr.strip().splitlines()) == 1, r.stderr
     assert r.stderr.startswith("provision-vm.sh: "), r.stderr
     for name in names:
         assert name in r.stderr, (name, r.stderr)
     assert lap.ssh_calls() == [], lap.ssh_calls()
-    assert {p.name for p in lap.config.iterdir()} <= GPU_KEY_NAMES, list(lap.config.iterdir())
+    assert {p.name for p in lap.config.iterdir()} <= HELD_NAMES, list(lap.config.iterdir())
+    quiet(r)
 
 
 def mode(path):
@@ -43,8 +52,8 @@ def mode(path):
 
 def readied(lap, *extra, stdin=PAT + "\n", tty=False):
     lap.add_vm("vm1.test")
-    return ok(lap.provision(TARGET, "--env", lap.received, "--user", "dev1", "--name", "first", *extra, stdin=stdin,
-                            tty=tty))
+    return quiet(ok(lap.provision(TARGET, "--env", lap.received, "--user", "dev1", "--name", "first", *extra,
+                                  stdin=stdin, tty=tty)))
 
 
 def test_provision_readies_a_vm():
@@ -73,11 +82,10 @@ def test_provision_readies_a_vm():
         assert sudoers.read_text() == "dev1 ALL=(ALL) NOPASSWD:ALL\n" and mode(sudoers) == 0o440
         assert (vm / "bootstrap.log").read_text() == "dev1 --ref ENS-containers\n"
         vm_cfg = home / ".config" / "peacock"
-        want = lap.received.read_text() + f"GPU_SSH_KEY_FILE={vm_cfg / 'gpu_ed25519'}\n"
-        assert (vm_cfg / "peacock.env").read_text() == want
+        assert (vm_cfg / "peacock.env").read_text() == lap.received.read_text()
         assert (vm_cfg / "gpu_ed25519").read_bytes() == key.read_bytes()
         assert (vm_cfg / "gpu_ed25519.pub").read_bytes() == key.with_name("id_ed25519.pub").read_bytes()
-        for name in ("gpu_ed25519", "gpu_ed25519.pub", "peacock.env"):
+        for name in ("gpu_ed25519", "gpu_ed25519.pub", "peacock.env", "nebius.yaml"):
             assert mode(vm_cfg / name) == 0o600, (name, oct(mode(vm_cfg / name)))
         assert f"oauth_token: {PAT}" in (home / ".config" / "gh" / "hosts.yml").read_text()
         gitconfig = (home / ".gitconfig").read_text()
@@ -182,6 +190,32 @@ def test_provision_rerun_skips_what_is_done():
         assert (lap.config / "vm").read_text() == f"vm1.test {user}@vm1.test\n"
 
 
+def test_a_second_provision_rewrites_the_sudoers_file():
+    # uutils' install (Ubuntu 26.04) refuses /dev/stdin onto a file that exists.
+    with Laptop() as lap:
+        readied(lap)
+        sudoers = lap.vms / "vm1.test" / "root" / "etc" / "sudoers.d" / "peacock-dev1"
+        assert sudoers.is_file()
+        quiet(ok(lap.provision(TARGET, "--user", "dev1", "--name", "first", stdin="")))
+        assert sudoers.read_text() == "dev1 ALL=(ALL) NOPASSWD:ALL\n" and mode(sudoers) == 0o440, oct(mode(sudoers))
+        vm_tmp = lap.vms / "vm1.test" / "tmp"
+        assert list(vm_tmp.iterdir()) == [], list(vm_tmp.iterdir())
+
+
+def test_the_secrets_are_staged_in_the_config_dir_and_removed():
+    # Never in /tmp: a killed run or a power loss must not leave keys outside ~/.config/peacock.
+    for fail in (None, "1"):
+        with Laptop() as lap:
+            lap.add_vm("vm1.test")
+            env = {"FAKE_TAR_FAIL": fail} if fail else None
+            r = lap.provision(TARGET, "--env", lap.received, "--user", "dev1", stdin=PAT + "\n", env=env)
+            assert (r.returncode != 0) == bool(fail), (fail, r.returncode, r.stderr)
+            (args,) = lap.tar_log.read_text().splitlines()
+            stage = pathlib.Path(args.split()[1])
+            assert stage.parent == lap.config and stage.name.startswith("provision."), args
+            assert not stage.exists(), list(lap.config.iterdir())
+
+
 def test_provision_without_a_terminal_names_the_claude_login():
     with Laptop() as lap:
         lap.add_vm("vm1.test")
@@ -242,21 +276,21 @@ def test_help_needs_no_sed():
         assert "set -euo" not in r.stdout and not any(ln.startswith("#") for ln in r.stdout.splitlines()), r.stdout
 
 
-def test_provision_needs_bash_4_4():
-    with Laptop() as lap:
-        lines = (lap.clone / "scripts" / "env" / "provision-vm.sh").read_text().splitlines()
-    at = next(i for i, ln in enumerate(lines) if "BASH_VERSINFO" in ln)
-    first_source = next(i for i, ln in enumerate(lines) if ln.startswith((". ", "source ")))
-    assert at + 1 < first_source, "the bash check follows a source"
-    assert not any(ln.startswith(("shopt", "set ")) for ln in lines[:at]), lines[:at]
-    check = "\n".join(lines[at:at + 2]).replace("BASH_VERSINFO", "V").replace("$BASH_VERSION", "$VS")
-    for version, ok in (("3 2", False), ("4 3", False), ("4 4", True), ("5 0", True)):
-        r = subprocess.run(["bash", "-c", f"V=({version}); VS='{version}'\n{check}\necho passed", "provision-vm.sh"],
-                           capture_output=True, text=True, timeout=30)
-        assert ("passed" in r.stdout) is ok, (version, r.returncode, r.stdout, r.stderr)
-        if not ok:
-            assert r.returncode == 2 and r.stderr.startswith("provision-vm.sh: ") and "brew install bash" in r.stderr, r
-            assert len(r.stderr.strip().splitlines()) == 1, r.stderr
+def test_the_laptop_scripts_need_bash_4_4():
+    for name in ("provision-vm.sh", "nebius-profiles.sh"):
+        lines = (pathlib.Path(__file__).resolve().parents[1] / name).read_text().splitlines()
+        at = next(i for i, ln in enumerate(lines) if "BASH_VERSINFO" in ln)
+        first_source = next(i for i, ln in enumerate(lines) if ln.startswith((". ", "source ")))
+        assert at + 1 < first_source, (name, "the bash check follows a source")
+        assert not any(ln.startswith(("shopt", "set ")) for ln in lines[:at]), (name, lines[:at])
+        check = "\n".join(lines[at:at + 2]).replace("BASH_VERSINFO", "V").replace("$BASH_VERSION", "$VS")
+        for version, ok in (("3 2", False), ("4 3", False), ("4 4", True), ("5 0", True)):
+            r = subprocess.run(["bash", "-c", f"V=({version}); VS='{version}'\n{check}\necho passed", name],
+                               capture_output=True, text=True, timeout=30)
+            assert ("passed" in r.stdout) is ok, (name, version, r.returncode, r.stdout, r.stderr)
+            if not ok:
+                assert r.returncode == 2 and r.stderr.startswith(f"{name}: ") and "brew install bash" in r.stderr, r
+                assert len(r.stderr.strip().splitlines()) == 1, r.stderr
 
 
 
@@ -271,15 +305,13 @@ def test_provision_normalises_the_env_file():
             lap.received.write_bytes(received)
             readied(lap)
             assert (lap.config / "peacock.env").read_text() == lines, (lap.config / "peacock.env").read_bytes()
-            key = lap.vm_home("vm1.test", "dev1") / ".config" / "peacock" / "gpu_ed25519"
-            assert vm_env(lap) == lines + f"GPU_SSH_KEY_FILE={key}\n", vm_env(lap)
+            assert vm_env(lap) == lines, vm_env(lap)
     with Laptop() as lap:
         lap.add_vm("vm1.test")
         lap.config.mkdir(parents=True, mode=0o700, exist_ok=True)
         (lap.config / "peacock.env").write_text(lines.rstrip("\n"))
         ok(lap.provision(TARGET, "--user", "dev1", stdin=PAT + "\n"))
-        assert vm_env(lap).splitlines()[:5] == [*lines.splitlines(), vm_env(lap).splitlines()[4]], vm_env(lap)
-        assert vm_env(lap).splitlines()[4].startswith("GPU_SSH_KEY_FILE="), vm_env(lap)
+        assert vm_env(lap) == lines.rstrip("\n"), vm_env(lap)
     with Laptop() as lap:
         lap.add_vm("vm1.test")
         lap.config.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -287,7 +319,7 @@ def test_provision_normalises_the_env_file():
         own.write_text(lines)
         ok(lap.provision(TARGET, "--env", own, "--user", "dev1", stdin=PAT + "\n"))
         assert own.read_text() == lines and mode(own) == 0o600, own.read_bytes()
-        assert vm_env(lap).splitlines()[:4] == lines.splitlines(), vm_env(lap)
+        assert vm_env(lap) == lines, vm_env(lap)
         assert [p.name for p in lap.config.iterdir() if p.name.startswith("peacock.env")] == ["peacock.env"]
 
 
@@ -317,6 +349,29 @@ def test_provision_runs_bootstrap_on_every_run():
         assert (lap.vms / "vm1.test" / "bootstrap.log").read_text() == "dev1 \n" * 2
 
 
+def test_provision_retries_a_refused_connection():
+    with Laptop() as lap:
+        lap.add_vm("vm1.test")
+        r = ok(lap.provision(TARGET, "--env", lap.received, "--user", "dev1", stdin=PAT + "\n",
+                             env={"FAKE_SSH_REFUSALS": "2"}))
+        assert (lap.ssh_log.parent / "ssh.log.refused").read_text() == "2"
+        assert "attempt 2 of 4 failed before authenticating" in r.stderr, r.stderr
+        # The root step's heredoc arrived whole after two refusals.
+        assert lap.vm_home("vm1.test", "dev1").is_dir()
+        assert "dev1" in lap.group_members("vm1.test", "docker")
+        assert (lap.vms / "vm1.test" / "bootstrap.log").read_text() == "dev1 \n"
+
+
+def test_provision_never_retries_a_session_that_authenticated():
+    with Laptop() as lap:
+        lap.add_vm("vm1.test")
+        r = lap.provision(TARGET, "--env", lap.received, "--user", "dev1", stdin=PAT + "\n",
+                          env={"FAKE_BOOTSTRAP_RC": "255"})
+        assert r.returncode != 0, (r.returncode, r.stdout, r.stderr)
+        assert (lap.vms / "vm1.test" / "bootstrap.log").read_text() == "dev1 \n"
+        assert "attempt" not in r.stderr, r.stderr
+
+
 def test_provision_copies_the_named_gpu_key():
     with Laptop() as lap:
         key = lap.home / "keys" / "dev_ed25519"
@@ -328,7 +383,7 @@ def test_provision_copies_the_named_gpu_key():
         assert (vm_cfg / "gpu_ed25519.pub").read_bytes() == key.with_name("dev_ed25519.pub").read_bytes()
         for name in ("gpu_ed25519", "gpu_ed25519.pub"):
             assert mode(vm_cfg / name) == 0o600, (name, oct(mode(vm_cfg / name)))
-        assert f"GPU_SSH_KEY_FILE={vm_cfg / 'gpu_ed25519'}" in vm_env(lap).splitlines(), vm_env(lap)
+        assert vm_env(lap) == (lap.config / "peacock.env").read_text(), vm_env(lap)
         for argv in [c["argv"] for c in lap.ssh_calls()]:
             assert not any(private.splitlines()[1] in arg for arg in argv), argv
         assert not lap.keygen_log.exists(), lap.keygen_log.read_text()
@@ -354,6 +409,151 @@ def test_provision_refuses_a_missing_gpu_key():
         key.with_name("lone_ed25519.pub").unlink()
         r = lap.provision(TARGET, "--env", lap.received, "--gpu-key", key, stdin=PAT + "\n")
         refused(r, lap, "--gpu-key", "lone_ed25519.pub")
+
+
+def sha256(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_provision_ships_nebius_yaml_on_stdin_mode_600():
+    with Laptop() as lap:
+        readied(lap)
+        shipped = lap.vm_home("vm1.test", "dev1") / ".config" / "peacock" / "nebius.yaml"
+        assert mode(shipped) == 0o600, oct(mode(shipped))
+        assert sha256(shipped) == sha256(lap.nebius_yaml)
+        text = lap.nebius_yaml.read_text()
+        assert any(text in c["stdin"] for c in lap.ssh_calls()), "nebius.yaml never went on ssh's stdin"
+        for argv in [c["argv"] for c in lap.ssh_calls()]:
+            assert not any(text in a or "serviceaccount-" in a for a in argv), argv
+
+
+def refused_for(lap, *names, env=None):
+    lap.add_vm("vm1.test")
+    refused(lap.provision(TARGET, "--env", lap.received, stdin=PAT + "\n", env=env), lap, *names)
+    assert not (lap.vms / "vm1.test" / "home" / "dev1").exists()
+
+
+def test_provision_refuses_a_missing_nebius_yaml_naming_nebius_profiles():
+    # No ~/.nebius/config.yaml either, so there is nothing to cut it from.
+    with Laptop() as lap:
+        lap.nebius_yaml.unlink()
+        (lap.home / ".nebius" / "config.yaml").unlink()
+        refused_for(lap, "nebius.yaml", "scripts/env/nebius-profiles.sh")
+
+
+def own_config(lap, profiles):
+    """No nebius.yaml, and a readable ~/.nebius/config.yaml holding `profiles`, old the active one."""
+    lap.nebius_yaml.unlink()
+    own = lap.home / ".nebius" / "config.yaml"
+    own.unlink()
+    nebius_config(own, "old", profiles)
+
+
+def test_a_missing_nebius_yaml_is_cut_before_anything_is_written():
+    with Laptop() as lap:
+        pem = lap.home / ".nebius" / "eu-west1-sa.pem"
+        pem.write_text("FAKE-KEY-MATERIAL\n")
+        own_config(lap, {"editor-eu": EMBEDDED, "eu-west1": {"key_path": str(pem)}, "old": EMBEDDED})
+        r = readied(lap)
+        assert f"{lap.nebius_yaml}: editor-eu (active), eu-west1; 1 other profiles left out" in r.stderr, r.stderr
+        assert mode(lap.nebius_yaml) == 0o600, oct(mode(lap.nebius_yaml))
+        listed = subprocess.run([str(lap.bin / "nebius"), "--config", str(lap.nebius_yaml), "profile", "list"],
+                                env={**lap.env, "FAKE_NEBIUS_LOG": ""}, capture_output=True, text=True,
+                                timeout=60, check=True).stdout
+        assert listed == "editor-eu [default]\neu-west1\n", listed
+        configs = [argv[argv.index("--config") + 1] for argv in lap.nebius_calls()]
+        first_check = configs.index(str(lap.nebius_yaml))
+        assert first_check > 0 and all(c != str(lap.nebius_yaml) for c in configs[:first_check]), configs
+        assert all(c == str(lap.nebius_yaml) for c in configs[first_check:]), configs
+        assert not any(p.name.startswith("nebius-cut.") for p in lap.config.iterdir()), list(lap.config.iterdir())
+        shipped = lap.vm_home("vm1.test", "dev1") / ".config" / "peacock" / "nebius.yaml"
+        assert sha256(shipped) == sha256(lap.nebius_yaml)
+
+
+def test_a_bad_argument_cuts_nothing():
+    # A bad flag, and a missing env file, which is checked before the cut.
+    for args, named in ((("--bogus",), "--bogus"), ((), "peacock.env")):
+        with Laptop() as lap:
+            own_config(lap, {"editor-eu": EMBEDDED, "eu-west1": EMBEDDED})
+            lap.add_vm("vm1.test")
+            r = lap.provision(TARGET, *args, stdin=PAT + "\n")
+            assert r.returncode == 2 and named in r.stderr, (args, r.returncode, r.stderr)
+            assert {p.name for p in lap.config.iterdir()} == GPU_KEY_NAMES, (args, list(lap.config.iterdir()))
+            assert lap.nebius_calls() == [] and lap.ssh_calls() == [], (args, lap.nebius_calls())
+
+
+def test_a_nebius_yaml_cut_that_fails_is_refused_before_any_ssh():
+    with Laptop() as lap:
+        own_config(lap, {"editor-eu": EMBEDDED, "old": EMBEDDED})
+        lap.add_vm("vm1.test")
+        r = quiet(lap.provision(TARGET, "--env", lap.received, stdin=PAT + "\n"))
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert len(r.stderr.strip().splitlines()) == 1, r.stderr
+        assert r.stderr.startswith("nebius-profiles.sh: ") and "eu-west1" in r.stderr, r.stderr
+        assert lap.ssh_calls() == [], lap.ssh_calls()
+        assert {p.name for p in lap.config.iterdir()} == GPU_KEY_NAMES, list(lap.config.iterdir())
+        assert not (lap.vms / "vm1.test" / "home" / "dev1").exists()
+
+
+def test_provision_refuses_a_nebius_yaml_with_another_profile():
+    with Laptop() as lap:
+        nebius_config(lap.nebius_yaml, "editor-eu", {"editor-eu": EMBEDDED, "eu-west1": EMBEDDED, "ci": EMBEDDED})
+        refused_for(lap, "ci", "nebius-profiles.sh")
+
+
+def test_provision_refuses_a_nebius_yaml_lacking_a_profile():
+    with Laptop() as lap:
+        nebius_config(lap.nebius_yaml, "editor-eu", {"editor-eu": EMBEDDED})
+        refused_for(lap, "lacks eu-west1", "nebius-profiles.sh")
+
+
+def test_provision_refuses_a_profile_that_reads_its_key_from_a_file():
+    with Laptop() as lap:
+        pem = lap.home / ".nebius" / "eu-west1-sa.pem"
+        pem.write_text("FAKE-KEY-MATERIAL\n")
+        nebius_config(lap.nebius_yaml, "editor-eu", {"editor-eu": EMBEDDED, "eu-west1": {"key_path": str(pem)}})
+        refused_for(lap, "eu-west1", "nebius-profiles.sh")
+
+
+def test_provision_refuses_a_federation_profile_naming_the_recipe():
+    for name in ("editor-eu", "eu-west1"):
+        with Laptop() as lap:
+            profiles = {"editor-eu": EMBEDDED, "eu-west1": EMBEDDED}
+            profiles[name] = {"key_path": None, "kind": "federation"}
+            nebius_config(lap.nebius_yaml, "editor-eu", profiles)
+            refused_for(lap, name, "service account", "The human's one-time setup")
+
+
+def test_provision_refuses_without_a_nebius_cli_naming_the_installer():
+    with Laptop() as lap:
+        (lap.bin / "nebius").unlink()
+        system = path_without(lap.home.parent, {"nebius"})
+        refused_for(lap, "install.sh", "bootstrap-vm.sh", env={"PATH": f"{lap.bin}:{system}"})
+        assert lap.nebius_calls() == []
+
+
+def test_provision_refuses_a_profile_list_it_cannot_read_naming_the_version():
+    with Laptop() as lap:
+        odd = "editor-eu private-key: FAKE-KEY-MATERIAL"
+        refused_for(lap, "0.12.293", env={"FAKE_NEBIUS_LIST": odd})
+
+
+def test_provision_reads_no_cli_config_of_its_own():
+    with Laptop() as lap:
+        readied(lap)
+        calls = lap.nebius_calls()
+        assert calls, "the nebius CLI was never asked"
+        for argv in calls:
+            assert "--config" in argv and argv[argv.index("--config") + 1] == str(lap.nebius_yaml), argv
+        assert mode(lap.home / ".nebius" / "config.yaml") == 0
+
+
+def test_the_vm_env_file_is_the_laptop_s():
+    with Laptop() as lap:
+        readied(lap)
+        vm_cfg = lap.vm_home("vm1.test", "dev1") / ".config" / "peacock"
+        assert (vm_cfg / "peacock.env").read_bytes() == (lap.config / "peacock.env").read_bytes()
+        assert "GPU_SSH_KEY_FILE" not in (vm_cfg / "peacock.env").read_text()
 
 
 if __name__ == "__main__":

@@ -1,12 +1,18 @@
 """`bench-each.sh`: the H100 benchmark one process per query, over a fake run-gpu.sh and nebius.sh.
 
-The fake run-gpu.sh plays the VM's `run bench` and `pull`: a case writes its section into the
-VM's tree and its rows into the VM's record, as the harness does, and `pull` copies both into the
-tree on dev. Per query a behaviour: `ok`, `timeout` (a failed section, no rows), `kill` (rows and
-no section, every time) or `kill-once` (that, then `ok`). Like run-tests.sh, `run bench` refuses a
-VM record that holds rows, and like the harness under resume it keeps a section on the VM whose
-trailer is this run's, running nothing. The fake nebius.sh runs `ssh` commands in the VM's home,
-where `hostname` is the trailer's host.
+The fake run-gpu.sh plays the VM's `run bench`, `status`, `follow` and `pull [--clear]`: a case writes
+its section into the VM's tree and its rows into the VM's record, as the harness does, and the run's
+end keeps the record as `records-<stamp>.tsv`, as the runner does. `pull` keeps a `records.tsv` no run
+holds under a stamp, copies the results and the records into the tree on dev, never over a local
+record that differs (exit 1, named), and with `--clear` removes each VM record whose copy home is the
+same; `--clear` is refused, exit 2, while a run goes. Per query a behaviour: `ok`, `timeout` (a failed
+section, no rows), `kill` (rows and no section, every time), `kill-once` (that, then `ok`) or `drop`
+(`ok`, but run-gpu.sh exits 1 with the run going, as a dropped ssh leaves it, until `follow`) or
+`conflict` (`ok`, and the next pull, its record home, exits 1 naming another file changed on both
+sides). Like
+run-tests.sh, `run bench` refuses a VM record that holds rows, and like the harness under resume it
+keeps a section on the VM whose trailer is this run's, running nothing. The fake nebius.sh runs `ssh`
+commands in the VM's home, where `hostname` is the trailer's host.
 """
 import json
 import os
@@ -53,22 +59,62 @@ while a[i].startswith("--"):
 verb = a[i]
 vm = pathlib.Path(os.environ["FAKE_HOST_HOME"]) / "peacock" / d / "testdata"
 record = vm / "calibration" / "records.tsv"
-if verb == "pull":
-    tree = pathlib.Path(os.environ["FAKE_TREE"]) / "testdata"
-    for sub in ("benchmark-results", "calibration"):
-        if (vm / sub).is_dir():
-            shutil.copytree(vm / sub, tree / sub, dirs_exist_ok=True)
+state = pathlib.Path(os.environ["FAKE_STATE"])
+seen = json.loads(state.read_text()) if state.exists() else {}
+
+def saved():
+    state.write_text(json.dumps(seen))
+
+def kept():
+    """records.tsv as records-<stamp>.tsv, the stamps in time order."""
+    if record.exists():
+        seen["#stamp"] = seen.get("#stamp", 0) + 1
+        record.rename(record.with_name(f"records-20260101T{seen['#stamp']:06d}.000Z.tsv"))
+        saved()
+
+if verb == "status":
+    sys.exit(5 if seen.get("#going") else 0)
+if verb == "follow":
+    seen.pop("#going", None)
+    saved()
     sys.exit(0)
+if verb == "pull":
+    if seen.get("#going") and a[i + 1:] == ["--clear"]:
+        print("run-gpu.sh: the bench run goes on: run-gpu.sh … follow follows it", file=sys.stderr)
+        sys.exit(2)
+    if not seen.get("#going"):
+        kept()
+    tree = pathlib.Path(os.environ["FAKE_TREE"]) / "testdata"
+    if (vm / "benchmark-results").is_dir():
+        shutil.copytree(vm / "benchmark-results", tree / "benchmark-results", dirs_exist_ok=True)
+    (tree / "calibration").mkdir(parents=True, exist_ok=True)
+    rc = 0
+    for f in sorted((vm / "calibration").glob("records*.tsv")):
+        if f.name == "records.tsv":
+            continue
+        home = tree / "calibration" / f.name
+        if home.exists() and home.read_bytes() != f.read_bytes():
+            print(f"run-gpu.sh: pull: kept testdata/calibration/{f.name}: it changed here and on the VM",
+                  file=sys.stderr)
+            rc = 1
+            continue
+        shutil.copy2(f, home)
+        if a[i + 1:] == ["--clear"] and re.fullmatch(r"records-\d.*\.tsv", f.name):
+            f.unlink()
+    if seen.pop("#conflict", None):
+        saved()
+        print("run-gpu.sh: pull: kept testdata/goldens/tpch.sf40/gpu-result.txt: it changed here and on the VM",
+              file=sys.stderr)
+        rc = 1
+    sys.exit(rc)
 assert a[i:] == ["run", "bench"], a
 if record.exists() and record.stat().st_size:
     print("run-tests.sh: the record holds an earlier run's rows", file=sys.stderr)
     sys.exit(2)
 ds, sf, query, mode = re.fullmatch(r"bench_(tpch|tpcds)_sf(\d+)_(.+)_(tp1_single|tp4_sized)",
                                    os.environ["PCK_TEST_FILTER"]).groups()
-state = pathlib.Path(os.environ["FAKE_STATE"])
-seen = json.loads(state.read_text()) if state.exists() else {}
 seen[query] = seen.get(query, 0) + 1
-state.write_text(json.dumps(seen))
+saved()
 behaviour = json.loads(os.environ.get("FAKE_BEHAVIOUR", "{}")).get(query, "ok")
 if behaviour == "kill-once":
     behaviour = "kill" if seen[query] == 1 else "ok"
@@ -84,7 +130,7 @@ if os.environ.get("PEACOCK_BENCH_RESUME") == "1" and tree.exists():
     if at >= 0 and (text[at:].split("\n== ", 1)[0].rstrip("\n") + "\n").endswith(trailer):
         print(f"kept {query}")
         sys.exit(0)
-if behaviour in ("ok", "kill"):
+if behaviour in ("ok", "kill", "drop", "conflict"):
     record.parent.mkdir(parents=True, exist_ok=True)
     fresh = not record.exists() or not record.stat().st_size
     with open(record, "a") as f:
@@ -92,15 +138,24 @@ if behaviour in ("ok", "kill"):
             f.write(os.environ["FAKE_HEADING"] + os.environ["FAKE_COLUMNS"])
         for seq in range(2):
             f.write(f"{ds}\t{sf}\t{query.replace('_', '-')}\t{mode.replace('_', '-')}\t{seq}\t{seen[query]}\n")
-if behaviour == "ok":
+if behaviour in ("ok", "drop", "conflict"):
     with open(tree, "a") as f:
         f.write(f"== {query.replace('_', '-')}\nGpuScan\n  time_us=[[1]] total_us=1\n--- run ---\nrun_us=1\n{trailer}")
-    sys.exit(0)
 if behaviour == "timeout":
     with open(tree, "a") as f:
         f.write(f"== {query.replace('_', '-')}\nstatus=failed reason=timeout: the case ran past "
                 f"{os.environ['PEACOCK_BENCH_CASE_TIMEOUT_S']} s\n{trailer}")
-sys.exit(1)
+kept()
+if behaviour == "conflict":
+    seen["#conflict"] = 1  # the next pull finds another file changed here and on the VM
+    saved()
+    sys.exit(0)
+if behaviour == "drop":
+    seen["#going"] = 1
+    saved()
+    print("run-gpu.sh: no longer following; the run goes on", file=sys.stderr)
+    sys.exit(1)
+sys.exit(0 if behaviour == "ok" else 1)
 '''
 
 FAKE_NEBIUS = r'''#!/usr/bin/env python3
@@ -189,6 +244,15 @@ class Run:
     def host_record(self):
         return self.vm / "calibration/records.tsv"
 
+    def nebius_calls(self):
+        if not self.nebius_log.exists():
+            return []
+        return [json.loads(line) for line in self.nebius_log.read_text().splitlines()]
+
+    def records_left(self):
+        """Every calibration record still on the VM or in the tree."""
+        return [p for root in (self.vm, self.tree / "testdata") for p in (root / "calibration").glob("records*.tsv")]
+
 
 def ok(r):
     assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
@@ -200,7 +264,7 @@ def test_bench_each_runs_one_process_per_query():
         ok(h.each())
         assert h.filters() == ALL_TP1, h.filters()
         verbs = [c["argv"][len(H100):] for c in h.calls()]
-        assert verbs == [["run", "bench"], ["pull"]] * 4, verbs
+        assert verbs == [["pull", "--clear"]] + [["run", "bench"], ["pull", "--clear"]] * 4, verbs
         for ds, q in (("tpch", "q1"), ("tpch", "q6"), ("tpch", "aggregate-groupby"), ("tpcds", "q37")):
             assert h.section(ds, q), (ds, q)
 
@@ -213,7 +277,7 @@ def test_bench_each_resumes_and_sets_the_timeout():
             env = call["env"]
             assert env["PEACOCK_BENCH_RESUME"] == "1" and env["PEACOCK_BENCH_CASE_TIMEOUT_S"] == "900", env
             assert env["PCK_WRITE_GPU_RESULT"] == "1", env
-        for call in [json.loads(line) for line in h.nebius_log.read_text().splitlines()]:
+        for call in h.nebius_calls():
             assert call[:4] == H100 and "--dir" not in call, call
 
 
@@ -223,8 +287,9 @@ def test_bench_each_passes_dir_to_run_gpu_alone():
         ok(h.each("--dir", "other"))
         for call in h.calls():
             assert call["argv"][4:6] == ["--dir", "other"], call
-        for call in [json.loads(line) for line in h.nebius_log.read_text().splitlines()]:
-            assert "--dir" not in call and "peacock/other/" in " ".join(call), call
+        for call in h.nebius_calls():
+            assert "--dir" not in call, call
+        assert any((h.home / "peacock/other/testdata/benchmark-results" / SLUG).iterdir())
 
 
 def test_bench_each_skips_a_failed_case_on_rerun():
@@ -269,8 +334,7 @@ def test_bench_each_moves_each_record_aside():
         assert sorted(p.name for p in h.records.glob("*.tsv")) == [
             "tpcds-q37-tp1_single.1.tsv", "tpch-aggregate_groupby-tp1_single.1.tsv",
             "tpch-q1-tp1_single.1.tsv", "tpch-q6-tp1_single.1.tsv"]
-        assert not h.host_record().exists()
-        assert not (h.tree / "testdata/calibration/records.tsv").exists()
+        assert h.records_left() == [], h.records_left()
         # q1 measured again: its section dropped on both sides.
         for root in (h.tree / "testdata", h.vm):
             path = root / f"benchmark-results/{SLUG}/tpch.sf40/tp1_single.benchmark.txt"
@@ -283,13 +347,58 @@ def test_bench_each_moves_each_record_aside():
 
 def test_bench_each_sets_aside_a_record_a_killed_run_left():
     with Run() as h:
+        # A killed runner's record, and the record of a run whose pull never came.
         h.host_record().parent.mkdir(parents=True)
         h.host_record().write_text(HEADING + COLUMNS + "tpch\t40\tq6\ttp1-single\t0\t0\n")
+        (h.vm / "calibration/records-20250101T000000.000Z.tsv").write_text(
+            HEADING + COLUMNS + "tpch\t40\tq1\ttp1-single\t0\t0\n")
         ok(h.each())
-        left = h.records / "tpch-q6-tp1_single.1.tsv"
-        assert left.read_text().endswith("tpch\t40\tq6\ttp1-single\t0\t0\n"), left.read_text()
-        assert "tpch\t40\tq6\ttp1-single\t0\t1\n" in (h.records / "tpch-q6-tp1_single.2.tsv").read_text()
+        for q in ("q1", "q6"):
+            left = h.records / f"tpch-{q}-tp1_single.1.tsv"
+            assert left.read_text().endswith(f"tpch\t40\t{q}\ttp1-single\t0\t0\n"), left.read_text()
+            assert f"tpch\t40\t{q}\ttp1-single\t0\t1\n" in (h.records / f"tpch-{q}-tp1_single.2.tsv").read_text()
         assert h.filters() == ALL_TP1, h.filters()
+        assert h.records_left() == [], h.records_left()
+
+
+def test_bench_each_removes_no_vm_record_by_hand():
+    with Run() as h:
+        r = h.each(behaviour={"q6": "kill"})
+        assert r.returncode == 1 and (h.records / "tpch-q6-tp1_single.1.tsv").exists(), (r.returncode, r.stderr)
+        assert not any("records" in " ".join(call) for call in h.nebius_calls()), h.nebius_calls()
+        pulls = [c["argv"][len(H100):] for c in h.calls() if "pull" in c["argv"]]
+        assert pulls and all(p == ["pull", "--clear"] for p in pulls), pulls
+
+
+def test_bench_each_sets_aside_no_record_but_a_run_s():
+    with Run() as h:
+        # create_nsys_profile.sh's metrics pass writes its record beside a run's; it is no case's.
+        metrics = h.vm / "calibration/records-metrics.tsv"
+        metrics.parent.mkdir(parents=True)
+        metrics.write_text(HEADING + COLUMNS + "tpch\t40\tq6\ttp1-single\t0\t9\n")
+        ok(h.each())
+        assert sorted(p.name for p in h.records.glob("tpch-q6-*.tsv")) == ["tpch-q6-tp1_single.1.tsv"]
+        assert "\t9\n" not in (h.records / "tpch-q6-tp1_single.1.tsv").read_text()
+        assert metrics.is_file()
+
+
+def test_bench_each_sets_aside_the_record_of_a_pull_that_kept_a_file():
+    with Run() as h:
+        r = h.each(behaviour={"q6": "conflict"})
+        assert r.returncode == 1 and "gpu-result.txt" in r.stderr, (r.returncode, r.stderr)
+        assert h.filters() == ALL_TP1[:2], h.filters()
+        assert "tpch\t40\tq6\ttp1-single\t0\t1\n" in (h.records / "tpch-q6-tp1_single.1.tsv").read_text()
+        assert h.records_left() == [], h.records_left()
+
+
+def test_bench_each_follows_a_run_whose_ssh_dropped():
+    with Run() as h:
+        r = ok(h.each(behaviour={"q6": "drop"}))
+        verbs = [c["argv"][len(H100):] for c in h.calls()]
+        at = verbs.index(["run", "bench"], verbs.index(["run", "bench"]) + 1)
+        assert verbs[at:at + 4] == [["run", "bench"], ["status"], ["follow"], ["pull", "--clear"]], verbs
+        assert h.filters() == ALL_TP1, h.filters()
+        assert (h.records / "tpch-q6-tp1_single.1.tsv").exists(), r.stdout
 
 
 def test_bench_each_measures_a_killed_case_again():

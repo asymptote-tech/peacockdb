@@ -50,7 +50,8 @@ def calibration_argv(env):
     sha = hashlib.sha256(record.encode()).hexdigest()
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
-        for rel in ("scripts/calibration/fetch_record.sh", "scripts/lib/calibration-bucket.sh", "scripts/lib/s3.sh"):
+        for rel in ("scripts/calibration/fetch_record.sh", "scripts/lib/calibration-bucket.sh", "scripts/lib/s3.sh",
+                    "scripts/lib/ssh-retry.sh"):
             (tmp / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / rel, tmp / rel)
         pin = tmp / "testdata/calibration/records.sha256"

@@ -1,17 +1,24 @@
 # shellcheck shell=bash
 #
 # ~/.config/peacock/, on a person's own machine (the laptop) and on a VM (llm-wiki/build-test.md,
-# "CPU VMs"): the storage keys, the person's PAT and GPU key, and the VMs this laptop
-# provisioned. A function that refuses prints one line to stderr and returns 2; it is called as a
-# statement, so set -e stops the caller.
+# "CPU VMs"): the storage keys, the person's PAT and GPU key, their two Nebius profiles, and the
+# VMs this laptop provisioned. And the card lock every user of a GPU VM takes. A function that
+# refuses prints one line to stderr and returns 2; it is called as a statement, so set -e stops the
+# caller.
 
 PEACOCK_CONFIG=$HOME/.config/peacock
 PEACOCK_ENV=$PEACOCK_CONFIG/peacock.env
 PEACOCK_PAT=$PEACOCK_CONFIG/github-pat
 PEACOCK_GPU_KEY=$PEACOCK_CONFIG/gpu_ed25519
 PEACOCK_VMS=$PEACOCK_CONFIG/vm
+PEACOCK_NEBIUS_CONFIG=$PEACOCK_CONFIG/nebius.yaml
+# The profiles nebius.yaml holds, and nothing else; the first is the active one.
+PEACOCK_NEBIUS_PROFILES=(editor-eu eu-west1)
 # What peacock.env holds on a laptop, and must hold on a VM.
 PEACOCK_STORAGE_KEYS=(AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_ENDPOINT_URL AWS_REGION)
+# On a GPU VM, held by whatever has the card: a run-gpu.sh run while its container lives, a capture
+# while it profiles. Two pools on one card fail each other. Its path is the caller's to pass.
+PEACOCK_CARD_LOCK=${PEACOCK_CARD_LOCK:-/run/lock/peacock-card.lock}
 
 peacock_refuse() { echo "${0##*/}: $*" >&2; return 2; }
 
@@ -70,4 +77,194 @@ peacock_env_is_storage_only() {
       return
     fi
   done < "$1"
+}
+
+# A Nebius config is read by the CLI alone: only its answers to `profile list`, `profile active`,
+# `config get` and `version` are used, and nothing here opens the file (build-test.md, "Credential
+# files").
+
+# peacock_nebius_cli — sets PEACOCK_NEBIUS to the nebius CLI, PATH's before ~/.nebius/bin's.
+peacock_nebius_cli() {
+  PEACOCK_NEBIUS=$(command -v nebius) && return
+  PEACOCK_NEBIUS=$HOME/.nebius/bin/nebius
+  [ -x "$PEACOCK_NEBIUS" ] && return
+  peacock_refuse "no nebius CLI on PATH or in ~/.nebius/bin: on a laptop, curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | bash; on a VM, scripts/env/bootstrap-vm.sh"
+}
+
+# peacock_nebius_profiles — `profile list` on stdin (CLI 0.12: a name a line, the active one with
+# " [default]") -> the names, in order. Any other shape returns 1 and prints nothing: the line may
+# be a key's, so it is not traced under set -x either.
+peacock_nebius_profiles() {
+  local -
+  set +x
+  local line names=() defaults=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^([A-Za-z0-9_.-]+)( \[default\])?$ ]] || return 1
+    names+=("${BASH_REMATCH[1]}")
+    [ -z "${BASH_REMATCH[2]}" ] || defaults=$((defaults + 1))
+  done
+  [ "$defaults" -le 1 ] || return 1
+  [ "${#names[@]}" -eq 0 ] || printf '%s\n' "${names[@]}"
+}
+
+# peacock_nebius_on <cli> <config> <args…> — one CLI call on <config>, never the CLI's default one.
+# Its stdin is /dev/null; the CLI may prompt.
+peacock_nebius_on() {
+  "$1" --config "$2" --no-check-update "${@:3}" </dev/null
+}
+
+# peacock_nebius_version <cli> <config> — the CLI's version, or `unknown` for an answer of another
+# shape: it goes into a message, so it is not traced under set -x either.
+peacock_nebius_version() {
+  local -
+  set +x
+  local v
+  v=$(peacock_nebius_on "$1" "$2" version 2>/dev/null) || v=
+  [[ "$v" =~ ^[0-9][0-9A-Za-z.+-]*$ ]] || v=unknown
+  printf '%s\n' "$v"
+}
+
+# peacock_nebius_listed <cli> <config> — sets PEACOCK_NEBIUS_LISTED to <config>'s profiles, or,
+# when the CLI fails or prints another shape, refuses naming the CLI's version, never the list.
+peacock_nebius_listed() {
+  local list
+  if list=$(peacock_nebius_on "$1" "$2" profile list 2>/dev/null | peacock_nebius_profiles); then
+    mapfile -t PEACOCK_NEBIUS_LISTED <<<"$list"
+    [ -n "$list" ] || PEACOCK_NEBIUS_LISTED=()
+    return 0
+  fi
+  peacock_refuse "the nebius CLI, version $(peacock_nebius_version "$1" "$2"), gave no profile list of the shape this reader knows, CLI 0.12's; it is not shown"
+}
+
+# peacock_nebius_cut <cli> <src> <copy> <dest> <active> <profile>[=<pem>]… — <src> copied to <copy>,
+# cut to the listed profiles, each key embedded, <active> the active one, and moved to <dest>, mode
+# 600. A profile that keeps a key path gets <pem>, else the file the path names, embedded and the
+# path dropped. Only the CLI reads <src> and <copy>, and its calls' output is dropped: it can hold a
+# key. <copy> holds every profile until the end, so the caller puts it in a private directory on
+# <dest>'s filesystem and removes that on any exit. Sets PEACOCK_NEBIUS_LEFT_OUT to how many were
+# left out. The CLI's answers are not traced under set -x.
+peacock_nebius_cut() {
+  local -
+  set +x
+  local cli=$1 src=$2 copy=$3 dest=$4 active=$5 spec name pem path endpoint sa pk keep=() n
+  shift 5
+  # Made empty at 600 first: cp onto a file keeps its mode, so the copy is never readable by others.
+  if ! (umask 077 && : >"$copy") || ! cp -- "$src" "$copy"; then
+    peacock_refuse "cannot copy $src"; return
+  fi
+  peacock_nebius_listed "$cli" "$copy" || return 2
+  for spec in "$@"; do
+    name=${spec%%=*} pem=
+    [ "$name" = "$spec" ] || pem=${spec#*=}
+    keep+=("$name")
+    [[ " ${PEACOCK_NEBIUS_LISTED[*]} " == *" $name "* ]] \
+      || { peacock_refuse "$src has no profile $name"; return; }
+    path=$(peacock_nebius_on "$cli" "$copy" --profile "$name" config get private-key-file-path 2>/dev/null) \
+      || { peacock_refuse "cannot read profile $name's key path"; return; }
+    if [ -z "$path" ]; then
+      # Another PEM would replace a working key.
+      [ -z "$pem" ] || { peacock_refuse "profile $name embeds its key; no other key file may replace it"; return; }
+      continue
+    fi
+    [ -n "$pem" ] || pem=$path
+    [ -f "$pem" ] || { peacock_refuse "profile $name's key path $pem names no file"; return; }
+    # update prompts for these three unless given them, and keeps the path beside the embedded key.
+    if ! endpoint=$(peacock_nebius_on "$cli" "$copy" --profile "$name" config get endpoint 2>/dev/null) \
+      || ! sa=$(peacock_nebius_on "$cli" "$copy" --profile "$name" config get service-account-id 2>/dev/null) \
+      || ! pk=$(peacock_nebius_on "$cli" "$copy" --profile "$name" config get public-key-id 2>/dev/null); then
+      peacock_refuse "cannot read profile $name's endpoint and ids"; return
+    fi
+    if ! peacock_nebius_on "$cli" "$copy" profile update "$name" --skip-auth --endpoint "$endpoint" \
+        --service-account-id "$sa" --public-key-id "$pk" --private-key-file "$pem" >/dev/null 2>&1 \
+      || ! peacock_nebius_on "$cli" "$copy" --profile "$name" config unset private-key-file-path >/dev/null 2>&1; then
+      peacock_refuse "cannot embed $pem into profile $name"; return
+    fi
+  done
+  # The CLI refuses to delete the active profile, so activate first.
+  peacock_nebius_on "$cli" "$copy" profile activate "$active" >/dev/null 2>&1 \
+    || { peacock_refuse "cannot activate profile $active"; return; }
+  PEACOCK_NEBIUS_LEFT_OUT=0
+  for n in "${PEACOCK_NEBIUS_LISTED[@]}"; do
+    [[ " ${keep[*]} " == *" $n "* ]] && continue
+    peacock_nebius_on "$cli" "$copy" profile delete "$n" >/dev/null 2>&1 \
+      || { peacock_refuse "cannot delete profile $n from the copy"; return; }
+    PEACOCK_NEBIUS_LEFT_OUT=$((PEACOCK_NEBIUS_LEFT_OUT + 1))
+  done
+  if ! chmod 600 "$copy" || ! mv -f -- "$copy" "$dest"; then
+    peacock_refuse "cannot move the cut into $dest"; return
+  fi
+}
+
+# peacock_nebius_config_cut — a missing nebius.yaml is cut by nebius-profiles.sh when this machine
+# has the CLI's own ~/.nebius/config.yaml (a laptop); one that exists is never cut again. A process of
+# its own, so its temp directory and EXIT trap stay its own; its line goes to stderr. Its refusal,
+# already said, returns 2.
+peacock_nebius_config_cut() {
+  if [ -f "$PEACOCK_NEBIUS_CONFIG" ] || [ ! -f "$HOME/.nebius/config.yaml" ]; then return 0; fi
+  "${BASH_SOURCE[0]%/*}/../env/nebius-profiles.sh" >&2 || return 2
+}
+
+# peacock_nebius_config_checked <cli> <file> — refuses unless <file> holds exactly
+# PEACOCK_NEBIUS_PROFILES, each key embedded: a key path names a file the machine may not have.
+peacock_nebius_config_checked() {
+  local cli=$1 file=$2 p path extra=() missing=()
+  [ -f "$file" ] || { peacock_refuse "no $file: make it with scripts/env/nebius-profiles.sh"; return; }
+  peacock_nebius_listed "$cli" "$file" || return 2
+  for p in "${PEACOCK_NEBIUS_LISTED[@]}"; do
+    [[ " ${PEACOCK_NEBIUS_PROFILES[*]} " == *" $p "* ]] || extra+=("$p")
+  done
+  for p in "${PEACOCK_NEBIUS_PROFILES[@]}"; do
+    [[ " ${PEACOCK_NEBIUS_LISTED[*]} " == *" $p "* ]] || missing+=("$p")
+  done
+  if [ "${#extra[@]}" -gt 0 ] || [ "${#missing[@]}" -gt 0 ]; then
+    peacock_refuse "$file must hold the profiles ${PEACOCK_NEBIUS_PROFILES[*]} alone${extra[*]:+; it holds ${extra[*]}}${missing[*]:+; it lacks ${missing[*]}}: make it again with scripts/env/nebius-profiles.sh"
+    return
+  fi
+  for p in "${PEACOCK_NEBIUS_PROFILES[@]}"; do
+    path=$(peacock_nebius_on "$cli" "$file" --profile "$p" config get private-key-file-path 2>/dev/null) \
+      || { peacock_refuse "cannot read profile $p's key path in $file"; return; }
+    [ -z "$path" ] || { peacock_refuse "profile $p in $file reads its key from a file: make it again with scripts/env/nebius-profiles.sh"; return; }
+  done
+  peacock_nebius_service_accounts_checked "$cli" "$file" "$file"
+}
+
+# peacock_nebius_service_accounts_checked <cli> <config> <named> — refuses, naming <named>, the
+# first of PEACOCK_NEBIUS_PROFILES in <config> that is not a service account's: its `auth-type` is
+# not `service account` (a browser login, a token, an empty or unknown one), or it lacks its
+# service-account-id or public-key-id. A browser login acts as the person, with all their rights,
+# whatever it is called. The private key is never asked; the answers are not traced under set -x.
+peacock_nebius_service_accounts_checked() {
+  local -
+  set +x
+  local cli=$1 config=$2 named=$3 p auth sa pk
+  for p in "${PEACOCK_NEBIUS_PROFILES[@]}"; do
+    if ! auth=$(peacock_nebius_on "$cli" "$config" --profile "$p" config get auth-type 2>/dev/null) \
+      || ! sa=$(peacock_nebius_on "$cli" "$config" --profile "$p" config get service-account-id 2>/dev/null) \
+      || ! pk=$(peacock_nebius_on "$cli" "$config" --profile "$p" config get public-key-id 2>/dev/null); then
+      peacock_refuse "cannot read profile $p's auth type and ids in $named"; return
+    fi
+    if [ "$auth" = "service account" ] && [ -n "$sa" ] && [ -n "$pk" ]; then continue; fi
+    peacock_refuse "profile $p in $named is not a service account: a browser login acts as you, with all your rights. Make it as llm-wiki/build-test.md, \"The human's one-time setup\", says"
+    return
+  done
+}
+
+# peacock_card_take <lock> — holds <lock> on fd PEACOCK_CARD_FD while this process lives; made mode
+# 666 when missing, so every user of the VM takes it whatever their group. While another holds it,
+# says so and waits in a background flock, its pid in PEACOCK_CARD_WAITER, so a TERM trap runs at
+# once; the wait's status is then returned. The lock is on the file's open description, which the
+# waiter shares: it stays held after. 1, said, when the lock cannot be made or opened.
+peacock_card_take() {
+  # Opened read-only, never to create: in sticky /run/lock, fs.protected_regular refuses an open
+  # that may create a file another user owns. Two users making it at once: the loser's is refused.
+  if ! { [ -e "$1" ] || (umask 000 && : >> "$1") 2> /dev/null || [ -e "$1" ]; } \
+     || ! exec {PEACOCK_CARD_FD}< "$1"; then
+    echo "cannot open the card lock $1"
+    return 1
+  fi
+  if flock -n "$PEACOCK_CARD_FD"; then return 0; fi
+  echo "waiting for the card: another run holds $1"
+  flock "$PEACOCK_CARD_FD" &
+  PEACOCK_CARD_WAITER=$!
+  wait "$PEACOCK_CARD_WAITER"
 }

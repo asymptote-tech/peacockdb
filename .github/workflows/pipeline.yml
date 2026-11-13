@@ -393,6 +393,11 @@ jobs:
     # This job holds the cloud's keys; its token needs nothing beyond reading the repo.
     permissions:
       contents: read
+    # run-gpu.sh's tree id, which ~/peacock/ci/ on the VM keeps as its owner's. The checkout is
+    # new on every run, so the id is fixed: a random one would be refused the dir on the next run
+    # (llm-wiki/build-test.md, "The H100's device run").
+    env:
+      PEACOCK_TREE_ID: ci
     # A wedged remote must cost minutes, not GitHub's six-hour default. The budget is the start
     # (capacity can take half an hour), prepare, the transfer and the suite; if the suite ever
     # outgrows it, raise it deliberately rather than removing it.
@@ -512,14 +517,16 @@ jobs:
 
       - name: Clean up and soft-stop
         # Whenever the start step ran at all: a start that failed or was cancelled half way can
-        # still leave the VM up. Soft, because a process on the card is someone else's (the VM
-        # is shared, with no lock); the idle watcher and the hourly checker take it down later.
+        # still leave the VM up. Soft, because a process on the card, or its lock held, is
+        # someone else's run (the VM is shared); the idle watcher and the hourly checker take it
+        # down later.
         if: always() && contains(fromJSON('["success", "failure", "cancelled"]'), steps.start.outcome)
         run: |
-          # A cancelled run leaves its container running on the VM, and a process on the card
-          # keeps the idle watcher from stopping it; the next run's `run` would refuse the busy
-          # name. Remove it first: peacock-ci alone, never a developer's run.
-          scripts/nebius.sh ssh 'docker rm -f peacock-ci' || true
+          # A cancelled job, or one whose ssh dropped, leaves its run going on the VM, and the run
+          # holds the card and its lock, which keep the soft stop and the idle watcher off; the
+          # next run's `run` would be refused. cancel ends this dir's run alone, never a
+          # developer's. A VM stopped or out of reach fails it, and the stop still comes.
+          scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt --dir ci cancel || echo "cancel failed (rc=$?)"
           scripts/nebius.sh stop || echo "soft stop declined (rc=$?); the watchers will take it down"
 
   # GPU coverage + cost-ratio report (Task 6). Pure CPU/dry: reads only the
@@ -684,8 +691,8 @@ jobs:
             scripts/build-test.sh -- python3 "$f" || status=1
           done
           shellcheck -x scripts/nebius.sh scripts/nebius-sync.sh scripts/nebius/check-actor.sh \
-            scripts/nebius/watch.sh scripts/build-test.sh scripts/env/run-gpu.sh \
-            scripts/env/image-ref.sh scripts/env/stage-install.sh || status=1
+            scripts/nebius/watch.sh scripts/build-test.sh scripts/env/run-gpu.sh scripts/env/run-gpu-vm.sh \
+            scripts/env/image-ref.sh scripts/env/stage-install.sh scripts/env/nebius-profiles.sh || status=1
           exit "$status"
 
       # The image, image-ref, build-test and run-gpu scripts, against fake docker, ssh and aws.
@@ -693,14 +700,15 @@ jobs:
       # (build-test.md, "Images"); images.yml's run job runs test_run_tests.py. on_runner are
       # stdlib only and need what the image cannot give the runner's uid: a locale that sorts
       # unlike C, en_US.UTF-8 (#309: test_fetch_sf40.py, test_image.py), or a user name, which
-      # bootstrap-vm.sh and provision-vm.sh read as the VM's or laptop's own user. Both named, and
-      # a missing one is an error, as the exec-model step's elsewhere list is.
+      # bootstrap-vm.sh and provision-vm.sh read as the VM's or laptop's own user, and real ssh
+      # needs (test_ssh_retry.py). Both named, and a missing one is an error, as the exec-model
+      # step's elsewhere list is.
       - name: Image and run script tests (Python)
         run: |
           set -euo pipefail
           shopt -s nullglob
           needs_docker=(test_image_any_user.py test_run_image.py test_run_tests.py)
-          on_runner=(test_fetch_sf40.py test_image.py test_bootstrap.py test_provision.py)
+          on_runner=(test_fetch_sf40.py test_image.py test_bootstrap.py test_provision.py test_ssh_retry.py)
           for n in "${needs_docker[@]}" "${on_runner[@]}"; do
             [ -f "scripts/env/tests/$n" ] || { echo "scripts/env/tests/$n is missing; is it still named here?"; exit 1; }
           done

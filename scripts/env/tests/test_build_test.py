@@ -24,6 +24,8 @@ REPO = pathlib.Path(__file__).resolve().parents[3]
 COPIED = ["scripts/build-test.sh", "docker/pins.env", "docker/conda/cudf-25.02.spec",
           "docker/conda/cudf-25.10.spec", "docker/conda/cudf-26.02.spec"]
 NOT_RUST_ONLY = '#![cfg(not(feature = "rust-only"))]\n'
+# What cpp/CMakeLists.txt includes first from the submodule.
+CUDF_CMAKE = "third_party/cudf/cmake/rapids_config.cmake"
 # One target per class: rust-only by default, cmake-gated, gpu-runtime, gated on the gpu feature,
 # and the two excluded by name.
 TARGETS = {
@@ -93,13 +95,17 @@ if name in os.environ.get("FAKE_CARGO_ZERO", "").split():
 print("running 1 test\ntest x ... ok\n\ntest result: ok. 1 passed; 0 failed")
 sys.exit(101 if name in os.environ.get("FAKE_CARGO_FAILS", "").split() else 0)
 '''
+# `id -u` as another uid would answer.
+FAKE_ID = '#!/bin/sh\nif [ "$1" = -u ]; then echo {uid}; else exec /usr/bin/id "$@"; fi\n'
+
 
 # What the environment of the caller must not leak into a run that does not name it.
 SCRUBBED = ("CARGO_TARGET_DIR", "PEACOCK_IN_IMAGE", "PEACOCK_CUDF", "PEACOCK_BUILD_IMAGE", "RUNNER_TEMP",
             "RUSTFLAGS", "CMAKE_GENERATOR", "LDFLAGS", "LD_LIBRARY_PATH", "PCK_TEST_FILTER", "PCK_SHARD",
             "UPDATE_CANONICAL", "PEACOCK_NO_FETCH", "RUST_TEST_THREADS", "CARGO_BUILD_JOBS", "GCC_VERSION",
             "PCK_UPDATE_SECTIONS", "PEACOCK_REWRITE_RECIPE_BYTES", "COST_FILTER", "PCK_GPU_RESULT_VERSION",
-            "PEACOCK_CARGO_REGISTRY", "PEACOCK_CCACHE_DIR", "XDG_CACHE_HOME", "AWS_SECRET_ACCESS_KEY")
+            "PEACOCK_CARGO_REGISTRY", "PEACOCK_CCACHE_DIR", "XDG_CACHE_HOME", "AWS_SECRET_ACCESS_KEY",
+            "PEACOCK_IMAGE_HOME")
 
 
 def git(repo, *args):
@@ -130,6 +136,7 @@ class Tree:
         write(self.root / "scripts/build.sh", RECORD.format(log="build.log"), 0o755)
         write(self.root / "scripts/env/stage-install.sh", RECORD.format(log="stage.log"), 0o755)
         write(self.root / "scripts/env/image-ref.sh", FAKE_IMAGE_REF, 0o755)
+        write(self.root / CUDF_CMAKE, "")
         if root is None:
             git(self.root, "init", "-q")
             git(self.root, "add", "-A")
@@ -150,7 +157,8 @@ class Tree:
     def environ(self, env, inside):
         e = {**self.env, **(env or {})}
         if inside:
-            e.update(PEACOCK_IN_IMAGE="1", GCC_VERSION=e.get("GCC_VERSION", "12"))
+            e.update(PEACOCK_IN_IMAGE="1", GCC_VERSION=e.get("GCC_VERSION", "12"),
+                     PEACOCK_CUDF=e.get("PEACOCK_CUDF", "25.02"))
         else:
             e.setdefault("PEACOCK_BUILD_IMAGE", "img:test")
         return {k: v for k, v in e.items() if v is not None}
@@ -371,6 +379,30 @@ def test_a_leftover_container_is_refused():
         ok(t.run("--rust-only", "--build", env={"FAKE_DOCKER_PS": alive}))
 
 
+def test_refuses_a_tree_under_the_image_home_for_another_uid():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        write(t.bin / "id", FAKE_ID.format(uid=1001), 0o755)
+        home = str(t.root.parent)
+        r = t.run("--rust-only", "--build", env={"PEACOCK_IMAGE_HOME": home})
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert home in r.stderr and "uid 1001" in r.stderr and "uid 1000's" in r.stderr, r.stderr
+        assert t.docker() == [] and t.lines("image-ref.log") == [], (t.docker(), t.lines("image-ref.log"))
+        assert not (t.root / ".home-img").exists() and not t.cache.exists()
+        # A home the tree's path only begins with, such as /home/peacockdb's /home/peacock, holds no tree.
+        ok(t.run("--rust-only", "--build", env={"PEACOCK_IMAGE_HOME": str(t.root)[:-1]}))
+
+
+def test_a_tree_under_the_image_home_is_taken_for_uid_1000():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        write(t.bin / "id", FAKE_ID.format(uid=1000), 0o755)
+        ok(t.run("--rust-only", "--build", env={"PEACOCK_IMAGE_HOME": str(t.root.parent)}))
+        argv = t.the_docker_run()
+        assert values(argv, "--user") == [f"1000:{os.getgid()}"], argv
+        assert values(argv, "-w") == [str(t.root)] and f"{t.root}:{t.root}" in values(argv, "-v"), argv
+
+
 def test_target_dir_is_per_worktree_and_version():
     with tempfile.TemporaryDirectory() as tmp:
         t = Tree(tmp)
@@ -414,6 +446,20 @@ def test_worktree_mounts_its_git_dir():
         mounts = values(t.runs()[-1], "-v")
         assert f"{common}:{common}" in mounts and f"{t.root}:{t.root}" in mounts, mounts
         assert values(t.runs()[-1], "-w") == [str(t.root)]
+
+
+def test_refuses_a_worktree_whose_git_dir_is_under_the_image_home_for_another_uid():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = pathlib.Path(tmp).resolve() / "home"
+        main_tree = Tree(home)
+        wt = pathlib.Path(tmp) / "wt"
+        git(main_tree.root, "worktree", "add", "-q", str(wt))
+        t = Tree(tmp, root=wt)
+        write(t.bin / "id", FAKE_ID.format(uid=1001), 0o755)
+        r = t.run("--rust-only", "--build", env={"PEACOCK_IMAGE_HOME": str(home)})
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        assert f"{main_tree.root}/.git" in r.stderr and "uid 1001" in r.stderr, r.stderr
+        assert t.docker() == [] and t.lines("image-ref.log") == [], (t.docker(), t.lines("image-ref.log"))
 
 
 def test_pass_env_never_puts_a_value_in_argv():
@@ -475,6 +521,50 @@ def test_refuses_an_unstamped_cpp_build():
         assert "cpp/build" in r.stderr and ".peacock-cudf" in r.stderr, r.stderr
         assert (t.root / "cpp/build/CMakeCache.txt").exists(), "a host configure was removed"
         assert t.lines("build.log") == [] and t.cargo() == [] and t.stamp() is None
+
+
+def test_a_shell_in_the_image_refuses_another_cudf():
+    """The image holds one cuDF: --cudf 26.02 typed in a 25.02 image's shell would build against
+    25.02's /opt/cudf and its gcc, and stamp cpp/build 26.02."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        for args in (["--build"], ["--rust-only", "--run"], ["--", "true"]):
+            r = t.run("--cudf", "26.02", *args, inside=True)
+            assert r.returncode == 2, (args, r.returncode, r.stdout, r.stderr)
+            assert "25.02" in r.stderr and "26.02" in r.stderr and "host" in r.stderr, r.stderr
+        assert t.lines("build.log") == [] and t.cargo() == [] and t.stamp() is None
+
+
+def test_inside_with_no_image_version_named_any_cudf_goes_through():
+    """A docker run of the image's own (the CPU-VM build) may name no PEACOCK_CUDF: only a version
+    known to differ from --cudf is refused."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        unset = {"PEACOCK_CUDF": None}
+        ok(t.run("--build", inside=True, env=unset))
+        ok(t.run("--cudf", "26.02", "--rust-only", "--build", inside=True, env=unset))
+        ok(t.run("--cudf", "26.02", "--", "true", inside=True, env=unset))
+        assert t.stamp() == "25.02" and len(t.lines("build.log")) == 1
+
+
+def test_a_cpp_build_without_third_party_cudf_is_refused():
+    """cpp/CMakeLists.txt includes cuDF's cmake files from the submodule; a worktree has none until
+    it is checked out, and cmake's own error comes after cpp/build is stamped."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        (t.root / CUDF_CMAKE).unlink()
+        for inside in (False, True):
+            for args in (["--build"], ["--run"], ["--gpu", "--build"]):
+                r = t.run(*args, inside=inside)
+                assert r.returncode == 2, (inside, args, r.returncode, r.stdout, r.stderr)
+                assert "third_party/cudf" in r.stderr and "git submodule update" in r.stderr, r.stderr
+        assert t.docker() == [] and t.lines("build.log") == [] and t.lines("stage.log") == []
+        assert t.cargo() == [] and t.stamp() is None
+        # A command and the rust-only shape configure no C++.
+        for inside in (False, True):
+            ok(t.run("--", "true", inside=inside))
+        ok(t.run("--rust-only", "--build"))
+        ok(t.run("--rust-only", "--build", "--run", inside=True))
 
 
 def test_cpu_build_configures_stamps_and_builds_every_target():
@@ -625,6 +715,20 @@ def test_command_form_passes_the_exit_code():
         assert t.docker() == []
 
 
+def test_a_command_has_cudf_s_libraries_on_the_loader_path():
+    """An FFI test binary loads libcudf from the image's prefix: without /opt/cudf/lib on the loader
+    path, `-- cargo test -p peacockdb-ffi` exits 127."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        r = ok(t.run("--", "sh", "-c", 'echo "$LD_LIBRARY_PATH"', inside=True))
+        assert r.stdout.strip() == "/opt/cudf/lib", r.stdout
+        r = ok(t.run("--", "sh", "-c", 'echo "$LD_LIBRARY_PATH"', inside=True, env={"LD_LIBRARY_PATH": "/x"}))
+        assert r.stdout.strip() == "/opt/cudf/lib:/x", r.stdout
+        write(t.root / "cpp/build/.peacock-cudf", "25.02\n")
+        ok(t.run("--run", inside=True, env={"LD_LIBRARY_PATH": "/x"}))
+        assert {c["ld"] for c in t.cargo()} == {"/opt/cudf/lib:/x"}, t.cargo()
+
+
 def test_runner_temp_is_mounted_when_set():
     with tempfile.TemporaryDirectory() as tmp:
         t = Tree(tmp)
@@ -637,6 +741,81 @@ def test_runner_temp_is_mounted_when_set():
         argv = t.runs()[-1]
         assert not [v for v in values(argv, "-v") if "runner-temp" in v], argv
         assert "RUNNER_TEMP" not in values(argv, "-e"), argv
+
+
+def test_a_testdata_link_out_of_the_tree_gets_its_target_mounted_read_only():
+    # bootstrap-vm.sh links testdata/<ds> to the machine's data set, outside the tree.
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        target = (pathlib.Path(tmp) / "data" / "0123456789abcdef" / "tpch.sf1").resolve()
+        target.mkdir(parents=True)
+        (t.root / "testdata").mkdir(exist_ok=True)
+        (t.root / "testdata" / "tpch.sf1").symlink_to(target)
+        ok(t.run("--", "true"))
+        argv = t.runs()[-1]
+        assert f"{target}:{target}:ro" in values(argv, "-v"), argv
+
+
+def test_a_dangling_testdata_link_is_refused_before_docker_runs():
+    # docker would make the missing target, as root.
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        gone = pathlib.Path(tmp) / "data" / "gone" / "tpch.sf1"
+        (t.root / "testdata").mkdir(exist_ok=True)
+        (t.root / "testdata" / "tpch.sf1").symlink_to(gone)
+        r = t.run("--", "true")
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        for words in (str(t.root / "testdata" / "tpch.sf1"), str(gone), "bootstrap-vm.sh"):
+            assert words in r.stderr, (words, r.stderr)
+        assert t.runs() == [] and not gone.exists(), t.runs()
+
+
+def test_a_relative_testdata_link_out_of_the_tree_is_resolved_from_its_own_directory():
+    # Not from the cwd: the link's own directory is where a relative target starts.
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        target = (pathlib.Path(tmp) / "data" / "h" / "tpch.sf1").resolve()
+        target.mkdir(parents=True)
+        (t.root / "testdata").mkdir(exist_ok=True)
+        (t.root / "testdata" / "tpch.sf1").symlink_to("../../data/h/tpch.sf1")
+        ok(t.run("--", "true"))
+        argv = t.runs()[-1]
+        assert f"{target}:{target}:ro" in values(argv, "-v"), argv
+
+
+def test_a_testdata_link_through_an_alias_is_mounted_where_it_points():
+    # The source is the resolved target; the destination is the path the link names, so the link
+    # resolves in the container, where the alias does not exist.
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        base = pathlib.Path(tmp).resolve()
+        (base / "data" / "h" / "tpch.sf1").mkdir(parents=True)
+        (base / "alias").symlink_to(base / "data")
+        (t.root / "testdata").mkdir(exist_ok=True)
+        (t.root / "testdata" / "tpch.sf1").symlink_to(base / "alias" / "h" / "tpch.sf1")
+        ok(t.run("--", "true"))
+        argv = t.runs()[-1]
+        assert f"{base}/data/h/tpch.sf1:{base}/alias/h/tpch.sf1:ro" in values(argv, "-v"), argv
+
+
+def test_a_testdata_link_into_the_tree_gets_no_mount():
+    # The tree is mounted already; a read-only mount over part of it would hide what a build writes.
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        (t.root / "testdata" / "goldens").mkdir(parents=True, exist_ok=True)
+        (t.root / "testdata" / "x").symlink_to("goldens")
+        ok(t.run("--", "true"))
+        argv = t.runs()[-1]
+        assert [v for v in values(argv, "-v") if "goldens" in v or v.endswith("/x:ro")] == [], argv
+
+
+def test_a_testdata_directory_gets_no_mount_of_its_own():
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        (t.root / "testdata" / "tpch.sf1").mkdir(parents=True)
+        ok(t.run("--", "true"))
+        argv = t.runs()[-1]
+        assert [v for v in values(argv, "-v") if "tpch.sf1" in v] == [], argv
 
 
 if __name__ == "__main__":

@@ -24,6 +24,8 @@
 # 25.02 cuDF). Another host names all three, since the patched loader path is shad-gpu's
 # alone. On a Nebius GPU VM the cuDF root is ~/peacock/cudf-<v>/, the run image's /opt/cudf,
 # which `scripts/env/run-gpu.sh prepare` lays down (the H100 below).
+# Each pass holds the host's card lock, PEACOCK_CARD_LOCK (scripts/lib/peacock-config.sh), which a
+# run-gpu.sh run holds while its container lives: a pass waits for a run, and a run for a pass.
 # --ssh <command> reaches the host through <command> instead of ssh, every call and every
 # rsync, as `<command> <host> <cmd…>`; a Nebius VM through scripts/nebius.sh (H100 shown):
 #   ./scripts/create_nsys_profile.sh --trace --host nebius-h100 \
@@ -67,6 +69,8 @@
 set -euo pipefail
 
 . "$(dirname "${BASH_SOURCE[0]}")/lib/shadgpu-env.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/peacock-config.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/peacock-config.sh"
 
 BENCH_TARGET=peacock_gpu_benchmarks
 BENCH_STAGING=cpp/install/rust-benchmarks
@@ -187,6 +191,11 @@ if [ -n "$record_rel" ]; then
   # so a leftover would swallow this run's rows under an earlier run's heading.
   rm -f "\$PEACOCK_RECORD_PATH"
 fi
+
+# The card's lock, held to the end of the pass: a run-gpu.sh run beside the capture would fail its
+# pool, and time a card the capture shares.
+$(declare -f peacock_card_take)
+peacock_card_take $(printf '%q' "$PEACOCK_CARD_LOCK") || exit 1
 
 echo "==> $label pass to \$capture.nsys-rep"
 log=/tmp/$BENCH_TARGET.$label.log

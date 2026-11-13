@@ -1,18 +1,24 @@
 """A laptop and the VMs it provisions, for provision-vm.sh's tests.
 
 The laptop is a home with a git identity and a clone of the scripts whose origin is the GitHub
-repository. `ssh` is a fake that records each call's argv and stdin and runs the remote command in
-a fake VM: a directory per address holding passwd, group, the users' homes, and `root/` for what
-is written under /etc and /var. A user is reached only with an authorized_keys. As ssh does, `-t`
-gives the far end a terminal only when the laptop's stdin is one, and otherwise says so. On a VM, sudo runs
-its command as the caller; getent, groupadd, useradd, usermod and install act on that directory;
-gh keeps its login in ~/.config/gh/hosts.yml on the laptop and on a VM alike. The clone's
-bootstrap-vm.sh is a stub that records its user and arguments, installs a fake claude, whose login
-needs a terminal, into ~/.local/bin, which is not on ssh's PATH, and makes an
-empty clone on the --ref branch; like the real one, it refuses a --ref other than the branch an
-existing clone is on, naming both. The laptop holds a GPU key pair where provision-vm.sh looks by
-default, and ssh-keygen is a fake that records any call.
-"""
+repository. `ssh` is a fake that records each call's argv and stdin and runs the remote command in a
+fake VM: a directory per address holding passwd, group, the users' homes, and `root/` for what is
+written under /etc and /var. A user is reached only with an authorized_keys. As ssh does, `-t` gives
+the far end a terminal only when the laptop's stdin is one, and otherwise says so. Its own lines go
+to its `-E` log when it has one, with `Authenticated to` once a user is reached; `-G` prints the
+`loglevel` and is not a call. FAKE_SSH_REFUSALS=<n> refuses the first n calls before authenticating,
+reading none of stdin and recording no call, and counts them in <ssh log>.refused. On a VM, sudo
+runs its command as the caller; getent, groupadd, useradd, usermod and install act on that
+directory, install refusing a source that is not a regular file onto a file that exists, as uutils'
+does, and each VM's commands get a TMPDIR of its own, <vm>/tmp; gh keeps its login in
+~/.config/gh/hosts.yml on the laptop and on a VM alike. The clone's bootstrap-vm.sh is a stub that
+records its user and arguments, exits FAKE_BOOTSTRAP_RC when it is set, installs a fake claude,
+whose login needs a terminal, into ~/.local/bin, which is not on ssh's PATH, and makes an empty
+clone on the --ref branch; like the real one, it refuses a --ref other than the branch an existing
+clone is on, naming both. The laptop holds a GPU key pair where provision-vm.sh looks by default,
+and ssh-keygen is a fake that records any call. Its nebius is `nebius_cli.py`'s fake, first on PATH,
+logging to <tmp>/nebius.log; `~/.config/peacock/nebius.yaml` holds editor-eu, active, and eu-west1,
+both keys embedded; `~/.nebius/config.yaml` is mode 000."""
 import json
 import os
 import pathlib
@@ -22,8 +28,10 @@ import subprocess
 import tempfile
 
 from machine import KEYS, REPO, git
+from nebius_cli import install_cli, nebius_config
 
-LAPTOP_FILES = ["scripts/env/provision-vm.sh", "scripts/lib/peacock-config.sh"]
+LAPTOP_FILES = ["scripts/env/provision-vm.sh", "scripts/env/nebius-profiles.sh", "scripts/lib/peacock-config.sh",
+                "scripts/lib/ssh-retry.sh"]
 ORIGIN = "git@github.com:asymptote-tech/peacockdb.git"
 PAT = "github_pat_11FAKETOKEN0value_Zq81"
 LAPTOP_GITCONFIG = "[user]\n\tname = Ada Laptop\n\temail = ada@example.test\n"
@@ -40,26 +48,41 @@ while i < len(args) and args[i].startswith("-"):
     step = 2 if args[i] in WITH_VALUE else 1
     opts += args[i:i + step]
     i += step
+if "-G" in opts:
+    levels = [o.split("=", 1)[1] for o in opts if o.startswith("LogLevel=")]
+    print("loglevel " + (levels[0] if levels else "INFO"))
+    sys.exit(0)
+log = open(opts[opts.index("-E") + 1], "a") if "-E" in opts else sys.stderr
 target, command = args[i], " ".join(args[i + 1:])
+user, _, address = target.rpartition("@")
+refused = pathlib.Path(os.environ["FAKE_SSH_LOG"] + ".refused")
+n = int(refused.read_text()) if refused.exists() else 0
+if n < int(os.environ.get("FAKE_SSH_REFUSALS", "0")):
+    refused.write_text(str(n + 1))
+    print(f"ssh: connect to host {address} port 22: Connection refused", file=log)
+    sys.exit(255)
 tty = "-t" in opts and sys.stdin.isatty()
 if "-t" in opts and not tty:
-    print("Pseudo-terminal will not be allocated because stdin is not a terminal.", file=sys.stderr)
+    print("Pseudo-terminal will not be allocated because stdin is not a terminal.", file=log)
 stdin = b"" if "-n" in opts or tty else sys.stdin.buffer.read()
 with open(os.environ["FAKE_SSH_LOG"], "a") as f:
     f.write(json.dumps({"argv": args, "stdin": stdin.decode(errors="replace")}) + "\n")
-user, _, address = target.rpartition("@")
 vm = pathlib.Path(os.environ["FAKE_VMS"]) / address
 if not vm.is_dir() or address in os.environ.get("FAKE_SSH_DOWN", "").split():
-    print(f"ssh: connect to host {address} port 22: No route to host", file=sys.stderr)
+    print(f"ssh: connect to host {address} port 22: No route to host", file=log)
     sys.exit(255)
 homes = {ln.split(":")[0]: ln.split(":")[5] for ln in (vm / "passwd").read_text().splitlines() if ln}
 home = homes.get(user)
 if home is None or not (pathlib.Path(home) / ".ssh" / "authorized_keys").is_file():
-    print(f"{target}: Permission denied (publickey).", file=sys.stderr)
+    print(f"{target}: Permission denied (publickey).", file=log)
     sys.exit(255)
+if log is not sys.stderr:
+    print(f'Authenticated to {address} ([{address}]:22) using "publickey".', file=log)
+    log.close()
 env = {k: v for k, v in os.environ.items() if k.startswith("FAKE_")}
+(vm / "tmp").mkdir(exist_ok=True)
 env.update(HOME=home, USER=user, LOGNAME=user, FAKE_VM=str(vm), FAKE_USER_NAME=user, LANG="C.UTF-8",
-           PATH=f"{os.environ['FAKE_VM_BIN']}:{os.environ['FAKE_BASE_PATH']}")
+           PATH=f"{os.environ['FAKE_VM_BIN']}:{os.environ['FAKE_BASE_PATH']}", TMPDIR=str(vm / "tmp"))
 if tty:
     env["FAKE_SSH_TTY"] = "1"
 sys.exit(subprocess.run(["bash", "-c", command], input=stdin, env=env, cwd=home).returncode)
@@ -108,6 +131,7 @@ if sys.argv[1:3] == ["auth", "login"]:
 STUB_BOOTSTRAP = '''#!/usr/bin/env bash
 set -eu
 printf '%s %s\\n' "$(id -un)" "$*" >> "$FAKE_VM/bootstrap.log"
+[ -z "${FAKE_BOOTSTRAP_RC:-}" ] || exit "$FAKE_BOOTSTRAP_RC"
 mkdir -p "$HOME/.local/bin"
 cp "$FAKE_CLAUDE" "$HOME/.local/bin/claude"
 if [ "${1:-}" = --ref ] && [ -e "$HOME/peacockdb" ]; then
@@ -124,6 +148,9 @@ if [ "${1:-}" = --ref ]; then ref=$2; fi
 
 FAKE_SSH_KEYGEN = '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_SSH_KEYGEN_LOG"\nexit 1\n'
 GPU_KEY_NAMES = {"gpu_ed25519", "gpu_ed25519.pub"}
+# What every laptop holds in ~/.config/peacock before provision-vm.sh runs.
+HELD_NAMES = GPU_KEY_NAMES | {"nebius.yaml"}
+EMBEDDED = {"key_path": None}
 
 
 def make_key(path, comment):
@@ -215,6 +242,11 @@ if directory:
             p.chmod(mode)
 else:
     src, dst = paths[0], place(paths[1])
+    # As uutils' install 0.10 does (Ubuntu 26.04): a source that is not a regular file (/dev/stdin,
+    # /dev/fd/N) onto a file that exists fails.
+    if not pathlib.Path(src).is_file() and dst.exists():
+        print("install: No such file or directory", file=sys.stderr)
+        sys.exit(1)
     dst.parent.mkdir(parents=True, exist_ok=True)
     data = sys.stdin.buffer.read() if src == "/dev/stdin" else pathlib.Path(src).read_bytes()
     dst.unlink(missing_ok=True)  # as install does when it cannot open the destination
@@ -258,22 +290,33 @@ class Laptop:
         self.bin, self.vm_bin = tmp / "bin", tmp / "vm-bin"
         self.config.mkdir(parents=True, mode=0o700)
         make_key(self.config / "gpu_ed25519", "Default")
-        laptop_bin = {"ssh": FAKE_SSH, "gh": FAKE_GH, "ssh-keygen": FAKE_SSH_KEYGEN}
+        # tar records its arguments, then is the real one unless FAKE_TAR_FAIL is set.
+        fake_tar = (f'#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_TAR_LOG"\n[ -z "${{FAKE_TAR_FAIL:-}}" ] || exit 1\n'
+                    f'exec {shutil.which("tar")} "$@"\n')
+        laptop_bin = {"ssh": FAKE_SSH, "gh": FAKE_GH, "ssh-keygen": FAKE_SSH_KEYGEN, "tar": fake_tar}
         for d, files in ((self.bin, laptop_bin), (self.vm_bin, {**VM_BIN, "gh": FAKE_GH})):
             d.mkdir()
             for name, text in files.items():
                 (d / name).write_text(text)
                 (d / name).chmod(0o755)
+        install_cli(self.bin)
+        self.nebius_yaml = nebius_config(self.config / "nebius.yaml", "editor-eu",
+                                         {"editor-eu": EMBEDDED, "eu-west1": EMBEDDED})
+        own = nebius_config(self.home / ".nebius" / "config.yaml", "old", {"old": EMBEDDED, "editor-eu": EMBEDDED})
+        own.chmod(0)
         (tmp / "claude").write_text(FAKE_CLAUDE)
         (tmp / "claude").chmod(0o755)
         self.ssh_log, self.gh_log, self.keygen_log = tmp / "ssh.log", tmp / "gh.log", tmp / "ssh-keygen.log"
+        self.nebius_log, self.tar_log = tmp / "nebius.log", tmp / "tar.log"
         self.received = tmp / "received.env"
         self.write_env(KEYS)
         self.env = {"PATH": f"{self.bin}:{os.environ['PATH']}", "HOME": str(self.home), "LANG": "C.UTF-8",
                     "FAKE_SSH_LOG": str(self.ssh_log), "FAKE_GH_LOG": str(self.gh_log),
-                    "FAKE_SSH_KEYGEN_LOG": str(self.keygen_log),
+                    "FAKE_SSH_KEYGEN_LOG": str(self.keygen_log), "FAKE_NEBIUS_LOG": str(self.nebius_log),
+                    "FAKE_TAR_LOG": str(self.tar_log),
                     "FAKE_VMS": str(self.vms), "FAKE_VM_BIN": str(self.vm_bin),
-                    "FAKE_BASE_PATH": vm_path(), "FAKE_CLAUDE": str(tmp / "claude")}
+                    "FAKE_BASE_PATH": vm_path(), "FAKE_CLAUDE": str(tmp / "claude"),
+                    "PEACOCK_SSH_PAUSES": "0 0 0"}
         return self
 
     def __exit__(self, *exc):
@@ -317,6 +360,9 @@ class Laptop:
 
     def gh_calls(self):
         return [json.loads(ln) for ln in self.gh_log.read_text().splitlines()] if self.gh_log.exists() else []
+
+    def nebius_calls(self):
+        return [json.loads(ln) for ln in self.nebius_log.read_text().splitlines()] if self.nebius_log.exists() else []
 
     def vm_home(self, address, user):
         return self.vms / address / "home" / user

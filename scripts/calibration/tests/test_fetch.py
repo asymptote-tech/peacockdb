@@ -24,11 +24,29 @@ for arg; do
 done
 exit 2
 """
+# One refusal before authenticating, then the command run here, as the host would run it. -G is the
+# log level the retry asks for, not a call.
+FAKE_SSH = """#!/bin/bash
+[ "$1" != -G ] || { echo "loglevel INFO"; exit 0; }
+while [ "${1#-}" != "$1" ]; do
+  case "$1" in -E) log=$2; shift 2 ;; -o) shift 2 ;; *) shift ;; esac
+done
+host=$1
+shift
+echo "$host $*" >> "$FAKE_SSH_CALLS"
+if [ "$(wc -l < "$FAKE_SSH_CALLS")" -eq 1 ]; then
+  echo "ssh: connect to host $host port 22: Connection refused" >> "$log"
+  exit 255
+fi
+echo "Authenticated to $host ([$host]:22) using \"publickey\"." >> "$log"
+exec bash -c "$*"
+"""
 
 
 def tree(tmp, pins, objects):
     """A repo of the fetch script alone, a pin file, and a bucket of `objects` by key."""
-    for rel in ("scripts/calibration/fetch_record.sh", "scripts/lib/calibration-bucket.sh", "scripts/lib/s3.sh"):
+    for rel in ("scripts/calibration/fetch_record.sh", "scripts/lib/calibration-bucket.sh", "scripts/lib/s3.sh",
+                "scripts/lib/ssh-retry.sh"):
         (tmp / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO / rel, tmp / rel)
     pin = tmp / "testdata/calibration/records.sha256"
@@ -37,14 +55,17 @@ def tree(tmp, pins, objects):
     for key, body in objects.items():
         (tmp / "bucket" / key).parent.mkdir(parents=True, exist_ok=True)
         (tmp / "bucket" / key).write_text(body)
-    aws = tmp / "aws"
-    aws.write_text(FAKE_AWS)
-    aws.chmod(0o755)
+    (tmp / "bin").mkdir()
+    for path, text in ((tmp / "aws", FAKE_AWS), (tmp / "bin" / "ssh", FAKE_SSH)):
+        path.write_text(text)
+        path.chmod(0o755)
 
 
-def fetch(tmp, name):
-    env = {**os.environ, "AWS": str(tmp / "aws"), "FAKE_BUCKET": str(tmp / "bucket")}
-    return subprocess.run(["bash", str(tmp / "scripts/calibration/fetch_record.sh"), name],
+def fetch(tmp, *args):
+    env = {**os.environ, "AWS": str(tmp / "aws"), "FAKE_BUCKET": str(tmp / "bucket"),
+           "PATH": f"{tmp / 'bin'}:{os.environ['PATH']}", "FAKE_SSH_CALLS": str(tmp / "ssh.calls"),
+           "PEACOCK_SSH_PAUSES": "0 0 0"}
+    return subprocess.run(["bash", str(tmp / "scripts/calibration/fetch_record.sh"), *args],
                           env=env, capture_output=True, text=True, timeout=30)
 
 
@@ -81,6 +102,17 @@ def test_a_name_that_is_not_a_pin_path_is_refused_before_any_fetch():
             r = fetch(tmp, name)
             assert r.returncode != 0 and "is not" in r.stderr, (name, r.stderr)
         assert not (tmp / "testdata/calibration/h100-80gb-hbm3").exists()
+
+
+def test_fetch_over_ssh_retries_a_refused_connection():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        tree(tmp, [(SHA, "h100-80gb-hbm3/tpch.sf40/records.tsv")], {f"h100-80gb-hbm3/tpch.sf40/{SHA}.tsv": RECORD})
+        r = fetch(tmp, "--ssh", "shad-gpu", "h100-80gb-hbm3/tpch.sf40")
+        assert r.returncode == 0, r.stderr
+        assert len((tmp / "ssh.calls").read_text().splitlines()) == 2
+        assert "attempt 1 of 4 failed before authenticating" in r.stderr, r.stderr
+        assert (tmp / "testdata/calibration/h100-80gb-hbm3/tpch.sf40/records.tsv").read_text() == RECORD
 
 
 if __name__ == "__main__":

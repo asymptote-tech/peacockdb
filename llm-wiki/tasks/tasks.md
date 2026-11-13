@@ -77,3 +77,12 @@ Roman as its author; every later commit is the coordinator's own.
 vm-setup replayed onto master as Roman's commit; `scripts/env/run-sirius.sh` (`prepare`, `run`) on
 a client library shared with `run-gpu.sh`; Sirius runs under the card lock, stamped for `pull`, its
 image run by ID; `bench-sirius.sh` and the docs follow. A new PR supersedes #205.
+
+### 2. [`vm-setup.md`](vm-setup.md) — closes [#313](../archive/archived-tickets.md#t313) — state: done — PR #205
+
+A plain `docker build` of either image; ssh retried only before a session authenticates; the
+`nebius` CLI and the developer's two-profile `nebius.yaml` on the VM; `run-gpu.sh` gains
+`follow`, `cancel`, a card lock, one tree per VM dir, per-run records cleared once home, the image
+by ID and a per-card driver check; one table of build and test lines; a fresh verda CPU VM
+provisioned. It branches from containers-only, beside sirius-bench, and its PR targets that.
+`gpu-tests` through the runner is unproven in CI: the L40S had no capacity.

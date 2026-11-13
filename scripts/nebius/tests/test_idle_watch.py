@@ -158,7 +158,8 @@ class World:
         self.calls = []
         self.etimes = 42
         self.ps = " 1 900 bash\n 2 900 sshd\n"
-        self.dir = tempfile.mkdtemp()
+        self.owned = tempfile.TemporaryDirectory()  # removed with the World
+        self.dir = self.owned.name
         self.now = 5_000_000.0
         self.state_path, self.log_path = self.dir + "/state.json", self.dir + "/log"
         init = {"last_test": self.now - 2 * H, "last_build": 0.0} if state is None else state

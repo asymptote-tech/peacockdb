@@ -1,15 +1,18 @@
 """nebius.sh against fake nebius/ssh/ssh-keyscan: every exit code, and the host-key rule."""
-import pathlib, subprocess, sys
+import os, pathlib, signal, stat, subprocess, sys, tempfile, time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from fakes import World  # noqa: E402
 from harness import main  # noqa: E402
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "env" / "tests"))
+from nebius_cli import install_cli, nebius_config  # noqa: E402
 
 SCRIPT = str(pathlib.Path(__file__).resolve().parents[2] / "nebius.sh")
 
 
-def run(world, *args, env=None, input=None):
+def run(world, *args, env=None, input=None, unset=()):
     # stdin is /dev/null unless the test gives one: the fakes read stdin to the end.
-    p = subprocess.run([SCRIPT, *args], env={**world.env(), **(env or {})}, capture_output=True, text=True,
+    env = {k: v for k, v in {**world.env(), **(env or {})}.items() if k not in unset}
+    p = subprocess.run([SCRIPT, *args], env=env, capture_output=True, text=True,
                        timeout=60, input=input, stdin=None if input is not None else subprocess.DEVNULL)
     return p.returncode, p.stdout, p.stderr
 
@@ -72,6 +75,35 @@ def test_force_stop_while_busy():
     assert rc == 0 and w.read()["state"] == "STOPPED"
 
 
+def test_soft_stop_refused_while_the_card_lock_is_held():
+    # The holder may have nothing on the card yet: a run whose container is still starting, a capture.
+    w = World(state="RUNNING", card_lock="held")
+    rc, _, err = run(w, "stop")
+    assert rc == 2 and w.read()["state"] == "RUNNING", (rc, err)
+    assert f"card lock {w.dir / 'card.lock'} held" in err, err
+    rc, _, err = run(w, "stop", "--force")
+    assert rc == 0 and w.read()["state"] == "STOPPED", (rc, err)
+
+
+def test_soft_stop_goes_on_when_nvidia_smi_fails_naming_it():
+    # A driver/library mismatch after an update: what nvidia-smi prints then is no card's app.
+    text = "Failed to initialize NVML: Driver/library version mismatch"
+    w = World(state="RUNNING", smi_fails=[18, text])
+    rc, _, err = run(w, "stop")
+    assert rc == 0 and w.read()["state"] == "STOPPED", (rc, err)
+    assert "nvidia-smi" in err and text in err and "busy" not in err, err
+    # A held card lock still holds the stop.
+    w = World(state="RUNNING", smi_fails=[18, text], card_lock="held")
+    rc, _, err = run(w, "stop")
+    assert rc == 2 and w.read()["state"] == "RUNNING" and "card lock" in err, (rc, err)
+
+
+def test_soft_stop_stops_on_another_user_s_free_card_lock():
+    w = World(state="RUNNING", card_lock="another's")
+    rc, _, err = run(w, "stop")
+    assert rc == 0 and w.read()["state"] == "STOPPED", (rc, err)
+
+
 def test_soft_stop_unreachable_host_stops():
     w = World(state="RUNNING", ssh="down")
     rc, _, _ = run(w, "stop")
@@ -124,10 +156,67 @@ def test_changed_key_refused_when_the_ip_moved_between_calls():
     assert "host key replaced" not in (w.dir / "state" / "nebius.log").read_text()
 
 
+def test_ssh_retries_a_refused_connection():
+    w = World(state="RUNNING", ssh_refusals=2)
+    rc, _, err = run(w, "ssh", "true")
+    assert rc == 0, (rc, err)
+    assert len([c for c in w.read()["calls"] if c[0] == "ssh"]) == 3, w.read()["calls"]
+    assert "attempt 2 of 4 failed before authenticating" in err, err
+
+
+def test_a_changed_host_key_is_repaired_without_a_retry():
+    w = World(state="RUNNING")
+    run(w, "ssh", "true")
+    w.set(host_key="ssh-ed25519 AAAAKEY2", calls=[])
+    rc, _, err = run(w, "ssh", "true")
+    assert rc == 0, (rc, err)
+    order = [c[0] for c in w.read()["calls"] if c[0] != "nebius"]
+    assert order == ["ssh", "ssh-keyscan", "ssh"], order
+    assert "attempt" not in err, err
+
+
+def test_rsh_is_one_attempt_for_the_sync_around_it_to_retry():
+    w = World(state="RUNNING", ssh_refusals=1)
+    rc, _, err = run(w, "rsh", "nebius-gpu", "true")
+    ssh = [c for c in w.read()["calls"] if c[0] == "ssh"]
+    assert rc == 255 and len(ssh) == 1, (rc, ssh)
+    assert "attempt" not in err, err
+
+
+def test_a_command_that_prints_a_host_key_refusal_is_never_run_again():
+    # The text comes from the remote command, after ssh authenticated: no key is repaired.
+    for verb in (["ssh"], ["rsh", "nebius-gpu"]):
+        w = World(state="RUNNING")
+        run(w, "ssh", "true")
+        w.set(remote={"stderr": "Host key verification failed.", "rc": 255}, calls=[])
+        rc, _, err = run(w, *verb, "true")
+        assert rc == 255 and "Host key verification failed." in err, (verb, rc, err)
+        calls = [c[0] for c in w.read()["calls"] if c[0] != "nebius"]
+        assert calls == ["ssh"], (verb, calls)
+        assert "host key replaced" not in (w.dir / "state" / "nebius.log").read_text()
+
+
+def test_start_bounds_its_ssh_wait_by_the_wall_clock():
+    # Each wait is four attempts of a second; the bound is checked between waits, not counted.
+    w = World(state="STOPPED", ssh="down", ssh_seconds=1)
+    t0 = time.monotonic()
+    rc, _, err = run(w, "start", env={"GPU_HOST_START_TIMEOUT": "3"})
+    assert rc == 1, (rc, err)
+    assert time.monotonic() - t0 < 15, time.monotonic() - t0
+    assert w.read()["state"] == "STOPPED"
+
+
+def test_an_unknown_verb_prints_the_whole_usage():
+    rc, _, err = run(World(), "bogus")
+    assert rc == 64 and "nebius.sh rsh <host>" in err and "1 other; 64 usage." in err, (rc, err)
+    assert "NEVER" not in err, err
+
+
 def test_ssh_refused_when_api_does_not_vouch():
     w = World(state="STOPPED")
     rc, _, err = run(w, "ssh", "true")
-    assert rc == 1 and "not RUNNING" in err
+    # These exact words are read: scripts/lib/machine.sh tells a stopped VM from a failed pull by them.
+    assert rc == 1 and "is not RUNNING; refusing to ssh" in err, (rc, err)
     assert not any(c[0] == "ssh-keyscan" for c in w.read()["calls"])
 
 
@@ -243,6 +332,260 @@ def test_install_watch_fails_loudly_when_the_root_profile_is_broken():
     rc, out, err = install_watch(w)
     assert rc == 1, (rc, err)
     assert "root" in err and "profile" in err, err
+
+
+def nebius_calls(w):
+    return [c for c in w.read()["calls"] if c[0] == "nebius"]
+
+
+def test_every_cli_call_names_the_config():
+    w = World(state="STOPPED")
+    config = w.env()["GPU_HOST_NEBIUS_CONFIG"]
+    for args in (["status"], ["start"], ["ip"], ["ssh", "true"], ["--profile", "eu-west1", "status"],
+                 ["stop", "--force"]):
+        rc, _, err = run(w, *args)
+        assert rc == 0, (args, rc, err)
+    assert nebius_calls(w), w.read()["calls"]
+    for c in nebius_calls(w):
+        assert c.count("--config") == 1 and c[c.index("--config") + 1] == config, c
+
+
+def test_a_missing_config_is_refused_naming_nebius_profiles():
+    w = World(state="RUNNING")
+    absent = str(w.dir / "no-such.yaml")
+    for args in (["status"], ["start"], ["stop", "--force"], ["ssh", "true"], ["rsh", "vm", "true"],
+                 ["install-watch"]):
+        rc, out, err = run(w, *args, env={"GPU_HOST_NEBIUS_CONFIG": absent})
+        assert rc == 1, (args, rc, err)
+        assert "scripts/env/nebius-profiles.sh" in err and absent in err, (args, err)
+        assert w.read()["calls"] == [], (args, w.read()["calls"])
+    # A usage error stays 64 whatever is missing: the config, and the CLI.
+    rc, _, err = run(w, "bogus", env={"GPU_HOST_NEBIUS_CONFIG": absent, "PATH": str(path_without_nebius(w))},
+                     unset=("NEBIUS",))
+    assert rc == 64 and "1 other; 64 usage." in err, (rc, err)
+
+
+def peacock_home(w):
+    """A HOME with ~/.config/peacock/nebius.yaml, and ~/.nebius/config.yaml at mode 000."""
+    home = w.dir / "home"
+    (home / ".config" / "peacock").mkdir(parents=True, exist_ok=True)
+    (home / ".config" / "peacock" / "nebius.yaml").write_text("")
+    (home / ".nebius").mkdir(exist_ok=True)
+    (home / ".nebius" / "config.yaml").write_text("")
+    (home / ".nebius" / "config.yaml").chmod(0)
+    return home
+
+
+def test_the_default_config_is_peacock_s():
+    w = World(state="RUNNING")
+    home = peacock_home(w)
+    rc, out, err = run(w, "status", env={"HOME": str(home)}, unset=("GPU_HOST_NEBIUS_CONFIG",))
+    assert rc == 0 and out.split() == ["RUNNING", "203.0.113.7"], (rc, out, err)
+    want = str(home / ".config" / "peacock" / "nebius.yaml")
+    assert nebius_calls(w) and all(c[c.index("--config") + 1] == want for c in nebius_calls(w)), nebius_calls(w)
+
+
+class CliHome:
+    """A HOME with no ~/.config/peacock/nebius.yaml and, unless `own` is False, the CLI's own
+    ~/.nebius/config.yaml: `profiles`, else editor-eu embedded, eu-west1 from a PEM, and old, active.
+    nebius_cli.py's fake, first on PATH, is what the cut runs; the world's fake stays nebius.sh's."""
+
+    def __init__(self, w, profiles=None, own=True):
+        self.w, self.home = w, w.dir / "home"
+        self.dest = self.home / ".config" / "peacock" / "nebius.yaml"
+        self.log = w.dir / "cut.log"
+        pem = self.home / ".nebius" / "eu-west1-sa.pem"
+        pem.parent.mkdir(parents=True, exist_ok=True)
+        pem.write_text("FAKE-KEY-MATERIAL\n")
+        if own:
+            if profiles is None:
+                profiles = {"editor-eu": {"key_path": None}, "eu-west1": {"key_path": str(pem)},
+                            "old": {"key_path": None}}
+            nebius_config(self.home / ".nebius" / "config.yaml", "old", profiles)
+        self.cli = install_cli(w.dir / "cut-bin")
+        self.env = {"HOME": str(self.home), "PATH": f"{self.cli.parent}:{os.environ['PATH']}",
+                    "FAKE_NEBIUS_LOG": str(self.log)}
+
+    def run(self, *args, env=None, unset=("GPU_HOST_NEBIUS_CONFIG",)):
+        return run(self.w, *args, env={**self.env, **(env or {})}, unset=unset)
+
+    def ask(self, *args):
+        """The fake CLI's answer on the cut file, not logged."""
+        env = {k: v for k, v in {**os.environ, **self.env}.items() if k != "FAKE_NEBIUS_LOG"}
+        p = subprocess.run([str(self.cli), "--config", str(self.dest), *args], env=env, capture_output=True,
+                           text=True, timeout=60, stdin=subprocess.DEVNULL, check=True)
+        return p.stdout
+
+    def in_peacock(self):
+        d = self.dest.parent
+        return sorted(f.name for f in d.iterdir()) if d.exists() else []
+
+
+def test_a_missing_config_is_cut_from_the_cli_s_own_then_used():
+    w = World(state="RUNNING")
+    h = CliHome(w)
+    rc, out, err = h.run("status")
+    assert rc == 0 and out.split() == ["RUNNING", "203.0.113.7"], (rc, out, err)
+    assert f"{h.dest}: editor-eu (active), eu-west1; 1 other profiles left out" in err, err
+    assert "FAKE-KEY-MATERIAL" not in out + err, (out, err)
+    assert h.in_peacock() == ["nebius.yaml"] and stat.S_IMODE(h.dest.stat().st_mode) == 0o600, h.in_peacock()
+    assert h.ask("profile", "list") == "editor-eu [default]\neu-west1\n"
+    assert nebius_calls(w) and all(c[c.index("--config") + 1] == str(h.dest) for c in nebius_calls(w)), \
+        nebius_calls(w)
+
+
+def test_ctrl_c_mid_cut_stops_a_bash_loop_around_nebius_sh():
+    w = World(state="RUNNING")
+    h = CliHome(w)
+    marks = w.dir / "marks"
+    env = {k: v for k, v in {**w.env(), **h.env, "FAKE_NEBIUS_SLOW": "list", "FAKE_NEBIUS_SLOW_SECONDS": "2"}.items()
+           if k != "GPU_HOST_NEBIUS_CONFIG"}
+    loop = f'for i in 1 2; do echo "pass $i" >> "{marks}"; "{SCRIPT}" status; done'
+    p = subprocess.Popen(["bash", "-c", loop], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, start_new_session=True)
+    deadline = time.monotonic() + 30
+    while not (h.log.exists() and '"slow"' in h.log.read_text()):
+        assert time.monotonic() < deadline and p.poll() is None, (p.poll(), h.log.exists())
+        time.sleep(0.05)
+    os.killpg(p.pid, signal.SIGINT)
+    out, err = p.communicate(timeout=60)
+    assert p.returncode == -signal.SIGINT, (p.returncode, err)
+    assert marks.read_text() == "pass 1\n", marks.read_text()
+    assert h.in_peacock() == [], h.in_peacock()
+
+
+def test_a_usage_error_cuts_nothing():
+    w = World(state="RUNNING")
+    h = CliHome(w)
+    rc, out, err = h.run("bogus")
+    assert rc == 64 and "1 other; 64 usage." in err, (rc, err)
+    assert h.in_peacock() == [] and not h.log.exists(), h.in_peacock()
+
+
+def test_a_cut_that_fails_is_refused_naming_the_profile():
+    w = World(state="RUNNING")
+    h = CliHome(w, profiles={"editor-eu": {"key_path": None}, "old": {"key_path": None}})
+    rc, out, err = h.run("status")
+    assert rc == 1, (rc, out, err)
+    assert err.startswith("nebius-profiles.sh: ") and "eu-west1" in err, err
+    assert h.in_peacock() == [], h.in_peacock()
+    assert w.read()["calls"] == [], w.read()["calls"]
+
+
+def test_a_federation_profile_is_refused_by_the_first_use_cut():
+    for name in ("editor-eu", "eu-west1"):
+        w = World(state="RUNNING")
+        profiles = {"editor-eu": {"key_path": None}, "eu-west1": {"key_path": None}, "old": {"key_path": None}}
+        profiles[name] = {"key_path": None, "kind": "federation"}
+        h = CliHome(w, profiles=profiles)
+        rc, out, err = h.run("status")
+        assert rc == 1, (name, rc, out, err)
+        assert err.startswith("nebius-profiles.sh: ") and name in err and "The human's one-time setup" in err, err
+        assert h.in_peacock() == [], (name, h.in_peacock())
+        assert w.read()["calls"] == [], (name, w.read()["calls"])
+
+
+def test_no_cli_config_refuses_a_missing_file_as_before():
+    w = World(state="RUNNING")
+    h = CliHome(w, own=False)
+    rc, out, err = h.run("status")
+    assert rc == 1, (rc, out, err)
+    assert str(h.dest) in err and "scripts/env/nebius-profiles.sh" in err, err
+    assert h.in_peacock() == [] and not h.log.exists(), h.in_peacock()
+    assert w.read()["calls"] == [], w.read()["calls"]
+
+
+def test_a_named_config_is_never_cut():
+    w = World(state="RUNNING")
+    h = CliHome(w)
+    absent = str(w.dir / "no-such.yaml")
+    rc, out, err = h.run("status", env={"GPU_HOST_NEBIUS_CONFIG": absent}, unset=())
+    assert rc == 1, (rc, out, err)
+    assert absent in err and "scripts/env/nebius-profiles.sh" in err, err
+    assert h.in_peacock() == [] and not h.log.exists(), h.in_peacock()
+    assert not pathlib.Path(absent).exists()
+
+
+def test_an_existing_config_is_not_cut_again():
+    w = World(state="RUNNING")
+    h = CliHome(w)
+    nebius_config(h.dest, "editor-eu", {"editor-eu": {"key_path": None}})
+    before = h.dest.read_bytes()
+    rc, out, err = h.run("status")
+    assert rc == 0, (rc, out, err)
+    assert h.dest.read_bytes() == before and not h.log.exists(), h.log
+    assert h.in_peacock() == ["nebius.yaml"], h.in_peacock()
+
+
+def identities(w):
+    return [c[i + 1] for c in w.read()["calls"] if c[0] == "ssh" for i, a in enumerate(c) if a == "-i"]
+
+
+def test_the_peacock_gpu_key_is_the_identity_without_gpu_host_key():
+    w = World(state="RUNNING")
+    rc, _, err = run(w, "ssh", "true", unset=("GPU_HOST_KEY",))
+    assert rc == 0 and identities(w) == [], (rc, err, identities(w))
+    key = peacock_home(w) / ".config" / "peacock" / "gpu_ed25519"
+    key.write_text("")
+    w.set(calls=[])
+    rc, _, err = run(w, "ssh", "true", unset=("GPU_HOST_KEY",))
+    assert rc == 0 and identities(w) == [str(key)], (rc, err, identities(w))
+
+
+def test_gpu_host_key_wins_over_the_peacock_key():
+    w = World(state="RUNNING")
+    (peacock_home(w) / ".config" / "peacock" / "gpu_ed25519").write_text("")
+    rc, _, err = run(w, "ssh", "true", env={"GPU_HOST_KEY": "/ci/nebius_gpu"})
+    assert rc == 0 and identities(w) == ["/ci/nebius_gpu"], (rc, err, identities(w))
+
+
+def path_without_nebius(w):
+    """A PATH directory linking every command on PATH but nebius, as on a machine without one."""
+    out = pathlib.Path(tempfile.mkdtemp(prefix="system-bin-", dir=w.dir))
+    for d in os.environ["PATH"].split(os.pathsep):
+        for entry in os.listdir(d) if os.path.isdir(d) else ():
+            if entry != "nebius" and not (out / entry).is_symlink():
+                (out / entry).symlink_to(os.path.join(d, entry))
+    return out
+
+
+def cli_at(w, directory, mark):
+    """A nebius in <directory> that writes <mark> to w.dir/which and runs the world's fake."""
+    directory.mkdir(parents=True, exist_ok=True)
+    cli = directory / "nebius"
+    cli.write_text(f'#!/bin/sh\necho {mark} >> "{w.dir / "which"}"\nexec "{w.dir / "nebius"}" "$@"\n')
+    cli.chmod(0o755)
+
+
+def lookup(w, path_dir=None):
+    system = path_without_nebius(w)
+    path = f"{path_dir}:{system}" if path_dir else str(system)
+    rc, out, err = run(w, "status", env={"PATH": path}, unset=("NEBIUS",))
+    which = (w.dir / "which").read_text().split() if (w.dir / "which").exists() else []
+    return rc, err, which
+
+
+def test_a_cli_on_path_wins_over_the_nebius_bin_one():
+    w = World(state="RUNNING")
+    cli_at(w, w.dir / "home" / ".nebius" / "bin", "nebius-bin")
+    cli_at(w, w.dir / "on-path", "path")
+    rc, err, which = lookup(w, w.dir / "on-path")
+    assert rc == 0 and which and set(which) == {"path"}, (rc, err, which)
+
+
+def test_the_nebius_bin_cli_without_one_on_path():
+    w = World(state="RUNNING")
+    cli_at(w, w.dir / "home" / ".nebius" / "bin", "nebius-bin")
+    rc, err, which = lookup(w)
+    assert rc == 0 and which and set(which) == {"nebius-bin"}, (rc, err, which)
+
+
+def test_no_cli_is_1_naming_the_installer():
+    w = World(state="RUNNING")
+    rc, err, which = lookup(w)
+    assert rc == 1, (rc, err)
+    assert "install.sh" in err and "scripts/env/bootstrap-vm.sh" in err, err
+    assert w.read()["calls"] == [] and which == [], w.read()["calls"]
 
 
 if __name__ == "__main__":
