@@ -8,12 +8,12 @@
 use std::collections::BTreeSet;
 
 use peacockdb_core::test_support::{
-    CorpusDeclaration, DuckdbOracle, MODES, RegistryEntry, assert_registry_matches_csv,
-    authoritative_mode, cpu_case, device_order_case, duckdb_case, duckdb_golden, duckdb_gpu_case,
-    ends_in_sort, golden_row_order, gpu_fingerprint_mismatch, gpu_result_coverage,
-    gpu_result_cudf_matches_path, gpu_result_golden, line_order_is_right, load_csv,
-    ordered_sections, result_golden, section_holds_rows, section_of, stem, stored_mismatch,
-    stored_of, tight,
+    AnswerVerdict, CaseStatus, CorpusDeclaration, DeviceCase, DuckdbOracle, MODES, RegistryEntry,
+    assert_registry_matches_csv, authoritative_mode, cpu_case, device_cases_path,
+    device_order_case, duckdb_case, duckdb_golden, duckdb_gpu_case, ends_in_sort, golden_row_order,
+    gpu_fingerprint_mismatch, gpu_result_coverage, gpu_result_cudf_matches_path, gpu_result_golden,
+    line_order_is_right, load_csv, ordered_sections, parse_device_cases, result_golden,
+    section_holds_rows, section_of, sf40_answer_verdict, stem, stored_mismatch, stored_of, tight,
 };
 
 /// `corpus_query!(dataset, sf, query, cpu_modes, gpu_modes, duckdb_oracle, cpu_oracle,
@@ -788,4 +788,134 @@ fn the_registry_matches_the_cpu_corpus_in_both_directions() {
         "cpu_tp4_rowgroup",
         "cpu_tp4_sized",
     ]);
+}
+
+// --- the H100's sf40 answers against DuckDB's ----------------------------------------------
+
+/// The device whose sf40 answers are held to DuckDB's at sf40: sf40-baseline's tree.
+const SF40_DEVICE: &str = "h100-80gb-hbm3";
+
+/// Each row of the H100's `cases.csv` against DuckDB at sf40, by the corpus's own comparison
+/// rules: an `ok` row's recorded answer meets DuckDB's, a `wrong` row's still differs, and a
+/// `skipped` row has no answer to hold. Every problem is collected before failing, so one run
+/// names them all.
+#[tokio::test]
+async fn every_sf40_device_answer_meets_duckdb() {
+    let list = device_cases_path(SF40_DEVICE);
+    let tree = list.parent().expect("a device directory");
+    if let Some(problem) = list_problem(tree.is_dir(), list.is_file()) {
+        panic!("{problem}");
+    }
+    let Ok(text) = std::fs::read_to_string(&list) else {
+        return;
+    };
+    let mut problems = Vec::new();
+    for row in parse_device_cases(&text) {
+        let verdict = match row.status {
+            CaseStatus::Skipped => None,
+            CaseStatus::Ok | CaseStatus::Wrong => {
+                Some(sf40_answer_verdict(&row.dataset, &row.query).await)
+            }
+        };
+        problems.extend(row_problem(&row, verdict));
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// A device tree whose `cases.csv` is missing has answers nobody holds to DuckDB. No tree and no
+/// list is a branch before the H100's run, and passes with nothing read.
+fn list_problem(tree_exists: bool, list_exists: bool) -> Option<String> {
+    (tree_exists && !list_exists).then(|| {
+        format!(
+            "{} does not exist beside its tree, so no sf40 answer is held to DuckDB's — write it \
+             with UPDATE_CANONICAL=1 cargo test --features rust-only -p peacockdb-core --test \
+             test_corpus_goldens -- the_h100_list_is_the_lists_measured",
+            device_cases_path(SF40_DEVICE).display()
+        )
+    })
+}
+
+/// One row against its verdict; `None` for a `skipped` row, which is not judged.
+fn row_problem(row: &DeviceCase, verdict: Option<AnswerVerdict>) -> Option<String> {
+    let at = format!("{}/{} at sf{}", row.dataset, row.query, row.sf);
+    match (row.status, verdict) {
+        (CaseStatus::Skipped, _) => None,
+        (CaseStatus::Ok, Some(AnswerVerdict::Meets)) => None,
+        (CaseStatus::Ok, Some(AnswerVerdict::Differs(said))) => Some(format!(
+            "{at} is `ok` in the list and its answer differs from DuckDB's: {said} — file a \
+             ticket and mark the row `wrong` with its number as the note"
+        )),
+        (CaseStatus::Wrong, Some(AnswerVerdict::Differs(_))) => None,
+        (CaseStatus::Wrong, Some(AnswerVerdict::Meets)) => Some(format!(
+            "{at} is `wrong` ({}) in the list and its answer meets DuckDB's — mark the row `ok` \
+             and close the ticket",
+            row.note
+        )),
+        (_, Some(AnswerVerdict::Unanswered(said))) => Some(format!("{at}: {said}")),
+        (status, None) => unreachable!("{at}: a {status:?} row is always judged"),
+    }
+}
+
+#[test]
+fn a_tree_without_its_list_is_refused() {
+    let said = list_problem(true, false).expect("a tree with no list");
+    assert!(said.contains("h100-80gb-hbm3/cases.csv"), "{said}");
+    assert_eq!(list_problem(false, false), None);
+    assert_eq!(list_problem(true, true), None);
+}
+
+fn sf40_row(status: CaseStatus, note: &str) -> DeviceCase {
+    DeviceCase {
+        dataset: "tpch".to_string(),
+        sf: "40".to_string(),
+        query: "q6".to_string(),
+        modes: vec!["tp1_single".to_string()],
+        status,
+        note: note.to_string(),
+    }
+}
+
+/// A `wrong` mark over answers that now agree is stale: the fix landed and the list still says
+/// wrong. The check names it rather than letting the mark outlive the bug.
+#[test]
+fn a_stale_wrong_mark_is_refused() {
+    let wrong = sf40_row(CaseStatus::Wrong, "#77");
+    let said = row_problem(&wrong, Some(AnswerVerdict::Meets)).expect("a stale mark");
+    assert!(
+        said.contains("meets DuckDB") && said.contains("`ok`"),
+        "{said}"
+    );
+    let still = AnswerVerdict::Differs("row 1 differs".to_string());
+    assert_eq!(row_problem(&wrong, Some(still)), None);
+    let unanswered = AnswerVerdict::Unanswered("no answer recorded".to_string());
+    assert!(
+        row_problem(&wrong, Some(unanswered)).is_some(),
+        "a `wrong` row is held to a disagreement, not to a missing answer"
+    );
+}
+
+/// An `ok` row needs the device's recorded answer. tpcds q12 has no device cell (its
+/// `gpu_tp1_single` is `na`), so no sf40 recording ever holds its section.
+#[tokio::test]
+async fn an_ok_row_without_an_answer_is_refused() {
+    let verdict = sf40_answer_verdict("tpcds", "q12").await;
+    assert!(
+        matches!(verdict, AnswerVerdict::Unanswered(_)),
+        "{verdict:?}"
+    );
+    let mut ok = sf40_row(CaseStatus::Ok, "");
+    ok.dataset = "tpcds".to_string();
+    ok.query = "q12".to_string();
+    let said = row_problem(&ok, Some(verdict)).expect("no answer");
+    assert!(said.contains("PCK_WRITE_GPU_RESULT"), "{said}");
+    assert_eq!(
+        row_problem(&sf40_row(CaseStatus::Ok, ""), Some(AnswerVerdict::Meets)),
+        None
+    );
+    let differs = AnswerVerdict::Differs("row 1 differs".to_string());
+    let said = row_problem(&sf40_row(CaseStatus::Ok, ""), Some(differs)).expect("a wrong answer");
+    assert!(
+        said.contains("row 1 differs") && said.contains("`wrong`"),
+        "{said}"
+    );
 }

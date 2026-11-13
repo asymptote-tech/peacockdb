@@ -84,8 +84,9 @@ pub(crate) async fn gpu_case(
 ///
 /// Which file, if any, is [`GpuRecording`]'s — never `UPDATE_CANONICAL` or
 /// `PCK_UPDATE_SECTIONS`, which own the cpu's goldens and which
-/// `a_device_run_under_a_regeneration_writes_no_golden` sets exactly.
-fn record_gpu_result(
+/// `a_device_run_under_a_regeneration_writes_no_golden` sets exactly. The benchmark records its
+/// chosen run's answer here too, at sf40.
+pub(crate) fn record_gpu_result(
     dataset: &str,
     sf: &str,
     query: &str,

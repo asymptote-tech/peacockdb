@@ -1,0 +1,5 @@
+dataset,sf,query,modes,status,note
+tpch,40,q1,tp1_single|tp4_sized,ok,
+tpch,40,aggregate_groupby,tp1_single,wrong,#7
+tpch,40,q9,,skipped,timeout: the case ran past 1800 s, and was killed
+tpcds,40,q37,tp1_single,ok,

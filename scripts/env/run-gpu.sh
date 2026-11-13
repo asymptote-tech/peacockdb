@@ -14,9 +14,12 @@
 #                                scripts/env/stage-install.sh makes) and the tree's committed
 #                                testdata to ~/peacock/<i>/ on the VM, the datasets linked in
 #   run <list|filter|bench>    the run image's run-tests.sh <mode> as container peacock-<i>, its
-#                                log followed; PCK_TEST_FILTER and PEACOCK_BENCH_RESUME pass on
-#   pull                       testdata/benchmark-results/ and testdata/calibration/ into this
-#                                tree, and the runs' logs into ~/.cache/peacock/run-gpu/<i>/
+#                                log followed; PCK_TEST_FILTER, PEACOCK_BENCH_RESUME,
+#                                PEACOCK_BENCH_CASE_TIMEOUT_S and PCK_WRITE_GPU_RESULT pass on
+#                                when set
+#   pull                       testdata/benchmark-results/, testdata/calibration/ and the device's
+#                                answers (testdata/goldens/*/gpu-result*.txt) into this tree, and
+#                                the runs' logs into ~/.cache/peacock/run-gpu/<i>/
 #
 # --instance-id and --profile go, as given, to every scripts/nebius.sh call ($NEBIUS_SH), which
 # picks the VM. --instance-id is required: without it nebius.sh means nebius-gpu, the shared L40S,
@@ -339,6 +342,8 @@ cmd_run() {
   # the scan's reader.
   [ -z "${PEACOCK_PINNED_HOST_CACHE_BYTES:-}" ] || envs+=("PEACOCK_PINNED_HOST_CACHE_BYTES=$PEACOCK_PINNED_HOST_CACHE_BYTES")
   [ -z "${PEACOCK_SCAN_READER:-}" ] || envs+=("PEACOCK_SCAN_READER=$PEACOCK_SCAN_READER")
+  [ -z "${PEACOCK_BENCH_CASE_TIMEOUT_S:-}" ] || envs+=("PEACOCK_BENCH_CASE_TIMEOUT_S=$PEACOCK_BENCH_CASE_TIMEOUT_S")
+  [ -z "${PCK_WRITE_GPU_RESULT:-}" ] || envs+=("PCK_WRITE_GPU_RESULT=$PCK_WRITE_GPU_RESULT")
   on_vm vm_run "$dir" "$RUN_REF" "$mode" "${envs[@]}"
 }
 
@@ -349,8 +354,10 @@ cmd_pull() {
   # --update: a file edited here since it was shipped stays as it is.
   from_vm "peacock/$dir/testdata/benchmark-results/" "$root/testdata/benchmark-results/" --update
   from_vm "peacock/$dir/testdata/calibration/" "$root/testdata/calibration/" --update
+  from_vm "peacock/$dir/testdata/goldens/" "$root/testdata/goldens/" --update --prune-empty-dirs \
+    --include='*/' --include='gpu-result*.txt' --exclude='*'
   from_vm "peacock/$dir/logs/" "$logs/"
-  echo "==> pull: testdata/benchmark-results/ and testdata/calibration/; the runs' logs in $logs"
+  echo "==> pull: testdata/benchmark-results/, testdata/calibration/ and testdata/goldens/*/gpu-result*.txt; the runs' logs in $logs"
 }
 
 "cmd_$verb"

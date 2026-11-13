@@ -176,6 +176,48 @@ def test_the_device_slug_is_the_harness_s():
         assert record.device_slug(slug) == slug, (name, slug)
 
 
+DEVICE_LIST = """\
+dataset,sf,query,modes,status,note
+tpch,40,q19,tp1_single,wrong,#7
+tpch,40,q6,tp1_single|tp4_sized,ok,
+tpch,40,q2,,skipped,timeout: the case ran past 1800 s, and was killed
+tpch,40,scan_limit,tp1_single,ok,
+"""
+
+
+def test_split_record_reads_a_device_list():
+    """A device's `cases.csv` declares its `ok` and `wrong` rows at their modes; a `skipped`
+    row times nothing, so a record without it is whole. Read through `device_cases.py`."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        listed = tmp / "cases.csv"
+        listed.write_text(DEVICE_LIST)
+        record = write(tmp, TPCH)
+        h100 = record.read_text().replace("device=NVIDIA H200", "device=NVIDIA H100 80GB HBM3")
+        record.write_text(h100)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            split_record.main(["--record", str(record), "--cases", str(listed),
+                               "--out-dir", str(tmp / "out")])
+        assert out.getvalue().split() == ["h100-80gb-hbm3/tpch.sf40"]
+        assert split_record.declared(listed) == {
+            ("tpch", "40"): {("q19", "tp1-single"), ("q6", "tp1-single"), ("q6", "tp4-sized"),
+                             ("scan-limit", "tp1-single")}}
+        listed.write_text(DEVICE_LIST.replace("tpch,40,q19,tp1_single,wrong,#7\n", ""))
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                split_record.main(["--record", str(record), "--cases", str(listed),
+                                   "--out-dir", str(tmp / "out2")])
+        except SystemExit as refused:
+            assert "q19 tp1-single was timed and is not declared" in str(refused), refused
+        else:
+            raise AssertionError("a case the device list does not hold was split")
+    # The main list's form, unchanged.
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        assert split(tmp, write(tmp, TPCH)) == ["h200/tpch.sf40"]
+
+
 def test_a_record_with_no_rows_is_refused():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)

@@ -32,7 +32,24 @@
 #   benchmarks/duckdb_minimal.sh [--dir DIR] [--sf N] [--runs N] [--duckdb PATH]
 #                                [--bucket NAME] [--endpoint URL] [--region NAME]
 #                                [--threads N] [--skip-download] [--skip-verify]
-#                                [--force-import] [--s3-direct]
+#                                [--force-import] [--s3-direct] [--dataset tpch|tpcds]
+#                                [--cases FILE [--answers FILE.duckdb]] [--results FILE.tsv]
+#                                [--build-only]
+#
+#   --dataset   tpch (default) or tpcds: the bucket <ds>-sf<N>, the db <dir>/<ds>.sf<N>.duckdb,
+#               and its tables, tpch's eight or every parquet file of tpcds.
+#   --cases     a device's cases.csv: the corpus query testdata/<ds>-queries/<q>.sql (`_` in the
+#               ident as `-`) of each of its `ok` and `wrong` rows of <ds>, in file order, read
+#               through scripts/calibration/device_cases.py, instead of the minimal set. There are
+#               no goldens at sf40, so nothing is verified.
+#   --answers   with --cases: the threads=1 pass stores each query's answer as table "<q>" of
+#               this database, under the oracle's two settings (testdata/duckdb_result.py renders
+#               them); a query DuckDB refuses has no table and is still timed.
+#   --results   the timing table as TSV, for test_support's parse_duckdb_results: a `# ` line of
+#               duckdb, threads, host, cpu, cores, memory_gib, db, resident_pct and floor_ms
+#               (`SELECT 1` timed as a query is, the second-smallest of the same runs), then
+#               query, ms_2nd_min, runs_ms, workset_bytes, disk_read_bytes, warm, status.
+#   --build-only import <ds>'s database and check its row counts, then stop: no query is run.
 #
 #   --s3-direct import each table straight from s3://BUCKET/ over DuckDB httpfs, with NO
 #               local parquet intermediate — for a host that fits the ~38 GB db but not
@@ -62,6 +79,11 @@ SKIP_DOWNLOAD=0
 SKIP_VERIFY=0
 FORCE_IMPORT=0
 S3_DIRECT=0
+DATASET=tpch
+CASES=""
+ANSWERS=""
+RESULTS_TSV=""
+BUILD_ONLY=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -81,22 +103,58 @@ while [ $# -gt 0 ]; do
     # does (e.g. the 76 GB Nebius VM). Everything downstream — warm-up, residency, 6-run/
     # 2nd-min, golden verify — is UNCHANGED; only the table SOURCE differs.
     --s3-direct) S3_DIRECT=1; SKIP_DOWNLOAD=1; shift ;;
-    -h|--help) sed -n '2,50p' "$0"; exit 0 ;;
+    --dataset) DATASET="$2"; shift 2 ;;
+    --cases) CASES="$2"; shift 2 ;;
+    --answers) ANSWERS="$2"; shift 2 ;;
+    --results) RESULTS_TSV="$2"; shift 2 ;;
+    --build-only) BUILD_ONLY=1; shift ;;
+    -h|--help) sed -n '2,${/^#/!q;p;}' "$0"; exit 0 ;;
     *) echo "error: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
-[ -n "$BUCKET" ] || BUCKET="tpch-sf${SF}"
+refuse() { echo "error: $*" >&2; exit 2; }
+case "$DATASET" in
+  tpch) LABEL=TPC-H ;;
+  tpcds) LABEL=TPC-DS ;;
+  *) refuse "--dataset $DATASET: tpch or tpcds" ;;
+esac
+[ -z "$ANSWERS" ] || [ -n "$CASES" ] || refuse "--answers needs --cases: the minimal set is verified against its goldens"
+[ -z "$ANSWERS" ] || [ "$SKIP_VERIFY" -eq 0 ] || refuse "--answers is the threads=1 pass, which --skip-verify skips"
+case "$ANSWERS" in *"'"*) refuse "--answers $ANSWERS: a path without a quote" ;; esac
+if [ "$BUILD_ONLY" -eq 1 ] && { [ -n "$CASES" ] || [ -n "$ANSWERS" ] || [ -n "$RESULTS_TSV" ]; }; then
+  refuse "--build-only runs no query, so --cases, --answers and --results mean nothing beside it"
+fi
+[ "$DATASET" = tpch ] || [ -n "$CASES" ] || [ "$BUILD_ONLY" -eq 1 ] \
+  || refuse "--dataset $DATASET has no minimal query set: name --cases, or --build-only"
+[ -z "$CASES" ] || [ -f "$CASES" ] || refuse "--cases $CASES: no such file"
+[ -z "$RESULTS_TSV" ] || [ -d "$(dirname "$RESULTS_TSV")" ] || refuse "--results $RESULTS_TSV: no such directory"
+[ -n "$BUCKET" ] || BUCKET="${DATASET}-sf${SF}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck source=testdata/tpch_query_sql.sh
 . "${ROOT}/testdata/tpch_query_sql.sh"
 
-PARQUET_DIR="${DIR}/tpch.sf${SF}"
-DB="${DIR}/tpch.sf${SF}.duckdb"
+# The corpus set: "<ident> <stem>" per `ok` and `wrong` row of the dataset, each stem's file checked.
+CORPUS=""
+if [ -n "$CASES" ]; then
+  CORPUS="$(python3 "${ROOT}/scripts/calibration/device_cases.py" "$CASES" --dataset "$DATASET" \
+    | awk -F'\t' '{ stem = $3; gsub("_", "-", stem); print $3, stem }')" \
+    || refuse "cannot read --cases $CASES (above)"
+  [ -n "$CORPUS" ] || refuse "--cases $CASES holds no ok or wrong row of $DATASET"
+  while read -r _ stem; do
+    [ -f "${ROOT}/testdata/${DATASET}-queries/${stem}.sql" ] \
+      || refuse "--cases $CASES names ${stem}, and testdata/${DATASET}-queries/${stem}.sql does not exist"
+  done <<< "$CORPUS"
+fi
+
+PARQUET_DIR="${DIR}/${DATASET}.sf${SF}"
+DB="${DIR}/${DATASET}.sf${SF}.duckdb"
 GOLDEN_DIR="${ROOT}/testdata/goldens/tpch.sf${SF}"
 PARAMS="${ROOT}/testdata/tpch-vec-queries/query_params.jsonl"
+# tpcds's tables are its parquet files', read once the source is listed (below).
 TABLES="customer lineitem nation orders part partsupp region supplier"
+[ "$DATASET" = tpch ] || TABLES=""
 
 fail() { echo; echo "ERROR: $*" >&2; exit 1; }
 hr()   { printf '%s\n' "-----------------------------------------------------------------------------"; }
@@ -104,7 +162,7 @@ gb()   { awk -v b="$1" 'BEGIN{printf "%.2f", b/1073741824}'; }
 
 command -v "$DUCKDB" >/dev/null 2>&1 || fail "duckdb not found ($DUCKDB); pass --duckdb PATH"
 command -v python3 >/dev/null 2>&1 || fail "python3 is required (query params, sizing)"
-[ -f "$PARAMS" ] || fail "missing $PARAMS — the vector queries resolve q and D from it"
+[ -n "$CASES" ] || [ "$BUILD_ONLY" -eq 1 ] || [ -f "$PARAMS" ] || fail "missing $PARAMS — the vector queries resolve q and D from it"
 [ "$S3_DIRECT" -eq 1 ] || mkdir -p "$PARQUET_DIR" || fail "cannot create $PARQUET_DIR"
 
 # --------------------------------------------------------------------------- table source
@@ -130,7 +188,7 @@ else
   DUCK_S3=""
 fi
 
-echo "=== duckdb_minimal.sh — TPC-H sf${SF} on native DuckDB storage ==="
+echo "=== duckdb_minimal.sh — ${LABEL} sf${SF} on native DuckDB storage ==="
 echo "target dir : $DIR"
 echo "parquet    : $PARQUET_DIR"
 echo "database   : $DB"
@@ -200,6 +258,17 @@ LOCAL_BYTES=0
 if [ "$S3_DIRECT" -eq 0 ]; then
   LOCAL_BYTES=$(find "$PARQUET_DIR" -maxdepth 1 -name '*.parquet' -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}')
   echo "local      : $(gb $LOCAL_BYTES) GiB of parquet already present"
+fi
+
+if [ -z "$TABLES" ]; then
+  if [ -n "${REMOTE_LIST:-}" ]; then
+    TABLES="$(printf '%s\n' "$REMOTE_LIST" | awk '/\.parquet$/ { sub(/\.parquet$/, "", $4); print $4 }' | LC_ALL=C sort)"
+  else
+    for f in "$PARQUET_DIR"/*.parquet; do [ -f "$f" ] && TABLES="${TABLES} $(basename "$f" .parquet)"; done
+  fi
+  TABLES="$(echo $TABLES)"
+  [ -n "$TABLES" ] || fail "no ${DATASET} parquet in ${PARQUET_DIR}: its tables are its parquet files"
+  echo "tables     : $(wc -w <<< "$TABLES") from the parquet: ${TABLES}"
 fi
 
 # The db ends up roughly the size of the parquet: the embedding columns are near-random
@@ -294,7 +363,7 @@ NEED_IMPORT=1
 if [ -f "$DB" ] && [ "$FORCE_IMPORT" -eq 0 ]; then
   echo "=== import: existing database found, checking completeness ==="
   if diff <(db_row_counts) <(parquet_row_counts) >/dev/null 2>&1; then
-    echo "row counts match the parquet for all 8 tables — skipping import"
+    echo "row counts match the parquet for all $(wc -w <<< "$TABLES") tables — skipping import"
     NEED_IMPORT=0
   else
     echo "row counts DO NOT match the parquet (or the db is unreadable) — re-importing"
@@ -371,6 +440,11 @@ TABLE_SIZE_SQL="SELECT t, blocks FROM (${TABLE_SIZE_SQL%UNION ALL }) ORDER BY bl
   printf '  %-10s %8.2f GiB\n' "$t" "$(awk -v b="$blocks" -v s="$BLOCK_SIZE" 'BEGIN{printf "%.4f", b*s/1073741824}')"
 done
 echo
+if [ "$BUILD_ONLY" -eq 1 ]; then
+  echo "built      : $DB ($(gb $DB_BYTES) GiB); --build-only: no query is warmed or timed"
+  rm -rf "$DUCK_TMP" 2>/dev/null
+  exit 0
+fi
 
 # per-column bytes, used below to size each query's working set
 COL_SIZES="$(mktemp)"
@@ -471,20 +545,42 @@ emit() {
   local sql; sql="$(printf '%s' "$3" | tr '\n' ' ' | tr -s ' ')"
   printf '%s\t%s\t%s\n' "$1" "$2" "$sql" >> "$QUERIES"
 }
-emit q6 "duckdb_q6.csv" "$(sql_q6)"
-emit q1 "duckdb_q1.csv" "$(sql_q1)"
-emit q3 "duckdb_q3.csv" "$(sql_q3)"
-emit q8 "duckdb_q8.csv" "$(sql_q8)"
+# A corpus query's text without its `--` comments and its final `;`, which a one-line query and
+# `CREATE TABLE … AS <query>` cannot carry.
+corpus_sql() {
+  python3 - "$1" <<'PY'
+import sys
+text, out, quoted, i = open(sys.argv[1]).read(), [], False, 0
+while i < len(text):
+    if text[i] == "'":
+        quoted = not quoted
+    if not quoted and text.startswith("--", i):
+        i = text.find("\n", i) if "\n" in text[i:] else len(text)
+        continue
+    out.append(text[i])
+    i += 1
+print("".join(out).strip().rstrip(";").strip())
+PY
+}
+if [ -n "$CASES" ]; then
+  while read -r q stem; do
+    emit "$q" "$stem" "$(corpus_sql "${ROOT}/testdata/${DATASET}-queries/${stem}.sql")"
+  done <<< "$CORPUS"
+else
+  emit q6 "duckdb_q6.csv" "$(sql_q6)"
+  emit q1 "duckdb_q1.csv" "$(sql_q1)"
+  emit q3 "duckdb_q3.csv" "$(sql_q3)"
+  emit q8 "duckdb_q8.csv" "$(sql_q8)"
 
-# probe id -> query, mirroring gen_duckdb_goldens.sh's mapping (one probe per k tier)
-while IFS=$'\t' read -r vid vD vlit; do
-  case "$vid" in
-    img_*) emit "q11v/${vid}" "duckdb_q11v_${vid}.csv" "$(sql_q11v "$vD" "$vlit")" ;;
-    txt_000) emit "q12v/${vid}" "duckdb_q12v_${vid}.csv" "$(sql_q12v "$vD" "$vlit")" ;;
-    txt_017) emit "q10v/${vid}" "duckdb_q10v_${vid}.csv" "$(sql_q10v "$vD" "$vlit")" ;;
-    txt_034) emit "q9v/${vid}"  "duckdb_q9v_${vid}.csv"  "$(sql_q9v  "$vD" "$vlit")" ;;
-  esac
-done < <(python3 - "$PARAMS" <<'PY'
+  # probe id -> query, mirroring gen_duckdb_goldens.sh's mapping (one probe per k tier)
+  while IFS=$'\t' read -r vid vD vlit; do
+    case "$vid" in
+      img_*) emit "q11v/${vid}" "duckdb_q11v_${vid}.csv" "$(sql_q11v "$vD" "$vlit")" ;;
+      txt_000) emit "q12v/${vid}" "duckdb_q12v_${vid}.csv" "$(sql_q12v "$vD" "$vlit")" ;;
+      txt_017) emit "q10v/${vid}" "duckdb_q10v_${vid}.csv" "$(sql_q10v "$vD" "$vlit")" ;;
+      txt_034) emit "q9v/${vid}"  "duckdb_q9v_${vid}.csv"  "$(sql_q9v  "$vD" "$vlit")" ;;
+    esac
+  done < <(python3 - "$PARAMS" <<'PY'
 import json, sys
 WANT = ["img_000", "img_017", "img_034", "txt_000", "txt_017", "txt_034"]
 rows = {}
@@ -500,6 +596,7 @@ for w in WANT:
     print(f"{w}\t{D!r}\t{lit}")
 PY
 ) || fail "could not resolve the vector query parameters"
+fi
 
 # --------------------------------------------------------------------------- helpers
 # WORKING SET: the on-disk size of exactly the columns a query reads. Derived by matching
@@ -511,9 +608,9 @@ PY
 working_set_bytes() {
   local sql="$1"
   [ -s "$COL_SIZES" ] || { echo ""; return; }
-  python3 - "$COL_SIZES" <<PY
+  python3 - "$COL_SIZES" "$sql" <<'PY'
 import csv, re, sys
-sql = """${sql}"""
+sql = sys.argv[2]
 total = 0
 for tbl, col, b in csv.reader(open(sys.argv[1])):
     if re.search(r'\b' + re.escape(col) + r'\b', sql):
@@ -522,13 +619,14 @@ print(total)
 PY
 }
 
-# run one query once; print "<elapsed_ms> <device_bytes_read>"
+# run one query once; print "<elapsed_ms> <device_bytes_read>". The settings go in a -c of their
+# own: the CLI parses a -c whole before running it, and integer_division is a parser setting.
 run_once() {
   local sql="$1" pragma="$2"
   local s0 s1 t0 t1
   s0=$(sectors_read)
   t0=$(date +%s%N)
-  "$DUCKDB" "$DB" -c "${pragma} ${sql}" > /dev/null 2>&1 || return 1
+  "$DUCKDB" "$DB" -c "${pragma}" -c "${sql}" > /dev/null 2>&1 || return 1
   t1=$(date +%s%N)
   s1=$(sectors_read)
   echo "$(( (t1 - t0) / 1000000 )) $(( (s1 - s0) * 512 ))"
@@ -542,13 +640,34 @@ run_once() {
 # box too small for a query — where the number is I/O-bound and honestly reported anyway.
 TIMED_PRAGMA="SET temp_directory='${DUCK_TMP}';"
 [ -n "$THREADS" ] && TIMED_PRAGMA="${TIMED_PRAGMA} PRAGMA threads=${THREADS};"
+# A corpus query is timed under the two settings its answer is taken under (testdata/duckdb_result.py's
+# session), so the time is the answered query's.
+ORACLE="SET default_null_order='nulls_last_on_asc_first_on_desc'; SET integer_division=true;"
+[ -z "$CASES" ] || TIMED_PRAGMA="${TIMED_PRAGMA} ${ORACLE}"
 
 # --------------------------------------------------------------------------- verify
 # Same SQL, same data, threads=1 — exactly how the goldens were generated. If this fails,
 # the timing below is measuring a query that produces the wrong answer, and the number is
 # worthless however good it looks.
 declare -A VERDICT=()
-if [ "$SKIP_VERIFY" -eq 0 ]; then
+if [ "$SKIP_VERIFY" -eq 0 ] && [ -n "$CASES" ] && [ -z "$ANSWERS" ]; then
+  echo "=== verify: a corpus run has no goldens at sf${SF}; nothing is verified (--answers stores DuckDB's answers) ==="
+  echo
+elif [ "$SKIP_VERIFY" -eq 0 ] && [ -n "$CASES" ]; then
+  # The answers database is this run's alone: a table left from an earlier run is an answer to
+  # a query this run may have refused.
+  echo "=== answers (threads=1) into ${ANSWERS} ==="
+  rm -f "$ANSWERS" "${ANSWERS}.wal"
+  while IFS=$'\t' read -r qid golden sql; do
+    if err=$("$DUCKDB" "$DB" -c "SET temp_directory='${DUCK_TMP}'; PRAGMA threads=1; ATTACH '${ANSWERS}' AS answers; ${ORACLE}" \
+               -c "CREATE OR REPLACE TABLE answers.\"${golden}\" AS ${sql};" 2>&1 >/dev/null); then
+      VERDICT[$qid]="answered"; printf '  %-20s answered\n' "$qid"
+    else
+      VERDICT[$qid]="ANSWER FAILED"; printf '  %-20s ANSWER FAILED: %s\n' "$qid" "$(head -1 <<< "$err")"
+    fi
+  done < "$QUERIES"
+  echo
+elif [ "$SKIP_VERIFY" -eq 0 ]; then
   echo "=== verify against committed goldens (threads=1) ==="
   if [ ! -d "$GOLDEN_DIR" ]; then
     echo "  golden dir not found: $GOLDEN_DIR — SKIPPING verification. NOTHING WAS CHECKED."
@@ -616,7 +735,26 @@ EOF
 done < "$QUERIES"
 echo
 
+# THE FLOOR — every time above is one CLI process: it starts, opens the database and runs its
+# query. `SELECT 1` timed the same way is what each time holds besides its query, which a
+# reader subtracts; it is reported, never taken off here.
+floors=""
+for i in $(seq 1 "$RUNS"); do
+  out=$(run_once "SELECT 1;" "$TIMED_PRAGMA") || fail "SELECT 1 failed against ${DB}"
+  floors="${floors}${out%% *} "
+done
+FLOOR_MS=$(printf '%s\n' $floors | sort -n | sed -n "$(( RUNS > 1 ? 2 : 1 ))p")
+echo "floor     : SELECT 1 in ${FLOOR_MS} ms, second-smallest of ${RUNS} ($floors)"
+echo
+
 # --------------------------------------------------------------------------- report
+# WARM VERDICT — from the measurement, not the intention. A run that pulled essentially
+# nothing from the block device was served from RAM whatever the global warm-up managed.
+warm_of() {  # warm_of <bytes read by the reported run> <working set, or empty>
+  if [ "$1" -lt 16777216 ]; then echo yes
+  elif [ -n "$2" ] && [ "$2" -gt 0 ] && awk -v r="$1" -v w="$2" 'BEGIN{exit !(r < 0.2*w)}'; then echo partial
+  else echo NO; fi
+}
 echo "=== results ==="
 hr
 printf '%-12s %10s %9s %10s %9s %-8s %s\n' \
@@ -629,11 +767,7 @@ while IFS=$'\t' read -r qid ws best2 best2_read times verdict; do
   fi
   ws_h="n/a"; [ -n "$ws" ] && ws_h="$(gb "$ws") G"
   rd_h="$(gb "$best2_read") G"
-  # WARM VERDICT — from the measurement, not the intention. A run that pulled essentially
-  # nothing from the block device was served from RAM whatever the global warm-up managed.
-  if [ "$best2_read" -lt 16777216 ]; then warm="yes"
-  elif [ -n "$ws" ] && [ "$ws" -gt 0 ] && awk -v r="$best2_read" -v w="$ws" 'BEGIN{exit !(r < 0.2*w)}'; then warm="partial"
-  else warm="NO"; fi
+  warm=$(warm_of "$best2_read" "$ws")
   printf '%-12s %8d ms %9s %10s %9s %-8s %s\n' \
     "$qid" "$best2" "$ws_h" "$rd_h" "$warm" "$verdict" "$times"
 done < "$RESULTS"
@@ -642,8 +776,39 @@ echo "2nd-min   : second-smallest of ${RUNS} wall times"
 echo "workset   : approximate on-disk size of the columns this query reads"
 echo "disk read : bytes pulled from ${DEV_NAME} during the reported run (system-wide counter)"
 echo "warm?     : yes = <16 MiB read from disk; partial = <20% of the working set; NO = otherwise"
-echo "golden    : result compared against testdata/goldens/tpch.sf${SF}/"
+if [ -z "$CASES" ]; then
+  echo "golden    : result compared against testdata/goldens/tpch.sf${SF}/"
+else
+  echo "answered  : the threads=1 answer stored in ${ANSWERS:-(nothing: no --answers)}"
+fi
 echo
 echo "database $(gb $DB_BYTES) GiB, $(gb $RESIDENT_BYTES) GiB resident (${RESIDENT_PCT}%) via ${WARM_METHOD}"
 [ "$IMPORT_SECS" -gt 0 ] && echo "import wall time this run: ${IMPORT_SECS} s"
 [ "$FULLY_WARM" -eq 1 ] || echo "NOT FULLY WARM — see the per-query 'warm?' column before quoting any number."
+
+# --------------------------------------------------------------------------- results file
+# One owner reads it, test_support's parse_duckdb_results. Every value in the `# ` line is one
+# word: whitespace inside one (a CPU's model name) becomes `_`.
+if [ -n "$RESULTS_TSV" ]; then
+  word() { printf '%s' "$*" | tr -s ' \t' '_'; }
+  version=$("$DUCKDB" -csv -noheader -c "SELECT version();" 2>/dev/null | tail -1)
+  threads=$("$DUCKDB" "$DB" -csv -noheader -c "${TIMED_PRAGMA} SELECT current_setting('threads');" 2>/dev/null | tail -1)
+  cpu=$(awk -F': *' '/^model name/ { print $2; exit }' /proc/cpuinfo)
+  {
+    printf '# duckdb=%s threads=%s host=%s cpu=%s cores=%s memory_gib=%s db=%s resident_pct=%s floor_ms=%s\n' \
+      "$(word "${version#v}")" "$(word "$threads")" "$(word "$(hostname)")" "$(word "${cpu:-unknown}")" \
+      "$(nproc)" "$(awk -v b="$MEM_TOTAL" 'BEGIN{printf "%.1f", b/1073741824}')" "$(word "$DB")" "$RESIDENT_PCT" \
+      "$FLOOR_MS"
+    printf 'query\tms_2nd_min\truns_ms\tworkset_bytes\tdisk_read_bytes\twarm\tstatus\n'
+    while IFS=$'\t' read -r qid ws best2 best2_read times verdict; do
+      if [ "$best2" = "FAILED" ]; then
+        printf '%s\t-\t-\t%s\t-\t-\tfailed\n' "$qid" "${ws:--}"
+      else
+        runs=$(echo $times | tr ' ' ',')
+        printf '%s\t%s\t%s\t%s\t%s\t%s\tok\n' "$qid" "$best2" "$runs" "${ws:--}" "$best2_read" "$(warm_of "$best2_read" "$ws")"
+      fi
+    done < "$RESULTS"
+  } > "${RESULTS_TSV}.partial"
+  mv "${RESULTS_TSV}.partial" "$RESULTS_TSV"
+  echo "results   : $RESULTS_TSV"
+fi

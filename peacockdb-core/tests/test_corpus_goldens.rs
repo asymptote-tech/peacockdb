@@ -5,9 +5,9 @@
 //! The second half reads the committed goldens back against their own redundancy: a file that
 //! contradicts itself is one the renderer got wrong, and there is no other oracle.
 //!
-//! The benchmark tree read back is `benchmark`, one section's checks `benchmark_checks`, the
-//! calibration record's format `benchmark_record`, and what a run writes when a case fails or
-//! runs again `benchmark_run`.
+//! The benchmark tree read back is `benchmark`, one section's checks `benchmark_checks`, each
+//! device tree against its case list `benchmark_lists`, the calibration record's format
+//! `benchmark_record`, and what a run writes when a case fails or runs again `benchmark_run`.
 
 // A test target's child modules resolve against tests/ itself, and a file there would be
 // another target. The path keeps it under a directory named for this one.
@@ -15,6 +15,8 @@
 mod benchmark;
 #[path = "test_corpus_goldens/benchmark_checks.rs"]
 mod benchmark_checks;
+#[path = "test_corpus_goldens/benchmark_lists.rs"]
+mod benchmark_lists;
 #[path = "test_corpus_goldens/benchmark_record.rs"]
 mod benchmark_record;
 #[path = "test_corpus_goldens/benchmark_run.rs"]

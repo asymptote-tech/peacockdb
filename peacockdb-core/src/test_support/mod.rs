@@ -34,6 +34,7 @@ mod device_answer;
 mod device_cases;
 mod device_schema;
 mod duckdb_oracle;
+mod duckdb_results;
 mod fingerprint;
 mod golden_text;
 #[cfg(not(feature = "rust-only"))]
@@ -768,6 +769,25 @@ pub async fn duckdb_gpu_case(dataset: &str, sf: &str, query: &str, mode: &str, o
     duckdb_oracle::duckdb_gpu_case(dataset, sf, query, mode, oracle).await
 }
 
+/// A recorded answer held to DuckDB's under its line's oracle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnswerVerdict {
+    /// The two agree, or the line says `duckdb_none` and a side does not answer.
+    Meets,
+    /// Both answer, and the oracle's comparison says how they differ.
+    Differs(String),
+    /// A side has no answer the line expects: no recorded section or file, a file another cuDF
+    /// recorded, or DuckDB's `failed:`. The text says how to record the missing one.
+    Unanswered(String),
+}
+
+/// The H100's sf40 answer to `query` (a case list's ident) at `tp1_single`, recorded in
+/// `goldens/<dataset>.sf40/gpu-result.txt`, against DuckDB's sf40 answer beside it, under the
+/// oracle of the sf1 registry row the benchmark's cell comes from.
+pub async fn sf40_answer_verdict(dataset: &str, query: &str) -> AnswerVerdict {
+    duckdb_oracle::sf40_verdict(dataset, query).await
+}
+
 /// Whether `query`'s plan, at one partition, ends in a sort — under any limit or projection —
 /// or why it has no plan. Such a line says `no_sort`.
 pub async fn ends_in_sort(dataset: &str, sf: &str, query: &str) -> Result<bool, String> {
@@ -1240,6 +1260,77 @@ pub fn render_device_cases(cases: &[DeviceCase]) -> String {
     device_cases::render(cases)
 }
 
+/// Replaces `device`'s `cases.csv` with `text`, staged and renamed, for an `UPDATE_CANONICAL`
+/// rewrite.
+pub fn write_device_cases(device: &str, text: &str) {
+    testdata::rewrite(&device_cases::path(device), text)
+}
+
+/// What a device's tree holds for a case in one mode's file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Measured {
+    Timed,
+    /// The failed section's reason, the text after `reason=`.
+    Failed(String),
+}
+
+/// The sf40 rows a device's tree makes of `candidates`, `(dataset, query, main-list modes)` in
+/// main-list order, at those of `modes` each carries. `files(dataset, mode)` is that file's
+/// sections by name as the file spells it, `None` without a file; `wrong` is `(dataset, query)` →
+/// `#NN`, the list's `wrong` rows as it stands, since the tree knows no tickets. `Err` names a
+/// section the tree owes and lacks, or a mark on a query not measured. Rules: build-test.md,
+/// "Corpus benchmarks".
+pub fn device_lines(
+    candidates: &[(String, String, Vec<String>)],
+    modes: &[&str],
+    files: &dyn Fn(&str, &str) -> Option<BTreeMap<String, Measured>>,
+    wrong: &BTreeMap<(String, String), String>,
+) -> Result<Vec<DeviceCase>, String> {
+    device_cases::lines(candidates, modes, files, wrong)
+}
+
+// --- DuckDB's results -------------------------------------------------------------
+
+/// What became of a query in DuckDB's timing pass, spelled `ok`, `failed` in the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DuckdbStatus {
+    Ok,
+    Failed,
+}
+
+/// One row of a `duckdb.tsv`: a query's timing on DuckDB's own storage.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuckdbRow {
+    /// The main list's ident, `_` kept (`aggregate_groupby`).
+    pub query: String,
+    /// The second-smallest wall time; `None` when failed (`-`).
+    pub ms_2nd_min: Option<f64>,
+    /// Every timed run, in order; empty when failed.
+    pub runs_ms: Vec<f64>,
+    /// The on-disk size of the columns the query reads; `None` where DuckDB gave no sizes.
+    pub workset_bytes: Option<u64>,
+    /// Read from the block device during the reported run; `None` when failed.
+    pub disk_read_bytes: Option<u64>,
+    /// `yes`, `partial` or `NO`, as written; `-` when failed.
+    pub warm: String,
+    pub status: DuckdbStatus,
+}
+
+/// A `duckdb.tsv`: its `# ` line's `key=value` words in order (duckdb, threads, host, cpu,
+/// cores, memory_gib, db, resident_pct), then its rows in file order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuckdbResults {
+    pub preamble: Vec<(String, String)>,
+    pub rows: Vec<DuckdbRow>,
+}
+
+/// `benchmarks/duckdb_minimal.sh --results`' file. Panics naming the line on a missing preamble
+/// or column line, a row short of seven fields, a value its column refuses, an unknown status,
+/// and a query listed twice.
+pub fn parse_duckdb_results(text: &str) -> DuckdbResults {
+    duckdb_results::parse(text)
+}
+
 // --- the benchmark report page ---------------------------------------------------
 
 /// `ticket_widget.py`'s `DEFAULT_REPO`: the page links each section on GitHub, as `report.html`
@@ -1307,6 +1398,11 @@ pub const FAILED: &str = "status=failed reason=";
 /// Env var that makes a run resume: `1` keeps every section this run's device, driver, CUDA,
 /// cuDF and host measured. Unset or `0` measures every case, whatever its file holds.
 pub const RESUME_ENV: &str = "PEACOCK_BENCH_RESUME";
+
+/// Env var bounding one benchmark case, in whole seconds; unset means no bound. A case still
+/// running past it is recorded `status=failed reason=timeout: the case ran past <N> s` and the
+/// process exits 1, so a resumed rerun skips the case (one process per case: `bench-each.sh`).
+pub const CASE_TIMEOUT_ENV: &str = "PEACOCK_BENCH_CASE_TIMEOUT_S";
 
 /// Whether a benchmark run keeps the sections it already measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1475,6 +1571,7 @@ pub struct RunMeta<'a> {
 /// Strings as written: `device` is the runtime's name for the card, `driver` the kernel
 /// module's release (`580.95.05`), `cuda` the runtime's version (`12.9`), `cudf` the release
 /// built against (`25.02.02`).
+#[derive(Clone)]
 pub struct Provenance {
     pub device: String,
     pub driver: String,
