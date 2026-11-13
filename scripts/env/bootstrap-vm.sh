@@ -119,29 +119,58 @@ fi
 [ "$(claude_at)" = "$claude_version" ] || die "Claude Code at $claude is not $claude_version"
 
 # The marketplace pins each plugin to a commit and cannot be added at one, so the pin is checked
-# on what the install recorded.
-plugin_version=$(pin SUPERPOWERS_VERSION)
-plugin_sha=$(pin SUPERPOWERS_SHA)
+# on what the install recorded for the user scope, which install and update write. The local copy
+# of the marketplace is added or updated first: an install reads that copy. `plugin install` leaves
+# an installed plugin as it is, so one at another version is updated.
+plugin=superpowers@claude-plugins-official
+plugin_pin="$(pin SUPERPOWERS_VERSION) at $(pin SUPERPOWERS_SHA)"
 record=$HOME/.claude/plugins/installed_plugins.json
-plugin_is_pinned() {
-  python3 - "$record" "$plugin_version" "$plugin_sha" << 'PY'
+# plugin_recorded — the plugin's user-scope installs in the record, "<version> at <commit>" each,
+# "; " between them, or nothing. A record of another shape is refused, exit 2.
+plugin_recorded() {
+  python3 - "$record" "$plugin" << 'PY'
 import json, sys
-path, version, sha = sys.argv[1:]
+path, plugin = sys.argv[1:]
+def refuse(why):
+    print(f"bootstrap-vm.sh: {path} {why}", file=sys.stderr)
+    sys.exit(2)
 try:
-    entries = json.load(open(path))["plugins"]["superpowers@claude-plugins-official"]
-except (OSError, KeyError, ValueError):
-    sys.exit(1)
-sys.exit(0 if any(e.get("version") == version and e.get("gitCommitSha") == sha for e in entries) else 1)
+    entries = json.load(open(path)).get("plugins", {}).get(plugin, [])
+except OSError:
+    entries = []
+except (ValueError, AttributeError):
+    refuse("is not the JSON object this script reads")
+if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+    refuse(f"holds {plugin} as something that is not a list of installs, which this script "
+           "cannot read")
+users = [e for e in entries if e.get("scope") == "user"]
+print("; ".join(f"{e.get('version')} at {e.get('gitCommitSha')}" for e in users))
 PY
 }
-if ! plugin_is_pinned; then
-  if ! grep -qs claude-plugins-official "$HOME/.claude/plugins/known_marketplaces.json"; then
-    "$claude" plugin marketplace add "$MARKETPLACE"
+# claude_step <argument…> — one `claude` call, refused by name when it fails.
+claude_step() { "$claude" "$@" || die "claude $* failed (above)"; }
+before=$(plugin_recorded)
+if [[ "; $before; " != *"; $plugin_pin; "* ]]; then
+  if grep -qs claude-plugins-official "$HOME/.claude/plugins/known_marketplaces.json"; then
+    claude_step plugin marketplace update claude-plugins-official
+  else
+    claude_step plugin marketplace add "$MARKETPLACE"
   fi
-  "$claude" plugin install superpowers@claude-plugins-official
+  if [ -z "$before" ]; then
+    claude_step plugin install "$plugin"
+  else
+    claude_step plugin update "$plugin"
+  fi
+  after=$(plugin_recorded)
+  if [[ "; $after; " != *"; $plugin_pin; "* ]]; then
+    [ -n "$after" ] || die "$record records no superpowers for the user after its install (above)"
+    [ "$after" != "$before" ] || die "the update changed nothing: $record records superpowers \
+$after, not the pin, $plugin_pin. The marketplace may still give that version, or the update \
+failed (above)"
+    die "the marketplace gives superpowers $after, not the pin, $plugin_pin: bump \
+docker/pins.env's SUPERPOWERS_VERSION and SUPERPOWERS_SHA to it"
+  fi
 fi
-plugin_is_pinned || die "superpowers is not $plugin_version at $plugin_sha in $record: the marketplace has \
-moved on, so docker/pins.env's SUPERPOWERS_VERSION and SUPERPOWERS_SHA must be bumped to what it installed"
 
 # The docker group this run joined takes effect at the next login.
 if ! docker info > /dev/null 2>&1; then docker() { sudo docker "$@"; }; fi

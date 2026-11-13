@@ -73,14 +73,15 @@ def whole_run_env(m):
     record = m.home / ".claude" / "plugins" / "installed_plugins.json"
     record.parent.mkdir(parents=True, exist_ok=True)
     record.write_text(json.dumps({"plugins": {"superpowers@claude-plugins-official": [
-        {"version": pin(m, "SUPERPOWERS_VERSION"), "gitCommitSha": pin(m, "SUPERPOWERS_SHA")}]}}))
+        {"scope": "user", "version": pin(m, "SUPERPOWERS_VERSION"), "gitCommitSha": pin(m, "SUPERPOWERS_SHA")}]}}))
     m.install("sudo", FAKE_SUDO)
     m.install("curl", SERVING_CURL)
     tmpdir = m.home.parent / "tmpdir"
     tmpdir.mkdir(exist_ok=True)
     return {"FAKE_SUDO_LOG": str(m.home.parent / "sudo.log"), "FAKE_SUDO_STATUS": "0",
             "FAKE_GH_TARBALL": GH_TARBALL.decode(), "FAKE_NEBIUS_BINARY": NEBIUS_BINARY.decode(),
-            "TMPDIR": str(tmpdir)}
+            "TMPDIR": str(tmpdir), "FAKE_CLAUDE_LOG": str(m.home.parent / "claude.log"),
+            "FAKE_MARKET_VERSION": pin(m, "SUPERPOWERS_VERSION"), "FAKE_MARKET_SHA": pin(m, "SUPERPOWERS_SHA")}
 
 
 def nebius_url(m):
@@ -437,6 +438,159 @@ def test_bootstrap_keeps_a_link_of_the_clone_s_own_and_names_it():
         assert os.readlink(link) == str(own), os.readlink(link)
         assert str(link) in r.stdout + r.stderr and "kept" in r.stdout + r.stderr, (r.stdout, r.stderr)
         assert sf1_links(m)["tpcds.sf1"] == str(m.data_dir / data_hash(m) / "tpcds.sf1"), sf1_links(m)
+
+
+OLD_PLUGIN = {"version": "7.0.0", "gitCommitSha": "bb92a777" + "0" * 32}
+NEWER_PLUGIN = {"version": "9.9.9", "gitCommitSha": "99" * 20}
+
+
+def plugin_state(m, recorded=None, known=None, entries=None):
+    """superpowers as installed_plugins.json records it, its user-scope install (None: none) or the
+    plugin's entries as they are given; and the marketplace copy known_marketplaces.json holds
+    (None: the marketplace is unknown)."""
+    plugins = m.home / ".claude" / "plugins"
+    for name in ("installed_plugins.json", "known_marketplaces.json"):
+        (plugins / name).unlink(missing_ok=True)
+    if recorded is not None:
+        entries = [{"scope": "user", **recorded}]
+    if entries is not None:
+        (plugins / "installed_plugins.json").write_text(json.dumps(
+            {"plugins": {"superpowers@claude-plugins-official": entries}}))
+    if known is not None:
+        (plugins / "known_marketplaces.json").write_text(json.dumps({"claude-plugins-official": known}))
+
+
+def recorded(m, scope="user"):
+    entries = json.loads((m.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+    return [(e["version"], e["gitCommitSha"]) for e in entries["plugins"]["superpowers@claude-plugins-official"]
+            if e.get("scope") == scope]
+
+
+def claude_calls(m):
+    log = m.home.parent / "claude.log"
+    return [c for c in map(json.loads, log.read_text().splitlines()) if c != ["--version"]] if log.exists() else []
+
+
+def test_bootstrap_installs_superpowers_where_it_is_absent():
+    with Machine() as m:
+        env = whole_run_env(m)
+        plugin_state(m)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert recorded(m) == [(pin(m, "SUPERPOWERS_VERSION"), pin(m, "SUPERPOWERS_SHA"))], recorded(m)
+        assert claude_calls(m) == [["plugin", "marketplace", "add", "anthropics/claude-plugins-official"],
+                                   ["plugin", "install", "superpowers@claude-plugins-official"]], claude_calls(m)
+
+
+def test_bootstrap_updates_an_installed_superpowers_to_the_pin():
+    # `plugin install` leaves an installed plugin as it is: an older one is updated instead.
+    with Machine() as m:
+        env = whole_run_env(m)
+        plugin_state(m, recorded=OLD_PLUGIN, known=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert recorded(m) == [(pin(m, "SUPERPOWERS_VERSION"), pin(m, "SUPERPOWERS_SHA"))], recorded(m)
+        assert claude_calls(m) == [["plugin", "marketplace", "update", "claude-plugins-official"],
+                                   ["plugin", "update", "superpowers@claude-plugins-official"]], claude_calls(m)
+
+
+def test_bootstrap_refuses_a_marketplace_that_is_not_at_the_pin_naming_the_pins():
+    # After a fresh install and after an update alike, what the marketplace gave is what to pin.
+    for state in ({}, {"recorded": OLD_PLUGIN, "known": OLD_PLUGIN}):
+        with Machine() as m:
+            env = {**whole_run_env(m), "FAKE_MARKET_VERSION": NEWER_PLUGIN["version"],
+                   "FAKE_MARKET_SHA": NEWER_PLUGIN["gitCommitSha"]}
+            plugin_state(m, **state)
+            r = m.run("bootstrap-vm.sh", env=env)
+            assert r.returncode == 2, (state, r.returncode, r.stderr)
+            given = f"{NEWER_PLUGIN['version']} at {NEWER_PLUGIN['gitCommitSha']}"
+            for words in (f"the marketplace gives superpowers {given}", "not the pin",
+                          "SUPERPOWERS_VERSION", "SUPERPOWERS_SHA"):
+                assert words in r.stderr, (state, words, r.stderr)
+
+
+def at_the_pin(m):
+    return [(pin(m, "SUPERPOWERS_VERSION"), pin(m, "SUPERPOWERS_SHA"))]
+
+
+MARKET_UPDATE = ["plugin", "marketplace", "update", "claude-plugins-official"]
+MARKET_ADD = ["plugin", "marketplace", "add", "anthropics/claude-plugins-official"]
+INSTALL = ["plugin", "install", "superpowers@claude-plugins-official"]
+UPDATE = ["plugin", "update", "superpowers@claude-plugins-official"]
+
+
+def test_bootstrap_installs_an_absent_superpowers_from_an_updated_marketplace():
+    # A marketplace copy from an earlier run is stale: it is updated before the install.
+    with Machine() as m:
+        env = whole_run_env(m)
+        plugin_state(m, known=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 0, (r.returncode, r.stderr)
+        assert recorded(m) == at_the_pin(m) and claude_calls(m) == [MARKET_UPDATE, INSTALL], claude_calls(m)
+
+
+def test_bootstrap_updates_a_superpowers_whose_marketplace_is_unknown():
+    with Machine() as m:
+        env = whole_run_env(m)
+        plugin_state(m, recorded=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 0, (r.returncode, r.stderr)
+        assert recorded(m) == at_the_pin(m) and claude_calls(m) == [MARKET_ADD, UPDATE], claude_calls(m)
+
+
+def test_bootstrap_names_a_plugin_step_that_fails():
+    for state, step in (({}, "plugin marketplace add"), ({"known": OLD_PLUGIN}, "plugin marketplace update"),
+                        ({"known": OLD_PLUGIN}, "plugin install"),
+                        ({"recorded": OLD_PLUGIN, "known": OLD_PLUGIN}, "plugin update")):
+        with Machine() as m:
+            env = {**whole_run_env(m), "FAKE_CLAUDE_FAIL": step}
+            plugin_state(m, **state)
+            r = m.run("bootstrap-vm.sh", env=env)
+            assert r.returncode == 2, (step, r.returncode, r.stderr)
+            assert f"bootstrap-vm.sh: claude {step}" in r.stderr and "failed" in r.stderr, (step, r.stderr)
+
+
+def test_bootstrap_refuses_an_install_that_records_nothing():
+    with Machine() as m:
+        env = {**whole_run_env(m), "FAKE_CLAUDE_INSTALL_RECORDS_NOTHING": "1"}
+        plugin_state(m, known=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2 and "records no superpowers" in r.stderr, (r.returncode, r.stderr)
+
+
+def test_bootstrap_takes_only_the_user_scope_install_as_pinned():
+    # A project's install at the pin is not the developer's: the user-scope one is updated.
+    with Machine() as m:
+        env = whole_run_env(m)
+        project = {"scope": "project", "version": pin(m, "SUPERPOWERS_VERSION"), "gitCommitSha": pin(m, "SUPERPOWERS_SHA")}
+        plugin_state(m, entries=[project, {"scope": "user", **OLD_PLUGIN}], known=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 0, (r.returncode, r.stderr)
+        assert UPDATE in claude_calls(m) and recorded(m) == at_the_pin(m), claude_calls(m)
+        assert recorded(m, "project") == at_the_pin(m), recorded(m, "project")
+
+
+def test_bootstrap_refuses_a_record_of_another_shape_by_name():
+    # An older record holds the plugin as one object, not a list of installs.
+    with Machine() as m:
+        env = whole_run_env(m)
+        plugin_state(m, entries=dict(OLD_PLUGIN), known=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        assert "installed_plugins.json" in r.stderr and "not a list" in r.stderr, r.stderr
+        assert "Traceback" not in r.stderr and claude_calls(m) == [], (r.stderr, claude_calls(m))
+
+
+def test_bootstrap_names_an_update_that_changed_nothing():
+    # The record is as before: the marketplace may still give that version, or the update failed.
+    with Machine() as m:
+        env = {**whole_run_env(m), "FAKE_MARKET_VERSION": OLD_PLUGIN["version"],
+               "FAKE_MARKET_SHA": OLD_PLUGIN["gitCommitSha"]}
+        plugin_state(m, recorded=OLD_PLUGIN, known=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        assert "the update changed nothing" in r.stderr and f"{OLD_PLUGIN['version']} at" in r.stderr, r.stderr
+        assert "marketplace gives" not in r.stderr, r.stderr
 
 
 def test_bootstrap_checks_out_the_clone_s_third_party_cudf():

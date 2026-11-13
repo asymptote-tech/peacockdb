@@ -1,16 +1,15 @@
 """A fake CPU VM for bootstrap-vm.sh's tests: a home, a clone of the scripts, and fakes on PATH.
 
-The machine user's home holds a Claude Code install and login and a git identity; `~/peacockdb` is
-a git clone holding the scripts under test and the image inputs. The docker CLI is a fake that
-records its argv and answers from a JSON world, which holds the image's label. It refuses a
-`--mount` whose source is missing, as docker does, and a bind's container path or a `-w` under the
-home, as the image refuses its own home to another uid. A `docker run` of `generate_testdata.sh`
-makes the dataset directory it would have made, at the host path of the bind that holds the script;
-it and `cargo fetch` take the world's `seconds`, and `cargo fetch` records whether two ran at once.
-cuDF's origin is a local repository of two commits, named by the clone's .gitmodules; the clone
-pins the first, its own `third_party/cudf` an empty directory, as a fresh clone leaves it. The
-machine has a machine-wide data directory, setgid.
-"""
+The machine user's home holds a Claude Code install, whose plugin commands are FAKE_CLAUDE's, and
+login and a git identity; `~/peacockdb` is a git clone holding the scripts under test and the image
+inputs. The docker CLI is a fake that records its argv and answers from a JSON world, which holds
+the image's label. It refuses a `--mount` whose source is missing, as docker does, and a bind's
+container path or a `-w` under the home, as the image refuses its own home to another uid. A `docker
+run` of `generate_testdata.sh` makes the dataset directory it would have made, at the host path of
+the bind that holds the script; it and `cargo fetch` take the world's `seconds`, and `cargo fetch`
+records whether two ran at once. cuDF's origin is a local repository of two commits, named by the
+clone's .gitmodules; the clone pins the first, its own `third_party/cudf` an empty directory, as a
+fresh clone leaves it. The machine has a machine-wide data directory, setgid."""
 import json
 import os
 import pathlib
@@ -19,6 +18,60 @@ import subprocess
 import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
+
+# Claude Code 2.1.304's plugin commands over ~/.claude/plugins. The marketplace serves
+# FAKE_MARKET_VERSION at FAKE_MARKET_SHA; `marketplace add` and `marketplace update` take its copy
+# of that. `install` records the copy's version as the plugin's user-scope entry when it has none,
+# and otherwise says it is installed and changes nothing; `update` sets that entry to the copy's
+# version. Entries of other scopes are left as they are. FAKE_CLAUDE_FAIL=<words> fails the call
+# whose argv starts with them; FAKE_CLAUDE_INSTALL_RECORDS_NOTHING makes `install` succeed and
+# record nothing. Each call goes to FAKE_CLAUDE_LOG when it is set.
+FAKE_CLAUDE = r'''#!/usr/bin/env python3
+import json, os, pathlib, sys
+a = sys.argv[1:]
+if os.environ.get("FAKE_CLAUDE_LOG"):
+    with open(os.environ["FAKE_CLAUDE_LOG"], "a") as f:
+        f.write(json.dumps(a) + "\n")
+if a == ["--version"]:
+    print("2.1.304 (Claude Code)")
+    sys.exit(0)
+failing = os.environ.get("FAKE_CLAUDE_FAIL", "").split()
+if failing and a[:len(failing)] == failing:
+    sys.exit(f"Error: {' '.join(failing)} failed (the fake)")
+NAME, PLUGIN = "claude-plugins-official", "superpowers@claude-plugins-official"
+plugins = pathlib.Path(os.environ["HOME"]) / ".claude" / "plugins"
+known_path, record_path = plugins / "known_marketplaces.json", plugins / "installed_plugins.json"
+def load(path):
+    return json.loads(path.read_text()) if path.exists() else {}
+def save(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value))
+known, record = load(known_path), load(record_path)
+if a[:3] == ["plugin", "marketplace", "add"] or a == ["plugin", "marketplace", "update", NAME]:
+    if a[2] == "update" and NAME not in known:
+        sys.exit(f"Marketplace '{NAME}' not found")
+    known[NAME] = {"version": os.environ["FAKE_MARKET_VERSION"],
+                   "gitCommitSha": os.environ["FAKE_MARKET_SHA"]}
+    save(known_path, known)
+elif a[:2] in (["plugin", "install"], ["plugin", "update"]) and a[2:] == [PLUGIN]:
+    if NAME not in known:
+        sys.exit(f"Marketplace '{NAME}' not found")
+    entries = record.setdefault("plugins", {}).setdefault(PLUGIN, [])
+    users = [e for e in entries if e.get("scope") == "user"]
+    if a[1] == "install" and users:
+        print(f'Plugin "{PLUGIN}" is already installed (scope: user)')
+        sys.exit(0)
+    if a[1] == "update" and not users:
+        sys.exit(f'Plugin "{PLUGIN}" is not installed')
+    if a[1] == "install" and os.environ.get("FAKE_CLAUDE_INSTALL_RECORDS_NOTHING"):
+        sys.exit(0)
+    others = [e for e in entries if e.get("scope") != "user"]
+    entries[:] = others + [{"scope": "user", **known[NAME]}]
+    save(record_path, record)
+else:
+    sys.exit(f"fake claude: unhandled {a}")
+'''
+
 CLONE_FILES = [
     "scripts/env/bootstrap-vm.sh", "scripts/lib/image-inputs.sh", "scripts/lib/data-inputs.sh",
     "scripts/lib/machine.sh", "testdata/generate_testdata.sh", "testdata/.gitignore", "cpp/CMakeLists.txt",
@@ -186,7 +239,7 @@ class Machine:
         (h / ".claude" / ".credentials.json").write_text('{"claudeAiOauth": {}}')
         version = h / ".local" / "share" / "claude" / "versions" / "2.1.304"
         version.parent.mkdir(parents=True)
-        version.write_text("#!/bin/sh\necho 2.1.304\n")
+        version.write_text(FAKE_CLAUDE)
         version.chmod(0o755)
         (h / ".local" / "bin").mkdir(parents=True)
         (h / ".local" / "bin" / "claude").symlink_to(version)
