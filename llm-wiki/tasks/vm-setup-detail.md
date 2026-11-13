@@ -928,7 +928,12 @@ seconds.
 - Step 4: `gh workflow run pipeline.yml --ref ENS-vm-setup`, run `43330240922` on `8c1bf1b8`:
   every job green but `gpu-tests`, whose start found no L40S in its 30 minutes (two starts of 900
   s, exit 75); prepare, ship and the list were skipped, and the cleanup's `cancel` met the stopped
-  VM (`not RUNNING; refusing to ssh`, `cancel failed (rc=1)`) as written. To be run again.
+  VM (`not RUNNING; refusing to ssh`, `cancel failed (rc=1)`) as written. Again, run
+  `43397318671` on `c6a807f4`: the console's own start of nebius-gpu was refused for high demand
+  too, and the run was cancelled 17 minutes into `gpu-tests`' start; the cleanup ran and the VM
+  stayed `STOPPED`. `cudf 25.02` failed in `test_results_name_version_threads_host`: the temp
+  dir's name held `__`, which the results line's `tr -s ' \t' '_'` squeezes to `_`, so `db=` and
+  the test's path differ. `gpu-tests` stays open until an L40S is free.
 
 ### Findings fixed in the scripts
 
