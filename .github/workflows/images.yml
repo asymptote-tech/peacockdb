@@ -2,9 +2,11 @@ name: Images
 
 # Builds and publishes the build and run images of each cuDF version (llm-wiki/build-test.md,
 # "Images"), one job per image, through scripts/env/image.sh: it tags the commit only from a clean
-# tree, and pushes only an image it built at HEAD. Started by hand only. GitHub can dispatch it
+# tree, and pushes only an image it built at HEAD. A run image passes test_run_tests.py before its
+# push. Started by hand only. GitHub can dispatch it
 # only once master holds it. A dispatch runs the workflow and the commit of the ref it names
-# (--ref, master by default), and moves :cudf-<v>. If the job's push is denied, give this
+# (--ref, master by default). It pushes the inputs and commit tags; only a dispatch on the default
+# branch moves :cudf-<v>. 25.10 has no run image. If the job's push is denied, give this
 # repository the Write role under the package's "Manage Actions access".
 on:
   workflow_dispatch:
@@ -17,7 +19,7 @@ on:
       cudf:
         description: The cuDF version
         type: choice
-        options: ['25.02', '26.02', all]
+        options: ['25.02', '25.10', '26.02', all]
         default: all
 
 permissions:
@@ -40,7 +42,11 @@ jobs:
       fail-fast: false
       matrix:
         kind: ${{ fromJSON(inputs.kind == 'all' && '["build","run"]' || format('["{0}"]', inputs.kind)) }}
-        cudf: ${{ fromJSON(inputs.cudf == 'all' && '["25.02","26.02"]' || format('["{0}"]', inputs.cudf)) }}
+        cudf: ${{ fromJSON(inputs.cudf == 'all' && '["25.02","25.10","26.02"]' || format('["{0}"]', inputs.cudf)) }}
+        # A build-only version: a spec and no DRIVER_MINIMUM_<v> pin (docker/pins.env).
+        exclude:
+          - kind: run
+            cudf: '25.10'
     defaults:
       run:
         shell: bash
@@ -76,10 +82,29 @@ jobs:
       - name: Build
         run: scripts/env/image.sh build "$KIND" "$CUDF"
 
+      # docker/run-tests.sh is a run-image input, and only these tests prove its rules: a binary
+      # that runs no test, a segfault and an empty glob each fail the run. They need the image, not
+      # a GPU, so they run here, before the push, and nowhere else in CI.
+      - name: Test
+        run: |
+          set -euo pipefail
+          # docker/run-tests.sh's rules over fake binaries, in the run image just built and found by this
+          # tree's inputs: no GPU. A build image has no run-tests.sh.
+          if [ "$KIND" = run ]; then
+            IMAGE=$(scripts/env/image-ref.sh run "$CUDF")
+            export IMAGE
+            python3 scripts/env/tests/test_run_tests.py
+          fi
+
       - name: Push
         env:
           GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
-          scripts/env/image.sh push "$KIND" "$CUDF"
+          # :cudf-<v> moves only from the default branch, so another branch's images never replace what
+          # master's checks pull by it.
+          moving=()
+          if [ "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH" ]; then moving=(--moving); fi
+          scripts/env/image.sh push "$KIND" "$CUDF" "${moving[@]}"

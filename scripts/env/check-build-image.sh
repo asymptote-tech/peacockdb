@@ -7,10 +7,13 @@
 # docker runs on the VM, through scripts/nebius.sh ssh ($NEBIUS_SH); the comparison runs here.
 # The VM's copy of the tree comes from nebius-sync.sh without .git, and the build image's inputs
 # include the third_party/cudf commit this tree's git index pins. --instance-id is required:
-# without it nebius.sh means nebius-gpu, which builds with its own scripts. <v> is 25.02 by default.
+# without it nebius.sh means nebius-gpu, which builds nothing. <v> is 25.02 by default. The image is
+# the one of this tree's inputs, by its inputs tag, or $PEACOCK_BUILD_IMAGE when set, such as
+# `scripts/env/image-ref.sh build <v>` prints. Prints the ref alone, for the build's docker run.
 #
 # Exit 0 the VM's image is this tree's; 2 bad input (nebius.sh's 64 too), or an image without a
-# label or built from other inputs; else nebius.sh's (75, 69, 1).
+# label, built from other inputs, or not published (the images.yml dispatch named); else nebius.sh's
+# (75, 69, 1), or a failed pull's.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -45,5 +48,7 @@ docker() {
   return "$rc"
 }
 
-machine_image_checked "$MACHINE_IMAGE:cudf-$cudf" "$root" "$cudf"
-echo "==> $MACHINE_IMAGE:cudf-$cudf on the VM is this tree's"
+ref=${PEACOCK_BUILD_IMAGE:-$MACHINE_IMAGE:$(image_inputs_tag "$root" build "$cudf")}
+machine_image_checked "$ref" "$root" "$cudf" >&2
+echo "==> $ref on the VM is this tree's" >&2
+echo "$ref"

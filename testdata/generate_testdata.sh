@@ -74,8 +74,8 @@ if [ -n "$EXPECTED_DUCKDB" ]; then
     echo "  actual:   $ACTUAL_DUCKDB  (full: $ACTUAL_DUCKDB_FULL)" >&2
     echo "  duckdb:   $DUCKDB" >&2
     echo "Plan-canonical row_width / target_batch_size depend on the exact" >&2
-    echo "schema dsdgen emits. Install duckdb-cli=1.5.4 (e.g. \`conda install" >&2
-    echo "-c conda-forge duckdb-cli=1.5.4\`), or set EXPECTED_DUCKDB= to skip." >&2
+    echo "schema dsdgen emits. The build image's duckdb is the pinned one: run" >&2
+    echo "\`scripts/build-test.sh -- testdata/generate_testdata.sh ...\`, or set EXPECTED_DUCKDB= to skip." >&2
     exit 1
   fi
 fi

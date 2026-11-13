@@ -64,8 +64,9 @@ def duckdb_binary() -> str:
         if found:
             return found
     raise FileNotFoundError(
-        "no duckdb binary for the corpus oracle: set $DUCKDB, or install the CLI. CI's "
-        "corpus workflow downloads the pinned v1.5.4 release the goldens are generated with."
+        "no duckdb binary for the corpus oracle: set $DUCKDB, or run under "
+        "scripts/build-test.sh, whose build image has the pinned release the goldens are "
+        "generated with on its PATH."
     )
 
 

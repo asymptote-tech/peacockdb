@@ -1,8 +1,8 @@
 # Rust
 target/
-# isolated per-cudf-root target dirs for cudf (default-feature) builds — see
-# scripts/build-test*.sh (target-cudf-<cudf_root_basename>, e.g. target-cudf-rapids,
-# target-cudf-rapids-cuda-12.2). Glob covers the plain legacy target-cudf too.
+# shad-gpu's builds keep a cargo target per cuDF root (scripts/lib/shadgpu-env.sh:
+# target-cudf-<cudf_root_basename>, e.g. target-cudf-rapids-cuda-12.2). The glob also covers
+# the dirs the retired host builds left in older worktrees.
 target-cudf*/
 # A run in the build image keeps its cargo target, one per cuDF version, and its HOME in the
 # tree: docker run ... -e CARGO_TARGET_DIR=$PWD/target-img-<v> -e HOME=$PWD/.home-img.
@@ -63,8 +63,6 @@ cpp/build26/
 /*.html
 /*.sh
 
-# nebius-test.sh run state on the VM
-.gpu-test/
 # query-fuser: the fused batches' record, which the metrics pass reads.
 testdata/calibration/fused/
 

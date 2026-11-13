@@ -4,7 +4,9 @@ The fake run-gpu.sh plays the VM's `run bench` and `pull`: a case writes its sec
 VM's tree and its rows into the VM's record, as the harness does, and `pull` copies both into the
 tree on dev. Per query a behaviour: `ok`, `timeout` (a failed section, no rows), `kill` (rows and
 no section, every time) or `kill-once` (that, then `ok`). Like run-tests.sh, `run bench` refuses a
-VM record that holds rows. The fake nebius.sh runs `ssh` commands in the VM's home.
+VM record that holds rows, and like the harness under resume it keeps a section on the VM whose
+trailer is this run's, running nothing. The fake nebius.sh runs `ssh` commands in the VM's home,
+where `hostname` is the trailer's host.
 """
 import json
 import os
@@ -33,7 +35,8 @@ ALL_TP1 = ["bench_tpch_sf40_q1_tp1_single", "bench_tpch_sf40_q6_tp1_single",
            "bench_tpch_sf40_aggregate_groupby_tp1_single", "bench_tpcds_sf40_q37_tp1_single"]
 COLUMNS = "dataset\tsf\tquery\tmode\tnode_seq\tdevice_us\n"
 HEADING = "# peacockdb cost-model calibration record.\n# run: capture=none\n# run: device=NVIDIA H100 80GB HBM3\n"
-TRAILER = "device=NVIDIA H100 80GB HBM3\ndriver=580.95.05\ncuda=12.9\ncudf=25.02.02\nhost=h100-node\n"
+VM_HOST = "h100-node"
+TRAILER = f"device=NVIDIA H100 80GB HBM3\ndriver=580.95.05\ncuda=12.9\ncudf=25.02.02\nhost={VM_HOST}\n"
 
 FAKE_RUN_GPU = r'''#!/usr/bin/env python3
 import json, os, pathlib, re, shutil, sys
@@ -74,6 +77,13 @@ if behaviour == "exit75":
 tree = vm / "benchmark-results" / "h100-80gb-hbm3" / f"{ds}.sf{sf}" / f"{mode}.benchmark.txt"
 tree.parent.mkdir(parents=True, exist_ok=True)
 trailer = os.environ["FAKE_TRAILER"]
+heading = f"== {query.replace('_', '-')}\n"
+if os.environ.get("PEACOCK_BENCH_RESUME") == "1" and tree.exists():
+    text = tree.read_text()
+    at = text.find(heading)
+    if at >= 0 and (text[at:].split("\n== ", 1)[0].rstrip("\n") + "\n").endswith(trailer):
+        print(f"kept {query}")
+        sys.exit(0)
 if behaviour in ("ok", "kill"):
     record.parent.mkdir(parents=True, exist_ok=True)
     fresh = not record.exists() or not record.stat().st_size
@@ -105,7 +115,8 @@ while i < len(a) and a[i].startswith("--"):
         sys.exit(64)
     i += 2
 assert a[i] == "ssh", a
-env = {**os.environ, "HOME": os.environ["FAKE_HOST_HOME"]}
+env = {**os.environ, "HOME": os.environ["FAKE_HOST_HOME"],
+       "PATH": os.environ["FAKE_VM_BIN"] + ":" + os.environ["PATH"]}
 sys.exit(subprocess.run(["bash", "-c", " ".join(a[i + 1:])], env=env, cwd=env["HOME"]).returncode)
 '''
 
@@ -133,6 +144,10 @@ class Run:
         (self.vm / "benchmark-results/h200/tpch.sf40").mkdir(parents=True)
         shutil.copy2(h200, self.vm / "benchmark-results/h200/tpch.sf40/tp1_single.benchmark.txt")
         self.records = tmp / "records"
+        vm_bin = tmp / "vm-bin"
+        vm_bin.mkdir()
+        (vm_bin / "hostname").write_text(f"#!/bin/sh\necho {VM_HOST}\n")
+        (vm_bin / "hostname").chmod(0o755)
         for name, text in (("run-gpu.sh", FAKE_RUN_GPU), ("nebius.sh", FAKE_NEBIUS)):
             (tmp / name).write_text(text)
             (tmp / name).chmod(0o755)
@@ -140,7 +155,8 @@ class Run:
         self.env = {**os.environ, "RUN_GPU_SH": str(tmp / "run-gpu.sh"), "NEBIUS_SH": str(tmp / "nebius.sh"),
                     "FAKE_RUN_GPU_LOG": str(self.run_log), "FAKE_NEBIUS_LOG": str(self.nebius_log),
                     "FAKE_TREE": str(self.tree), "FAKE_HOST_HOME": str(self.home), "FAKE_STATE": str(tmp / "state"),
-                    "FAKE_TRAILER": TRAILER, "FAKE_HEADING": HEADING, "FAKE_COLUMNS": COLUMNS}
+                    "FAKE_TRAILER": TRAILER, "FAKE_HEADING": HEADING, "FAKE_COLUMNS": COLUMNS,
+                    "FAKE_VM_BIN": str(vm_bin)}
         for name in ("PCK_TEST_FILTER", "PEACOCK_BENCH_RESUME", "PEACOCK_BENCH_CASE_TIMEOUT_S", "PCK_WRITE_GPU_RESULT"):
             self.env.pop(name, None)
         return self
@@ -220,6 +236,27 @@ def test_bench_each_skips_a_failed_case_on_rerun():
         r = ok(h.each(behaviour={"q6": "timeout"}))
         assert len(h.runs()) == before, h.filters()
         assert "q6" in r.stdout and "kept" in r.stdout, r.stdout
+
+
+def test_bench_each_learns_the_device_from_a_section_the_run_kept():
+    """A fresh --records over a device tree this VM measured: `run bench` keeps the case's section, so
+    no pull changes the tree, and the device is the tree whose section names the VM's host."""
+    with Run() as h:
+        ok(h.each())
+        path = h.tree / f"testdata/benchmark-results/{SLUG}/tpch.sf40/tp1_single.benchmark.txt"
+        text = path.read_text()
+        # Another device's tree holding q1 too, from another host: never this run's device.
+        other = h.tree / "testdata/benchmark-results/l40s/tpch.sf40/tp1_single.benchmark.txt"
+        other.parent.mkdir(parents=True)
+        other.write_text(f"== q1\nGpuScan\n--- run ---\n{TRAILER.replace('H100 80GB HBM3', 'L40S')}"
+                         .replace(f"host={VM_HOST}", "host=l40s-node"))
+        h.records = h.records.with_name("records-2")
+        measured = len(h.runs())
+        r = ok(h.each())
+        assert (h.records / "device").read_text() == f"{SLUG}\n", r.stdout
+        assert h.filters()[measured:] == ALL_TP1[:1], "one run learns the device; the tree keeps the rest"
+        assert path.read_text() == text
+        assert list(h.records.glob("*.tsv")) == [], "a kept case writes no record"
 
 
 def test_bench_each_moves_each_record_aside():

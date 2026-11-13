@@ -1,7 +1,9 @@
-//! The three GPU runners — pipeline.yml's gpu job, `build-test-shadgpu.sh` and `build-test.sh`
-//! — read for the staged targets, the lib and its rung, and the single-tenant flag. The gpu
-//! job stages its binaries in pipeline.yml and runs them through `scripts/nebius-test.sh` on
-//! the GPU host, so its run loop is read out of that script.
+//! The two GPU runners — CI's image path and `build-test-shadgpu.sh` — read for the staged
+//! targets, the lib and its rung, and the single-tenant flag. CI's gpu-tests job runs the install
+//! pipeline.yml's staging step builds (`build-test.sh --gpu --build`, which is
+//! `scripts/env/stage-install.sh` in the build image) through `run-gpu.sh` on nebius-gpu, in the
+//! run image, whose `docker/run-tests.sh list` is the run loop read here. `build-test.sh` holds
+//! the GPU-runtime set the CPU modes subtract.
 
 use std::collections::BTreeSet;
 
@@ -13,14 +15,24 @@ use crate::repo_root;
 
 const SHADGPU: &str = "scripts/build-test-shadgpu.sh";
 
-/// The L40S list pipeline.yml's gpu-tests job runs on the GPU host: its rust loop is the CI one.
-pub(crate) const NEBIUS_TEST: &str = "scripts/nebius-test.sh";
-
 const BUILD_TEST: &str = "scripts/build-test.sh";
+
+/// Stages the install a device run ships, CI's included, in the build image.
+pub(crate) const STAGE_INSTALL: &str = "scripts/env/stage-install.sh";
+
+/// The run image's runner: its `list` is the L40S list CI runs on nebius-gpu.
+pub(crate) const RUN_TESTS: &str = "docker/run-tests.sh";
+
+/// Names the staged lib's crate and kind for `stage_cargo_lib_binary`.
+const STAGE_CARGO: &str = "scripts/lib/stage-cargo.sh";
 
 pub(crate) const GPU_STAGING_STEP: &str = "Build and stage rust GPU test binaries";
 
 pub(crate) const GPU_RUN_STEP: &str = "Run the L40S list";
+
+/// The run step's command: run-tests.sh's list on nebius-gpu, attached, its exit the run's.
+const GPU_RUN: &str =
+    "scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt --dir ci run list";
 
 /// The body of one step of pipeline.yml's GPU jobs, by its `name:`.
 fn gpu_job_step(name: &str) -> String {
@@ -39,96 +51,73 @@ fn gpu_job_step(name: &str) -> String {
         .join("\n")
 }
 
-/// The `--test` targets pipeline.yml's gpu-tests job stages and runs, read out of the
-/// staging step's `for t in <names>; do` array.
+/// The `--test` targets CI's gpu-tests job stages and runs: `stage-install.sh`'s one-line
+/// `GPU_TESTS=( … )` array, which pipeline.yml's staging step builds through `build-test.sh --gpu
+/// --build` ([`the_pipeline_stages_through_stage_install`]).
 ///
 /// Parsed rather than duplicated: this is the array a [`Exemption::GpuJob`] entry
 /// points at, so a copy here would defeat the check it exists to make.
+///
+/// [`Exemption::GpuJob`]: crate::ci_coverage::Exemption::GpuJob
 pub(crate) fn gpu_job_staged_targets() -> BTreeSet<String> {
-    let step = gpu_job_step(GPU_STAGING_STEP);
-    let line = step
+    one_line_array(&read(STAGE_INSTALL), "GPU_TESTS").expect(
+        "stage-install.sh has no one-line `GPU_TESTS=( … )` array — the staging list was \
+         renamed or reshaped, and every GpuJob exemption now rests on an array that does not exist",
+    )
+}
+
+/// The words of a script's `<name>=( … )` array, written on one line; `None` when there is no
+/// such line outside a comment, or its `)` is on another line.
+fn one_line_array(text: &str, name: &str) -> Option<BTreeSet<String>> {
+    let head = format!("{name}=(");
+    let line = text
         .lines()
-        .find(|l| l.trim_start().starts_with("for t in test_"))
-        .expect(
-            "pipeline.yml has no `for t in test_…; do` staging loop — the gpu-tests \
-             staging step was reshaped, and every GpuJob exemption now rests \
-             on an array that does not exist",
-        );
-    line.trim()
-        .trim_start_matches("for t in ")
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .split_whitespace()
-        .map(str::to_string)
-        .collect()
+        .map(str::trim)
+        .find(|l| l.starts_with(&head))?;
+    let words = line[head.len()..].split_once(')')?.0;
+    Some(words.split_whitespace().map(str::to_string).collect())
 }
 
-/// The binaries the staging step names outright, as `(staged name, folded line)`: a
-/// `stage <name> "$(cargo …)"` with a literal name, not the array loop's `stage "$t"`.
-/// The lib is not a `--test` target, so it cannot ride in the array and is staged this
-/// way — which is why the array reader above cannot see it.
-pub(crate) fn gpu_job_staged_by_name() -> Vec<(String, String)> {
-    fold_continuations(&gpu_job_step(GPU_STAGING_STEP))
-        .iter()
-        .filter_map(|l| staged_by_name_of(l))
-        .collect()
-}
-
-/// Parse one folded staging line as `stage <literal name> …`, if it is one.
-pub(crate) fn staged_by_name_of(line: &str) -> Option<(String, String)> {
-    let mut toks = line.split_whitespace();
-    (toks.next()? == "stage").then_some(())?;
-    let name = toks.next()?;
-    (!name.starts_with(['"', '$'])).then(|| (name.to_string(), line.trim().to_string()))
-}
-
-/// The lib binary the gpu-tests job stages, as `(staged name, line)`: the one `stage`
-/// line naming a file outright whose cargo build is `--lib --features gpu`.
-pub(crate) fn gpu_job_staged_lib() -> Option<(String, String)> {
-    gpu_job_staged_by_name().into_iter().find(|(_, l)| {
-        l.contains("--lib") && cargo_features(l) == Some("gpu") && l.contains("--no-run")
-    })
-}
-
-/// The rung the gpu job's run loop (nebius-test.sh) hands one staged file, as
-/// `(staged name, filter)` — the `[ "$name" = <name> ] && rung=<filter>` line. The GPU host
-/// runs prebuilt binaries, never cargo, so the device rung is this line and not a command line.
-pub(crate) fn gpu_job_lib_rung() -> Option<(String, String)> {
-    rust_gpu_runner_loop(NEBIUS_TEST)
-        .iter()
-        .find_map(|l| lib_rung_of(l))
-}
-
-/// Parse one loop line as the rung assignment, if it is one.
-pub(crate) fn lib_rung_of(line: &str) -> Option<(String, String)> {
-    let line = line.trim_start();
-    if line.starts_with('#') {
+/// The lib binary a staging script stages, as `(staged name, line)`: its first
+/// `stage_cargo_lib_binary <name> <dir> … --features gpu` line outside a comment, the name a
+/// literal or a `$VAR` the script assigns. `stage_cargo_lib_binary` is the crate's own unit-test
+/// binary ([`the_staged_lib_is_the_crates_own_test_binary`]).
+pub(crate) fn staged_lib_in(text: &str) -> Option<(String, String)> {
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("stage_cargo_lib_binary "))?;
+    if cargo_features(line) != Some("gpu") {
         return None;
     }
-    let (cond, assign) = line.split_once("&&")?;
-    let filter = assign.trim().strip_prefix("rung=")?;
-    let name = cond.split_whitespace().rev().nth(1)?;
-    Some((name.to_string(), filter.to_string()))
+    let name = line.split_whitespace().nth(1)?.trim_matches('"');
+    let name = match name.strip_prefix('$') {
+        Some(var) => assigned(text, var.trim_matches(['{', '}']))?,
+        None => name.to_string(),
+    };
+    Some((name, line.to_string()))
+}
+
+/// The lib binary CI's gpu-tests job stages: [`staged_lib_in`] over `stage-install.sh`.
+pub(crate) fn gpu_job_staged_lib() -> Option<(String, String)> {
+    staged_lib_in(&read(STAGE_INSTALL))
+}
+
+/// The lib and its rung in run-tests.sh, as `(LIB_STAGED, LIB_RUNG)`. The run image runs prebuilt
+/// binaries, never cargo, so the device rung is these two values and the loop line that appends
+/// the rung under the name, not a command line.
+pub(crate) fn run_tests_lib_rung() -> Option<(String, String)> {
+    let text = read(RUN_TESTS);
+    script_lib(&text, "LIB_STAGED", "LIB_RUNG")
 }
 
 /// The GPU test binaries `scripts/build-test-shadgpu.sh` stages, from its `RUST_TESTS`
 /// array — what a developer's own run ships to the host.
 pub(crate) fn shadgpu_staged_targets() -> BTreeSet<String> {
-    let text =
-        std::fs::read_to_string(repo_root().join(SHADGPU)).expect("read build-test-shadgpu.sh");
-    let start = text.find("RUST_TESTS=(").expect(
-        "build-test-shadgpu.sh has no RUST_TESTS=( array — the staging list was renamed, \
-         and the check that it matches CI now rests on a list that does not exist",
-    ) + "RUST_TESTS=(".len();
-    let end = start
-        + text[start..]
-            .find(')')
-            .expect("unterminated RUST_TESTS array");
-    text[start..end]
-        .split_whitespace()
-        .map(str::to_string)
-        .collect()
+    one_line_array(&read(SHADGPU), "RUST_TESTS").expect(
+        "build-test-shadgpu.sh has no one-line RUST_TESTS=( … ) array — the staging list was \
+         renamed, and the check that it matches CI now rests on a list that does not exist",
+    )
 }
 
 /// A script's lib binary on the GPU host, as `(staged name, rung)`: the first `<staged>=`
@@ -136,37 +125,166 @@ pub(crate) fn shadgpu_staged_targets() -> BTreeSet<String> {
 /// target, so neither script lists it beside the targets — each names it in a pair of
 /// variables that the run loop hands to `rung_args`.
 fn script_lib(text: &str, staged: &str, rung: &str) -> Option<(String, String)> {
-    let assigned = |name: &str| {
-        text.lines().find_map(|l| {
-            let v = l.trim().strip_prefix(name)?.strip_prefix('=')?;
-            Some(v.trim_matches(['"', '\'']).to_string())
-        })
-    };
-    Some((assigned(staged)?, assigned(rung)?))
+    Some((assigned(text, staged)?, assigned(text, rung)?))
+}
+
+/// The value of the first `<name>=` assignment in `text`, quotes stripped.
+fn assigned(text: &str, name: &str) -> Option<String> {
+    text.lines().find_map(|l| {
+        let v = l.trim().strip_prefix(name)?.strip_prefix('=')?;
+        Some(v.trim_matches(['"', '\'']).to_string())
+    })
+}
+
+fn read(rel: &str) -> String {
+    std::fs::read_to_string(repo_root().join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"))
 }
 
 /// `build-test-shadgpu.sh`'s lib: `RUST_LIB_STAGED` and `RUST_LIB_RUNG`.
 fn shadgpu_staged_lib() -> Option<(String, String)> {
-    let text =
-        std::fs::read_to_string(repo_root().join(SHADGPU)).expect("read build-test-shadgpu.sh");
-    script_lib(&text, "RUST_LIB_STAGED", "RUST_LIB_RUNG")
+    script_lib(&read(SHADGPU), "RUST_LIB_STAGED", "RUST_LIB_RUNG")
 }
 
-/// `build-test.sh`'s lib in `--gpu` mode: `LIB_STAGED` and `LIB_RUNG` inside the
-/// `[ "$MODE" = "gpu" ]` branch that sets them, since the cpu modes set the same two
-/// names to their own shapes.
-fn build_test_gpu_lib() -> Option<(String, String)> {
-    let text = std::fs::read_to_string(repo_root().join(BUILD_TEST)).expect("read build-test.sh");
-    let branch: String = text
-        .lines()
-        .skip_while(|l| !(l.contains("\"$MODE\" = \"gpu\"") && l.contains("then")))
+/// The body of run-tests.sh's rust loop, `for t in "${rust[@]}"` to its `done`, comments out.
+fn run_tests_rust_loop(text: &str) -> Vec<String> {
+    text.lines()
+        .skip_while(|l| !l.contains("for t in \"${rust[@]}\""))
         .skip(1)
-        .take_while(
-            |l| !matches!(l.trim(), s if s.starts_with("elif ") || s == "else" || s == "fi"),
-        )
-        .collect::<Vec<_>>()
-        .join("\n");
-    script_lib(&branch, "LIB_STAGED", "LIB_RUNG")
+        .take_while(|l| !l.trim_start().starts_with("done"))
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .map(str::to_string)
+        .collect()
+}
+
+/// A shell function's body, `<name>() {` to the `}` that closes it at the start of a line,
+/// folded at continuations, comments out.
+fn function_body(text: &str, name: &str) -> Vec<String> {
+    let head = format!("{name}() {{");
+    let body: Vec<&str> = text
+        .lines()
+        .skip_while(|l| !l.starts_with(&head))
+        .skip(1)
+        .take_while(|l| *l != "}")
+        .collect();
+    fold_continuations(&body.join("\n"))
+        .into_iter()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect()
+}
+
+/// The lines every rust binary run-tests.sh runs takes its arguments from: each `args=(` line in
+/// its rust loop and in `run_bench`. Each must hold `--test-threads=1`, and each `run_binary`
+/// line there must pass `"${args[@]}"`. `None` when either block declares no `args=(`.
+fn run_tests_rust_args(text: &str) -> Option<Vec<String>> {
+    let mut lines = Vec::new();
+    for block in [run_tests_rust_loop(text), function_body(text, "run_bench")] {
+        let declared: Vec<String> = block
+            .iter()
+            .filter(|l| l.contains("args=("))
+            .map(|l| l.trim().to_string())
+            .collect();
+        if declared.is_empty() {
+            return None;
+        }
+        lines.extend(declared);
+    }
+    Some(lines)
+}
+
+/// The `run_binary` lines of run-tests.sh's rust loop and `run_bench`, folded.
+fn run_tests_rust_runs(text: &str) -> Vec<String> {
+    run_tests_rust_loop(text)
+        .into_iter()
+        .chain(function_body(text, "run_bench"))
+        .filter(|l| l.trim_start().starts_with("run_binary "))
+        .map(|l| l.trim().to_string())
+        .collect()
+}
+
+/// What run-tests.sh must hold for a failure to fail the run. It runs without `set -e` for a
+/// binary, deliberately, so the only thing that can fail the run is what it folds into `rc`:
+/// it ends `exit "$rc"`, every `run_binary` in `run_list` and `run_bench` is judged on the next
+/// line, `judge` reads a segfault out of the log, and no library path is exported into its own
+/// shell. Returns what is missing.
+fn run_tests_cannot_report_success_over_a_failure(text: &str) -> Result<(), String> {
+    let last = text
+        .lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty() && !l.starts_with('#'));
+    if last != Some("exit \"$rc\"") {
+        return Err(format!(
+            "it does not end `exit \"$rc\"` but {last:?}, so what it folded into rc is discarded"
+        ));
+    }
+    for name in ["run_list", "run_bench"] {
+        let body = function_body(text, name);
+        let runs: Vec<usize> = (0..body.len())
+            .filter(|&i| body[i].trim_start().starts_with("run_binary "))
+            .collect();
+        if runs.is_empty() {
+            return Err(format!("{name} runs no binary through run_binary"));
+        }
+        for i in runs {
+            let next = body[i + 1..].iter().find(|l| !l.trim().is_empty());
+            if !next.is_some_and(|l| l.trim_start().starts_with("judge ")) {
+                return Err(format!(
+                    "{name}: a binary's status is not judged on the next line: {}",
+                    body[i].trim()
+                ));
+            }
+        }
+    }
+    if !function_body(text, "judge")
+        .iter()
+        .any(|l| l.contains("grep") && l.contains("Segmentation fault") && l.contains("fail "))
+    {
+        return Err(
+            "judge does not fail a log holding `Segmentation fault`: a binary that crashed \
+             under a wrapper that exits 0 is green"
+                .to_string(),
+        );
+    }
+    if text.contains("export LD_LIBRARY_PATH") {
+        return Err("it exports a library path into its own shell, whose coreutils then load it \
+                    and can crash; apply it per command, through env"
+            .to_string());
+    }
+    Ok(())
+}
+
+/// Does run-tests.sh's rung reach the lib `stage-install.sh` stages as `staged`? In its
+/// `for t in "${rust[@]}"` loop the rung is appended to `args` under `[ "$name" = "$LIB_STAGED" ]`,
+/// so the script's `LIB_STAGED` must be that name, and every `run_binary` line in the loop must
+/// pass `"${args[@]}"`. Returns what is missing.
+fn run_tests_rung_reaches_the_binary(text: &str, staged: &str) -> Result<(), String> {
+    match assigned(text, "LIB_STAGED") {
+        Some(name) if name == staged => {}
+        other => {
+            return Err(format!(
+                "its LIB_STAGED is {other:?}, and {STAGE_INSTALL} stages the lib as {staged:?}: \
+                 the rung goes to a name no binary has"
+            ));
+        }
+    }
+    let body = run_tests_rust_loop(text);
+    if body.is_empty() {
+        return Err("no `for t in \"${rust[@]}\"` loop with a body".to_string());
+    }
+    if !body.iter().any(|l| {
+        l.contains("[ \"$name\" = \"$LIB_STAGED\" ]") && l.contains("args+=(\"$LIB_RUNG\")")
+    }) {
+        return Err(
+            "no line appends $LIB_RUNG to args under [ \"$name\" = \"$LIB_STAGED\" ]".to_string(),
+        );
+    }
+    let runs: Vec<&String> = body.iter().filter(|l| l.contains("run_binary ")).collect();
+    if runs.is_empty() {
+        return Err("the loop runs no binary through run_binary".to_string());
+    }
+    match runs.iter().find(|l| !l.contains("\"${args[@]}\"")) {
+        Some(l) => Err(format!("a binary runs without its args: {}", l.trim())),
+        None => Ok(()),
+    }
 }
 
 /// Does the lib's rung reach the binary in this script's run loop? The rung sits in a
@@ -239,8 +357,8 @@ fn gpu_runtime_targets() -> BTreeSet<(String, String)> {
         .collect()
 }
 
-/// Three committed lists name the GPU test binaries — pipeline.yml's staging array,
-/// build-test-shadgpu.sh's `RUST_TESTS`, and build-test.sh's `gpu_runtime_targets()` —
+/// Three committed lists name the GPU test binaries — stage-install.sh's `GPU_TESTS`, which CI
+/// stages, build-test-shadgpu.sh's `RUST_TESTS`, and build-test.sh's `gpu_runtime_targets()` —
 /// each read by a different runner, so a target in one and not the others is invisible in
 /// exactly the direction that matters. The third is the dangerous one: the CPU modes are
 /// built by SUBTRACTING it, whole-line, so an entry with the wrong crate or a stale target
@@ -256,9 +374,10 @@ fn the_three_gpu_target_lists_agree() {
 
     assert_eq!(
         ci, dev,
-        "pipeline.yml's gpu-tests staging array and build-test-shadgpu.sh's RUST_TESTS \
-         name different sets. A developer's run then proves a different set from the \
-         merge gate's, in whichever direction the lists disagree."
+        "{STAGE_INSTALL}'s GPU_TESTS, which CI stages, and {SHADGPU}'s RUST_TESTS name \
+         different sets. A shad-gpu run then proves a different set from the merge gate's, in \
+         whichever direction the lists disagree; {BUILD_TEST}'s gpu_runtime_targets() is the \
+         third list, checked below."
     );
 
     // The heredoc is the only one of the three that names a crate, so it is the only one
@@ -307,96 +426,228 @@ fn the_three_gpu_target_lists_agree() {
     // one serial host, and a runner with another rung runs the device cases nowhere.
     let ci_lib = gpu_job_staged_lib()
         .map(|(n, _)| n)
-        .zip(gpu_job_lib_rung().map(|(_, r)| r));
+        .zip(run_tests_lib_rung().map(|(_, r)| r));
     let dev_lib = shadgpu_staged_lib();
-    let runtime_lib = build_test_gpu_lib();
     assert!(
-        ci_lib.is_some() && dev_lib.is_some() && runtime_lib.is_some(),
-        "a runner no longer names the lib binary and its rung — pipeline.yml + \
-         nebius-test.sh {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu \
-         {runtime_lib:?}"
+        ci_lib.is_some() && dev_lib.is_some(),
+        "a runner no longer names the lib binary and its rung — {STAGE_INSTALL} + {RUN_TESTS} \
+         {ci_lib:?}, {SHADGPU} {dev_lib:?}"
     );
     assert!(
-        ci_lib == dev_lib && dev_lib == runtime_lib,
-        "the three runners disagree about the lib binary or its rung — pipeline.yml + \
-         nebius-test.sh {ci_lib:?}, build-test-shadgpu.sh {dev_lib:?}, build-test.sh --gpu \
-         {runtime_lib:?}"
+        ci_lib == dev_lib,
+        "the two runners disagree about the lib binary or its rung — {STAGE_INSTALL} + \
+         {RUN_TESTS} {ci_lib:?}, {SHADGPU} {dev_lib:?}"
     );
-    let runners = [
-        (SHADGPU, "RUST_LIB_STAGED", "RUST_LIB_RUNG"),
-        (BUILD_TEST, "LIB_STAGED", "LIB_RUNG"),
-    ];
-    for (rel, staged, rung) in runners {
-        let text = std::fs::read_to_string(repo_root().join(rel))
-            .unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        if let Err(why) = rung_reaches_the_binary(&text, staged, rung) {
-            panic!("{rel}: the lib's rung does not reach the binary — {why}");
-        }
+    if let Err(why) = rung_reaches_the_binary(&read(SHADGPU), "RUST_LIB_STAGED", "RUST_LIB_RUNG") {
+        panic!("{SHADGPU}: the lib's rung does not reach the binary — {why}");
     }
+    let staged = ci_lib.map(|(n, _)| n).unwrap_or_default();
+    if let Err(why) = run_tests_rung_reaches_the_binary(&read(RUN_TESTS), &staged) {
+        panic!("{RUN_TESTS}: the lib's rung does not reach the binary — {why}");
+    }
+}
+
+/// The run-tests.sh reader's own guard: it accepts the loop as written and refuses each way the
+/// rung can stop reaching the lib — a commented-out rung, a run without the arguments, and a
+/// `LIB_STAGED` naming another binary than the one staged.
+#[test]
+fn the_run_tests_reader_refuses_a_rung_that_cannot_reach_the_lib() {
+    let script = |staged: &str, rung_line: &str, run_line: &str| {
+        format!(
+            "LIB_STAGED={staged}\nLIB_RUNG=gpu_tests::\n\
+             for t in \"${{rust[@]}}\"; do\n\
+             \x20 args=(--nocapture --test-threads=1)\n\
+             \x20 {rung_line}\n\
+             \x20 {run_line}\n\
+             done\n"
+        )
+    };
+    let rung = "if [ \"$name\" = \"$LIB_STAGED\" ]; then args+=(\"$LIB_RUNG\"); fi";
+    let run = "run_binary \"$logs/$name.log\" \"$t\" \"${args[@]}\"";
+    let lib = "peacockdb_core_gpu_lib";
+    assert_eq!(
+        run_tests_rung_reaches_the_binary(&script(lib, rung, run), lib),
+        Ok(())
+    );
+    assert!(
+        run_tests_rung_reaches_the_binary(&script(lib, &format!("# {rung}"), run), lib).is_err()
+    );
+    assert!(
+        run_tests_rung_reaches_the_binary(
+            &script(lib, rung, "run_binary \"$logs/$name.log\" \"$t\""),
+            lib
+        )
+        .is_err()
+    );
+    assert!(run_tests_rung_reaches_the_binary(&script("other_lib", rung, run), lib).is_err());
+
+    // The staging reader: the name a literal or a `$VAR` the script assigns, only `--features
+    // gpu`, never a commented-out line.
+    let staging = |line: &str| format!("LIB_STAGED={lib}\nTESTS=cpp/install/rust-tests\n{line}\n");
+    let named = |line: &str| staged_lib_in(&staging(line)).map(|(n, _)| n);
+    assert_eq!(
+        named("stage_cargo_lib_binary \"$LIB_STAGED\" \"$TESTS\" --features gpu").as_deref(),
+        Some(lib)
+    );
+    assert_eq!(
+        named("stage_cargo_lib_binary other_lib \"$TESTS\" --features gpu").as_deref(),
+        Some("other_lib")
+    );
+    assert_eq!(named("# stage_cargo_lib_binary \"$LIB_STAGED\" \"$TESTS\" --features gpu"), None);
+    assert_eq!(named("stage_cargo_lib_binary \"$LIB_STAGED\" \"$TESTS\""), None);
+    assert_eq!(named("stage_cargo_lib_binary \"$LIB_STAGED\" \"$TESTS\" --features rust-only"), None);
+    assert_eq!(named("stage_cargo_lib_binary \"$UNSET\" \"$TESTS\" --features gpu"), None);
+}
+
+/// CI's staging step builds the install through `build-test.sh --gpu --build`, which is
+/// `stage-install.sh` in the build image: so `stage-install.sh`'s lists are what CI stages, and
+/// the guards that read them read CI.
+#[test]
+fn the_pipeline_stages_through_stage_install() {
+    let step: Vec<String> = fold_continuations(&gpu_job_step(GPU_STAGING_STEP))
+        .into_iter()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect();
+    assert!(
+        step.iter().any(|l| l.contains("scripts/build-test.sh --gpu --build")),
+        "the `{GPU_STAGING_STEP}` step does not build through `scripts/build-test.sh --gpu \
+         --build`, so {STAGE_INSTALL}'s GPU_TESTS and lib are not what CI stages, and every \
+         guard reading them reads another runner:\n{}",
+        step.join("\n")
+    );
+    let build_test = read(BUILD_TEST);
+    assert!(
+        build_test
+            .lines()
+            .any(|l| !l.trim_start().starts_with('#') && l.contains("stage=(scripts/env/stage-install.sh")),
+        "{BUILD_TEST} --gpu --build no longer runs {STAGE_INSTALL}"
+    );
+}
+
+/// `stage_cargo_lib_binary`, which [`staged_lib_in`] reads, stages peacockdb-core's own
+/// unit-test binary: the artifact of kind `lib` named `peacockdb_core`, built `--lib`.
+#[test]
+fn the_staged_lib_is_the_crates_own_test_binary() {
+    let body: Vec<String> = function_body(&read(STAGE_CARGO), "stage_cargo_lib_binary");
+    assert!(
+        body.iter()
+            .any(|l| l.trim_start().starts_with("stage_cargo_binary peacockdb_core lib ") && l.contains("--lib")),
+        "{STAGE_CARGO}'s stage_cargo_lib_binary no longer stages peacockdb_core's lib test \
+         binary, built --lib: {body:?}"
+    );
+    assert!(
+        function_body(&read(STAGE_CARGO), "stage_cargo_binary")
+            .iter()
+            .any(|l| l.contains("cargo test --no-run -p peacockdb-core")),
+        "{STAGE_CARGO}'s stage_cargo_binary no longer builds peacockdb-core's test binaries"
+    );
 }
 
 /// The GPU step reports a failure, and has no way to report success over one.
 ///
-/// The runner runs without `set -e` deliberately — one binary failing must not skip the rest —
+/// run-tests.sh runs without `set -e` for a binary — one binary failing must not skip the rest —
 /// so the only thing that can fail it is what it folds into `rc` itself. Ways that goes wrong:
-/// a binary's status never folded in, the run not exiting `rc`, the step not waiting for the
-/// run, and a command dying of a signal, which leaves no status to fold at all. The last
-/// shipped: the rust loop's `cat` and `grep` segfaulted under an exported glibc-2.35 once per
-/// target, so five binaries ran with their output discarded and their zero-tests guard
-/// answering from a crash, job green.
+/// a binary's status never judged, the run not exiting `rc`, the step not waiting for the run,
+/// and a command dying of a signal, which leaves no status to fold at all. The last shipped:
+/// the rust loop's `cat` and `grep` segfaulted under an exported glibc-2.35 once per target, so
+/// five binaries ran with their output discarded and their zero-tests guard answering from a
+/// crash, job green.
 #[test]
 fn the_gpu_step_cannot_report_success_over_a_failure() {
-    let step: Vec<String> = gpu_job_step(GPU_RUN_STEP)
+    let problems = gpu_run_step_problems(&gpu_job_step(GPU_RUN_STEP));
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    if let Err(why) = run_tests_cannot_report_success_over_a_failure(&read(RUN_TESTS)) {
+        panic!("{RUN_TESTS} can report success over a failure: {why}");
+    }
+}
+
+/// Each way the GPU run step's body, the lines after its `- name:`, could be green over a failed
+/// run.
+fn gpu_run_step_problems(body: &str) -> Vec<String> {
+    let step = body
         .lines()
         .filter(|l| !l.trim_start().starts_with('#'))
-        .map(str::to_string)
-        .collect();
-    let step = step.join("\n");
-    assert!(
-        step.contains("nebius-test.sh run --foreground"),
-        "the `{GPU_RUN_STEP}` step does not run {NEBIUS_TEST} in the foreground. Detached, the \
-         script returns at once and the step is green before a single binary has run"
-    );
-    assert!(
-        !step.contains("|| true") && !step.contains("; true"),
-        "the `{GPU_RUN_STEP}` step swallows the runner's status:\n{step}"
-    );
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut problems = Vec::new();
+    if !step.contains(GPU_RUN) || step.contains("--detach") {
+        problems.push(format!(
+            "the `{GPU_RUN_STEP}` step does not run `{GPU_RUN}`, attached. run-gpu.sh's `run list` \
+             follows the run and exits as it did; detached, it returns once the container is up, \
+             and the step is green before a single binary has run:\n{step}"
+        ));
+    }
+    if step.contains("|| true") || step.contains("; true") {
+        problems.push(format!(
+            "the `{GPU_RUN_STEP}` step swallows the runner's status:\n{step}"
+        ));
+    }
+    if step.contains("export LD_LIBRARY_PATH") {
+        problems.push(format!("the `{GPU_RUN_STEP}` step exports a library path"));
+    }
+    for key in ["continue-on-error:", "if:"] {
+        if step.lines().any(|l| l.trim_start().starts_with(key)) {
+            problems.push(format!(
+                "the `{GPU_RUN_STEP}` step has `{key}`: a forgiven or skipped run is a green job \
+                 that ran nothing"
+            ));
+        }
+    }
+    problems
+}
 
-    let text = std::fs::read_to_string(repo_root().join(NEBIUS_TEST))
-        .unwrap_or_else(|e| panic!("read {NEBIUS_TEST}: {e}"));
-    assert!(
-        text.contains("return \"$rc\"") && text.contains("run_all \"$tree\"; exit $?"),
-        "{NEBIUS_TEST} does not end by exiting the status it accumulated, so everything it \
-         recorded in rc is discarded and the step is green whatever ran"
-    );
-    for line in rust_gpu_runner_invocations(NEBIUS_TEST) {
+/// The run step's reader: the step as committed passes, and each way to be green over a failed
+/// run is refused, a skip or a forgiven failure among them.
+#[test]
+fn the_gpu_run_step_reader_refuses_each_way_to_hide_a_failure() {
+    let body = format!("        timeout-minutes: 90\n        run: {GPU_RUN}\n");
+    assert_eq!(gpu_run_step_problems(&body), Vec::<String>::new());
+    for (what, broken) in [
+        ("detached", body.replace("run list", "run --detach list")),
+        ("another command", body.replace(GPU_RUN, "true")),
+        ("swallowed", body.replace(GPU_RUN, &format!("{GPU_RUN} || true"))),
+        ("forgiven", format!("        continue-on-error: true\n{body}")),
+        ("skipped", format!("        if: github.event_name == 'push'\n{body}")),
+        ("skipped, at the step's end", format!("{body}        if: false\n")),
+    ] {
         assert!(
-            line.ends_with("trc=$?"),
-            "a staged rust GPU binary runs without its status captured, so it cannot fail \
-             the job: {line}"
+            !gpu_run_step_problems(&broken).is_empty(),
+            "{what}: accepted\n{broken}"
         );
     }
-    assert!(
-        rust_gpu_runner_loop(NEBIUS_TEST)
-            .iter()
-            .any(|l| l.contains("[ \"$trc\" -eq 0 ] || rc=1")),
-        "the rust loop no longer folds each binary's status into rc"
-    );
-    assert!(
-        text.matches("[ \"$trc\" -eq 0 ] || rc=1").count() >= 2,
-        "the C++ loop no longer folds each binary's status into rc"
-    );
-    assert!(
-        text.contains("Segmentation fault") && text.contains("::error::"),
-        "nothing in {NEBIUS_TEST} notices a command dying of a signal. Without 'set -e' such \
-         a death folds no status into rc, so the run is green having crashed — which is how \
-         the rust loop printed nothing for five targets and said so nowhere"
-    );
-    assert!(
-        !text.contains("export LD_LIBRARY_PATH") && !step.contains("export LD_LIBRARY_PATH"),
-        "the GPU runner exports a library path into its shell. The host's own coreutils then \
-         load it and can crash; apply it per command (env LD_LIBRARY_PATH=… \"$t\" …) instead"
-    );
+}
+
+/// The failure reader's own guard: run-tests.sh as committed passes, and each way it could hide
+/// a failure, made in a copy, is refused.
+#[test]
+fn the_run_tests_failure_reader_refuses_each_way_to_hide_a_failure() {
+    let text = read(RUN_TESTS);
+    assert_eq!(run_tests_cannot_report_success_over_a_failure(&text), Ok(()));
+    let judged = "    judge \"$name\" \"$logs/$name.log\" \"$status\"\n";
+    assert!(text.contains(judged), "the fixture's judge line is not run-tests.sh's");
+    for (what, broken) in [
+        ("exit 0", text.replacen("exit \"$rc\"", "exit 0", 1)),
+        ("a judge line dropped", text.replacen(judged, "", 1)),
+        (
+            "the bench unjudged",
+            text.replacen(
+                "  judge \"$BENCH_TARGET\"",
+                "  echo \"$BENCH_TARGET\"",
+                1,
+            ),
+        ),
+        ("no segfault read", text.replace("Segmentation fault|", "")),
+        (
+            "an exported library path",
+            text.replacen("set -euo pipefail\n", "set -euo pipefail\nexport LD_LIBRARY_PATH=$LIBS\n", 1),
+        ),
+    ] {
+        assert_ne!(broken, text, "{what}: the fixture changed nothing");
+        assert!(
+            run_tests_cannot_report_success_over_a_failure(&broken).is_err(),
+            "{what}: accepted"
+        );
+    }
 }
 
 /// The `<crate>:<target>` form build-test.sh matches on, for failure messages.
@@ -455,58 +706,90 @@ fn is_rust_gpu_runner_loop_header(line: &str) -> bool {
 /// the patched glibc is applied per command (`env LD_LIBRARY_PATH=… "$t" …`) rather than
 /// exported, and a reader anchored at the start of the line stops seeing the invocation the
 /// moment anything precedes it — a guard silently reading nothing, not a red one.
-/// build-test-shadgpu.sh writes the loop inside an ssh heredoc (`"\$t"`), nebius-test.sh
-/// runs on the host itself (`"$t"`); both spellings are the same command.
+/// build-test-shadgpu.sh writes the loop inside an ssh heredoc (`"\$t"`); a loop run on the host
+/// itself spells it `"$t"`, and both spellings are the same command.
 pub(crate) fn is_rust_gpu_runner_invocation(line: &str) -> bool {
     let line = line.trim_start().replace("\\$", "$");
     !line.starts_with('#') && line.contains("\"$t\"") && line.contains("> \"$")
 }
 
-/// Single-tenant GPU is one flag on two committed runner lines and nothing else. cuDF and
+/// Single-tenant GPU is one flag on both committed runners and nothing else. cuDF and
 /// RMM share a process-wide pool, so `--test-threads=1` is what keeps the device to one test
 /// at a time — and `test_gpu_corpus.rs` spends it further, setting environment variables
 /// in an `unsafe` block whose safety argument is that flag. Dropping it from either runner
 /// makes that argument false, and until this test existed nothing said so.
 #[test]
 fn both_gpu_runners_pass_test_threads_one() {
-    for rel in [NEBIUS_TEST, SHADGPU] {
-        for line in rust_gpu_runner_invocations(rel) {
-            assert!(
-                line.contains("--test-threads=1"),
-                "{rel} runs a staged GPU binary without --test-threads=1:\n  {line}\n\
-                 cuDF/RMM share one process-wide pool, so concurrent cases OOM the device, and \
-                 the env-var writes in test_gpu_corpus.rs are sound only while this flag holds."
-            );
-        }
+    let text = read(RUN_TESTS);
+    let args = run_tests_rust_args(&text).unwrap_or_else(|| {
+        panic!(
+            "{RUN_TESTS}'s rust loop or run_bench declares no `args=(` — the runner was \
+             reshaped, and the single-tenant GPU invariant now rests on lines this guard \
+             cannot find"
+        )
+    });
+    for line in &args {
+        assert!(
+            line.contains("--test-threads=1"),
+            "{RUN_TESTS} gives a staged GPU binary arguments without --test-threads=1:\n  {line}\n\
+             cuDF/RMM share one process-wide pool, so concurrent cases OOM the device, and \
+             the env-var writes in test_gpu_corpus.rs are sound only while this flag holds."
+        );
+    }
+    for line in run_tests_rust_runs(&text) {
+        assert!(
+            line.contains("\"${args[@]}\""),
+            "{RUN_TESTS} runs a rust GPU binary without its arguments, --test-threads=1 among \
+             them:\n  {line}"
+        );
+    }
+    for line in rust_gpu_runner_invocations(SHADGPU) {
+        assert!(
+            line.contains("--test-threads=1"),
+            "{SHADGPU} runs a staged GPU binary without --test-threads=1:\n  {line}\n\
+             cuDF/RMM share one process-wide pool, so concurrent cases OOM the device, and \
+             the env-var writes in test_gpu_corpus.rs are sound only while this flag holds."
+        );
     }
 }
 
 /// The measurement binary is staged with the GPU targets and runs on every job, but never
 /// its `bench_` cases: those are tens of minutes of device time and would write a benchmark
-/// tree from a correctness run. That is `--skip bench_` on two committed runner loops and
+/// tree from a correctness run. That is `--skip bench_` in both committed runner loops and
 /// nothing else, so a runner that lost it turns the gate into a measurement in silence.
 #[test]
 fn the_benchmark_binary_runs_without_its_cases_on_ci() {
-    for rel in [NEBIUS_TEST, SHADGPU] {
-        // build-test-shadgpu.sh names the target through `$BENCH_TARGET`, nebius-test.sh
-        // spells it out.
-        // Resolved rather than matched two ways, so one needle reads both files.
-        let loop_body = rust_gpu_runner_loop(rel)
-            .join("\n")
-            .replace("$BENCH_TARGET", BENCHMARK_TARGET);
+    let lost = "does not skip the benchmark binary's bench_ cases. Every gate run would then \
+                spend the measurement's device time and overwrite the committed tree with times \
+                nobody asked for.";
+    let text = read(RUN_TESTS);
+    assert_eq!(
+        assigned(&text, "BENCH_TARGET").as_deref(),
+        Some(BENCHMARK_TARGET),
+        "{RUN_TESTS}'s BENCH_TARGET is not {BENCHMARK_TARGET}"
+    );
+    assert!(
+        run_tests_rust_loop(&text).iter().any(|l| {
+            l.contains("[ \"$name\" = \"$BENCH_TARGET\" ]") && l.contains("args+=(--skip bench_)")
+        }),
+        "{RUN_TESTS}'s rust loop {lost}"
+    );
+
+    // build-test-shadgpu.sh names the target through `$BENCH_TARGET`; resolved, so one needle
+    // reads it.
+    let loop_body = rust_gpu_runner_loop(SHADGPU)
+        .join("\n")
+        .replace("$BENCH_TARGET", BENCHMARK_TARGET);
+    assert!(
+        loop_body.contains(&format!("{BENCHMARK_TARGET}) skip=\"--skip bench_\"")),
+        "{SHADGPU}'s rust-tests loop {lost}"
+    );
+    for line in rust_gpu_runner_invocations(SHADGPU) {
         assert!(
-            loop_body.contains(&format!("{BENCHMARK_TARGET}) skip=\"--skip bench_\"")),
-            "{rel}'s rust-tests loop does not skip {BENCHMARK_TARGET}'s bench_ cases. Every \
-             gate run would then spend the measurement's device time and overwrite the \
-             committed tree with times nobody asked for."
+            line.contains("$skip"),
+            "{SHADGPU} runs a staged GPU binary without the per-binary skip:\n  {line}\n\
+             The case above it sets it and this line is where it takes effect."
         );
-        for line in rust_gpu_runner_invocations(rel) {
-            assert!(
-                line.contains("$skip"),
-                "{rel} runs a staged GPU binary without the per-binary skip:\n  {line}\n\
-                 The case above it sets it and this line is where it takes effect."
-            );
-        }
     }
 }
 
@@ -560,5 +843,44 @@ fn the_runner_reader_takes_every_rust_command_and_not_a_comment_or_the_cpp_loop(
     assert!(
         flagged(&rust[0].as_str()) && !flagged(&rust[1].as_str()),
         "the retry is unflagged"
+    );
+
+    // run-tests.sh's shape: the flag is in `args=(`, which every run_binary passes. The same
+    // three ways: (1) the flag dropped from args, the comment left; (2) the C++ loop's
+    // run_binary, which takes no args, not read as a rust run; (3) a second `args=(` in the loop.
+    let run_tests = |rust_args: &str, bench_args: &str| {
+        format!(
+            "run_list() {{\n\
+             \x20 for t in \"${{cpp[@]}}\"; do\n\
+             \x20   run_binary \"$logs/$name.log\" \"$t\"\n\
+             \x20 done\n\
+             \x20 for t in \"${{rust[@]}}\"; do\n\
+             \x20   # --test-threads=1: cuDF/RMM share one process-wide pool.\n\
+             \x20   {rust_args}\n\
+             \x20   run_binary \"$logs/$name.log\" \"$t\" \"${{args[@]}}\"\n\
+             \x20 done\n\
+             }}\n\
+             run_bench() {{\n\
+             \x20 local stamp {bench_args}\n\
+             \x20 run_binary \"$logs/b.log\" X=1 \\\n\
+             \x20   \"$bin\" \"${{args[@]}}\"\n\
+             }}\n"
+        )
+    };
+    let all_flagged = |text: &str| {
+        run_tests_rust_args(text).is_some_and(|a| a.iter().all(|l| l.contains("--test-threads=1")))
+    };
+    let flag = "args=(--nocapture --test-threads=1)";
+    let ok = run_tests(flag, flag);
+    assert!(all_flagged(&ok), "{ok}");
+    assert_eq!(run_tests_rust_runs(&ok).len(), 2, "the loop's run and the folded bench run");
+    let dropped = run_tests("args=(--nocapture)", flag);
+    assert!(dropped.contains("--test-threads=1") && !all_flagged(&dropped));
+    assert!(!all_flagged(&run_tests(flag, "args=(--nocapture)")), "the bench's own args");
+    let retry = run_tests(&format!("{flag}\n    args=(--nocapture --ignored)"), flag);
+    assert!(!all_flagged(&retry), "the second args= in the loop is read");
+    assert!(
+        run_tests_rust_args(&run_tests("x=1", flag)).is_none(),
+        "a loop with no args= is not read as flagged"
     );
 }

@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Prepare a CPU VM for a developer (llm-wiki/build-test.md, "Containers").
+# Prepare a CPU VM for a developer (llm-wiki/build-test.md, "CPU VMs").
 #
 #   bootstrap-vm.sh [--ref <branch>] [--cudf <v>]
 #
 # Run as the machine user, with sudo; provision-vm.sh runs it so. Installs what is missing: Docker,
 # and gh and Claude Code with the superpowers plugin at docker/pins.env's versions; makes the data
 # directory the machine's users share; clones the repository into ~/peacockdb at <ref>, master by
-# default, and the third_party/cudf it pins. In the build image of cuDF <v> (25.02 by default) it
-# fills cargo's registry and generates sf1. A step already done is skipped.
+# default, and the third_party/cudf it pins. In the build image of cuDF <v> (25.02 by default) and
+# of the clone's inputs, by its inputs tag, it fills cargo's registry and generates sf1. A step
+# already done is skipped.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -54,6 +55,8 @@ if [ ! -e "$clone" ]; then git clone --branch "${ref:-master}" "$REPO_URL" "$clo
 . "$clone/scripts/lib/image-inputs.sh"
 . "$clone/scripts/lib/data-inputs.sh"
 . "$clone/scripts/lib/machine.sh"
+declare -F image_inputs_tag > /dev/null \
+  || die "$clone/scripts/lib/image-inputs.sh has no image_inputs_tag: the clone's ref predates finding images by their inputs. Give a newer --ref"
 
 # The data directory every developer on the machine shares. Its owner writes it at once; another
 # developer through the group, which provision-vm.sh adds them to before their first login.
@@ -126,7 +129,8 @@ moved on, so docker/pins.env's SUPERPOWERS_VERSION and SUPERPOWERS_SHA must be b
 
 # The docker group this run joined takes effect at the next login.
 if ! docker info > /dev/null 2>&1; then docker() { sudo docker "$@"; }; fi
-ref=$MACHINE_IMAGE:cudf-$cudf
+# The image of the clone's own inputs, by its inputs tag: :cudf-<v> moves with master alone.
+ref=$MACHINE_IMAGE:$(image_inputs_tag "$clone" build "$cudf")
 machine_image_checked "$ref" "$clone" "$cudf"
 machine_cargo_fetch "$ref" "$clone"
 machine_data_set "$ref" "$clone"

@@ -27,6 +27,27 @@ number in none of them, failing the report rather than emitting one that goes no
 
 ## Done
 
+<a id="t129"></a>
+### #129 (26.02 CI leg image) The "26.02" CI leg builds against a 25.10a image
+Two unrelated smells in `pipeline.yml`, both found auditing the CI section of
+build-test.md. (a) The dataset-matrix matrix leg labelled `cudf: "26.02"` runs
+`rapidsai/base:25.10a-cuda12-py3.12`, so the compile-only 26.02 coverage the wiki and
+`#94` both rely on is actually 25.10a coverage; the label is the only place 26.02 appears.
+Either bump the image or rename the leg — as it stands, "26.02 compiles" is a claim no job
+makes. (b) `s3-datasets` explains its fork guard as mirroring "the GPU job's fork guard",
+but `gpu-tests` has no job-level `if:` — on a fork PR `secrets.SHAD_GPU_SSH_KEY` is empty,
+so Setup SSH writes an empty key and the job goes red on ssh instead of skipping. Moot
+while the repo has no forks, which is exactly why it will bite later.
+
+(b) is closed. `gpu-tests` now never runs on a pull_request, so a fork PR gets no GPU job, and
+the `s3-datasets` comment says so. Only (a) is open.
+
+**Closed** (containers-only, Task 4). `dataset-matrix` has no `image:` key now. Each leg runs in
+the build image of its `cudf:`, `peacockdb-build:cudf-<v>`, and the second leg is `cudf: "25.10"` in
+the CI-only `peacockdb-build:cudf-25.10`, built from `docker/conda/cudf-25.10.spec`. So the label is
+the image. `ci_images.rs`' `every_cudf_leg_has_a_build_image` fails a leg with an `image:` key or
+with no spec. (b) was closed earlier, as above.
+
 <a id="t149"></a>
 ### #149 — the parquet load must use pinned host memory
 **Priority: high**
@@ -391,8 +412,8 @@ both versions, and each cuDF version is its own build, so no runtime probe. The 
 **Closed.** `kMergeM2CountType` (`plan_executor_internal.h`) is
 `merge_m2_count_type(CUDF_VERSION_MAJOR, CUDF_VERSION_MINOR)` from `<cudf/version_config.hpp>`:
 `INT32` before 25.06, `INT64` from it. No CMake define, no runtime probe. Proven on 25.02 by a
-device run; the `INT64` branch is built and unit-tested by CI's `cudf 26.02` leg (a 25.10a image,
-[#129](../tickets/testinfra.md#t129)) and not yet run on a device
+device run; the `INT64` branch is built and unit-tested by CI's `cudf 25.10` leg
+([#129](#t129)) and not yet run on a device
 ([#260](../tickets/system-hardening.md#t260)). The INT32 count still wraps past 2^31 on 25.02:
 [#289](../tickets/system-hardening.md#t289).
 

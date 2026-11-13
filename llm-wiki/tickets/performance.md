@@ -75,7 +75,7 @@ than 25.02 on some shapes at 50M, so it reads as a changed strategy. Whole-table
 73.5 s, 98.9% of it one `single_pass_shmem_aggs_kernel` launch; streamed in 29 batches of about
 8M rows it takes 1.0 s. One axis stays confounded: shad-gpu runs CUDA 12.2, sparkdgx CUDA 13.0.
 The engine reaches it: `Batching::Off` (`plan/mod.rs`) hands a lane its whole chunk, so an sf40
-lineitem aggregate at a tp1 mode is one call over 240M rows. CI builds a 26.02 leg. This is what
+lineitem aggregate at a tp1 mode is one call over 240M rows. CI builds a 25.10 leg. This is what
 #148's q1 figure measured, not the missing pool.
 
 **Corpus queries:** none at sf1, where no lane holds 100M rows. At sf40, `tpch/q1` at `tp1-single`
@@ -93,7 +93,7 @@ the toolkit.
 **Priority: low** — nothing measured; the one real candidate may be slower.
 
 The join rewrite (`tasks/join-rewrite-design.md` §3.10) calls nothing that only one cuDF version
-has, so one code path runs on shad-gpu (25.02), the CI image (25.10a) and verda-gpu (26.02). Four
+has, so one code path runs on shad-gpu (25.02), CI's second leg (25.10) and verda-gpu (26.02). Four
 26.02 APIs could replace a portable step, each as a second path selected by
 `CUDF_VERSION_MAJOR`/`MINOR` (`<cudf/version_config.hpp>`):
 
