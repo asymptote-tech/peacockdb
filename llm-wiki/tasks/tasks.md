@@ -233,6 +233,8 @@ and `testdata/benchmarks.csv` of every result. Starts after the report rebase (n
 
 ### 12. [`vm-setup.md`](vm-setup.md) — closes no ticket — state: new
 
+### 12. [`vm-setup.md`](vm-setup.md) — closes no ticket — state: building
+
 A plain `docker build` of either image; ssh retried only before a session authenticates; the
 `nebius` CLI and the developer's two-profile `nebius.yaml`, cut from their own CLI config, on the
 VM; `run-gpu.sh` gains `follow`, `cancel`, a card lock, one tree per VM dir, per-run records

@@ -112,7 +112,7 @@ Actions; Python 3 script tests (`scripts/env/tests`, `scripts/nebius/tests`,
   and its labels carry it (Task 9 reads it).
 - Unchanged: `image.sh` passes every pin; `image_inputs`' awk already strips `=…` from an `ARG`.
 
-- [ ] **Step 1: failing tests** in `test_pins.py`:
+- [x] **Step 1: failing tests** in `test_pins.py`:
   - `PINS["DRIVER_MINIMUM_PTX"] = r"575\.51\.03"`.
   - `test_every_pin_a_dockerfile_declares_defaults_to_the_pin`: for each `^ARG (\w+)(=(\S+))?`
     in either file whose name is in `pins.env`, the default is present and equals the pin;
@@ -122,44 +122,44 @@ Actions; Python 3 script tests (`scripts/env/tests`, `scripts/nebius/tests`,
     third_party/cudf` gives.
   - `test_the_run_image_labels_the_ptx_driver_minimum`: after the last `FROM` of
     `run.Dockerfile`, the `ARG` and the `LABEL` above.
-- [ ] **Step 2: run** `python3 scripts/env/tests/test_pins.py` → FAIL on those five.
-- [ ] **Step 3: implement** the defaults, the pin and the label.
-- [ ] **Step 4: pin what the spec says of a plain build's refusal** (passes at once; the code
+- [x] **Step 2: run** `python3 scripts/env/tests/test_pins.py` → FAIL on those five.
+- [x] **Step 3: implement** the defaults, the pin and the label.
+- [x] **Step 4: pin what the spec says of a plain build's refusal** (passes at once; the code
   exists): `test_image_ref.py::test_refuses_an_image_without_a_label` also asserts
   `scripts/env/image.sh` in stderr; new `test_bootstrap.py::test_a_plain_build_is_refused_naming_image_sh`
   (world label `None` → exit 2, stderr names `peacockdb.inputs` and `scripts/env/image.sh`, no
   `docker run`). `machine_image_label_checked` is also run-gpu.sh's.
-- [ ] **Step 5: run** every `scripts/env/tests/test_*.py` but the three needing images
+- [x] **Step 5: run** every `scripts/env/tests/test_*.py` but the three needing images
   (`test_image_any_user.py test_run_image.py test_run_tests.py`) → `0 failed`.
   `test_image.py`'s label tests must pass unchanged.
-- [ ] **Step 6: docs.** "Images": the run image's `peacockdb.driver-minimum-ptx` label.
+- [x] **Step 6: docs.** "Images": the run image's `peacockdb.driver-minimum-ptx` label.
   "Rebuilding and publishing": a bullet with
   `docker build -f docker/<kind>.Dockerfile .` from the root, `--build-arg CUDF=<v>` or none for
   25.02: what `image.sh build <kind> <v>` builds, layer for layer, less its labels; it has no
   `peacockdb.inputs` label, so `build-test.sh`, `run-gpu.sh` and `bootstrap-vm.sh` refuse it,
   naming `image.sh`; why defaults and not a file read by the build (spec item 1's last bullet).
-- [ ] **Step 7: report a checkpoint** `vm-setup: a plain docker build builds either image; the run image names the PTX driver minimum`.
+- [x] **Step 7: report a checkpoint** `vm-setup: a plain docker build builds either image; the run image names the PTX driver minimum`.
 
 ### Task 2: the plain builds proved against `image.sh`'s, on dev
 
 Needs Docker on dev and downloads; no Nebius, no published image. It also leaves this branch's
 build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
 
-- [ ] **Step 1:** in the tree under `/build` (Global Constraints), `time scripts/env/image.sh
+- [x] **Step 1:** in the tree under `/build` (Global Constraints), `time scripts/env/image.sh
   build build 25.02`, then at once `docker build -f docker/build.Dockerfile --progress=plain -t
   peacock-plain:build-25.02 . 2>&1 | tee <scratch>/plain-build.log`.
-- [ ] **Step 2:** every `#<n> [<stage> <i>/<k>] RUN|COPY` line of the plain log has its
+- [x] **Step 2:** every `#<n> [<stage> <i>/<k>] RUN|COPY` line of the plain log has its
   `#<n> CACHED` line. `docker image inspect --format '{{json .RootFS.Layers}}'` of
   `ghcr.io/asymptote-tech/peacockdb-build:$(bash -c '. scripts/lib/image-inputs.sh;
   image_inputs_tag . build 25.02')` and of `peacock-plain:build-25.02` are equal.
-- [ ] **Step 3:** Steps 1–2 for `run` (`run.Dockerfile`, tag `peacock-plain:run-25.02`).
-- [ ] **Step 4:** `docker build -f docker/run.Dockerfile --build-arg CUDF=25.10 .` → non-zero,
+- [x] **Step 3:** Steps 1–2 for `run` (`run.Dockerfile`, tag `peacock-plain:run-25.02`).
+- [x] **Step 4:** `docker build -f docker/run.Dockerfile --build-arg CUDF=25.10 .` → non-zero,
   stopping at the final `FROM` (its output names `run-25.10`).
-- [ ] **Step 5:** `docker rmi peacock-plain:build-25.02 peacock-plain:run-25.02`. Record in the
+- [x] **Step 5:** `docker rmi peacock-plain:build-25.02 peacock-plain:run-25.02`. Record in the
   detail file's `## Plain builds`: each command, wall time, the CACHED count against the step count,
   the sha256 of each pair's layer JSON, and Step 4's last line. A step not taken from the cache is
   a failing test for Task 1: find which `ARG` changed its key, and fix it there.
-- [ ] **Step 6: report a checkpoint** `vm-setup: the plain builds proved against image.sh's`.
+- [x] **Step 6: report a checkpoint** `vm-setup: the plain builds proved against image.sh's`.
 
 ### Task 3: one ssh helper, retried only before authentication
 
@@ -186,7 +186,7 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   bound on a silently dead route), same pauses and bound, stderr `<command's name>: attempt <n>
   of 4 exited <rc>; again in <s> s`.
 
-- [ ] **Step 1: failing tests**, a fake `ssh` on PATH driven by a JSON list of attempts
+- [x] **Step 1: failing tests**, a fake `ssh` on PATH driven by a JSON list of attempts
   (`log` lines written to the `-E` file, `rc`, `stdout`, `read_stdin`), `PEACOCK_SSH_PAUSES="0 0 0"`
   unless said:
   - `test_a_connection_that_never_authenticates_is_tried_four_times`: 4 calls, exit 255, three
@@ -210,11 +210,11 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
     `Connection refused` on stderr, exit of the function 255, stdout `payload`.
   - `test_sync_retry_reruns_a_command_that_exits_255`: 255, 255, 0 → 3 runs, exit 0; a first
     exit 1 → one run, exit 1.
-- [ ] **Step 2: run** `python3 scripts/env/tests/test_ssh_retry.py` → FAIL (no library).
-- [ ] **Step 3: implement** `ssh-retry.sh` (`# shellcheck shell=bash`, a header saying why each
+- [x] **Step 2: run** `python3 scripts/env/tests/test_ssh_retry.py` → FAIL (no library).
+- [x] **Step 3: implement** `ssh-retry.sh` (`# shellcheck shell=bash`, a header saying why each
   rule holds, under 10 lines), and the `on_runner` entry.
-- [ ] **Step 4: run** → `0 failed`.
-- [ ] **Step 5: report a checkpoint** `vm-setup: ssh is retried while it cannot connect, never once it has authenticated`.
+- [x] **Step 4: run** → `0 failed`.
+- [x] **Step 5: report a checkpoint** `vm-setup: ssh is retried while it cannot connect, never once it has authenticated`.
 
 ### Task 4: every ssh the scripts make goes through the helper
 
@@ -256,7 +256,7 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   `GPU_HOST_START_TIMEOUT` seconds after the wait began, the helper's retries inside it; the
   `waited += POLL` counter goes.
 
-- [ ] **Step 1: failing tests:**
+- [x] **Step 1: failing tests:**
   - `test_provision.py::test_provision_retries_a_refused_connection`: `FAKE_SSH_REFUSALS=2` → exit
     0, the VM user exists (the root step's heredoc arrived whole), `bootstrap.log` one line.
   - `test_provision.py::test_provision_never_retries_a_session_that_authenticated`: the bootstrap
@@ -275,10 +275,10 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   - `test_fetch.py::test_fetch_over_ssh_retries_a_refused_connection`: a fake `ssh` refusing
     once before authenticating, then printing the pinned record's bytes → exit 0, the record
     checked against its sha.
-- [ ] **Step 2: run** each file → FAIL on those.
-- [ ] **Step 3: implement.** Source the library in the four scripts.
-- [ ] **Step 4: run** every file of the three suites → `0 failed`.
-- [ ] **Step 5: report a checkpoint** `vm-setup: every ssh the scripts make goes through the retrying helper`.
+- [x] **Step 2: run** each file → FAIL on those.
+- [x] **Step 3: implement.** Source the library in the four scripts.
+- [x] **Step 4: run** every file of the three suites → `0 failed`.
+- [x] **Step 5: report a checkpoint** `vm-setup: every ssh the scripts make goes through the retrying helper`.
 
 ### Task 5: the `nebius` CLI on a CPU VM
 
@@ -294,16 +294,16 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   image's URL) to a temp file, checks it against `NEBIUS_SHA256` (else exit 2 naming
   `NEBIUS_SHA256` and the URL), then `sudo install -m 755 <tmp> /usr/local/bin/nebius`.
 
-- [ ] **Step 1: failing tests:** `test_bootstrap_installs_the_pinned_nebius_cli` (whole run, the
+- [x] **Step 1: failing tests:** `test_bootstrap_installs_the_pinned_nebius_cli` (whole run, the
   pin rewritten to the served bytes' sha: curl asked for the URL above with `0.12.293`'s pin
   value, sudo log `install -m 755 <tmp> /usr/local/bin/nebius`);
   `test_bootstrap_refuses_a_nebius_cli_of_another_sha` (exit 2, `NEBIUS_SHA256` on stderr, no
   install line); `test_bootstrap_skips_the_nebius_cli_at_its_pin` (a fake `nebius` on PATH prints
   the pin → no curl of the URL, no install).
-- [ ] **Step 2: run** `python3 scripts/env/tests/test_bootstrap.py` → FAIL on the three.
-- [ ] **Step 3: implement**, beside gh's install and in its idiom (`pin`).
-- [ ] **Step 4: run** → `0 failed`.
-- [ ] **Step 5: report a checkpoint** `vm-setup: bootstrap-vm.sh installs the pinned nebius CLI`.
+- [x] **Step 2: run** `python3 scripts/env/tests/test_bootstrap.py` → FAIL on the three.
+- [x] **Step 3: implement**, beside gh's install and in its idiom (`pin`).
+- [x] **Step 4: run** → `0 failed`.
+- [x] **Step 5: report a checkpoint** `vm-setup: bootstrap-vm.sh installs the pinned nebius CLI`.
 
 ### Task 6: the two-profile cut, `nebius-profiles.sh`, one cut for install-watch too
 
@@ -361,7 +361,7 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   `FAKE-KEY-MATERIAL` on stdout. `nebius_config(path, active, profiles)` writes a fixture,
   `profiles = {name: {"key_path": str | None}}`.
 
-- [ ] **Step 1: failing tests** (`test_nebius_profiles.py`, the source holding `editor-eu`
+- [x] **Step 1: failing tests** (`test_nebius_profiles.py`, the source holding `editor-eu`
   embedded, `eu-west1` with a key path to an existing PEM, `ci` and `old`, `old` active):
   - `test_cuts_the_two_profiles_out_of_several`: exit 0; through the fake CLI on the dest:
     `profile list` is `editor-eu [default]`, `eu-west1`; both `config get
@@ -385,10 +385,10 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
     `test_install_watch_and_nebius_profiles_share_one_cut` (`profile delete` appears in
     `peacock-config.sh` alone among the three scripts). The other install-watch tests stay green,
     `test_install_watch_refuses_a_key_file_for_a_profile_that_embeds_its_key` among them.
-- [ ] **Step 2: run** both files → FAIL.
-- [ ] **Step 3: implement.**
-- [ ] **Step 4: run** both, and every `scripts/nebius/tests/test_*.py` → `0 failed`.
-- [ ] **Step 5: report a checkpoint** `vm-setup: nebius-profiles.sh cuts the two profiles; install-watch shares the cut`.
+- [x] **Step 2: run** both files → FAIL.
+- [x] **Step 3: implement.**
+- [x] **Step 4: run** both, and every `scripts/nebius/tests/test_*.py` → `0 failed`.
+- [x] **Step 5: report a checkpoint** `vm-setup: nebius-profiles.sh cuts the two profiles; install-watch shares the cut`.
 
 ### Task 7: what the VM holds — `nebius.yaml` checked and shipped; nebius.sh's config and key
 
@@ -419,7 +419,7 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   gains `nebius.yaml` (a `cp`, never read); the remote stops appending `GPU_SSH_KEY_FILE`.
 - Produces in the action: `echo "GPU_HOST_NEBIUS_CONFIG=$HOME/.nebius/config.yaml" >> "$GITHUB_ENV"`.
 
-- [ ] **Step 1: failing tests:**
+- [x] **Step 1: failing tests:**
   - `test_provision.py`: `test_provision_ships_nebius_yaml_on_stdin_mode_600` (the VM's
     `~/.config/peacock/nebius.yaml` mode 600, sha256 equal to the laptop's; no argv holds it);
     `test_provision_refuses_a_missing_nebius_yaml_naming_nebius_profiles`,
@@ -439,10 +439,10 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
     `test_a_cli_on_path_wins_over_the_nebius_bin_one`,
     `test_the_nebius_bin_cli_without_one_on_path`, `test_no_cli_is_1_naming_the_installer` (no call, stderr names both fixes).
   - `test_watch_workflow.py::test_action_names_the_config_it_makes`.
-- [ ] **Step 2: run** → FAIL on those.
-- [ ] **Step 3: implement.**
-- [ ] **Step 4: run** `test_provision.py`, every `scripts/nebius/tests/test_*.py` → `0 failed`.
-- [ ] **Step 5: report a checkpoint** `vm-setup: the VM holds nebius.yaml and reads its GPU key; nebius.sh names its config`.
+- [x] **Step 2: run** → FAIL on those.
+- [x] **Step 3: implement.**
+- [x] **Step 4: run** `test_provision.py`, every `scripts/nebius/tests/test_*.py` → `0 failed`.
+- [x] **Step 5: report a checkpoint** `vm-setup: the VM holds nebius.yaml and reads its GPU key; nebius.sh names its config`.
 
 ### Task 8: container paths; a tree the image's home hides is refused
 
@@ -466,7 +466,7 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   `cpp/build`'s CMake cache and `compile_commands.json`, which host tools read, name it.
   `PEACOCK_IMAGE_HOME` is the tests' knob alone.
 
-- [ ] **Step 1: failing tests:** `test_bootstrap_fetches_the_registry_with_the_clone_read_only`
+- [x] **Step 1: failing tests:** `test_bootstrap_fetches_the_registry_with_the_clone_read_only`
   now expects `type=bind,src=<clone>,dst=/peacock/tree,readonly` and `-w /peacock/tree`;
   `test_bootstrap.py::test_the_generator_runs_at_a_container_path` (each generator run:
   `dst=/peacock/stage`, `-w /peacock/stage`, `/peacock/stage/generate_testdata.sh`);
@@ -474,10 +474,10 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   `test_build_test.py::test_refuses_a_tree_under_the_image_home_for_another_uid` (fake `id`
   giving 1001 → exit 2 before any docker call, stderr names the home and `1000`) and
   `test_a_tree_under_the_image_home_is_taken_for_uid_1000`.
-- [ ] **Step 2: run** the three files → FAIL on those.
-- [ ] **Step 3: implement.**
-- [ ] **Step 4: run** the three, `test_run_gpu.py`, `test_check_build_image.py` → `0 failed`.
-- [ ] **Step 5: report a checkpoint** `vm-setup: the build image reaches the tree and the stage at container paths`.
+- [x] **Step 2: run** the three files → FAIL on those.
+- [x] **Step 3: implement.**
+- [x] **Step 4: run** the three, `test_run_gpu.py`, `test_check_build_image.py` → `0 failed`.
+- [x] **Step 5: report a checkpoint** `vm-setup: the build image reaches the tree and the stage at container paths`.
 
 ### Task 9: the run image by its ID; every card's driver
 
@@ -503,7 +503,7 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
 - Produces: `run` and `run <staged>` give the VM `RUN_ID`, never the ref. `prepare` pulls by ref,
   then `run_image_read` and `cards_checked`.
 
-- [ ] **Step 1: failing tests** (`test_run_gpu_vm.py`):
+- [x] **Step 1: failing tests** (`test_run_gpu_vm.py`):
   `test_run_runs_the_image_id_its_labels_were_read_from` (the device `docker run`'s image is
   `sha256:run1…`; one inspect of the ref per `run`); `test_every_card_s_driver_is_held_to_the_minimum`
   (`[["550.54.15","8.9"],["530.30.02","8.9"]]` → exit 3, stderr `530.30.02` and `535.104.05`);
@@ -515,10 +515,10 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   Ported from `test_gpu.py`: `test_run_refuses_old_driver`,
   `test_a_card_past_compute_capability_9_needs_the_driver_that_compiles_its_ptx`,
   `test_a_driver_answer_that_is_no_version_is_refused`, `test_the_image_run_is_the_one_whose_label_was_read`.
-- [ ] **Step 2: run** `python3 scripts/env/tests/test_run_gpu_vm.py` → FAIL on those.
-- [ ] **Step 3: implement.**
-- [ ] **Step 4: run** `test_run_gpu_vm.py`, `test_run_gpu.py` → `0 failed`.
-- [ ] **Step 5: report a checkpoint** `vm-setup: run-gpu.sh runs the image by the ID it checked and holds every card to its driver`.
+- [x] **Step 2: run** `python3 scripts/env/tests/test_run_gpu_vm.py` → FAIL on those.
+- [x] **Step 3: implement.**
+- [x] **Step 4: run** `test_run_gpu_vm.py`, `test_run_gpu.py` → `0 failed`.
+- [x] **Step 5: report a checkpoint** `vm-setup: run-gpu.sh runs the image by the ID it checked and holds every card to its driver`.
 
 ### Task 10: the runner — `follow`, `cancel`, `--init`, one card lock
 
@@ -586,7 +586,7 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   runner, holding the card, refuses any other dir's, status 2; every `docker rm` is of this dir's
   alone.
 
-- [ ] **Step 1: failing tests** (`test_run_gpu_runs.py`):
+- [x] **Step 1: failing tests** (`test_run_gpu_runs.py`):
   - `test_a_run_outlives_its_session_and_is_followed`: an attached held `run list`; its process
     group killed; the runner goes; `follow` prints the log from its first line; released, `follow`
     exits the run's code.
@@ -621,11 +621,11 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   `test_a_run_whose_instance_is_busy_is_neither_started_nor_followed`. The hold, heartbeat, ship
   server, install-lock and power cases are not ported (no such design here); the detail file's
   `## Ported and dropped cases` says so, case by case.
-- [ ] **Step 2: run** `python3 scripts/env/tests/test_run_gpu_runs.py` and `test_nebius.py` →
+- [x] **Step 2: run** `python3 scripts/env/tests/test_run_gpu_runs.py` and `test_nebius.py` →
   FAIL on those.
-- [ ] **Step 3: implement**, and reshape `test_run_gpu.py`'s run tests to the runner.
-- [ ] **Step 4: run** `test_run_gpu*.py`, `test_bench_each.py`, `scripts/nebius/tests/test_*.py` → `0 failed`.
-- [ ] **Step 5: report a checkpoint** `vm-setup: every run is held by a runner on the VM; follow, cancel and one card lock`.
+- [x] **Step 3: implement**, and reshape `test_run_gpu.py`'s run tests to the runner.
+- [x] **Step 4: run** `test_run_gpu*.py`, `test_bench_each.py`, `scripts/nebius/tests/test_*.py` → `0 failed`.
+- [x] **Step 5: report a checkpoint** `vm-setup: every run is held by a runner on the VM; follow, cancel and one card lock`.
 
 ### Task 11: one tree per VM dir
 
@@ -646,7 +646,7 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   a dir without `.tree` is claimed (`set -C`); another id → exit 2 `~/peacock/<i> on the VM is
   another tree's: name a dir of your own with --dir <name>`. `status` and `follow` claim nothing.
 
-- [ ] **Step 1: failing tests:** `test_a_tree_records_its_id_and_its_dir_on_the_vm`;
+- [x] **Step 1: failing tests:** `test_a_tree_records_its_id_and_its_dir_on_the_vm`;
   `test_a_copied_tree_is_refused_its_record_before_any_vm_call` (no nebius call; stderr names
   `.run-gpu-tree` and `--dir`); `test_another_tree_s_call_is_refused_before_it_ships_runs_pulls_or_clears`
   (a second tree of the same name: `ship`, `run list`, `pull`, `cancel`, and `pull --clear` from
@@ -657,10 +657,10 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   Ported from `test_gpu_records.py`: `test_a_tree_records_its_instance_and_later_commands_take_it`,
   `test_a_copied_tree_is_refused_the_record_it_carries`,
   `test_a_second_tree_under_a_taken_name_is_refused_on_the_host`.
-- [ ] **Step 2: run** `python3 scripts/env/tests/test_run_gpu_records.py` → FAIL.
-- [ ] **Step 3: implement.**
-- [ ] **Step 4: run** `test_run_gpu*.py` → `0 failed`.
-- [ ] **Step 5: report a checkpoint** `vm-setup: a VM dir is one tree's`.
+- [x] **Step 2: run** `python3 scripts/env/tests/test_run_gpu_records.py` → FAIL.
+- [x] **Step 3: implement.**
+- [x] **Step 4: run** `test_run_gpu*.py` → `0 failed`.
+- [x] **Step 5: report a checkpoint** `vm-setup: a VM dir is one tree's`.
 
 ### Task 12: records and logs under a stamp; ship's stamp; `pull`, `pull --clear`; bench-each
 
@@ -715,7 +715,7 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   today; a pull's non-zero stops it with that exit (1: a file changed here and on the VM, which the
   pull named).
 
-- [ ] **Step 1: failing tests** (`test_run_gpu_records.py`): `test_each_run_logs_under_its_stamp`;
+- [x] **Step 1: failing tests** (`test_run_gpu_records.py`): `test_each_run_logs_under_its_stamp`;
   `test_each_bench_run_keeps_its_own_record` (two benches → two `records-<stamp>.tsv`, the second
   not refused); `test_a_cancelled_or_killed_bench_keeps_its_record` (cancel; and `run_code` 137);
   `test_a_record_left_by_a_runner_that_died_is_kept_under_its_run_s_stamp`;
@@ -751,16 +751,16 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   `test_pull_brings_the_results_home_and_keeps_a_newer_local_file` (reshaped to the stamp: an edit
   here after the pull is kept without a word while the VM's copy stands; once a run changes the
   VM's, exit 1 naming it, whatever the local mtime).
-- [ ] **Step 2: run** `test_run_gpu_records.py`, `test_bench_each.py` → FAIL on those.
-- [ ] **Step 3: implement.**
-- [ ] **Step 4: run** `test_run_gpu*.py`, `test_bench_each.py` → `0 failed`.
-- [ ] **Step 5: the file's length.** `wc -l scripts/env/run-gpu.sh` above 1000 → move the "the VM's
+- [x] **Step 2: run** `test_run_gpu_records.py`, `test_bench_each.py` → FAIL on those.
+- [x] **Step 3: implement.**
+- [x] **Step 4: run** `test_run_gpu*.py`, `test_bench_each.py` → `0 failed`.
+- [x] **Step 5: the file's length.** `wc -l scripts/env/run-gpu.sh` above 1000 → move the "the VM's
   side" section whole to `scripts/env/run-gpu-vm.sh` (`# shellcheck shell=bash`, sourced by
   run-gpu.sh, its functions still sent as text by `on_vm`; `gpu_host.TREE_FILES` gains it; CI's
   shellcheck list names it, since `-x` reads a sourced file for definitions only), a move with no
   other change but two shellcheck directives the file needs linted alone (SC2164 file-wide: no
   `set -e` of its own; SC2032 on `vm_docker`); run Step 4 again.
-- [ ] **Step 6: report a checkpoint** `vm-setup: each run keeps its log and record under its stamp; pull skips what ship stamped, keeps a file changed on both sides, and clears what is home`.
+- [x] **Step 6: report a checkpoint** `vm-setup: each run keeps its log and record under its stamp; pull skips what ship stamped, keeps a file changed on both sides, and clears what is home`.
 
 ### Task 13: CI's `gpu-tests` names a fixed tree and cleans up with `cancel`
 
@@ -781,11 +781,11 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   of another dir, cancel under `success()`, cancel commented out, no `PEACOCK_TREE_ID`, one from
   `${{ github.run_id }}`, and the kept ones.
 
-- [ ] **Step 1: failing test** as above.
-- [ ] **Step 2: run** `scripts/build-test.sh -- cargo test -p cost-report --test
+- [x] **Step 1: failing test** as above.
+- [x] **Step 2: run** `scripts/build-test.sh -- cargo test -p cost-report --test
   test_source_formatting ci_gpu` (a tree under `/build`, Task 2's image) → FAIL.
-- [ ] **Step 3: implement** the job and the guard; run the whole `test_source_formatting` → PASS.
-- [ ] **Step 4: report a checkpoint** `vm-setup: gpu-tests names its tree and cancels its run on every outcome`.
+- [x] **Step 3: implement** the job and the guard; run the whole `test_source_formatting` → PASS.
+- [x] **Step 4: report a checkpoint** `vm-setup: gpu-tests names its tree and cancels its run on every outcome`.
 
 ### Task 14: one short table of command lines, each run as written
 
@@ -805,8 +805,8 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
     -- <test>`; `-- cargo test -p peacockdb-ffi --test test_ffi -- <test>`; `-- ctest --test-dir
     cpp/build -R <name>`; `PCK_TEST_FILTER=<f> scripts/build-test.sh --rust-only --run`.
 
-- [ ] **Step 1:** write the table and the README section.
-- [ ] **Step 2: run every line once as written**, in a tree under `/build` with Task 2's image,
+- [x] **Step 1:** write the table and the README section.
+- [x] **Step 2: run every line once as written**, in a tree under `/build` with Task 2's image,
   with real targets and test names: from the host, then as
   `scripts/build-test.sh -- bash -c '<the line>'` (a shell in the build image). Record each in the
   detail file's `## The table, run as written`: line, where, exit, wall time. Two exceptions: a
@@ -815,14 +815,14 @@ build and run images for 25.02 local, which Tasks 13, 14 and 16 use.
   tree without it is refused, exit 2, naming `git submodule update --init --depth 1
   third_party/cudf`, which `scripts/env/bootstrap-vm.sh` runs as its last step. The 26.02 row runs
   from the host in Task 15, once its image is published.
-- [ ] **Step 3: each failing line**, test first: a case in `test_build_test.py` → FAIL; fix
+- [x] **Step 3: each failing line**, test first: a case in `test_build_test.py` → FAIL; fix
   `build-test.sh`; → PASS; rerun the line. The first suspect is a `-- ctest` or an FFI `-- cargo
   test` with no `/opt/cudf/lib` on the loader path: then
   `test_a_command_has_cudf_s_libraries_on_the_loader_path` (inside the image, `-- env` shows
   `LD_LIBRARY_PATH` starting `/opt/cudf/lib`, a caller's value after it), and the export moves
   above the command's `exec`.
-- [ ] **Step 4: run** `python3 scripts/env/tests/test_build_test.py` → `0 failed`.
-- [ ] **Step 5: report a checkpoint** `vm-setup: one table of build and test lines, each run as written`.
+- [x] **Step 4: run** `python3 scripts/env/tests/test_build_test.py` → `0 failed`.
+- [x] **Step 5: report a checkpoint** `vm-setup: one table of build and test lines, each run as written`.
 
 ### Task 14a: a missing `nebius.yaml` is cut on first use
 
@@ -852,7 +852,7 @@ is only the refresh of a file that exists.
   ("The human's one-time setup"). The kind is read with the CLI's `config get` on the copy, never
   from the file; install-watch's one-profile cut keeps what it accepts now.
 
-- [ ] **Step 1: write the failing tests**, over the fake CLI the cut's tests use:
+- [x] **Step 1: write the failing tests**, over the fake CLI the cut's tests use:
   - `test_nebius.py`: `test_a_missing_config_is_cut_from_the_cli_s_own_then_used` (the file made,
     mode 600, the two profiles, and the call made with `--config` naming it);
     `test_a_cut_that_fails_is_refused_naming_the_profile` (exit 1, no file left);
@@ -862,25 +862,25 @@ is only the refresh of a file that exists.
   - `test_provision.py`: `test_a_missing_nebius_yaml_is_cut_before_anything_is_written`, and its
     refusal case (exit 2, no ssh).
   The existing mode-000 cases now cover only a run where `nebius.yaml` exists.
-- [ ] **Step 2: run them** → FAIL.
-- [ ] **Step 3: implement** in `nebius.sh` (around its missing-file check) and `provision-vm.sh`
+- [x] **Step 2: run them** → FAIL.
+- [x] **Step 3: implement** in `nebius.sh` (around its missing-file check) and `provision-vm.sh`
   (before `peacock_nebius_config_checked`); the header of `nebius-profiles.sh` and the wiki say the
   hand run is for a refresh: a profile or key that changed, or the file removed.
-- [ ] **Step 4: run** `test_nebius.py`, `test_provision.py`, `test_nebius_profiles.py`, shellcheck
+- [x] **Step 4: run** `test_nebius.py`, `test_provision.py`, `test_nebius_profiles.py`, shellcheck
   `-x` over CI's list → green; the build-test.md counts and grand total updated.
-- [ ] **Step 5: report a checkpoint** `vm-setup: a missing nebius.yaml is cut on first use`.
+- [x] **Step 5: report a checkpoint** `vm-setup: a missing nebius.yaml is cut on first use`.
 
 ### Task 15 *(coordinator)*: publish the branch's images; the PR is green
 
 Needs GitHub alone: the branch pushed with Task 1's commit. It may run as soon as that commit is
 pushed, and must before any CI run on the branch is read or any VM pulls an image.
 
-- [ ] **Step 1:** `gh workflow run images.yml --ref ENS-vm-setup -f kind=all -f cudf=all` → five
+- [x] **Step 1:** `gh workflow run images.yml --ref ENS-vm-setup -f kind=all -f cudf=all` → five
   jobs green (build 25.02, 25.10, 26.02; run 25.02, 26.02).
-- [ ] **Step 2:** for each, `docker buildx imagetools inspect
+- [x] **Step 2:** for each, `docker buildx imagetools inspect
   ghcr.io/asymptote-tech/peacockdb-<kind>:$(bash -c '. scripts/lib/image-inputs.sh; image_inputs_tag
   . <kind> <v>')` → a digest; `…:cudf-<v>` keeps its digest from before. Record the five.
-- [ ] **Step 3:** the table's 26.02 row, from the host in the `/build` tree:
+- [x] **Step 3:** the table's 26.02 row, from the host in the `/build` tree:
   `rm -rf cpp/build cpp/install && scripts/build-test.sh --cudf 26.02 --build` → exit 0; record
   it in `## The table, run as written` (exit, wall time). Then `rm -rf cpp/build cpp/install`, so
   Task 16's 25.02 build is not refused.
