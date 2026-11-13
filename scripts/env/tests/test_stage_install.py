@@ -124,6 +124,21 @@ def test_stage_install_builds_the_prototype_target():
         assert "--strip-debug cpp/install/rust-benchmarks/prototype_fused_benchmarks" in t.lines("strip.log")
 
 
+def test_stage_install_no_release_bench_builds_no_release_benchmark():
+    # CI's staging: the device rung alone, as the L40S list runs it; no bench is run there.
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Tree(tmp)
+        (t.install / "rust-benchmarks").mkdir(parents=True)
+        (t.install / "rust-benchmarks" / "peacock_gpu_benchmarks").write_text("an earlier build")
+        r = ok(t.run("--no-release-bench"))
+        staged = sorted(p.name for p in (t.install / "rust-tests").iterdir())
+        assert staged == sorted(GPU_TESTS + ["peacockdb_core_gpu_lib"]), staged
+        assert not (t.install / "rust-benchmarks").exists()
+        assert not [c for c in t.cargo() if "--release" in c["argv"]], t.cargo()
+        assert not [ln for ln in t.lines("strip.log") if "rust-benchmarks" in ln], t.lines("strip.log")
+        assert "rust-benchmarks" not in r.stdout, r.stdout
+
+
 def test_stage_install_stages_from_empty():
     with tempfile.TemporaryDirectory() as tmp:
         t = Tree(tmp)

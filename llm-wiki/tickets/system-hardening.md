@@ -90,8 +90,8 @@ dataset-matrix tier, and teach the guard that `--doc` is a target class it must 
 **Priority: low** — a cost, not a defect; it waits on `verify-26.02`.
 
 The engine compiles and is tested against two cuDF versions: 25.02 on shad-gpu
-(`envs/rapids-cuda-12.2`) and 26.02 on verda (`envs/rapids`), with the CI's "26.02" leg really
-25.10a ([#129](testinfra.md#t129)). 25.02 was kept only because shad-gpu's driver is 535
+(`envs/rapids-cuda-12.2`) and 26.02 on verda (`envs/rapids`), and CI's second leg on 25.10
+([#129](../archive/archived-tickets.md#t129)). 25.02 was kept only because shad-gpu's driver is 535
 (CUDA 12.2) and the host gives no sudo to upgrade it.
 
 That constraint may be gone. shad-gpu already holds a 26.02 environment,
@@ -105,7 +105,7 @@ What dropping 25.02 would remove: the `__has_include(<cudf/join/join.hpp>)` head
 `join.cpp` and the gtests; the portable-constructor constraints on `hash_join` and
 `distinct_hash_join`; the CI's 25.02 C++ build job; `rapids-cuda-12.2` in the shad-gpu scripts
 and `build-test.md`. What it would allow: the 26.02-only joins of [#242](performance.md#t242),
-one cuDF for every host, and a CI leg that is really 26.02 (#129). To evaluate: whether every tier
+one cuDF for every host, and a CI leg on 26.02 (its second leg is 25.10 today). To evaluate: whether every tier
 passes on shad-gpu's 26.02 (verify-26.02's record), whether sf40 benchmarks on the H200 hold or
 improve, and whether anything else on shad-gpu (the actions runner, its jobs) depends on the
 25.02 environment.
@@ -171,7 +171,8 @@ Both cuDF environments were created from one `conda list --explicit` of the buil
 - libarrow 21.0.0 (cpu);
 - cuda-version 12.9, cuda-cudart 12.9.79, nvcc 12.9.86 from that env.
 
-The build is `scripts/build-test.sh --gpu --build` with gcc-14 14.2.0, cmake 4.2.3 or 4.3.4,
+The build was the host build `build-test.sh --gpu --build` made before containers-only, into
+`cpp/build26`, with gcc-14 14.2.0, cmake 4.2.3 or 4.3.4,
 ninja 1.12.1 and rustc 1.99.0. `libpeacock_gpu.so` is built for sm_80 and sm_90, so both cards
 JIT its PTX. That does not matter here: the faulting kernel is in libcudf, which ships SASS for
 both cards.
@@ -179,7 +180,9 @@ both cards.
 The data is `testdata/generate_testdata.sh --bench tpch` with the DuckDB 1.5.4 release CLI and
 synthetic embeddings. `lineitem.parquet` has sha256 `91e14da396295b2f…`, the same on both hosts.
 
-**To reproduce** on either host, from the repo root, after the build:
+**To reproduce** on either host, from the repo root, after that build (today's equivalent is
+`scripts/build-test.sh --cudf 26.02 --gpu --build`, which stages `cpp/install/`, run in the 26.02
+run image with `--entrypoint`):
 
     E=<the cuDF env>
     LD_LIBRARY_PATH=cpp/build26/install/lib:$E/lib PEACOCK_TESTDATA_DIR=$PWD/testdata \

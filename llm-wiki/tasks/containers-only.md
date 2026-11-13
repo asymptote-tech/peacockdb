@@ -95,3 +95,9 @@ Component-level API: none.
   secrets").
 - The dataset and DuckDB pins stay those of `docker/pins.env`, and the generated sf1 stays
   byte-identical to today's.
+
+## Signoff (2026-11-08, coordinator)
+
+Solved under its constraints: every CI job builds and tests in `peacockdb-build:cudf-<v>`, found by its inputs tag (legs 25.02 and an honest 25.10, #129 a closed); `gpu-tests` runs on the L40S through `run-gpu.sh` and the run image; local builds go through `build-test.sh` in the image; the conda and machine-setup scripts are gone; the wiki shows one path, shad-gpu the exception. Counts per tier equal the parent's, and sf1 is byte-identical. No engine change.
+Shortcuts: four script test files run on the runner, not in the image (no en_US locale, no name for uid 1001: #309), as does `shellcheck`. verda is off the image path and was never run: it was down, and an rsync'd tree has no `.git`. Not run in CI: `call-cost`, and validate-large's ssh half (shad-gpu is down). The multi-GPU tests were built, never run on two GPUs. `bench-each.sh`, Nsight and the fused binary ran one case each.
+After the merge (the human): dispatch `images.yml -f kind=all -f cudf=all` on master once open branches that read `:cudf-<v>` have rebased; rewrite chain J's board override and `verify-26.02-impl.md` (they name the deleted scripts); then clear nebius-gpu's `~/peacockdb-ci/`, `~/miniforge3` and `~/peacock-env.sh`, and the dev worktrees' host `target*/` and `cpp/build`. #310 tracks nebius-gpu's disk filling with images.

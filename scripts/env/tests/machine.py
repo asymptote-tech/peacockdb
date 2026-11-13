@@ -23,6 +23,12 @@ CLONE_FILES = [
 ]
 GITCONFIG = "[user]\n\tname = Machine User\n\temail = machine@example.test\n"
 
+# What docker pull says when the registry has no such tag (dev's docker, then an older one's), and on
+# a network error.
+UNPUBLISHED = ['Error response from daemon: failed to resolve reference "{ref}": {ref}: not found',
+               "Error response from daemon: manifest for {ref} not found: manifest unknown: manifest unknown"]
+NO_HOST = 'Error response from daemon: Get "https://ghcr.io/v2/": dial tcp: lookup ghcr.io: no such host'
+
 FAKE_DOCKER = r'''#!/usr/bin/env python3
 import fcntl, json, os, pathlib, sys, time
 a = sys.argv[1:]
@@ -39,6 +45,9 @@ def update(fn):
         return w
 
 w = update(lambda w: None)
+if a[0] == "pull" and w.get("pull_error"):
+    print(w["pull_error"], file=sys.stderr)
+    sys.exit(1)
 if a[0] in ("info", "pull"):
     sys.exit(0)
 if a[:2] == ["image", "inspect"] and "peacockdb.inputs" in a[a.index("--format") + 1]:

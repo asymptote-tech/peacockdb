@@ -310,7 +310,7 @@ def test_a_call_inside_a_probe_s_replan_counts_and_a_replan_that_keeps_the_previ
 
 
 def test_the_committed_page_renders_with_pandas_pyarrow_and_numpy_blocked():
-    # The cost-report job's python3 has pandas from the prototype's step, so CI's render alone
+    # The cost-report job's python3, the build image's, has pandas, so CI's render alone
     # would not show that the page needs none; blocked here, an import of one anywhere fails.
     root = pathlib.Path(__file__).resolve().parents[3]
     blocked = ("pandas", "pyarrow", "numpy")

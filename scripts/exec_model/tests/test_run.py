@@ -11,6 +11,7 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/<file>.p
 
 import os
 import pathlib
+import re
 import tempfile
 
 from .harness import main, raises
@@ -142,7 +143,12 @@ def test_a_missing_dataset_or_dphyp_library_is_refused_before_any_work():
         was = os.environ.get("PEACOCK_DPHYP_LIB")
         os.environ["PEACOCK_DPHYP_LIB"] = str(root / "absent.so")
         try:
-            with raises(RuntimeError, match="PEACOCK_DPHYP_LIB"):
+            # The refusal names the image's build and the library it leaves, as the README does.
+            with raises(RuntimeError, match=re.escape(
+                    "scripts/build-test.sh -- cargo build --release -p peacockdb-dphyp")):
+                preflight(["tpch"], root)
+            with raises(RuntimeError, match=re.escape(
+                    "PEACOCK_DPHYP_LIB=$PWD/target-img-25.02/release/libpeacockdb_dphyp.so")):
                 preflight(["tpch"], root)
         finally:
             if was is None:

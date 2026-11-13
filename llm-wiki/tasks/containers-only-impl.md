@@ -87,9 +87,11 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
    build: refuse, naming both. Cargo target dirs are separate per version and always inside the
    worktree. → Task 2, `test_refuses_cpp_build_of_another_cudf`,
    `test_target_dir_is_per_worktree_and_version`.
-4. **A cancelled `gpu-tests` run leaves `peacock-peacockdb` running on the VM.** The next run
+4. **A cancelled `gpu-tests` run leaves its container running on the VM.** The next run
    should not hang or skip. Cleanup removes the container on every outcome, and `run` refuses a
-   busy name with exit 2. → Task 6, `ci_images.rs::the_gpu_cleanup_removes_the_run_container`.
+   busy name with exit 2. The job's dir and container are `ci`'s (`--dir ci`, `peacock-ci`), never
+   a developer's clone's. → Task 6 and review round 1,
+   `ci_gpu.rs::the_gpu_job_owns_its_dir_and_removes_its_container`.
 5. **A secret passed into the image.** The AWS keys for `s3-datasets`/`validate-large`
    should never appear in argv or `ps`. → Task 2,
    `test_pass_env_never_puts_a_value_in_argv`.
@@ -121,7 +123,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `DRIVER_MINIMUM_25_10`.
 - Produces: `ghcr.io/asymptote-tech/peacockdb-build:cudf-25.10` (+ the inputs tag); no run image.
 
-- [ ] **Step 1: export the spec on dev.** `docker run --rm -v "$PWD/docker/conda:/out"
+- [x] **Step 1: export the spec on dev.** `docker run --rm -v "$PWD/docker/conda:/out"
   mambaorg/micromamba:<MICROMAMBA_VERSION without -0> bash -c 'micromamba create -y -p /tmp/e
   -c rapidsai -c conda-forge -c nvidia cudf=25.10 cuvs=25.10 python=3.12 cuda-version=12.9 &&
   micromamba env export -p /tmp/e --explicit --md5 > /out/cudf-25.10.spec'`. Match the header
@@ -129,7 +131,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   rapids-library package name in the 26.02 spec (`libcudf libcuvs libraft* librmm libkvikio
   rapids-logger`, and others), check it is present in the 25.10 spec. Record in the detail file
   the `libcudf`, `libarrow` and `cuda-version` lines, plus any name missing with its reason.
-- [ ] **Step 2: failing tests.**
+- [x] **Step 2: failing tests.**
   - `test_pins.py`: `PINS["GCC_25_10"] = "14"`; `IDENTITY["25.10"]` = the libcudf `25.10.*`,
     libarrow and `cuda-version 12.9` lines from Step 1;
     `test_a_build_only_version_has_no_driver_minimum`: `DRIVER_MINIMUM_25_10` not in pins.
@@ -147,20 +149,20 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     `v`. Update `test_all_runs_every_other_choice…` so `exclude` is not read as a matrix axis.
     `test_only_the_default_branch_moves_the_tag`: the push step passes `--moving` only under a
     condition on `github.ref` equal to the default branch's ref.
-- [ ] **Step 3: run** `for f in scripts/env/tests/test_{pins,image,images_workflow}.py; do python3 $f; done`
+- [x] **Step 3: run** `for f in scripts/env/tests/test_{pins,image,images_workflow}.py; do python3 $f; done`
   → FAIL on the new tests only.
-- [ ] **Step 4: implement.** Write the spec, pin, Dockerfile stage, `image_inputs_tag`, and the
+- [x] **Step 4: implement.** Write the spec, pin, Dockerfile stage, `image_inputs_tag`, and the
   `image.sh` tags and refusal. images.yml: `options: ['25.02', '25.10', '26.02', all]` and
   `exclude: [{kind: run, cudf: '25.10'}]` in block form, which the test's reader accepts.
-- [ ] **Step 5: run** Step 3's loop, then every `scripts/env/tests/test_*.py` that needs no image
+- [x] **Step 5: run** Step 3's loop, then every `scripts/env/tests/test_*.py` that needs no image
   → `0 failed`.
-- [ ] **Step 6: build and prove 25.10 on dev.** Run `scripts/env/image.sh build build 25.10`.
+- [x] **Step 6: build and prove 25.10 on dev.** Run `scripts/env/image.sh build build 25.10`.
   Then, in `docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/h -v "$PWD:$PWD" -w "$PWD"
   -e CARGO_TARGET_DIR="$PWD/target-img-25.10" <image>`, run `scripts/build.sh --configure
   --build --install --cudf_ROOT /opt/cudf --gcc-version 14`, then `cargo test --no-run -p
   peacockdb-core --lib` → both succeed. Record the image size in the detail file.
-- [ ] **Step 7: commit** `containers-only: a CI-only cuDF 25.10 build image; images carry an inputs tag`.
-- [ ] **Step 8: publish (coordinator).** `images.yml` must be on master, because GitHub dispatches
+- [x] **Step 7: commit** `containers-only: a CI-only cuDF 25.10 build image; images carry an inputs tag`.
+- [x] **Step 8: publish (coordinator).** `images.yml` must be on master, because GitHub dispatches
   only the default branch's workflows. If `gh workflow list --all | grep -w images.yml` finds
   nothing, stop, `blocked(building)`, and ask the human to land this branch's
   `.github/workflows/images.yml` alone on master, as a separate commit (approved in advance). Never
@@ -241,7 +243,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     --remote-cudf-root --gcc-version --push-* --pull-* --all --build-benchmarks --run-benchmarks
     --pull-benchmarks --update-canonical`.
 
-- [ ] **Step 1: failing tests**, with fake `docker`, `cargo`, `ctest` and `stage-install.sh` on
+- [x] **Step 1: failing tests**, with fake `docker`, `cargo`, `ctest` and `stage-install.sh` on
   PATH recording argv, in a fake tree as `test_image.py`'s `Repo()` does.
   - `test_image_ref.py`:
     - `test_prefers_the_local_inputs_tag`;
@@ -270,8 +272,8 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     - `test_command_form_passes_the_exit_code` (`-- false` → 1);
     - `test_runner_temp_is_mounted_when_set` (`RUNNER_TEMP=<tmp>` → `-v <tmp>:<tmp>` and `-e
       RUNNER_TEMP` in argv; unset → neither).
-- [ ] **Step 2: run** both files → FAIL (no script).
-- [ ] **Step 3: implement** `image-ref.sh` and the new `build-test.sh`. Delete `cargo-cudf.sh`. In
+- [x] **Step 2: run** both files → FAIL (no script).
+- [x] **Step 3: implement** `image-ref.sh` and the new `build-test.sh`. Delete `cargo-cudf.sh`. In
   runners.rs, replace `build_test_gpu_lib()` with `container_gpu_lib()`. It returns the staged
   name from `scripts/env/stage-install.sh`'s `stage <name> …--lib…` line, and `LIB_RUNG=` from
   `docker/run-tests.sh` (`script_lib`). Add `run_tests_rung_reaches_the_binary()`: in run-tests.sh's
@@ -279,11 +281,11 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   and every `run_binary` line passes `"${args[@]}"`. The `runners` loop at line 334 keeps
   SHADGPU only; run-tests.sh is checked by the new function. Update the failure messages that
   name `build-test.sh --gpu`.
-- [ ] **Step 4: run** both Python files → `0 failed`. Then run
+- [x] **Step 4: run** both Python files → `0 failed`. Then run
   `scripts/build-test.sh -- cargo test -p cost-report --test test_source_formatting` → all pass.
   Then `scripts/build-test.sh --rust-only --build --run` on dev → green, with the cpu counts of
   build-test.md's table (`--lib` 780, `test_cpu_corpus` 2009, …). Record them in the detail file.
-- [ ] **Step 5: commit** `containers-only: build-test.sh builds and runs in the build image; image-ref.sh; cargo-cudf.sh gone`.
+- [x] **Step 5: commit** `containers-only: build-test.sh builds and runs in the build image; image-ref.sh; cargo-cudf.sh gone`.
 
 ### Task 3: the CPU-only jobs in the image (`cost-report`, `s3-datasets`)
 
@@ -313,13 +315,13 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   as the runner shell's redirect after the wrapped command. This task lists `pipeline.yml`
   `cost-report` and `s3-datasets`.
 
-- [ ] **Step 1: counts before (coordinator).** The count baseline (Global Constraints): `id=$(gh
+- [x] **Step 1: counts before (coordinator).** The count baseline (Global Constraints): `id=$(gh
   run list --workflow pipeline.yml --branch ENS-tp4-sized --event pull_request --status success -L1
   --json databaseId -q '.[0].databaseId'); gh run view $id --log > <scratch>/before.log` (this
   branch's own first PR run, before Step 3, if the parent has none). Save, per job, the lines
   matching `test result:`, `\[  PASSED  \]` and the Python harness's summary, to the detail file
   `## Counts before`, naming the run.
-- [ ] **Step 2: failing tests** `ci_images.rs::every_listed_job_runs_in_the_build_image` (as in
+- [x] **Step 2: failing tests** `ci_images.rs::every_listed_job_runs_in_the_build_image` (as in
   Interfaces), and its doctored-workflow cases: `a_bare_cargo_line_in_a_listed_job_is_refused`
   (a `cost-report`-shaped job with `run: cargo test -p cost-report` → refused, naming the job and
   line; the same line in `RUNNER_SIDE` → accepted) and `a_wrapped_command_writing_an_unmounted_path_is_refused`
@@ -327,7 +329,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `--md "$RUNNER_TEMP/r.md"` and `scripts/build-test.sh -- … >> "$GITHUB_OUTPUT"` → accepted). Run `scripts/build-test.sh -- cargo test -p cost-report --test
   test_source_formatting ci_images` → FAIL (the action is absent; cost-report still has
   `dtolnay`).
-- [ ] **Step 3: move the jobs.**
+- [x] **Step 3: move the jobs.** (As built, beside this text: the detail file's `## Task 3`.)
   - `cost-report`: after checkout (fetch-depth 0), use the action with `cudf: "25.02"`, then
     Swatinem with `shared-key: rust-cost-report-image` and `workspaces: ". ->
     target-img-25.02"`. Every `python3 …`/`cargo …` line becomes `scripts/build-test.sh -- <same
@@ -348,12 +350,12 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   - `s3-datasets`: use the action, then `scripts/build-test.sh --pass-env AWS_ACCESS_KEY_ID
     --pass-env AWS_SECRET_ACCESS_KEY -- python3 scripts/check_s3_datasets.py --endpoint …`. Its
     fork guard and `exit 0` on missing keys stay on the runner.
-- [ ] **Step 4: run** the guard locally → PASS. Then (coordinator) push; on the branch's PR run,
+- [x] **Step 4: run** the guard locally → PASS (done, 47 passed; the detail file). Then (coordinator) push; on the branch's PR run,
   `cost-report` and `s3-datasets` are green, and the counts equal Step 1's baseline, plus the
   `benchmarks/tests` suites now run. The coordinator hands any red job or moved count to the
   developer as a failing test, with the venv pins (`pandas 3.0.6`, `matplotlib`) as the first
   suspect for a count; the developer explains it in the detail file.
-- [ ] **Step 5: commit** `containers-only: cost-report and s3-datasets run in the build image`.
+- [x] **Step 5: commit** `containers-only: cost-report and s3-datasets run in the build image`.
 
 ### Task 4: `dataset-matrix` in the image, legs 25.02 and 25.10 (#129 a)
 
@@ -377,20 +379,24 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   ccache` with `LDFLAGS=-Wl,-rpath-link,/opt/cudf/lib`, then `ccache -s` in the image. No conda,
   no cmake/ninja download: the image has both at the pins.
 
-- [ ] **Step 1: failing tests** in `ci_images.rs`. First, add `dataset-matrix` to
+- From Task 3 (detail file `## Task 3`): `benchmarks/tests/test_duckdb_minimal.py` needs the
+  generated sf1, which cost-report lacks, so it lands here: the 25.02 leg runs it after `Generate
+  SF-1`, wrapped, and build-test.md's row for it moves off "manual". The build-image action takes
+  `ccache: 'true'` here (key `ccache-img-<cudf>-<sha>`); cpp-build's own ccache step goes.
+- [x] **Step 1: failing tests** in `ci_images.rs`. First, add `dataset-matrix` to
   `IN_IMAGE_JOBS`. Then `every_cudf_leg_has_a_build_image`: each `- cudf: "<v>"` leg in
   pipeline.yml has `docker/conda/cudf-<v>.spec`, no leg has an `image:` key, and the job passes
   `${{ matrix.cudf }}` to the action. Run → FAIL.
-- [ ] **Step 2: byte-identity of sf1 on dev.** In a fresh worktree, run `scripts/build-test.sh --
+- [x] **Step 2: byte-identity of sf1 on dev.** In a fresh worktree, run `scripts/build-test.sh --
   testdata/generate_testdata.sh --bench tpch` and the same for `--bench tpcds`. Separately, on the
   host, generate into another fresh worktree with the release zip, exactly as pipeline.yml lines
   156–176 do today. Then `(cd testdata && sha256sum tpch.sf1/*.parquet tpcds.sf1/*.parquet)` in
   each → identical. Record the two aggregate hashes.
-- [ ] **Step 3: FFI runtime path on dev.** Run `scripts/build-test.sh -- cargo test -p
+- [x] **Step 3: FFI runtime path on dev.** Run `scripts/build-test.sh -- cargo test -p
   peacockdb-ffi --test test_ffi` after a cpp build. If a library is not found, set
   `LD_LIBRARY_PATH: /opt/cudf/lib` in the two Rust steps' env, where it reaches the image through
   the fixed pass-through. Otherwise drop the variable. Record which in the detail file.
-- [ ] **Step 4: move the job.** Remove `container:`, `Install git`, `dtolnay` and the DuckDB curl.
+- [x] **Step 4: move the job.** (As built, beside this text: the detail file's `## Task 4`.) Remove `container:`, `Install git`, `dtolnay` and the DuckDB curl.
   Checkout keeps `submodules: recursive`. Use the action with `cudf: ${{ matrix.cudf }}` and the
   cpp-build action. Swatinem gets `shared-key: rust-image-${{ matrix.cudf }}` and
   `workspaces: ". -> target-img-${{ matrix.cudf }}"`. Every `ctest`/`cargo`/`python3`/
@@ -399,18 +405,18 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `CUDF_ROOT: /opt/conda` and `LD_LIBRARY_PATH: /opt/conda/lib`. Every comment that names the
   rapids container, the tmpfs or glibc-per-image is rewritten to what is true now: one image
   per leg, and a target dir per leg.
-- [ ] **Step 5: #129.** Close it the way `tickets.md` line 17 says. Its text records that the
+- [x] **Step 5: #129.** Close it the way `tickets.md` line 17 says. Its text records that the
   second leg is now `25.10` in `peacockdb-build:cudf-25.10` and that (b) was closed earlier.
   Update `testinfra.md`'s Contents and count, the index line, and `tickets.md`'s open-ticket
   total (line 22, one fewer). Update `build-test.md`'s CI
   section and every other line that names a 26.02 CI leg to 25.10. The 26.02 images stay for
   developer and device use.
-- [ ] **Step 6: run** `scripts/build-test.sh -- cargo test -p cost-report --test
+- [x] **Step 6: run** `scripts/build-test.sh -- cargo test -p cost-report --test
   test_source_formatting` → PASS. Then (coordinator) push; both legs are green on the PR, their
   counts per step equal the count baseline's 25.02 leg, and the 25.10 leg's equal the baseline's
   "26.02" leg; `Generate SF-1` logs `generate_pbench.sh --check` passing. A moved count or a red
   step reaches the developer as a failing test; the developer explains it in the detail file.
-- [ ] **Step 7: commit** `containers-only: dataset-matrix in the build image, an honest 25.10 leg (closes #129)`.
+- [x] **Step 7: commit** `containers-only: dataset-matrix in the build image, an honest 25.10 leg (closes #129)`.
 
 ### Task 5: what `run-gpu.sh` needs for CI and for agents
 
@@ -440,7 +446,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     non-zero, 5 for running, and 2 for none. This is what `nebius-test.sh run`/`status` gave
     agents.
 
-- [ ] **Step 1: failing tests**: `test_run_uses_the_given_run_image`,
+- [x] **Step 1: failing tests**: `test_run_uses_the_given_run_image`,
   `test_prepare_no_sf40_reads_no_env_file` (no env read from stdin, no `fetch-sf40.sh` call),
   `test_prepare_no_sf40_skips_the_nsight_setup` (counters admin-only on the fake host → exit 0, no
   `peacock-profiling.conf` written, no `/opt/cudf` copy),
@@ -449,10 +455,10 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   stream), `test_status_reports_running_then_exit`, `test_detached_run_returns_while_running`.
   Port every case of `scripts/nebius/tests/test_ci_ship.py` that still applies, and name any
   dropped case and why in the detail file.
-- [ ] **Step 2: run** `python3 scripts/env/tests/test_run_gpu.py` → FAIL on the new ones.
-- [ ] **Step 3: implement.** Run `shellcheck scripts/env/run-gpu.sh` → clean.
-- [ ] **Step 4: run** → `0 failed`; every other `scripts/env/tests/test_*.py` needing no image → `0 failed`.
-- [ ] **Step 5: commit** `containers-only: run-gpu.sh takes CI's run image, ships like ci-ship, runs detached`.
+- [x] **Step 2: run** `python3 scripts/env/tests/test_run_gpu.py` → FAIL on the new ones.
+- [x] **Step 3: implement.** Run `shellcheck scripts/env/run-gpu.sh` → clean.
+- [x] **Step 4: run** → `0 failed`; every other `scripts/env/tests/test_*.py` needing no image → `0 failed`.
+- [x] **Step 5: commit** `containers-only: run-gpu.sh takes CI's run image, ships like ci-ship, runs detached`.
 
 ### Task 6: `cpp-build-2502` in the image; `gpu-tests` through `run-gpu.sh`
 
@@ -464,6 +470,10 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `ci_coverage.rs:32–35, 556–578` (F5 reads stage-install.sh), `ci_images.rs`
 - Delete: `scripts/nebius-test.sh`, `scripts/nebius/ci-ship.sh`, and their tests under
   `scripts/nebius/tests/` (`test_ci_ship.py`, `test_nebius_test.py`)
+- Delete: `.github/actions/cpp-build-conda/` (Task 4 kept HEAD's conda `cpp-build` there for this
+  job alone, since a job in a rapids container cannot run `build-test.sh`'s `docker run`). With
+  `ccache: 'true'` on this job's build-image step, it shares the key `ccache-img-25.02-<sha>` with
+  dataset-matrix's 25.02 leg: the second save in a run is refused with a warning, not an error
 - Modify (kept, spec item 2's "reduced to what `run-gpu.sh` lacks"): `scripts/nebius-sync.sh`
   becomes the tree transfer alone, the uncommitted workspace to a VM, which new-hosts' CPU-VM
   build and the wiki's recipes use. Its sf1 generation goes (it sourced the conda
@@ -504,7 +514,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 
   "Bundle Arrow/Parquet runtime libraries" goes: the run image's `/opt/cudf` holds them.
 
-- [ ] **Step 1: failing guard tests.**
+- [x] **Step 1: failing guard tests.**
   - runners.rs: `gpu_job_staged_targets()` reads `scripts/env/stage-install.sh`.
     `the_pipeline_stages_through_stage_install`: the step `GPU_STAGING_STEP` contains
     `build-test.sh --gpu --build`.
@@ -524,24 +534,24 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     `IN_IMAGE_JOBS`.
 
   Run → FAIL.
-- [ ] **Step 2: implement** the pipeline, the `stage-install.sh` flag, the guard readers and
+- [x] **Step 2: implement** the pipeline, the `stage-install.sh` flag, the guard readers and
   the deletions. Then `grep -rn 'nebius-test\.sh\|ci-ship\.sh\|peacock-env\.sh\|miniforge'
   --exclude-dir=archive --exclude-dir=tasks .` → only shad-gpu's files and their docs; `grep -n
   'generate_testdata\|peacock-env' scripts/nebius-sync.sh` → nothing.
-- [ ] **Step 3: run** `scripts/build-test.sh -- cargo test -p cost-report --test
+- [x] **Step 3: run** `scripts/build-test.sh -- cargo test -p cost-report --test
   test_source_formatting` → PASS. Run `python3` on each `scripts/nebius/tests/test_*.py` →
   `0 failed`.
-- [ ] **Step 4: commit; (coordinator) push; the PR is green.** `cpp-build-2502` uploads an
+- [x] **Step 4: commit; (coordinator) push; the PR is green.** `cpp-build-2502` uploads an
   artifact that holds `lib/libpeacock_gpu.so`, `bin/peacock_*_tests` and the four `rust-tests/`
   files.
-- [ ] **Step 5: `prepare` on nebius-gpu by hand, once, before any CI dispatch.** With the sandbox
+- [x] **Step 5: `prepare` on nebius-gpu by hand, once, before any CI dispatch.** With the sandbox
   off: `scripts/nebius.sh start`; `scripts/nebius.sh ssh 'df -h /'` (below 10 GB free: stop, an
   obstacle in the detail file, build-test.md "Disk"); `timeout 2400 scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt prepare
   --no-sf40` → exit 0 (Docker, the toolkit, sf1 and the run image in place). An exit 4 is handled
   by `scripts/nebius.sh stop --force && scripts/nebius.sh start` and a second `prepare --no-sf40`.
   `scripts/nebius.sh ssh 'df -h /'` again; record both, the wall time and what the run image and
   sf1 took; `scripts/nebius.sh stop`.
-- [ ] **Step 6: device run through CI (coordinator).** The coordinator runs `gh workflow run
+- [x] **Step 6: device run through CI (coordinator).** The coordinator runs `gh workflow run
   pipeline.yml --ref ENS-containers-only` (its actor is in `GPU_ALLOWED_ACTORS`) and watches the
   run. Pass means `gpu-tests` green and its log shows the run image's digest, `run-tests.sh
   list: green`, no `miniforge`, and per-binary counts equal the count baseline's `gpu-tests`, or
@@ -549,7 +559,7 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   times for prepare, ship and run, and the job log's `df -h /`, and hands any failure or moved
   count to the developer as a failing test. Pass also means the job stopped the VM, or the
   watcher did.
-- [ ] **Step 7: commit** any fix with its failing test first:
+- [x] **Step 7: commit** any fix with its failing test first:
   `containers-only: gpu-tests ships and runs on nebius-gpu through run-gpu.sh; the old runner goes`.
 
 ### Task 7: `exec-model-corpus.yml` and `validate-large.yml` in the image; the guard covers every job
@@ -570,8 +580,11 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   No job of the three has a `container:` key, and no line in them or in `.github/actions/` contains
   `conda install`, `pip install` or `rapidsai/`.
 
-- [ ] **Step 1: failing test** (as above) → FAIL (`corpus` and `validate-large` are unlisted).
-- [ ] **Step 2: move.**
+- [x] **Step 1: failing test** (as above) → FAIL (`corpus` and `validate-large` are unlisted).
+  As built (detail file, `## Task 7`): every workflow under `.github/workflows/` is read, not three,
+  so `HOST_JOBS` also names images.yml's `image` and nebius-watch.yml's `watch`; a host job is held
+  to no project command on the runner. It also found `call-cost`, unlisted.
+- [x] **Step 2: move.**
   - `corpus` uses the action with `cudf: "25.02"`. `scripts/build-test.sh --
     testdata/generate_testdata.sh --bench tpch` and the same for tpcds; the `pip install` and the
     curl go. The run step becomes `scripts/build-test.sh -- python3 "$f" ${FILTER:+"$FILTER"}`, with
@@ -580,8 +593,10 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     then `scripts/build-test.sh --pass-env AWS_ACCESS_KEY_ID --pass-env AWS_SECRET_ACCESS_KEY --
     python3 scripts/check_s3_datasets.py --endpoint …`; `pip install awscli` goes (aws is in the
     image).
-- [ ] **Step 3: run** the guard → PASS.
-- [ ] **Step 4: live.**
+  - `call-cost` (not in the plan; exec-model-corpus.yml's second job) uses the action too:
+    `fetch_record.sh tpch.sf40` and the check through build-test.sh, the keys by `--pass-env`.
+- [x] **Step 3: run** the guard → PASS.
+- [x] **Step 4: live.**
   - (coordinator) `gh workflow run exec-model-corpus.yml --ref ENS-containers-only -f filter=q1`.
     Pass means three shards green, each running ≥ 1 test; a red shard reaches the developer as a
     failing test.
@@ -589,8 +604,8 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
     instead: `set -a; . ~/.config/peacock/peacock.env; set +a; scripts/build-test.sh --pass-env
     AWS_ACCESS_KEY_ID --pass-env AWS_SECRET_ACCESS_KEY -- python3 scripts/check_s3_datasets.py
     --endpoint https://storage.eu-north1.nebius.cloud:443` → exit 0. Record in the detail file
-    that the ssh half was not run, and why.
-- [ ] **Step 5: commit** `containers-only: the manual workflows run in the build image; every CI job is accounted for`.
+    that the ssh half was not run, and why. Done on dev, 2026-11-07: exit 0.
+- [x] **Step 5: commit** `containers-only: the manual workflows run in the build image; every CI job is accounted for`.
 
 ### Task 8: delete the conda and machine-setup scripts
 
@@ -606,12 +621,12 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   machine installs Docker by hand; the wiki says so in one line. No script is reduced to a
   Docker installer, since both installs already exist.
 
-- [ ] **Step 1:** delete the five files (`rm`; the coordinator stages the deletions).
-- [ ] **Step 2:** run the grep → empty outside `llm-wiki/archive/` and `llm-wiki/tasks/`. Run
+- [x] **Step 1:** delete the five files (`rm`; the coordinator stages the deletions).
+- [x] **Step 2:** run the grep → empty outside `llm-wiki/archive/` and `llm-wiki/tasks/`. Run
   `grep -rn 'conda install\|miniforge\|rapids-cuda-12.2\|envs/rapids' --exclude-dir=archive
   --exclude-dir=tasks . | grep -v 'third_party/'` → only shad-gpu's files (`build-test-shadgpu.sh`,
   `lib/shadgpu-env.sh`, `setup-glibc.sh`) and the shad-gpu wiki section.
-- [ ] **Step 3: commit** `containers-only: the conda installers and machine-setup scripts go`;
+- [x] **Step 3: commit** `containers-only: the conda installers and machine-setup scripts go`;
   (coordinator) push; the PR is green.
 
 ### Task 9: the wiki describes one path
@@ -640,10 +655,10 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
 - Produces: the detail file's `## Wiki commands run`: every command in the edited sections,
   with the host it ran on and its exit code.
 
-- [ ] **Step 1:** `grep -rn 'build-test\.sh --host\|--local-cudf-root\|cargo-cudf\|CUDF_ROOT=\|conda\|nebius-test\|gpu-host-test\|gpu-host-sync\|rapidsai/base'
+- [x] **Step 1:** `grep -rn 'build-test\.sh --host\|--local-cudf-root\|cargo-cudf\|CUDF_ROOT=\|conda\|nebius-test\|gpu-host-test\|gpu-host-sync\|rapidsai/base'
   llm-wiki/*.md .claude/agents/` → the list to rewrite. Rewrite it in short sentences
   (prompts.md "Shared rules"). Name the CI-only 25.10 image once in "Images", with "no run image".
-- [ ] **Step 2: run every command once on dev** in a fresh worktree:
+- [x] **Step 2: run every command once on dev** in a fresh worktree:
   - `scripts/build-test.sh --rust-only --build --run`;
   - `scripts/build-test.sh --build --run` (FFI; counts = build-test.md's ffi row);
   - `scripts/build-test.sh --gpu --build`;
@@ -666,8 +681,10 @@ the branch holds them) and new-hosts' renames: `scripts/nebius.sh`, `scripts/neb
   `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu`, as
   new-hosts' section words them. Record each in `## Wiki commands run`. A command that fails is
   fixed in the wiki or the script, test first, before the commit.
-- [ ] **Step 3:** `grep` from Step 1 → only shad-gpu lines and archive/tasks.
-- [ ] **Step 4: commit** `containers-only: one build-and-run path in the wiki; shad-gpu the one exception`.
+  Done 2026-11-08; `bench-each.sh`, Nsight and `run prototype_fused_benchmarks` not run, by the
+  coordinator's decision (detail file, `## Wiki commands run`).
+- [x] **Step 3:** `grep` from Step 1 → only shad-gpu lines and archive/tasks.
+- [x] **Step 4: commit** `containers-only: one build-and-run path in the wiki; shad-gpu the one exception`.
 
 ---
 

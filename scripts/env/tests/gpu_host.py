@@ -26,9 +26,8 @@ TREE_FILES = [
     "scripts/lib/s3.sh", "scripts/lib/pinned.sh", "testdata/generate_testdata.sh", "cpp/CMakeLists.txt",
 ]
 CUDF = "25.02"
-RUN_REF = f"ghcr.io/asymptote-tech/peacockdb-run:cudf-{CUDF}"
-BUILD_REF = f"ghcr.io/asymptote-tech/peacockdb-build:cudf-{CUDF}"
 H100 = ["--instance-id", "computeinstance-e00e6yena4nzjgaym0", "--profile", "editor-eu"]
+L40S = ["--instance-id", "computeinstance-e00tnrse7ayntnzcyt"]
 CPU_VM = ["--instance-id", "computeinstance-e01t2mm4265y8x88ey", "--profile", "eu-west1"]
 HOSTNAME = "h100-test-node"
 DRIVER_MINIMUM = "535.104.05"
@@ -87,8 +86,14 @@ if a[0] == "info":
     if "--format" in a:
         print(json.dumps({r: {} for r in w["runtimes"]}))
     sys.exit(0)
+# A pull of an image the world lacks fails as dev's docker does on an unpublished tag, or with the
+# world's pull_error, such as a network error.
 if a[0] == "pull":
-    sys.exit(0 if a[-1] in w["images"] else 1)
+    if a[-1] in w["images"]:
+        sys.exit(0)
+    print(w.get("pull_error") or f'Error response from daemon: failed to resolve reference "{a[-1]}": {a[-1]}: not found',
+          file=sys.stderr)
+    sys.exit(1)
 if a[:2] == ["image", "inspect"]:
     image = w["images"].get(a[-1])
     if image is None:
@@ -112,9 +117,15 @@ if a[0] == "run" and "-d" in a:
         print(f"docker: Error response from daemon: Conflict. The container name /{name} is already in use",
               file=sys.stderr)
         sys.exit(125)
-    w["containers"][name] = {"state": "exited", "code": w["run_code"]}
+    labels = dict(a[i + 1].split("=", 1) for i, x in enumerate(a) if x == "--label")
+    w["containers"][name] = {"state": w.get("run_state", "exited"), "code": w["run_code"], "labels": labels}
     save()
     print("f00dfeed" * 8)
+    sys.exit(0)
+if a[0] == "inspect":
+    c = w["containers"][a[-1]]
+    fmt = flag("--format")
+    print(c["code"] if "ExitCode" in fmt else c.get("labels", {}).get(fmt.split('"')[1], "<no value>"))
     sys.exit(0)
 if a[0] == "run":
     gen = [c for c in a if c.endswith("/generate_testdata.sh")]
@@ -124,7 +135,8 @@ if a[0] == "run":
     (stage / f"{bench}.sf1" / "generated").write_text(bench)
     sys.exit(0)
 if a[0] == "logs":
-    print(w["run_output"], end="")
+    lines = w["run_output"].splitlines(keepends=True)
+    print("".join(lines[-int(flag("--tail")):] if "--tail" in a else lines), end="")
     sys.exit(0)
 if a[0] == "wait":
     print(w["containers"][a[-1]]["code"])
@@ -185,6 +197,12 @@ def label(tree, kind, change=None):
     return " ".join(lines)
 
 
+def inputs_ref(tree, kind):
+    """The image of the tree's own inputs, by its inputs tag: what the scripts default to."""
+    return f"ghcr.io/asymptote-tech/peacockdb-{kind}:" + lib(tree, "image-inputs.sh",
+                                                             f'image_inputs_tag "{tree}" {kind} {CUDF}')
+
+
 def log_lines(path):
     return [json.loads(ln) for ln in path.read_text().splitlines()] if path.exists() else []
 
@@ -220,11 +238,13 @@ class Host:
         self.nebius_log, self.docker_log = tmp / "nebius.log", tmp / "docker.log"
         self.host_log, self.dev_log, self.fetch_log = tmp / "vm.log", tmp / "dev.log", tmp / "fetch.log"
         self.world_path = tmp / "world.json"
+        self.run_ref, self.build_ref = inputs_ref(self.tree, "run"), inputs_ref(self.tree, "build")
         self.world_path.write_text(json.dumps({
             "images": {
-                RUN_REF: {"id": "sha256:run1", "labels": {"peacockdb.inputs": label(self.tree, "run"),
-                                                          "peacockdb.driver-minimum": DRIVER_MINIMUM}},
-                BUILD_REF: {"id": "sha256:build1", "labels": {"peacockdb.inputs": label(self.tree, "build")}},
+                self.run_ref: {"id": "sha256:run1",
+                               "labels": {"peacockdb.inputs": label(self.tree, "run"),
+                                          "peacockdb.driver-minimum": DRIVER_MINIMUM}},
+                self.build_ref: {"id": "sha256:build1", "labels": {"peacockdb.inputs": label(self.tree, "build")}},
             },
             "containers": {}, "driver": "550.54.15", "runtimes": ["nvidia", "runc"],
             "run_code": 0, "run_output": "==> run-tests.sh list: green\n",

@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 #
 # A CPU VM's layout, and the steps bootstrap-vm.sh takes in the build image (llm-wiki/build-test.md,
-# "Containers"). Every path but the data directory comes from $HOME, and every container runs as
+# "CPU VMs"). Every path but the data directory comes from $HOME, and every container runs as
 # the caller's uid:gid. Sourced after image-inputs.sh and data-inputs.sh.
 # A step function (machine_image_checked, machine_image_label_checked, machine_cargo_fetch,
 # machine_data_set, machine_cudf_source) is called as a statement of its own, never in `$(…)` or
@@ -57,9 +57,39 @@ machine_cudf_source() {
 }
 
 # machine_image_checked <ref> <tree> <cudf> [<kind>] — pulls the image <ref>, of <kind> build (the
-# default) or run, then machine_image_label_checked.
+# default) or run, then machine_image_label_checked. A failed pull names the images.yml dispatch
+# that publishes <tree>'s image: return 2 when the registry has no such tag, else docker's status (a
+# network error, or the caller's ssh). docker's stderr goes to a file, not `$(…)`, so a docker
+# wrapper's own exit still ends the script; an EXIT trap, ahead of the caller's own, then prints
+# the file and removes it. The trap runs inside the pull's `2>`, so it writes to a copy of stderr.
 machine_image_checked() {
-  docker pull "$1"
+  local ref=$1 tree=$2 cudf=$3 kind=${4:-build} err rc=0 unpublished=0 branch publish caller_trap=() stderr
+  err=$(mktemp)
+  exec {stderr}>&2
+  eval "caller_trap=($(trap -p EXIT))"  # trap -- '<command>' EXIT, or nothing
+  # shellcheck disable=SC2064  # expanded now: the file, the fd and the caller's command are this call's
+  trap "{ cat ${err@Q} >&2; rm -f ${err@Q}; ${caller_trap[2]:-}
+} 2>&$stderr" EXIT
+  docker pull "$ref" 2> "$err" || rc=$?
+  cat "$err" >&2
+  grep -qE ': not found$|manifest unknown' "$err" && unpublished=1
+  rm -f "$err"
+  if [ "${#caller_trap[@]}" -gt 0 ]; then trap -- "${caller_trap[2]}" EXIT; else trap - EXIT; fi
+  exec {stderr}>&-
+  if [ "$rc" -ne 0 ]; then
+    branch=$(git -C "$tree" rev-parse --abbrev-ref HEAD 2> /dev/null || true)
+    [ -n "$branch" ] && [ "$branch" != HEAD ] || branch="<this tree's branch>"
+    publish="images.yml publishes this tree's $kind image for cuDF $cudf as \
+${MACHINE_IMAGE%-build}-$kind:$(image_inputs_tag "$tree" "$kind" "$cudf"):
+  gh workflow run images.yml --ref $branch -f kind=$kind -f cudf=$cudf"
+    if [ "$unpublished" = 1 ]; then
+      echo "${0##*/}: $ref is not published. $publish" >&2
+      return 2
+    fi
+    echo "${0##*/}: cannot pull $ref: a registry or network error (above), so try again." \
+      "If the image was never published, $publish" >&2
+    return "$rc"
+  fi
   machine_image_label_checked "$@"
 }
 

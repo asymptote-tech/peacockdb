@@ -90,6 +90,10 @@ def test_the_25_02_image_runs_as_any_user():
     check("25.02")
 
 
+def test_the_25_10_image_runs_as_any_user():
+    check("25.10")
+
+
 def test_the_26_02_image_runs_as_any_user():
     check("26.02")
 
