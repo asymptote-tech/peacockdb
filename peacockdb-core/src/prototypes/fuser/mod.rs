@@ -6,7 +6,7 @@
 //! beside scans that read columns. Every reader of a shared scan that sits inside a hold is
 //! buffered or reads the table again, as a caller-supplied chooser decides. It runs at sf40
 //! only: the benchmark's chooser reads the sf40 baseline, and nothing else may supply figures.
-//! `llm-wiki/tasks/query-fuser-detail.md` records the decisions.
+//! `llm-wiki/designs/query-fuser.md` holds its rules and format.
 
 mod baseline;
 mod benchmark;
@@ -380,7 +380,7 @@ pub(crate) fn state_under(dag: &PlanDag<'_>, at: usize) -> Option<usize> {
 /// where the reader's root waits (`held.waits`), where nothing at or under it keeps state. A
 /// re-read costs the reader's own load's `loads.tsv` `load_us` (by `names` and its `CudfScan`
 /// seq in `seqs`) and adds its `batch_bytes` to its root. In full:
-/// `llm-wiki/tasks/query-fuser-detail.md`, "The hold rule".
+/// `llm-wiki/designs/query-fuser.md`, "The hold rule".
 pub(crate) fn hold_inputs(
     fused: &Fused,
     held: &HeldReader,
@@ -502,8 +502,9 @@ pub(crate) enum Outcome<'r> {
     },
 }
 
-/// One batch's section of the fused format (`query-fuser-detail.md`, "The fused format"):
-/// `--- batch ---`, `--- merge ---`, `--- pipeline ---`, and for a measured batch its tree.
+/// One batch's section of the fused format (`llm-wiki/designs/query-fuser.md`, "The fused
+/// format"): `--- batch ---`, `--- merge ---`, `--- pipeline ---`, and for a measured batch its
+/// tree.
 /// `queries` names the roots in order; `pool_bytes` is the pool the cap was computed against.
 pub(crate) fn render_fused_section(
     queries: &[String],

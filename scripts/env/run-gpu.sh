@@ -162,8 +162,8 @@ SF40_SETS=(tpch.sf40 tpcds.sf40)
 KIT=(scripts/env/fetch-sf40.sh scripts/env/sf40.sha256 scripts/lib/peacock-config.sh scripts/lib/s3.sh
      scripts/lib/pinned.sh scripts/lib/data-inputs.sh scripts/lib/machine.sh docker/pins.env
      testdata/generate_testdata.sh docker/sirius-seccomp.json)
-# The Sirius image's disk use, measured 3.08 GB on 2026-11-10 (llm-wiki/tasks/sirius-bench-detail.md),
-# and what prepare --sirius leaves free beside it.
+# The Sirius image's disk use, measured 3.08 GB on 2026-11-10 (git show
+# d290698f:llm-wiki/tasks/sirius-bench-detail.md), and what prepare --sirius leaves free beside it.
 SIRIUS_IMAGE_GB=4 SIRIUS_SPARE_GB=10
 
 # sirius_image: SIRIUS_CUDF and SIRIUS_REF, the Sirius image of this tree's inputs or the given one.

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Sirius on the H100, by flags (llm-wiki/tasks/sirius-bench.md): per dataset, run-gpu.sh's sirius
-# verb over a device list's queries, then pull, then the answers rendered at home.
+# Sirius on the H100, by flags (sirius-bench in llm-wiki/archive/archived-tasks.md): per dataset,
+# run-gpu.sh's sirius verb over a device list's queries, then pull, then the answers rendered at
+# home.
 #
 #   bench-sirius.sh --instance-id <id> [--profile <name>] --dataset tpch|tpcds|all [--sf <n>]
 #                   [--cases <cases.csv>] [--query <q>]… [--runs <n>] [--timeout <s>] [--resume]

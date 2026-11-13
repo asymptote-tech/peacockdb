@@ -24,8 +24,9 @@ world = {
   "calls": []                 # appended by every fake: argv lists
 }
 
-The fake profile commands answer as CLI 0.12.289 does (new-hosts-detail.md, Task 4): `profile
-list` prints names, the active one with " [default]"; deleting the active profile is refused;
+The fake profile commands answer as CLI 0.12.289 does (git show
+d290698f:llm-wiki/tasks/new-hosts-detail.md, Task 4): `profile list` prints names, the active
+one with " [default]"; deleting the active profile is refused;
 `profile update` with a key prompts, and so fails without a tty, unless it has the endpoint,
 service account and public key id. World.env() names an empty config for install-watch to copy.
 

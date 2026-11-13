@@ -131,7 +131,8 @@ def test_the_config_must_hold_exactly_its_three_settings():
 
 def test_the_config_file_is_the_three_settings():
     """docker/sirius-config.yaml itself, read by the self-test's own reader: Sirius's defaults but
-    for pinning's two settings and the telemetry it turns off (llm-wiki/tasks/sirius-bench.md)."""
+    for pinning's two settings and the telemetry it turns off (sirius-bench in
+    llm-wiki/archive/archived-tasks.md)."""
     proc = self_test()
     assert proc.returncode == 0, proc.stderr
     for line in ["sirius.executor.scan_manager.cache.mode=sirius",

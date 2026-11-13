@@ -1,6 +1,6 @@
 //! The fused format: one section per batch in `tp1_single.fused.txt`, written here and read
 //! back here, by the page's table and the corpus goldens' checks alike. The format is
-//! `llm-wiki/tasks/query-fuser-detail.md`, "The fused format".
+//! `llm-wiki/designs/query-fuser.md`, "The fused format".
 
 #[cfg(test)]
 mod tests;

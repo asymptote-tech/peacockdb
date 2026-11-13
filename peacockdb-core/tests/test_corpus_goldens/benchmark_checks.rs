@@ -364,9 +364,9 @@ fn a_fused_section_that_does_not_add_up_is_refused() {
     );
 }
 
-/// tpch q3 at tp1-single as the H100 measured it on 2026-11-05 (bench-rows-detail.md, Task 5):
-/// three loaders under two joins. Each `partition_groups` list is cut to its first and last
-/// group; nothing checked reads it.
+/// tpch q3 at tp1-single as the H100 measured it on 2026-11-05 (`git show
+/// d290698f:llm-wiki/tasks/bench-rows-detail.md`, Task 5): three loaders under two joins. Each
+/// `partition_groups` list is cut to its first and last group; nothing checked reads it.
 const TIMED: &str = "\
 GpuUnload
   time_us=[[118]] total_us=118 batch_rows=[[10]] batch_bytes=[[328]]

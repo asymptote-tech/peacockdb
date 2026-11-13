@@ -48,8 +48,9 @@ PINS = {
     "NEBIUS_SHA256": SHA256,
     "MICROMAMBA_VERSION": r"\d+\.\d+\.\d+-\d+",
     "MICROMAMBA_SHA256": SHA256,
-    # Sirius `stable` (llm-wiki/tasks/sirius-bench.md): its commit, and its CUDA 13 linux_amd64
-    # extension as the release published it, mirrored in the private calibration bucket.
+    # Sirius `stable` (sirius-bench in llm-wiki/archive/archived-tasks.md): its commit, and its
+    # CUDA 13 linux_amd64 extension as the release published it, mirrored in the private
+    # calibration bucket.
     "SIRIUS_COMMIT": "8d17afec481c56903b61b74a9787423b470298a1",
     "SIRIUS_EXTENSION_S3": r"s3://calibration/sirius/[0-9a-f]{64}\.duckdb_extension\.gz",
     "SIRIUS_EXTENSION_SHA256": "01e4797cff315985e66ff829dde3e3bec715482ced2a6142ff1334577638ed1b",

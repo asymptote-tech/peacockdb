@@ -27,7 +27,7 @@ tpch q6, one Sirius process, tables pinned `tier='parquet'`). q6 reports 339.4 m
 2. **The GPU part is still about 4× peacockdb's.** Each run reads 894 chunks from Sirius's pinned
    cache (`prefetching_cache` `reads=894 hits=1118` per run, `h2d=0` throughout, which is
    undocumented). If q6's four lineitem columns are a few GB compressed, 235 ms is about 10 GB/s,
-   against the 41–49 GB/s peacockdb's pinned loads copy at (`pinned-loads-detail.md`, "Copy
+   against the 41–49 GB/s peacockdb's pinned loads copy at (`git show d290698f:llm-wiki/tasks/pinned-loads-detail.md`, "Copy
    rate"). Small chunks, Sirius's 4 pipeline threads and per-chunk scheduling are suspects, none
    measured. The readahead manager logs `fell_behind=1` on the warm-up.
 3. Logging is not the cause: q6 was 341.0 ms with Sirius's log off and 339.4 ms with it on.

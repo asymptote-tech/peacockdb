@@ -7,7 +7,7 @@ Reads the H100 `cases.csv` (through `device_cases`), the unfused and fused bench
 DuckDB results and the `loads.tsv` profiles under `--testdata`. Every peacockdb total is
 device-side, `load_us + execute_us`; DuckDB's is wall time. This script owns every number
 between `BEGIN` and `END`; the prose around them is written by hand. `--check` exits 1 when the
-page is stale. llm-wiki/tasks/batching-report-impl.md has the layout.
+page is stale. `git show d290698f:llm-wiki/tasks/batching-report-impl.md` has the layout.
 """
 
 import argparse
@@ -93,8 +93,8 @@ def trailer(body):
 
 
 def fused_batch(body):
-    """A fused section's blocks (query-fuser-detail.md, "The fused format"); a marker gives
-    `{"marker": …}` and a failed batch `{"failed": reason}`."""
+    """A fused section's blocks (llm-wiki/designs/query-fuser.md, "The fused format"); a marker
+    gives `{"marker": …}` and a failed batch `{"failed": reason}`."""
     if body.startswith(SKIPPED):
         return {"marker": body.strip()}
     if body.startswith(FAILED):

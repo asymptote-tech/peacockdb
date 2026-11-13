@@ -1,6 +1,6 @@
 //! Fusing: which scans share, the union load each group reads, what each member reads in place
 //! of its own load, and the loop that resolves every held reader of a shared load. The rules
-//! are `llm-wiki/tasks/query-fuser-impl.md`, Task 1.
+//! are `git show d290698f:llm-wiki/tasks/query-fuser-impl.md`, Task 1.
 
 #[cfg(test)]
 mod tests;

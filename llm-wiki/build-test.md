@@ -3523,7 +3523,7 @@ whatever the sf1 line declares. Near the cap DuckDB's longer floats can pass it 
 
 SiriusDB (`github.com/sirius-db/sirius`) is a DuckDB extension that runs a query on the GPU with
 libcudf. It is timed on the H100 over the H100's list at sf40, beside peacockdb and DuckDB. Spec:
-`llm-wiki/tasks/sirius-bench.md`.
+sirius-bench in `llm-wiki/archive/archived-tasks.md`.
 
 **The image**, `peacockdb-sirius:cudf-26.08` (*Images*), is built from `docker/sirius.Dockerfile`
 by `image.sh build sirius 26.08` and published by `images.yml`, under the same tag rules as the
@@ -3614,7 +3614,7 @@ scripts/env/bench-sirius.sh $H --dataset all
 2. It pins every table once, `CALL pin_table(…, tier = 'parquet')`: the raw parquet bytes go into
    Sirius's pinned host cache. The pin is untimed and outside any timeout. It holds the column
    chunks alone. Sirius's log counts cache misses on every run of 34 of the 84 timed sf40 rows
-   (listed in `tasks/sirius-bench-detail.md`), most in tpch q19 and q10: reads from disk
+   (listed in `git show d290698f:llm-wiki/tasks/sirius-bench-detail.md`), most in tpch q19 and q10: reads from disk
    (`O_DIRECT`) inside the timed run. The likely cause is the bloom filters after the column
    chunks, which the pin leaves out; the logs give counts, not bytes, and some queries with equality
    or `IN` filters (tpch q5, q12) read none. Kept as measured; the cost is unmeasured.
@@ -3652,7 +3652,7 @@ either, the file and the answers database are the run's alone.
 
 ### Fused batches — `prototype_fused_benchmarks` (by hand)
 
-query-fuser's prototype (`src/prototypes/fuser/`, spec `llm-wiki/tasks/query-fuser.md`). Eight
+query-fuser's prototype (`src/prototypes/fuser/`, spec: query-fuser in `llm-wiki/archive/archived-tasks.md`). Eight
 cases, `bench_fused_<tpch|tpcds>_sf40_<first3|first10|first20|all>_tp1_single`. Each fuses that
 prefix of the H100 `cases.csv` list, read when the case runs, into one plan with one shared load per
 file, plus a load per re-read the hold rule chooses. It runs at sf40 only: the hold rule and the cap read sf40-baseline's
@@ -3665,7 +3665,7 @@ second-smallest reported. Every answer is checked against its query run alone on
 batch that runs out of device memory writes its section and passes.
 
 - Results: `testdata/benchmark-results/h100-80gb-hbm3/fused/<ds>.sf40/tp1_single.fused.txt`, one
-  section per batch. The format is `llm-wiki/tasks/query-fuser-detail.md`, "The fused format".
+  section per batch. The format is `llm-wiki/designs/query-fuser.md`, "The fused format".
   Each file is a table on the report page (*The page*, above), regenerated in the commit that
   adds or changes it.
 - Record: `testdata/calibration/fused/<ds>.sf40/<batch>.records.tsv`, gitignored, one per batch

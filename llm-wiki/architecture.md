@@ -1107,12 +1107,12 @@ aside: not as a path, an alias or a brace-list item. The engine never depends on
   columns would gain NULLs (`nulls:<col>`), and a rows-only scan beside column scans, or a lone
   column scan beside rows-only ones (`rows-only`). Every reader of a shared scan inside a hold is buffered or re-reads the table,
   as a chooser decides. The benchmark's chooser and its concurrency cap are plain functions of
-  the sf40 baseline's numbers and the rmm pool, written down in the detail file. It reports, without executing, the identical subtrees above the shared
+  the sf40 baseline's numbers and the rmm pool, written down in `designs/query-fuser.md`. It reports, without executing, the identical subtrees above the shared
   sources and what merging them would save (the merge hint), and what overlapping loads with
   execution would save (the pipelining hint). It runs at sf40 only. A batch runs on the device
   through the benchmark harness's parts in `test_support` (its pool, cache, protocol and trailer)
   and the `prototype_fused_benchmarks` target, by hand on the H100 (build-test.md, "Fused
-  batches"). Decisions and formats: `tasks/query-fuser-detail.md`.
+  batches"). Its rules and format: `designs/query-fuser.md`.
 
 ## The wire format
 

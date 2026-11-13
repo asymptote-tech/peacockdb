@@ -1,5 +1,5 @@
 {
-	"comment": "Sirius's container profile (llm-wiki/tasks/sirius-bench.md, Constraints): Docker's default, github.com/moby/profiles seccomp/default.json at commit 245180c51918481c0525424b3ee025d2b435d46c (seccomp/v0.2.4, the version Docker 29.9 vendors), with one rule added, the last. Docker's loader ignores this key.",
+	"comment": "Sirius's container profile (sirius-bench in llm-wiki/archive/archived-tasks.md, Constraints): Docker's default, github.com/moby/profiles seccomp/default.json at commit 245180c51918481c0525424b3ee025d2b435d46c (seccomp/v0.2.4, the version Docker 29.9 vendors), with one rule added, the last. Docker's loader ignores this key.",
 	"defaultAction": "SCMP_ACT_ERRNO",
 	"defaultErrnoRet": 1,
 	"archMap": [
