@@ -65,3 +65,5 @@ cpp/build26/
 
 # nebius-test.sh run state on the VM
 .gpu-test/
+
+graphify-out/
