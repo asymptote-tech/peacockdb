@@ -12,6 +12,8 @@ Tests, CI, hosts, testdata etc
 - [#310 (nebius-gpu fills with images) `gpu-tests` keeps every image and sf1 set it pulls, so nebius-gpu's disk runs out](#t310)
 - [#312 (start waits out a refusal) `nebius.sh start` waits its full 900 s after the API has already refused the start](#t312)
 - [#313 (results line squeezes __) the results line's `tr -s` squeezes `__` in a value, so `test_results_name_version_threads_host` fails at random](#t313)
+- [#314 (bootstrap skips the clone) `bootstrap-vm.sh` never updates an existing clone, so a pin or script bumped in git reaches a VM only by hand](#t314)
+- [#315 (no free-space check) neither `bootstrap-vm.sh` nor `build-test.sh` checks free space first, so a small disk fails mid-build](#t315)
 
 <a id="t178"></a>
 ### #178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault
@@ -115,3 +117,26 @@ that holds `__` is changed. The test's data directory is a `mkdtemp`, whose rand
 A host or CPU name with `__` is changed the same way.
 
 The fix: squeeze whitespace only, `sed 's/[[:space:]]\+/_/g'`.
+
+<a id="t314"></a>
+### #314 (bootstrap skips the clone) `bootstrap-vm.sh` never updates an existing clone, so a pin or script bumped in git reaches a VM only by hand
+`bootstrap-vm.sh` clones `~/peacockdb` when it is missing and otherwise leaves it as it is, yet
+reads the clone's `docker/pins.env`, `scripts/lib/` and `testdata/generate_testdata.sh`.
+`provision-vm.sh` pipes the caller's own `bootstrap-vm.sh`, so the two disagree once the branch
+moves. On a fresh VM, after `SUPERPOWERS_VERSION` was bumped and pushed, a rerun still refused
+with the old pin until the clone was pulled by hand; the refusal names `docker/pins.env`, not the
+clone's copy of it.
+
+The fix: on a clean clone on `--ref`'s branch, `git pull --ff-only` before anything reads it; a
+dirty or diverged clone is refused, naming the clone, its commit and the remote's.
+
+<a id="t315"></a>
+### #315 (no free-space check) neither `bootstrap-vm.sh` nor `build-test.sh` checks free space first, so a small disk fails mid-build
+A developer machine needs the build image (15.5 GB unpacked), an incremental
+`target-img-<v>` (about 14 GB for the rust-only build) and sf1 (0.8 GB): about 30 GB free, more
+for the C++ build. On a 48 GB VM with 27 GB free, `build-test.sh --rust-only --build` ran 15
+minutes and ended in a rustc panic, `No space left on device`. CI's build-image action refuses
+below 25 GB up front (`need_gb`).
+
+The fix: `bootstrap-vm.sh` and `build-test.sh` refuse below a stated free-space floor before the
+pull or the build, naming the space free, the floor and `docker system df`.

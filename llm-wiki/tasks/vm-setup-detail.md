@@ -1,7 +1,7 @@
 # vm-setup — run detail
 
-Branch `ENS-vm-setup`, forked from `ENS-containers-only` at `7aeec989`; its PR targets
-`ENS-containers-only`.
+Branch `ENS-vm-setup`, forked from `ENS-containers-only` at `7aeec989` and rebased onto its
+rewritten head, `1eaefe39`, beside sirius-bench; its PR targets `ENS-containers-only`.
 
 ## Progress
 
