@@ -18,6 +18,1828 @@ retargeted to master when that base merged.
 
 ---
 
+<!-- archived from llm-wiki/tasks/sirius-bench.md -->
+
+**Merged 2026-11-13 as PR #204, chain L's task 11, one commit `a1357bf5` squashed from the branch, merged into master by `d290698f`.** Its plan and record: `git show d290698f:llm-wiki/tasks/sirius-bench-impl.md` and `…/sirius-bench-detail.md`.
+
+# SiriusDB on the H100 beside peacockdb and DuckDB, and a flat CSV of every result
+
+Kind: production
+
+The report page compares peacockdb on the H100 with DuckDB on 128 cores. The other GPU SQL
+engine worth measuring against is SiriusDB (`github.com/sirius-db/sirius`), a DuckDB extension
+that decodes parquet with libcudf. This task times Sirius on the same H100, over the same queries,
+starting from the same place peacockdb starts — the raw parquet bytes already in pinned host
+memory — and puts it on the page between peacockdb and DuckDB. It also writes every result the
+page holds into one CSV, for ad hoc analysis scripts.
+
+Today's figures, for scale (`ENS-containers-only`, both engines `ok`): Σ total peacockdb / Σ total
+DuckDB is 0.88 over 47 tpch sf40 queries and 1.53 over 77 tpcds sf40 queries.
+
+## Done when
+
+1. **The chain is rebased onto the report changes first.** Two report commits landed on lower
+   branches after the branches above them were built: `fc4decfb` on `ENS-query-fuser`
+   (fused-batches tables with the nonfused totals, reads as `n/m`, multi-line cells) and
+   `a647a223` on `ENS-tp4-sized` (the tp1_single main table per dataset, the per-device Modes
+   tables under a collapsed section). Each descendant is rebased onto its rebased parent, lowest
+   first: `ENS-batching-report` onto `ENS-query-fuser`, `ENS-tp4-sized` onto `ENS-batching-report`,
+   `ENS-containers-only` onto `ENS-tp4-sized` (`git rebase --onto <new parent> <old parent tip>`),
+   each force-pushed (with lease) to its open PR. This
+   task's branch then starts from the rebased `ENS-containers-only`. Conflicts resolve to the
+   report commits' intent; `testdata/benchmark-report.html` is regenerated on each rebased branch
+   rather than merged by hand.
+   - **How these rebases are verified, and when the rebased tasks are `done` again, is the
+     chain L note "Report rebase, 2026-11-09" on the board** (`llm-wiki/tasks/tasks.md`), which
+     the coordinator reads at startup: report tests only, no build, no review, `done` without
+     waiting for CI. The board marks the three tasks `rebase needed(done)`, so the coordinator's
+     progress rule runs these rebases before it starts this task.
+2. **Sirius runs on the H100 through the existing path.**
+   - **Version:** Sirius's `stable` tag (commit `8d17afe`: DuckDB 1.5.6, libcudf 26.08, CUDA 13
+     or 12), pinned by commit. Not `latest`, which moves with main and is on DuckDB 2.0.
+   - **Image:** a Sirius run image built from committed inputs by `scripts/env/image.sh` and
+     published by `images.yml`, under the same input-label rules as the other images. It is
+     image.sh's scheme with a third kind, `sirius`, at Sirius's libcudf version:
+     `ghcr.io/asymptote-tech/peacockdb-sirius:cudf-26.08`, with the inputs tag
+     `:cudf-26.08-in-<hash>` and the commit tag `:cudf-26.08-<commit>`. The Sirius commit is one
+     of its pinned inputs, so a new pin is a new inputs tag.
+   - **Prebuilt, not compiled.** The image installs the `stable` release's CUDA 13
+     `.duckdb_extension` for linux-amd64 (the H100's 580.173 driver meets its ≥580.65.06),
+     loaded by Python `duckdb==1.5.6`. The extension links cudf 26.08.01 statically and needs only
+     libcuda, libnvidia-ml, libstdc++ and glibc 2.28, so the image carries no libcudf runtime and
+     no conda. The `stable` release asset is replaced whenever Sirius promotes a new commit, so
+     the `.gz` (921,613,272 bytes, sha256 `01e4797c…` in full in the pin) is mirrored where the
+     project keeps its other pinned downloads, and `docker/pins.env` pins the mirror's URL and
+     sha256. No Sirius source build, no pixi. If the prebuilt file cannot load or run in the
+     image, stop and ask rather than compiling. It is the only new image: there is no Sirius build
+     image, and the existing images are unchanged. Sirius ships no Docker image.
+   - **The image's CI self-test cannot load the extension:** a GPU-less runner lacks libcuda and
+     libnvidia-ml. It checks the sha256, the extension's footer (`v1.5.6 linux_amd64`) and its
+     library list instead.
+   - **Run:** on the H100 through `scripts/env/run-gpu.sh`, as peacockdb's benchmarks are.
+3. **Apples-to-apples, warm from pinned buffers.** Before any timed run, every table of the
+   dataset is pinned once with `CALL pin_table(..., tier='parquet')`: its raw parquet column-chunk
+   bytes sit in Sirius's pinned host cache, and every timed run copies them to the device and
+   decodes them there, as peacockdb's pinned cache does. The pin is not timed and is outside any
+   query timeout. Two settings depart from Sirius's defaults, deliberately, because pinning
+   requires them: `sirius.executor.scan_manager.cache.mode: sirius` (without it `pin_table`
+   refuses) and `sirius.executor.scan_manager.cache.eviction_threshold_fraction: 1.0` (at the
+   default 0.8 pinned chunks can be evicted). Also:
+   - `SET enable_duckdb_fallback = false`: a query Sirius cannot run on the GPU errors and is a
+     `failed` row with its reason, never a silent CPU run. At `stable`, TPC-DS's INTERSECT/EXCEPT
+     queries (q8, q14, q38, q87) are expected to fail this way (q51 is not in the H100's list), and
+     Sirius refused a DISTINCT with "Distinct not supported" on the H100, so queries using
+     DISTINCT may fail too.
+   - Quent telemetry off (`sirius.telemetry.enable_quent: false`; it is on by default).
+   - Sirius's defaults otherwise, memory included: its GPU pool (95% of device memory) and its
+     pinned host cache are its own, not peacockdb's 69 GiB pool. Its scans overlap its compute,
+     and that is the engine being measured. A query that runs out of memory is a `failed` row.
+4. **The timing protocol is peacockdb's.** The queries are every row of the H100's `cases.csv` at
+   sf40, both datasets: `ok`, `wrong` and `skipped` alike. A `skipped` row's note is peacockdb's
+   own refusal (tpcds q17/q25/q29's accumulator budget, tpch anti_join's GpuUnload), so Sirius
+   runs those queries too, the human's choice. DuckDB's sf40 run covered only the `ok` and `wrong`
+   rows, so those queries have no DuckDB answer or time: a timed Sirius row there is
+   `unverified` (item 5).
+   Per query: one warm-up, then `MEASURED_RUNS` runs, the second-smallest reported. **One Sirius
+   process per dataset**, the human's choice: pinning reads around the page cache at the H100's
+   ~100 MB/s, so pinning per query would cost about 3.4 h of reads for both datasets against
+   about 11 min once per dataset. The time is the query's wall time as the harness measures it
+   around the statement and an Arrow fetch of its result (not Python tuples: some sf40 answers
+   are 96 M rows). A query that fails or times out does not end the process for the next one;
+   a crashed process is restarted, re-pinned, and resumes at the next query.
+   - **Only a total.** Sirius exposes no clean load/execute split: its scans overlap its compute,
+     and its per-operator times are busy time, not a share of the wall. Load and execute are not
+     reported.
+   - **No peak.** Sirius's pool peak is a process-lifetime high-water mark that also counts
+     reservations; it is not comparable with the accountant's peak and is not reported.
+   - **One script runs it, by flags.** A single entry point (my call: `scripts/env/bench-sirius.sh`)
+     does the whole run from the laptop: ship, pin, time, collect answers, pull results home. It
+     takes flags, not edits or environment variables, in the style of `bench-each.sh` and
+     `duckdb_minimal.sh`, with `--help`. At least (names the builder's, meanings fixed):
+     `--instance-id`/`--profile` (passed to `run-gpu.sh`), `--dataset tpch|tpcds|all`, `--sf`
+     (40 by default), `--cases <cases.csv>` (the H100's by default), `--query <q>` (repeatable,
+     narrows the list), `--runs <n>` (`MEASURED_RUNS` by default), `--resume` (keep rows this
+     Sirius commit and host already wrote), `--dry-run` (print what would run, run nothing).
+     Bad input is refused before any call. Offline tests over a fake `run-gpu.sh` hold the flags
+     to what they do, as `test_bench_each.py` does.
+5. **Answers are checked.** Each query's Sirius answer is held to DuckDB's stored sf40 answer under
+   the same oracle and tolerance rules `every_sf40_device_answer_meets_duckdb` applies to
+   peacockdb's. A mismatch makes the row `wrong`. A query with no stored DuckDB sf40 answer
+   (peacockdb's `skipped` rows) makes a timed row `unverified`: shown, never `ok`, and out of the
+   ratio. The answer is the Arrow result of a Sirius
+   `SELECT`: `CREATE TABLE … AS` does not run on Sirius and would store DuckDB's own answer. The
+   harness writes that Arrow table into a DuckDB answers database as table `<q>`, as
+   `duckdb_minimal.sh --answers` does; after `pull`, the laptop renders it with
+   `testdata/duckdb_result.py --answers … --out` (pinned to DuckDB 1.5.4, so not in the image)
+   into `testdata/goldens/<ds>.sf40/sirius-result.txt`, `duckdb-result.txt`'s format. Queries are
+   named by their stem everywhere (`aggregate-groupby`, not the list's `aggregate_groupby`). The
+   harness judges nothing itself; an `UPDATE_CANONICAL`-style Rust
+   step sets each row's status in `sirius.tsv` from that comparison, and a test holds the
+   committed statuses to it, as peacockdb's device answers are held.
+6. **Results live in the device's tree.** `testdata/benchmark-results/h100-80gb-hbm3/<ds>.sf40/sirius.tsv`,
+   one per dataset: a `# ` provenance line (Sirius commit, DuckDB, libcudf, CUDA, driver, device,
+   host) and one row per query: its time, its runs, and its status (`ok`, `wrong`, `unverified`,
+   `failed`, `skipped`) with a reason where it is not `ok`. The engine is in the file name, not the
+   directory. A Rust reader parses it, as `parse_duckdb_results` parses `duckdb.tsv`.
+7. **The page: new columns in each dataset's main table.** Today's main table
+   (`h100-80gb-hbm3 · tp1_single`) has, left to right: `query`; the h100 group `load (ms)`,
+   `execute (ms)`, `total (ms)`, `peak ≥ (GiB)`; the DuckDB group `warm (ms)`. This task inserts
+   one group between the h100 group and DuckDB, so the table becomes:
+
+   | query | h100-80gb-hbm3 · tp1_single: load, execute, total, peak | **sirius · h100-80gb-hbm3: load (ms), execute (ms), total (ms)** | duckdb-cpu128: warm (ms) |
+   |---|---|---|---|
+
+   - First header row: `sirius · h100-80gb-hbm3`, spanning its three columns. Second row:
+     `load (ms)`, `execute (ms)`, `total (ms)`. No peak column.
+   - **load (ms), execute (ms):** always `—`.
+   - **total (ms):** the second-smallest of the timed runs, one decimal, linked to its line in
+     `sirius.tsv`. A `wrong` row: the time plus `wrong answer`, as peacockdb's. An `unverified`
+     row: the time plus `unverified` (title: no DuckDB answer to check it against). A `failed` row:
+     `failed: <reason>` coloured as peacockdb's failures. A `skipped` row: `skipped: <note>`
+     coloured as peacockdb's skips. No Sirius row for the query: `—`.
+   - **Ratio line**, a paragraph between the dataset's heading and its table:
+     `Σ total Sirius / Σ total DuckDB = <r> over <n> of <m> queries`. `<r>` has two decimals,
+     `<n>` counts the queries where both Sirius's and DuckDB's rows are `ok`, and `<m>` counts
+     the main table's rows. A dataset with no `sirius.tsv` has no line.
+   - The Modes tables, the fused tables, and the h200 table do not change.
+8. **`testdata/benchmarks.csv`.** Every result the page holds, fused batches excepted, one row
+   each. Columns, in order:
+   `dataset,sf,query,engine,device,mode,load_ms,exec_ms,total_ms,peak_gib,status`.
+   - `engine`: `peacockdb`, `sirius`, `duckdb`. `device`: the result tree's directory name
+     (`h100-80gb-hbm3`, `h200`, `duckdb-cpu128`).
+   - peacockdb: every device and every mode it has a section for. DuckDB: `mode`, `load_ms`,
+     `exec_ms` and `peak_gib` empty, its warm time in `total_ms`. Sirius: `mode` `tp1_single`, `load_ms`,
+     `exec_ms` and `peak_gib` empty.
+   - `status`: `ok`, `wrong`, `unverified` (Sirius only), `failed`, `skipped`, taken as the page takes it (a device list's
+     `skipped` and `wrong` rows over the section). A `failed` or `skipped` row leaves the times
+     empty; a `wrong` or `unverified` row keeps them, as the page shows them.
+   - Written by the same test that writes the page, from the same trees, regenerated in every
+     commit that regenerates the page, and checked byte for byte the same way.
+9. **The wiki.** `build-test.md` describes the Sirius image, its run, its protocol and its file;
+   "The page" and the report tests' table follow; `benchmarks.csv` joins the generated-files
+   table. The H100's free disk after `prepare` is corrected from 81 GB to what the task measures
+   (the analyst read 60 GB).
+
+10. **Done is the chain's usual rule for this task itself:** it reaches `done` with its PR's CI
+    green.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/src/prototypes/fuser/report*`, `peacockdb-core/src/test_support/benchmark_report*`, `testdata/benchmark-report.html`, `llm-wiki/build-test.md` | Done when 1: regenerated on each rebased branch |
+| `docker/` (a Sirius Dockerfile and its pinned inputs), `scripts/env/image.sh`, `.github/workflows/images.yml` | the Sirius run image |
+| `scripts/env/` or `benchmarks/` | the Sirius harness: pin, run, time, collect answers, write `sirius.tsv` |
+| `peacockdb-core/src/test_support/` | the `sirius.tsv` reader, the page's Sirius group and ratio line, `benchmarks.csv` |
+| `peacockdb-core/tests/test_corpus_goldens/` | the page and CSV test; Sirius's answers against DuckDB's |
+| `testdata/goldens/{tpch,tpcds}.sf40/sirius-result.txt` | Sirius's answers |
+| `testdata/benchmark-results/h100-80gb-hbm3/{tpch,tpcds}.sf40/sirius.tsv`, `testdata/benchmarks.csv`, `testdata/benchmark-report.html` | results and generated files |
+| `scripts/env/tests/` | the harness's and the image's offline tests |
+| `llm-wiki/build-test.md` | Done when 9 |
+
+Component-level API: none. No engine change in peacockdb.
+
+## Constraints
+
+- **Publishing the Sirius image needs nothing on master first.** `images.yml` is on master
+  already, and a dispatch runs the workflow file of the ref it names (`--ref`), so the branch
+  adds its Sirius image to its own `images.yml` and dispatches on itself. A branch dispatch pushes
+  the inputs and commit tags only, which is all `run-gpu.sh` reads. If the first push to the new
+  package is denied, the human grants the repository Write under the package's "Manage Actions
+  access", as the header of `images.yml` says.
+- **The H100's disk** holds the new image beside the two it has: `run-gpu.sh prepare` checks free
+  space before the pull, and the task records the image's size.
+- **Sirius's container needs three things the run image's does not** (each confirmed on the
+  H100): a seccomp profile that allows `io_uring_setup`, `io_uring_enter` and `io_uring_register`
+  (Docker's default refuses them and every scan fails), `mbind`, `set_mempolicy` and
+  `get_mempolicy` in it or `--cap-add SYS_NICE`, and `--ulimit memlock=-1:-1` (at the default
+  8 MiB Sirius drops to a slower path). The profile is committed (its source named, since moby's
+  default profile JSON moved) and shipped by `run-gpu.sh prepare`. O_DIRECT works on the H100's
+  `/var/lib/peacock` (ext4).
+- **Its driver needs:** ≥580.65.06 for CUDA 13, ≥570.26 for CUDA 12. The H100 reads 580.173.
+- **H100 time** follows the chain's VM rules: `run-gpu.sh` never starts or stops the VM.
+- **No Sirius change.** If Sirius cannot do what Done when 3 asks without one, stop and ask.
+- No test is weakened, and DuckDB's pinned version and its results stay as they are.
+
+## Not in this task
+
+Fused batches in `benchmarks.csv`; Sirius on any other device or mode; a Sirius load/execute
+split or peak; Sirius's TPC-DS fixes past `stable`.
+
+## Signoff (completeness pass, 2026-11-10)
+
+Solved under its constraints: Sirius `stable` from a pinned, licensed image; every row timed warm from `pin_table` with GPU evidence from Sirius's log (84 of 84 timed rows); answers held to DuckDB's; page group, ratio lines (tpch 1.29 over 35 of 48, tpcds 1.32 over 42 of 82) and `benchmarks.csv`. Shortcuts, each recorded in the detail file:
+- 34 of 84 timed rows read outside the pin on every run, likely bloom filters `pin_table` leaves out (about 41% of tpch's Σ Sirius). Kept as measured, said on the page; the cost is unmeasured. The human may want a no-bloom or tmpfs rerun, or q19/q10/q21/q17 timed both ways.
+- `integer_division = true` (the answers' setting) may cost tpcds q2 and q78, which fail on `round(x // y, 2)`; unmeasured.
+- Timed runs log at info, Sirius's default; logging against no logging was never measured.
+- The committed run used `run-gpu.sh sirius --detach` with a manual pull and render, not `bench-sirius.sh` end to end (same runner arguments).
+- Two oracle defects make right answers `wrong`: q73 (#306) and scan-limit (#311).
+
+---
+
+<!-- archived from llm-wiki/tasks/containers-only.md -->
+
+**Merged 2026-11-13 as PR #203, chain L's task 10, one commit `6bbecc42` squashed from the branch, merged into master by `63a6e4f5`.** Its plan and record: `git show d290698f:llm-wiki/tasks/containers-only-impl.md` and `…/containers-only-detail.md`.
+
+# Retire the non-container build and run paths
+
+Kind: production
+
+**This task closes part (a) of [#129](../tickets/testinfra.md#t129) (26.02 CI leg image).** Part (b), the `s3-datasets` comment, is fixed alongside if it still applies.
+
+containers-rebase brings the build and run images (`ghcr.io/asymptote-tech/peacockdb-{build,run}:cudf-{25.02,26.02}`).
+new-hosts brings `scripts/env/run-gpu.sh`, the device run on any GPU host over ssh, proven on the
+H100 by the chain's later tasks. Until this task, every machine but shad-gpu still has a second,
+hand-built way to build and run:
+
+- **CI.** `pipeline.yml` runs its build jobs in `rapidsai/base` images and installs the rest with
+  `conda install` steps: `dataset-matrix` on 25.10a and 25.02, and `cpp-build-2502`.
+  `exec-model-corpus.yml` and `validate-large.yml` have their own setups.
+- **The L40S** (nebius-gpu): `nebius-sync.sh` and `nebius-test.sh` (renamed by new-hosts) run
+  against a conda env installed by hand on the VM. CI's `gpu-tests` job uses them. new-hosts'
+  CPU-VM build uses `nebius-sync.sh --no-data` for the tree alone.
+- **Local and verda:** `build-test.sh`, `build.sh` and `cargo-cudf.sh`, against a conda cuDF env
+  from `conda-install-cudf.sh` / `conda-install-cudf-2506.sh`, on machines set up by `init.sh`,
+  `init_fedora43.sh` and `create_verda_instance.sh`.
+
+Two ways to do one thing means two to keep working, and the wiki describing both. This task leaves
+one: the images, everywhere but shad-gpu.
+
+## Done when
+
+1. **CI builds and tests in the build image.** Every job in `pipeline.yml`, `exec-model-corpus.yml`
+   and `validate-large.yml` that compiles or runs project code runs in
+   `peacockdb-build:cudf-<v>`, pinned by the same digest or tag rule `image.sh` writes. No
+   `conda install` step is left for project dependencies.
+   - **The cuDF matrix: 25.02 and 25.10.** `dataset-matrix` keeps two legs. The second leg,
+     labelled `26.02` today but run in `rapidsai/base:25.10a` (#129, 26.02 CI leg image), becomes
+     an honest `cudf: "25.10"` leg in a new **`peacockdb-build:cudf-25.10`** image. That image is
+     for CI only: a build image with no run image. It is built from committed conda specs and pins,
+     as the other build images are (`docker/conda/cudf-25.10.spec`, `docker/pins.env`). It is
+     published through `images.yml` and carries the same `peacockdb.inputs` label check. This
+     closes #129 part (a). `build-test.md` and every place that names the 26.02 CI leg say 25.10.
+     The 26.02 images stay for developer and device use.
+   - CI stays green on the task's PR, the cost-report job included, with the same case counts
+     per tier as the parent branch's last green run. Any count that moves is explained.
+   - A branch's image publication never moves the `:cudf-<v>` tags; only master's does, so the
+     chain's earlier trees keep passing their image checks.
+2. **The L40S runs through `run-gpu.sh`.** `gpu-tests` prepares, ships and runs on nebius-gpu
+   through `run-gpu.sh` and the run image. The hand-built conda env on the VM is no longer read.
+   `run-gpu.sh prepare` runs on nebius-gpu by hand once, its disk use recorded, before the first
+   CI run. `nebius-test.sh` is deleted. `nebius-sync.sh` is kept, reduced to what `run-gpu.sh`
+   lacks, each kept line justified: the transfer of the uncommitted tree to a VM, which the
+   CPU-VM build and the wiki use; its conda-based sf1 generation goes. The CI wiring guard (`cost-report` `test_source_formatting`) follows:
+   - the three GPU target lists still agree;
+   - `--test-threads=1` is still asserted for both GPU runners.
+3. **Local and verda builds go through the build image.** One documented command builds every
+   shape (rust-only, cudf/FFI, `--features gpu`, the staged binaries and the benchmark binary)
+   inside the image, over the checkout. `build-test.sh` either becomes that command or is deleted.
+   The `cargo-cudf.sh` and `CUDF_ROOT` rules for a host build go with it. The per-worktree
+   `CARGO_TARGET_DIR` rule stays: a build script bakes `CARGO_MANIFEST_DIR`.
+4. **Deleted:** `conda-install-cudf.sh` and `conda-install-cudf-2506.sh`, plus every reference to
+   them. `init.sh`, `init_fedora43.sh` and `create_verda_instance.sh` are deleted, or reduced to
+   installing Docker and the NVIDIA toolkit where `bootstrap-vm.sh` / `run-gpu.sh prepare` do not
+   already, with no conda.
+5. **shad-gpu is untouched.** `build-test-shadgpu.sh`, `setup-glibc.sh`, `lib/shadgpu-env.sh` and
+   their docs stay as they are, because shad-gpu has no Docker. Its binaries may still be built
+   in the build image and shipped; that is the builder's choice.
+6. **The wiki describes one path.** `build-test.md` and `prompts.md` lose the conda and host-build
+   instructions:
+   - the "Containers" section becomes the build and run section;
+   - "Nebius host" names `run-gpu.sh` for every Nebius GPU VM;
+   - shad-gpu's section says it is the one exception, and why.
+
+   Every command in the wiki was run once on the image path during the task.
+
+## Scope
+
+| path | change |
+|---|---|
+| `.github/workflows/pipeline.yml`, `exec-model-corpus.yml`, `validate-large.yml`, `.github/actions/` | jobs in the build image |
+| `docker/conda/cudf-25.10.spec`, `docker/pins.env`, `docker/build.Dockerfile`, `scripts/env/image.sh`, `.github/workflows/images.yml` | the CI-only 25.10 build image |
+| `llm-wiki/tickets/testinfra.md` | #129 |
+| `scripts/build-test.sh`, `scripts/build.sh`, `scripts/cargo-cudf.sh`, `scripts/conda-install-cudf*.sh`, `scripts/init.sh`, `scripts/init_fedora43.sh`, `scripts/create_verda_instance.sh`, `scripts/nebius-test.sh`, `scripts/nebius/ci-ship.sh` | reduced or deleted |
+| `scripts/nebius-sync.sh` | kept: the tree transfer only |
+| `.gitignore` | `/target-img-*/`, `/.home-img/` if absent |
+| `scripts/env/` | the local build command; whatever `run-gpu.sh` needs for CI |
+| `cost-report/tests/test_source_formatting/` | the CI wiring guard |
+| `llm-wiki/build-test.md`, `llm-wiki/prompts.md`, `.claude/agents/*.md` where they name the old paths | one path |
+
+Component-level API: none.
+
+## Constraints
+
+- Publishing the new and changed images needs `.github/workflows/images.yml` on master. It lands
+  there as a separate commit by the human, approved in advance, before this task's first dispatch.
+
+- No engine change, and no test is weakened to make a job pass in the image. A test that fails in
+  the image and passed outside it is a finding: fix the image or ticket it.
+- The CI GPU job keeps its actor allowlist and environment secrets (`build-test.md` "CI and its
+  secrets").
+- The dataset and DuckDB pins stay those of `docker/pins.env`, and the generated sf1 stays
+  byte-identical to today's.
+
+## Signoff (2026-11-08, coordinator)
+
+Solved under its constraints: every CI job builds and tests in `peacockdb-build:cudf-<v>`, found by its inputs tag (legs 25.02 and an honest 25.10, #129 a closed); `gpu-tests` runs on the L40S through `run-gpu.sh` and the run image; local builds go through `build-test.sh` in the image; the conda and machine-setup scripts are gone; the wiki shows one path, shad-gpu the exception. Counts per tier equal the parent's, and sf1 is byte-identical. No engine change.
+Shortcuts: four script test files run on the runner, not in the image (no en_US locale, no name for uid 1001: #309), as does `shellcheck`. verda is off the image path and was never run: it was down, and an rsync'd tree has no `.git`. Not run in CI: `call-cost`, and validate-large's ssh half (shad-gpu is down). The multi-GPU tests were built, never run on two GPUs. `bench-each.sh`, Nsight and the fused binary ran one case each.
+After the merge (the human): dispatch `images.yml -f kind=all -f cudf=all` on master once open branches that read `:cudf-<v>` have rebased; rewrite chain J's board override and `verify-26.02-impl.md` (they name the deleted scripts); then clear nebius-gpu's `~/peacockdb-ci/`, `~/miniforge3` and `~/peacock-env.sh`, and the dev worktrees' host `target*/` and `cpp/build`. #310 tracks nebius-gpu's disk filling with images.
+
+---
+
+<!-- archived from llm-wiki/tasks/tp4-sized.md -->
+
+**Merged 2026-11-13 as PR #202, chain L's task 9, one commit `0c2c8521` squashed from the branch, merged into master by `24e7091d`.** Its plan and record: `git show d290698f:llm-wiki/tasks/tp4-sized-impl.md` and `…/tp4-sized-detail.md`.
+
+# sf40 tp4_sized on the H100 for the batching query set
+
+Kind: production
+
+sf40-baseline and the fused batches are tp1_single: one lane, one batch per source. tp4_sized runs
+four lanes with sized batches. It is the multi-lane mode people will compare against. This task
+measures it on the same device, for the same queries, so the report can say how far batching in
+tp1_single gets against the engine's own multi-lane mode. No other mode is in scope.
+
+## Done when
+
+1. `testdata/benchmark-results/h100-80gb-hbm3/{tpch,tpcds}.sf40/tp4_sized.benchmark.txt` hold every query
+   with an `ok` or `wrong` row in sf40-baseline's `testdata/benchmark-results/h100-80gb-hbm3/cases.csv`
+   whose line in the main case list carries `tp4_sized`, in bench-rows' format. That covers the
+   batching set (TPC-H q1-q22, every TPC-DS line) and the TPC-H micro queries. The modes the
+   H100's list is written at are tp1_single and tp4_sized, and the same test that writes
+   `cases.csv` from the tree gives a row the modes `tp1_single|tp4_sized` when its tp4_sized
+   section did not fail. The tree check holds the H100 tree to that list, by containers' rule.
+2. A query enabled at tp4_sized that fails at sf40 is recorded as a failed case, with its reason,
+   as sf40-baseline does.
+3. `reports/query-batching.md` gains, per batch, the sum of the same queries' unfused tp4_sized
+   load and execute, beside the tp1_single sums.
+4. bench-rows' report page, `testdata/benchmark-report.html`, regenerated in the commit that
+   adds the files, shows the tp4_sized rows beside the tp1_single ones.
+
+**Profiles.** Every case this task benchmarks is also profiled on the H100. Both Nsight passes run
+(`create_nsys_profile.sh`): the trace pass's `calls.tsv` and pinned-loads' load breakdown, and the
+metrics pass's `hbm.tsv`. In each case's profile, a reader sees how much of every load is reading
+and copying, against decoding. The derived files are committed per device and dataset under
+`testdata/calibration/h100-80gb-hbm3/`. Captures stay on the host or in the scratch area; they are too large to
+commit. A case whose capture fails is listed with the reason, as a failed benchmark case is.
+
+## Scope
+
+| path | change |
+|---|---|
+| `testdata/calibration/h100-80gb-hbm3/` | the profiles' derived files |
+| `testdata/benchmark-results/h100-80gb-hbm3/` | the tp4_sized files |
+| `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` | `H100_MODES`, the modes the H100's list is written at |
+| `testdata/benchmark-results/h100-80gb-hbm3/cases.csv` | the modes, rewritten by sf40-baseline's test |
+| `testdata/benchmark-report.html` | regenerated |
+| `llm-wiki/reports/query-batching.md` | the column |
+
+Component-level API: none.
+
+## Signoff (2026-11-07)
+
+Solved under its constraints. Done-when 1-4 are met: 126 cases at sf40 tp4_sized on the H100, 5 recorded as failed (tpch q8 at the step cap, #238; four 1800 s timeouts, #308). The list is written at both modes, and the report and page carry the sums. Two review rounds and a completeness pass. Shortcuts, all recorded in `tp4-sized-detail.md`:
+- The binary shipped was sf40-baseline's (`b415d375`, before dag-driver), so tp4_sized and tp1_single come from one engine, not from this branch's.
+- Profiles: tpch all 45, tpcds 72 of 76. q14, q61, q80 and q88 were left out on an estimated capture size, never attempted. `calls.tsv` misses 3 tpch and 14 tpcds cases the sf1 recipe check refuses.
+- The tpcds passes ran a case at a time on the VM by drivers that are not committed. build-test.md step 7 describes them in prose. The merge and the profile script now take `--mode`.
+- The H100 ran 16.4 h for this task.
+
+---
+
+<!-- archived from llm-wiki/tasks/batching-report.md -->
+
+**Merged 2026-11-13 as PR #201, chain L's task 8, one commit `3369585b` squashed from the branch, merged into master by `522d156b`.** Its plan and record: `git show d290698f:llm-wiki/tasks/batching-report-impl.md` and `…/batching-report-detail.md`.
+
+# Report: what query batching buys on the H100 against DuckDB on 128 cores
+
+Kind: production
+
+The chain's output for the human is one page, `llm-wiki/reports/query-batching.md`, in the shape of
+the TPC-H section of `reports/benchmark-minimal.md`: load and execute as separate columns,
+DuckDB warm alongside.
+
+## Done when
+
+1. **A table per dataset** (TPC-H sf40, TPC-DS sf40), one row per batch size: 3, 10, 20, all.
+   Columns:
+   - fused load (ms) and fused execute (ms);
+   - the sums of the same queries' unfused peacockdb load and execute from sf40-baseline;
+   - the sum of their DuckDB warm times;
+   - fused total against unfused total, and against DuckDB, as ratios.
+
+   A batch that ran out of device memory shows that, with the cap it ran under. tp4-sized adds
+   the unfused tp4_sized sums later. A batch's queries come from sf40-baseline's H100
+   `cases.csv`, as query-fuser takes them (its `ok` and `wrong` rows); its `skipped` rows are
+   item 4's skipped queries, and its `wrong` rows are counted and noted.
+2. **The two hints per batch:** what merging the listed identical subtrees would save, and what
+   overlapping execute with load would save. Each is labeled an estimate, with its model in one
+   line.
+3. **Load against decode:** per dataset, from the profiles, how much of the unfused and the fused
+   load is reading and copying, against decoding. That says whether sharing a scan saves copies,
+   decodes, or both.
+4. **Provenance:** device, driver, CUDA, cuDF and host for the H100 runs, and the pinned host
+   file cache they ran with (pinned-loads; bench-rows' `pinned_cache=`: on or off, its capacity,
+   the largest resident bytes, and any run that fell back or re-read from disk); DuckDB version,
+   threads and host for the CPU runs. Also the queries skipped at sf40 and why, and the protocol
+   (runs, which minimum, and that each query process, or each fused batch, prefills the cache
+   before any run: peacockdb's warm loads read pinned host memory, DuckDB's its buffer manager
+   over a warm page cache).
+4a. **One reader per format.** The generator reads `cases.csv` through
+   `scripts/calibration/device_cases.py` (sf40-baseline), not a parser of its own. Its reader of
+   `duckdb.tsv` is tested against the committed fixture `testdata/fixtures/duckdb-results.tsv`,
+   whose owner reader is sf40-baseline's Rust `parse_duckdb_results`, with the same expected
+   values.
+5. A short reading of the numbers: where the saving comes from, where it stops growing, and what
+   the hints say is worth building next. No claim the numbers do not support.
+
+## Scope
+
+| path | change |
+|---|---|
+| `llm-wiki/reports/query-batching.md` | new |
+| `scripts/calibration/batching_report.py`, `scripts/calibration/tests/test_batching_report.py` | the generator the report's tables come from, so no number is typed by hand |
+
+Component-level API: none.
+
+## Signoff (2026-11-06)
+
+Solved under its constraints. Done-when 1-5 and 4a are met. Every table cell was recomputed from the raw files by two reviewers. Three review rounds and a completeness pass. Shortcuts and limits, all recorded in `batching-report-detail.md`:
+- The Reading is written by hand from the generated tables, and `--check` does not cover it. tp4-sized must re-read it when it adds its sums.
+- A fused batch whose queries are no longer today's `cases.csv` prefix is named stale, not refused. A status change to a sf40 row then calls for an H100 rerun, without turning CI red.
+- The page is no longer documentation to CI's path filters, so a page-only change runs the full pipeline.
+- The DuckDB comparison is given both as measured and with the per-process floor taken off; TPC-DS first3 is DuckDB-faster only with the floor taken off.
+
+---
+
+<!-- archived from llm-wiki/tasks/query-fuser.md -->
+
+**Merged 2026-11-13 as PR #200, chain L's task 7, one commit `3af466b1` squashed from the branch, merged into master by `269e9636`.** Its plan and record: `git show d290698f:llm-wiki/tasks/query-fuser-impl.md` and `…/query-fuser-detail.md`.
+
+# Fuse N queries' plans into one DAG that loads each table once, and run batches of them
+
+Kind: production
+
+On sf40 a query's load is 400-690 ms against 19-48 ms of execute (`reports/benchmark-minimal.md`).
+Queries that read the same tables pay that load again each time. This task takes the plans of
+N queries in tp1_single mode and fuses them into one plan, built on dag-driver, in which each table
+is read once and feeds every query that needs it. It runs batches of the first 3, 10, 20 and all
+queries of each dataset on the H100, and records what batching saves.
+
+## Done when
+
+1. **The fuser.** It takes N queries' tp1_single plans and returns one DAG with N roots. Scans of
+   the same parquet file become one `GpuLoadParquet`:
+   - its projection is the union of the queries' projections;
+   - its row groups are the union of their surviving row groups, with batch sizing redone;
+   - each consumer sees exactly the columns and rows its own plan expected, through a zero-copy
+     column selection and through the filters its plan already carries.
+
+   If a query's pruning dropped row groups that its filters do not reject, sharing could change
+   its answer. The fuser then does not share that scan, and says so. Nothing but sources is
+   merged.
+1a. **Buffer or re-read, per held reader.** Where a reader of a shared scan lies inside a join's
+   hold, the fuser makes one of two choices, case by case, and records which and why:
+   - **re-read:** that reader gets its own `GpuLoadParquet`, loaded once the hold lifts. This
+     costs the table's load time again, from the baseline's load time and `loads.tsv`.
+   - **buffer:** a `GpuHoldBuffer` (dag-driver) goes on the reader's path. This costs the bytes
+     the buffer keeps.
+
+   Placement of a buffer: on the path from the shared scan up to the held join's probe input,
+   the edge whose recorded `batch_bytes` in the sf40-baseline run is smallest. That is after the
+   filters and projections that shrink the batch. A buffer above an inner join on that path runs
+   that join early, so the choice also charges that join's build table. It is placed above a
+   join only when the recorded rows say the join did not increase cardinality there. The choice
+   between re-read and buffer is a plain function of those numbers and the memory budget,
+   testable without a device. Its inputs come from the sf40 benchmark files. The fuser runs
+   at sf40 only, and has no fallback for a scale without them.
+1b. **Reads per table.** For each batch, the fuser reports how many times each table is read:
+   once, plus one per re-read it chose.
+2. **The mergeability hint.** For each batch, the fuser lists the identical subtrees above the
+   shared sources: same node, same parameters, same inputs, across queries. That includes a
+   filter, a join or an aggregate several queries compute alike. Each entry carries the time
+   merging it would save, read from the sf40-baseline per-node times. It is a report, not an
+   execution.
+3. **The pipelining hint.** For each batch, it estimates the further saving if execution
+   overlapped loading: a query starts as soon as its own tables are on the device, and loads are
+   ordered to start queries early. The estimate is a schedule computed from the baseline's per-node
+   load and execute times, against the fused run's measured load + execute. The model is stated.
+4. **The concurrency cap.** The outer code reads each query's `peak_bytes` and per-node
+   `batch_bytes` from the sf40-baseline results and passes dag-driver a cap that keeps the
+   estimated live bytes under the device's memory less a margin. The rule is written down and
+   is a plain function, testable without a device.
+5. **The runs.** For TPC-H and TPC-DS, the first 3, 10, 20 and all queries of sf40-baseline's
+   ordered list, in tp1_single on the H100. That list is the H100 tree's
+   `testdata/benchmark-results/h100-80gb-hbm3/cases.csv`, read when the batch runs, not compiled
+   in: per dataset, its `ok` and `wrong` rows carrying `tp1_single`, in file order, TPC-H
+   restricted to q1-q22. A query sf40-baseline skipped is a `skipped` row there, so it is not in
+   a batch. Each batch records:
+   - fused load time and fused execute time, measured separately;
+   - the cap used, and peak device memory;
+   - the two hints.
+
+   The protocol is the benchmark's warm-up and 2nd-min, with fewer measured runs allowed for the
+   largest batches, stated. A batch that runs out of device memory is a recorded outcome, not a
+   failure of the task. The smaller batches are the comparison.
+6. **Answers.** Every query's answer in a fused batch equals its unfused answer on the same
+   device, checked for every batch that completes. On the CPU backend at sf1, a fused batch's
+   answers equal the corpus goldens, in a test.
+7. The results are under `testdata/benchmark-results/h100-80gb-hbm3/fused/{tpch,tpcds}.sf40/`, in a format
+   batching-report reads, documented in the detail file.
+8. bench-rows' report page, `testdata/benchmark-report.html`, gains a fused-batches table per
+   dataset, read through the fused format's own section reader: per batch, its queries, outcome,
+   fused load, execute and accountant's peak (a lower bound), cap, reads per table, and a link to
+   the section. The page is regenerated in the commit that adds the fused files.
+
+**Profiles.** Every fused batch this task runs is also profiled on the H100. Both Nsight passes run
+(`create_nsys_profile.sh`): the trace pass's `calls.tsv` and pinned-loads' load breakdown, and the
+metrics pass's `hbm.tsv`. In each case's profile, a reader sees how much of every load is reading
+and copying, against decoding. The derived files are committed per dataset under
+`testdata/calibration/h100-80gb-hbm3/fused/`. Captures stay on the host or in the scratch area; they are too large to
+commit. A case whose capture fails is listed with the reason, as a failed benchmark case is.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/src/prototypes/fuser/` (new) | the fuser, the hints, the cap rule, buffer placement |
+| `peacockdb-core/tests/prototype_fused_benchmarks.rs` (new test target, features `gpu` + `test-support`; its case code in `src/prototypes/fuser/`) | the runs: eight fixed tests, `bench_fused_{tpch,tpcds}_sf40_{first3,first10,first20,all}_tp1_single`, each reading the H100 `cases.csv` at run time for its batch. Not in `peacock_gpu_benchmarks` |
+| `scripts/env/run-gpu.sh`, `scripts/env/stage-install.sh` | stage and run `prototype_fused_benchmarks` by name, in the run image without changing it (no `docker/` file is edited). No CI step runs it |
+| `scripts/nebius/idle_watch.py` | the 4-hour cap sees the fused binary as a test process |
+| `cost-report/tests/test_source_formatting/` (`ci_coverage.rs`) | the CI wiring guard's explicit "manual, prototype" entry for the target, checked not wired into CI |
+| `testdata/benchmark-results/h100-80gb-hbm3/fused/` | results |
+| `testdata/calibration/h100-80gb-hbm3/fused/` | the profiles' derived files, one capture per batch |
+| `scripts/create_nsys_profile.sh` (`--fused`), `peacockdb-core/src/plan/rebuild.rs` | profiling fused batches; the plan rebuild helper moved out of tests |
+| `peacockdb-core/src/lib.rs`, `cost-report/tests/test_source_formatting/visibility.rs`, `llm-wiki/coding-style.md` | `prototypes` admitted as a second component behind `test-support`, under `test_support`'s rules |
+| `planner/translator/scan_mapping/parquet_meta.rs`, `planner/mod.rs`, `plan_text/` (`node_text.rs`, `bench_text.rs`, `mod.rs`), `executor/driver/index.rs`, `executor/mod.rs`, `test_support/{record,corpus_benchmark}.rs`, `.gitignore` | small engine and harness helpers the fuser calls, each a delegate or a visibility change, no behaviour change |
+| `peacockdb-core/tests/test_corpus_goldens/benchmark.rs`, `testdata/benchmark-report.html` | the page's fused-batches table |
+
+Component-level API: none beyond what dag-driver adds.
+
+## Constraints
+
+- `Kind: production` (the human's decision, 2026-11-03): a PR against its parent branch and the
+  usual reviewer rounds. The code stays prototype code: it lives under `src/prototypes/`, runs at
+  sf40 only, and is tested enough to trust the numbers. That means the answer checks in item 6
+  and a unit test for each hint's arithmetic.
+- No planner change for single queries; every existing golden is unchanged.
+- Fused runs go through the same benchmark harness as the baseline: its 69 GiB rmm pool, and the
+  engine's pinned host file cache from pinned-loads, prefilled with the batch's files before the
+  warm-up. Neither is
+  installed a second way.
+- **Prototype code lives apart from the engine.** Rust: `peacockdb-core/src/prototypes/<name>/`,
+  compiled only under `test-support`, as `test_support/` is, so `cargo build` cannot name it.
+  Each prototype's module doc says what it is, that it runs
+  at sf40 only, and that no engine module may depend on it. A source-formatting test in
+  `cost-report` (`tests/test_source_formatting/`) enforces that no file outside `prototypes/` and
+  the tests names `prototypes::`. `architecture.md` gains a short "Prototypes" section with that
+  rule.
+
+## Signoff (2026-11-06)
+
+Solved under its constraints. Every Done-when item and the Profiles paragraph are met: all 8 sf40 batches measured on the H100 with `answers=match`, 7-31 % faster than their queries run alone, all from one binary, profiled. Three review rounds and a completeness pass. Shortcuts and limits, all recorded in `query-fuser-detail.md`:
+- The hold ledger reads the shared loads as the last rebuild left them, since groups are rebuilt at the end of each resolve. A mid-resolve re-read overstates it: tpcds first10 is +97 ms against round 1. Accepted.
+- A join's build child that is itself a shared load is priced as the reader's own load. tp1_single plans never have that shape.
+- Buffers left when a group dissolves are kept (at most 0.13 GB).
+- The profiles were taken before the merge hint was restricted to cross-query groups. The executed plans are identical, so they stand.
+- The fused format and the hold and cap rules live only in the detail file (spec item 7). Move them somewhere permanent before archiving it.
+
+---
+
+<!-- archived from llm-wiki/tasks/dag-driver.md -->
+
+**Merged 2026-11-13 as PR #199, chain L's task 6, one commit `54470a20` squashed from the branch, merged into master by `e27700dd`.** Its plan and record: `git show d290698f:llm-wiki/tasks/dag-driver-impl.md` and `…/dag-driver-detail.md`.
+
+# The driver runs a plan in which one source feeds several consumers and several roots answer
+
+Kind: production
+
+The driver runs trees. Each node owns its children as `Box<dyn GpuNode>`. `executor/driver/index.rs`
+numbers nodes pre-order with a single `parent`. `run` takes one root and pushes every unloaded batch
+into one result list. To fuse several queries' plans, so their table loads are shared, the driver
+must run a DAG: a `GpuLoadParquet` source read by several consumers, with one root per query.
+**Only a source may be shared.** Merging any other node is out of scope here. query-fuser reports
+how much it would save, without doing it.
+
+This is production code with unit tests, not part of the prototype. A single-query plan is the
+one-root, unshared case, and must run exactly as today.
+
+## Done when
+
+1. **A plan may have several roots and shared sources.** Each root's batches are returned
+   separately, in the order that root alone would produce them. A source with k consumers loads
+   each batch once. Every consumer reads it without a device copy, through refcounted ownership
+   of the same columns: an additive ABI call that duplicates a handle over shared owners, or an
+   equivalent the builder argues for. `CpuBatch` gets the same, by an explicit cheap clone of
+   its Arc-backed arrays.
+2. **Every place that assumes a tree is made DAG-correct**, or proven unaffected, each with a
+   test:
+   - indexing: several parents, several roots, height, and subtree ranges that are no longer
+     contiguous;
+   - the scheduler's re-check after a step, which reaches every parent;
+   - output queues: one read per consumer, and a batch dropped only after its last consumer;
+   - memory accounting: one hold and one release per shared batch, released at the last
+     consumer, so `holds == releases` and `in_flight_bytes == 0` still hold;
+   - the plan-time memory estimator, which charges a shared batch until its slowest consumer;
+   - validation and the output hook, which visit a shared node once;
+   - display: a shared node printed once, and referenced from each further consumer;
+   - the wire format: one seq space across the fused plan, a shared node numbered once on both
+     the Rust writer and C++ `index_post_order`, and several roots.
+3. **Join holds cannot deadlock across roots.** The scheduling rule holds a join's probe subtree
+   until its build is ready, and its no-deadlock argument rests on "plans are trees"
+   (`architecture.md` "The scheduling rule"). Two cases are covered:
+   - two roots whose builds each wait on a source the other holds;
+   - one join reading the same shared source on both sides.
+
+   The answer is the **hold buffer** below. A plan with a buffer on the held reader's path runs
+   both cases. A plan without one is refused at validation with a named error. `architecture.md`
+   carries the new argument.
+3a. **A hold buffer node, `GpuHoldBuffer`.** It sits on one edge. While a join's hold covers it,
+   it takes every batch its child emits and emits nothing; when the hold lifts, it emits them in
+   arrival order. **A hold stops at a buffer**: the buffer itself is held, and nothing below it
+   is. So its subtree runs while the build runs, and what waits is the buffer's input, after
+   whatever filters and projections lie below it.
+   - It is a Rust-side node: it keeps the handles it was given and calls nothing on the device.
+     No C++ or ABI change.
+   - The memory accountant holds its batches like any other held batch, and the estimator charges
+     the buffer for everything its child emits.
+   - Display shows it as its own node. It has no wire node, since it makes no device call (as `GpuUnion`); "From node to seqs" gives it its own row.
+   - On lanes: one queue per lane.
+   - No single-query plan contains one, so every single-query plan schedules exactly as today.
+3b. **The only unbounded storage is a node you can see.** A queue between two ordinary nodes stays
+   self-bounding at one batch per lane, as `architecture.md` "Queues need no cap" says today.
+   Validation refuses any plan where an edge into a held region carries batches from a producer
+   outside it and nothing on that edge or below it, inside the region, is a hold buffer. That
+   includes a shared source read from inside a hold. Unbounded storage exists only in
+   accumulators and hold buffers, which the plan shows and the estimator charges. This rule goes
+   into `architecture.md` "The scheduling rule", in those words, as a rule every later driver
+   change keeps.
+3c. **`plan::validate_dag(roots, cap)`, one entry point that proves the DAG deadlock-free** before
+   anything runs. `run_roots` calls it first, and the fuser calls it on every plan it builds. It
+   checks, in order, and refuses with a named `PlanError` that names the nodes:
+   - the structure: every root a sink and no sink elsewhere; only a `GpuLoadParquet` shared;
+     acyclic;
+   - rule 3b, for every join's hold and, under a cap, for every root that may wait;
+   - **the wait-for graph is acyclic.** A join in its build phase waits for hold H′ when a node
+     of its build region lies inside H′'s held region, holds stopping at buffers. A capped root
+     waits only for its admission, that is, for the roots admitted before it to finish: it waits
+     for H′ when a node of one of those roots lies inside H′'s held region. It never waits on its
+     own region, and a join inside a root never waits on that root's cap. A cycle is refused as
+     `PlanError::HoldCycle` listing the holds in order. Under 3b the argument says no cycle can
+     form, but the check is kept: it is the mechanical form of the argument, and what a later
+     rule change breaks first.
+
+   A property test ties the check to the driver, both ways. Random DAGs, shared sources and
+   buffers placed at random, with and without a cap, run on the CPU or mock backend. Every DAG
+   `validate_dag` accepts runs to completion, with `holds == releases`. Every DAG on which the
+   driver stops with work left, caught by a step bound, is one `validate_dag` refused. And no
+   refusal is false: every DAG that passes the structure and rule 3b, capped or not, is accepted
+   and runs to completion, so `HoldCycle` never fires on it. A capped plan with a join is among
+   them.
+4. **A limit's early exit is per consumer.** One root satisfying its limit does not stop a
+   shared source another root still reads. The source stops when every consumer is satisfied or
+   done.
+5. **The driver takes an optional concurrency cap:** at most k roots' subtrees past their shared
+   sources run at once, and the rest wait. query-fuser uses it to keep a large batch inside device
+   memory. Without the cap, scheduling is the existing rule extended to several roots, and stays
+   deterministic.
+6. **Tests:**
+   - CPU-backend unit tests for each item above;
+   - GPU tests of a two-root, one-shared-source plan, and of three roots over two shared sources,
+     each root's answer byte-identical to that query run alone;
+   - a test that a shared batch is held once and released once;
+   - hold buffers: the subtree below a held buffer runs during the build; the buffer emits in
+     arrival order once the hold lifts; a plan with an unbuffered reader of a shared source inside
+     a hold is refused by name; the two deadlock shapes of item 3 with buffers answer as alone;
+   - `validate_dag`: each refusal by name, and the property test of item 3c;
+   - TPC-DS q95's shape, one join reading `web_sales` on both sides, from the real plan, fused
+     with a buffer, answering as q95 alone.
+
+   Every existing golden (plan, `.cpu.txt`, `.cost.txt`, recipe payloads, device tier) is
+   byte-identical, because no existing plan has a shared node.
+7. `architecture.md` "Execution" and "The wire format" describe the DAG rules.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/src/plan/` | shared children: `Arc` or arena ids; `children()` |
+| `peacockdb-core/src/executor/driver/`, `executor/mod.rs`, `executor/accounting.rs` | indexing, scheduling, queues, roots, limits, accounting, the cap |
+| `peacockdb-core/src/planner/memory_estimation.rs` | shared-batch lifetime |
+| `peacockdb-core/src/plan/validate.rs`, `plan_text/` | single visit, display |
+| `peacockdb-core/src/wire/`, `flatbuffers/gpu_plan.fbs`, `cpp/src/node_session.cpp` | several roots; DAG numbering |
+| `cpp/include/peacock_gpu.h`, `cpp/src/`, `peacockdb-ffi/src/lib.rs` | the handle duplicate, additive |
+| `peacockdb-core/src/planner/nullability.rs`, `plan_text/`, `wire/attach.rs` | the hold buffer's arm in each walk over node kinds |
+| `peacockdb-core/src/test_support/gpu_session.rs` | a session over several roots, for the device tests |
+| `llm-wiki/architecture.md` | the DAG rules |
+
+Component-level API:
+- the driver's entry point accepts several roots and returns per-root results;
+- one additive C ABI symbol (handle duplicate);
+- the wire schema gains several roots, additively, so a one-root plan's bytes are unchanged.
+
+## Constraints
+
+- The planner is unchanged. Nothing in this task builds a DAG from SQL; the tests build them by
+  hand.
+- tp1_single is the mode query-fuser uses, but the driver rules hold for every mode, and the
+  tests cover at least one multi-lane mode.
+
+## Signoff (2026-11-06)
+
+Solved under its constraints: shared sources loaded once and read through refcounted handles
+(`peacock_handle_duplicate`, `Batch::share`); several roots; hold buffers with validation and a
+wait-for check (`validate_dag`); per-consumer limits; an optional cap; estimator, display and wire
+DAG-correct; fused answers equal each query alone on the CPU and the L40S, q95 included; single-query
+plans unchanged. Shortcuts: item 1's order holds only where a root reads one source per stream (rows
+always match; pinned by a test); 15 cost goldens change in a category comment (`GpuHoldBuffer` at
+0.0); the property test's "stuck ⇒ refused" arm cannot fire (an unbuffered hold grows a queue instead)
+and `HoldCycle` occurs on no plan; `run` skips `validate_dag` (trees need no buffer); per-root limits,
+the cap and buffers are exercised on the mock backend only; buffer-kept rows are not counted abandoned.
+
+---
+
+<!-- archived from llm-wiki/tasks/sf40-baseline.md -->
+
+**Merged 2026-11-13 as PR #198, chain L's task 5, one commit `0c46a65a` squashed from the branch, merged into master by `19f58c24`.** Its plan and record: `git show d290698f:llm-wiki/tasks/sf40-baseline-impl.md` and `…/sf40-baseline-detail.md`.
+
+# sf40 tp1_single on the H100, and DuckDB on 128 cores, for every query the batches use
+
+Kind: production
+
+Query batching is measured against two baselines: peacockdb running the same queries one at a
+time, and DuckDB on 128 cores. DuckDB has no batching, so its side of a batch is the sum of its
+warm single-query times. This task records both. It also takes over containers' benchmark run on
+an 80 GB device (task 11 of `origin/ENS-containers:llm-wiki/tasks/containers-impl.md`), with this
+chain's H100 as the device.
+
+## The query set
+
+The candidates are the main case list's tp1_single cells
+(`peacockdb-core/tests/common/corpus_benchmark_cases.inc`), in its order:
+
+- **TPC-H:** the 44 lines carrying `tp1_single`: q1-q22 and the micro queries. TPC-H+V's vector
+  probes are not in the list and are out. The batching set is q1-q22 of them.
+- **TPC-DS:** the 82 lines carrying `tp1_single`. The batching set is all of them.
+- A query that fails at sf40 (error, OOM or timeout) is skipped. It is written as a failed case
+  with its reason, as containers' format does, and is listed in the detail file.
+  A skipped query is not a ticket unless it is a wrong answer.
+
+The one ordered list is the H100 tree's `testdata/benchmark-results/h100-80gb-hbm3/cases.csv`,
+in containers-rebase's per-device format: header `dataset,sf,query,modes,status,note`, `modes`
+`|`-joined and empty when skipped, `status` one of `ok`, `skipped`, `wrong`, `note` the skip
+reason or the `#NN` ticket. A test, `the_h100_list_is_the_lists_measured`, writes it from the
+H100 results tree under `UPDATE_CANONICAL=1`, never by hand, and holds it to the tree otherwise:
+
+- a query with a non-failed section in a mode gets an `ok` row carrying those modes;
+- a query whose sections are all failed gets a `skipped` row, no modes, its reason as the note;
+- a wrong answer keeps its row as `wrong`, the ticket `#NN` as the note. The tree knows no
+  tickets, so the writer carries each `wrong` mark over from the file as it stands.
+
+query-fuser, tp4-sized and batching-report read this file. No second list is kept. The tree check
+reads it by containers' rule: a device tree that holds a `cases.csv` is held to it, one without
+to the whole main list. No exception names the H100.
+
+## Done when
+
+1. `testdata/benchmark-results/h100-80gb-hbm3/{tpch,tpcds}.sf40/tp1_single.benchmark.txt` hold every query
+   above, in bench-rows' format, with pinned-loads in the build. The tree check holds
+   `h100-80gb-hbm3` (the harness names the tree from the card) to its own `cases.csv`, so a tree
+   carrying only tp1_single passes; that list's `ok` and `wrong` rows must be cases of the main
+   list at the modes they carry.
+2. DuckDB 1.5.4 timings for the same queries on `nebius-cpu128`, using `duckdb_minimal.sh`'s
+   protocol: native storage, page cache warmed and its residency checked, all cores, 2nd-min of 6.
+   The script is extended to the corpus query text, not forked. The results go in a per-device
+   tree, `testdata/benchmark-results/duckdb-cpu128/{tpch,tpcds}.sf40/`, with DuckDB's version,
+   threads and host as provenance.
+3. Each peacockdb answer at sf40 matches DuckDB's answer at sf40, by the corpus comparison rules.
+   Where it does not, a ticket is filed and the query's `cases.csv` row becomes `wrong` with
+   note `#NN`.
+4. The skips with reasons and the run commands are in the detail file.
+5. **The report page** (bench-rows' `testdata/benchmark-report.html`) gains a DuckDB column: per
+   (dataset, query) at sf40, the warm 2nd-min from `duckdb-cpu128/<ds>.sf40/duckdb.tsv`, or its
+   failed mark, beside the devices, and the page shows the H100 tree. `duckdb.tsv` has one
+   owner reader, in Rust (`test_support`), which the page uses; batching-report's Python reader is
+   tested against the same committed fixture. The page is regenerated in the commit that adds
+   the trees.
+
+**Profiles.** Every case this task benchmarks is also profiled on the H100. Both Nsight passes run
+(`create_nsys_profile.sh`): the trace pass's `calls.tsv` and pinned-loads' load breakdown, and the
+metrics pass's `hbm.tsv`. In each case's profile, a reader sees how much of every load is reading
+and copying, against decoding. The derived files are committed per device and dataset under
+`testdata/calibration/h100-80gb-hbm3/`. Captures stay on the host or in the scratch area; they are too large to
+commit. A case whose capture fails is listed with the reason, as a failed benchmark case is.
+
+## Scope
+
+| path | change |
+|---|---|
+| `benchmarks/duckdb_minimal.sh`, `benchmarks/tests/` (new) | the corpus queries, both datasets; its tests |
+| `testdata/benchmark-results/h100-80gb-hbm3/`, `testdata/benchmark-results/duckdb-cpu128/` | results |
+| `testdata/calibration/h100-80gb-hbm3/` | the profiles' derived files |
+| `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` | a device list's rows held to the main list; the test that writes and checks the H100's `cases.csv`; the page's DuckDB input |
+| `testdata/benchmark-results/h100-80gb-hbm3/cases.csv` | the ordered query list, skips and wrong answers as rows |
+| `peacockdb-core/src/test_support/` (`duckdb_results.rs`, new; `benchmark_report.rs`), `testdata/benchmark-report.html`, `testdata/fixtures/{device-cases.csv,duckdb-results.tsv}` | the DuckDB column; the formats' shared fixtures |
+| `scripts/calibration/device_cases.py` (new) | the device list's one reader for scripts |
+| `llm-wiki/build-test.md` | how to re-run both sides |
+| `peacockdb-core/src/test_support/` (`corpus_benchmark.rs`, `corpus_gpu.rs`, `corpus_golden.rs`, `duckdb_oracle.rs`, `device_cases.rs`), `tests/test_cpu_corpus.rs`, `testdata/duckdb_result.py`, `testdata/goldens/{tpch,tpcds}.sf40/` | recording and comparing the sf40 answers (done-when 3); a per-case timeout |
+| `scripts/env/` (`bench-each.sh`, `run-gpu.sh`), `scripts/calibration/` (`join_records.py`, `publish_record.sh`), `scripts/create_nsys_profile.sh` (`--cases`, `--device`) | one process per query, joined records, profiling a subset |
+
+Component-level API: none.
+
+## Constraints
+
+- The H100's watcher stops one process after 4 hours. A long run goes in segments with
+  `PEACOCK_BENCH_RESUME=1`, and the segments' records are joined, as containers planned.
+- Both VMs are stopped when the run ends.
+
+## Signoff (2026-11-05)
+
+Solved under its constraints: 130 sf40 tp1_single cases on the H100 (124 ok, 4 skipped, 2 wrong #306)
+with `cases.csv`, the trees, the record and both Nsight passes; DuckDB on 128 cores for the same set,
+warm and resident, its answers held to the H100's; the page's H100 and DuckDB columns. Shortcuts:
+the plan's L40S run is CI's GPU Tests dispatch (nebius-gpu's disk full); 14 tpcds cases have no call
+breakdown (sf40 join order differs from the sf1 goldens); tpcds q18/q73 are right answers marked
+`wrong` until the oracle's tie rule (#306); tpch anti_join skipped on #307; tpcds q17/q25/q29 refused by
+the planner's 2 GiB test budget, not the card; a DuckDB time is a whole CLI process (floor 30/36 ms,
+recorded); profile files moved by hand; `test_duckdb_minimal`, `test_bench_each`, `test_run_gpu` run in
+no CI job; one Python failure seen once, not reproduced.
+
+---
+
+<!-- archived from llm-wiki/tasks/bench-rows.md -->
+
+**Merged 2026-11-13 as PR #197, chain L's task 4, one commit `00f18723` squashed from the branch, merged into master by `f90e3087`.** Its plan and record: `git show d290698f:llm-wiki/tasks/bench-rows-impl.md` and `…/bench-rows-detail.md`.
+
+# Benchmark results carry each node's batch rows and bytes, and the load apart from the execute
+
+Kind: production
+
+A `.benchmark.txt` section is the plan tree with `time_us` and `total_us` under each node. The
+`.cpu.txt` goldens print each node's `batch_rows` and `batch_bytes`; the benchmark does not, though
+the harness already holds the full `RunReport` and reads only `report.emitted.len()`
+(`test_support/corpus_benchmark.rs`). Two later tasks need those numbers from the sf40 run:
+
+- query-fuser reads each query's live bytes to decide how many fused queries may run at once;
+- batching-report splits load from execute, the way `reports/benchmark-minimal.md` does.
+
+Load today is only the `GpuLoadParquet` node's time, inside `run_us`.
+
+Containers already closes #226 (benchmark provenance) and writes the per-device tree,
+`testdata/benchmark-results/<device>/<dataset>.sf<sf>/<mode>.benchmark.txt`. This task builds on
+both and does not redo them.
+
+## Done when
+
+1. Each node in a `.benchmark.txt` section carries `batch_rows` and `batch_bytes`, by lane then by
+   batch, in the same notation as `.cpu.txt` (`architecture.md` "Node display"), taken from the
+   reported run (the 2nd-smallest).
+2. The `--- run ---` trailer adds `load_us` (the sum of the `GpuLoadParquet` nodes' `total_us`) and
+   `execute_us` (`device_us − load_us`), plus `peak_bytes`: the most bytes the run's memory
+   accountant held at once. It is the number query-fuser's hint reads. If the accountant cannot
+   give a true peak without a change in the driver, the builder says so and gives the closest
+   bound it can, named as a bound. `load_us` stays the device-side load: the benchmark prefills
+   pinned-loads' host file cache before its first case, so every round's load reads pinned
+   memory. The trailer also carries `pinned_cache`, the cache's state at the end of the case
+   (pinned-loads' `PinnedCache`, e.g. `on cap=136.9GiB resident=12.3GiB … source=default`, or
+   `off source=env`), followed by `prefill_files=<n> prefill_bytes=<n> prefill_us=<n>`: the
+   prefill's host IO, reported apart from the device load. A round that filled, reloaded, evicted
+   or fell back fails its case instead of being timed.
+3. The parsers and checks that read the tree accept the new fields, and the existing H200 files
+   still parse. Re-measuring them is not required.
+4. `build-test.md` documents the format.
+5. **A benchmark report page**, `testdata/benchmark-report.html`, committed. For every device
+   tree under `testdata/benchmark-results/`, one row per (dataset, query, mode), the devices side
+   by side: load, execute, total and `peak_bytes` (labelled a lower bound), or the case's failed
+   or skipped mark with its reason (from the device's `cases.csv` where it has one), and a link
+   to the section. A Rust test in `test_corpus_goldens`, `the_benchmark_report_matches_the_trees`,
+   writes it through item 3's reader, `parse_benchmark_section`, so the format has one reader: it
+   checks the committed page equals the render, and rewrites it under `UPDATE_CANONICAL=1`. The
+   output is deterministic: no timestamp, no machine path. Its look is `testdata/report.html`'s
+   (`scripts/ticket_widget.py`). Later tasks extend it: sf40-baseline a DuckDB column,
+   tp4-sized its mode's rows, query-fuser a fused-batches table. `build-test.md` says that a
+   commit that changes a results tree regenerates the page, and that the test enforces it.
+
+## Scope
+
+| path | change |
+|---|---|
+| `peacockdb-core/src/test_support/corpus_benchmark.rs`, `benchmark_trailer.rs`, `plan_text/bench_text.rs` | the fields |
+| `peacockdb-core/src/plan_text/node_text.rs`, `plan_text/run_text.rs` | the batch-list renderer, shared rather than copied |
+| `peacockdb-core/src/executor/` (accounting) | only if a peak needs recording |
+| `peacockdb-core/tests/test_corpus_goldens/benchmark.rs`, `scripts/calibration/` | readers of the format |
+| `peacockdb-core/src/test_support/benchmark_report.rs` (new), `peacockdb-core/tests/test_corpus_goldens/benchmark.rs` | the report page's renderer and its test |
+| `testdata/benchmark-report.html` (new) | the page |
+| `llm-wiki/build-test.md` | the format; the page and its regeneration rule |
+| `llm-wiki/architecture.md` "Node display" | the benchmark line's new fields |
+
+Component-level API: none.
+
+## Signoff (2026-11-05)
+
+Solved under its constraints: per-node `batch_rows`/`batch_bytes`; `load_us`, `execute_us`,
+`peak_bytes`, the pinned cache and the prefill in the trailer; one reader and a committed page of every
+device tree; the format read back from one H100 case (tpch sf40 q3); a resumed run re-measures any
+section not in the current format. Shortcuts: the page does not mark unpinned loads (every H200 load
+predates the cache; handed to sf40-baseline); writer and reader are tied by one real H100 section,
+not a rust-only round trip; `peak_bytes` is a lower bound only as far as the join session's
+per-row model holds; the page was read as text, never opened in a browser.
+
+---
+
+<!-- archived from llm-wiki/tasks/pinned-loads.md -->
+
+**Merged 2026-11-13 as PR #196, chain L's task 3, one commit `630c1b98` squashed from the branch, merged into master by `45df8da4`.** Its plan and record: `git show d290698f:llm-wiki/tasks/pinned-loads-impl.md` and `…/pinned-loads-detail.md`.
+
+# Parquet loads read table files kept resident in pinned host memory, through the chunked reader
+
+Kind: production
+
+**This task closes [#149](../tickets/performance.md#t149) (pinned host memory) and [#232](../tickets/performance.md#t232) (chunked parquet reader).** Nothing in the
+engine sets cuDF's IO host memory resource, so every parquet load goes through pageable host
+memory. On the H100 this chain benchmarks on, measured 2026-11-02 with a standalone CUDA probe
+(4 GiB, 10 runs): H2D is 55.5 GB/s from pinned memory against 10.0 GB/s from pageable memory,
+and a kernel reading mapped pinned pages directly gets 51.4 GB/s. On sf40 the load is 400-690 ms
+against 19-48 ms of execute (`reports/benchmark-minimal.md`), so the load is the number every
+later task in this chain measures. It has to be the fast one before the baseline is taken.
+
+**Why cuDF's pinned resource alone cannot do it.** `scan.cpp` reads file paths. Without GDS (none
+on the Nebius VMs), cuDF reads through kvikio: the file's bytes come from the kernel's page cache,
+which is pageable and cannot be pinned, and are copied by the CPU into pinned bounce buffers before
+the DMA. So a pinned resource still leaves a host copy of every byte. Reading pinned host pages
+means the file's bytes must already sit in pinned host memory when the read starts. This is also
+the fair comparison: DuckDB's warm numbers read from its own buffer manager in RAM.
+
+**And the reader is the second known cost.** #232: `cudf::io::read_parquet` loaded q6 in 340 ms
+where `chunked_parquet_reader` with one chunk took about 60 ms (GB10, 26.02). Both fixes land here,
+before any baseline, so no later number carries a known load bug.
+
+**What the existing results say (H200, `h200/tpch.sf40/tp1_single.benchmark.txt`, sizes scaled from
+sf1's parquet footers ×40):**
+
+| case | compressed bytes read | `GpuLoadParquet` | rate | the copy at 10 GB/s pageable | at 55 GB/s pinned |
+|---|--:|--:|--:|--:|--:|
+| aggregate-groupby (`l_quantity`, `l_returnflag`) | ~212 MB | 101 ms | ~2.1 GB/s | ~21 ms | ~4 ms |
+| filter-project (`l_orderkey`, `l_quantity`) | ~1.35 GB | 347 ms | ~3.9 GB/s | ~135 ms | ~25 ms |
+
+The load runs at 2-4 GB/s of compressed parquet, well below even the pageable link rate. Most of it
+is decoding and per-row-group work across 1953 row groups, not the copy. So pinned memory can save at
+most the copy's share: about a fifth to a third of the load, if the copy is not already overlapped
+with decoding. cuDF may also already default its IO host resource to a pinned pool in 25.02. That
+has to be checked in the cuDF source before anything is changed.
+
+## Done when
+
+**First, before any engine change: profile the load and see where its time goes.** The Nsight
+tooling (`scripts/create_nsys_profile.sh`, `scripts/calibration/nsys_calls.py`) today gives each cuDF
+call one `device_us`. That sums kernels and memcpys, so a load's copy is indistinguishable from its
+decode. This task adds the split, and every later profile in the chain uses it.
+
+A. **A load breakdown from the trace capture**, one row per `GpuLoadParquet` call per case:
+   - host file read: OS-runtime or kvikio ranges, whichever the capture can see;
+   - H2D copies: bytes, time, GB/s, and pageable or pinned, from CUPTI's memcpy source kind;
+   - decompression kernels and decode kernels, each with its time;
+   - the rest, as unattributed.
+
+   The parquet reader's device work may launch off the calling thread, which `nsys_calls.py`
+   currently tallies as `(off-thread)`. The breakdown attributes it to the load. It is written
+   to a new derived file beside `calls.tsv` (`loads.tsv`, or columns in `calls.tsv`; the
+   builder's choice), is documented in `build-test.md` "Benchmark data flow", and has a test over
+   a synthetic capture, as `scripts/calibration/tests/` does.
+B. **The before profile:** a trace of sf40 tp1_single TPC-H q1, q3, q6 and q8 on the H100, with
+   today's engine. The detail file carries its breakdown, and says whether the copies run at the
+   pageable rate (~10 GB/s) or at the pinned rate (~55 GB/s).
+C. **The after profile:** the same four, after item 1. **The H2D copies must reach close to the
+   probe's 55 GB/s pinned rate**, read from the profile, not inferred from the load's total. If they
+   do not, the gap is explained before the task moves on. A copy too small to reach link rate is an
+   explanation, with its size stated.
+
+0. The task's detail file states what cuDF 25.02 does by default (pageable or a pinned pool, and
+   its size, and how a path read reaches the device: kvikio, compat mode, bounce buffers), with
+   the source lines.
+0a. **A pinned host file cache, the engine's default.** The engine keeps each parquet file it reads
+   resident in pinned host memory (`cudaHostAlloc`, the whole file), loaded on first use and
+   reused by every later read in the process. Scans read it through a host-buffer source
+   (`cudf::io::source_info` over the pinned span), not the path. It is on by default on a discrete
+   GPU and off on an integrated one (the `pageableMemoryAccess` branch of item 1), and off when
+   the process sees no CUDA device. A session option
+   bounds it: `pinned_host_cache_bytes`, default **three quarters of min(host RAM, the cgroup
+   memory limit when one is set)** (the human's decision, 2026-11-03; about 147 GB on the H100 VM),
+   `0` = off. It is a hard ceiling: the cache never grows past it. A file
+   that does not fit is read from its path as today, and the run says so once. Eviction is by
+   least recent use, and only between calls: no read sees its buffer freed. A changed file (size
+   or mtime) is reloaded. The cache's first load of a file is host IO; its time is reported apart
+   from the load the device does (bench-rows' `load_us` is the device-side load).
+   **The benchmark prepares the pinned buffers once, for every round** (the human's decision,
+   2026-11-03). Before its first case, a benchmark process fills the cache with every file its
+   cases read, through an explicit engine call (prefill), and keeps it for the whole process: all
+   warm-up and measured rounds of all cases read the same pinned buffers. No measured number
+   depends on the page cache: the prefill is the only read from disk, and the run records its
+   bytes and time. If the files do not fit `pinned_host_cache_bytes`, the run refuses at prefill,
+   naming the size, rather than measuring some loads from the page cache.
+   **The prefill call** (the human's choice, 2026-11-03). The cache lives on the C++ side, behind
+   one additive C symbol:
+
+   ```c
+   typedef struct { uint64_t files, bytes, us; uint64_t needed, limit; } peacock_prefill_stats_t;
+   int peacock_pinned_cache_prefill(peacock_executor_t* executor,
+                                    const char* const* paths, size_t n_paths,
+                                    peacock_prefill_stats_t* out);
+   ```
+
+   - It makes every named file resident, whole, from disk.
+   - A file already resident and unchanged costs nothing, so the call is idempotent.
+   - It refuses before pinning anything when the total exceeds `pinned_host_cache_bytes`, with
+     `needed` and `limit` set.
+
+   The Rust side wraps it as `prefill_pinned_cache(&self, files: &[PathBuf]) -> Result<PrefillStats,
+   PrefillError>`, where `PrefillError` is one of `DoesNotFit { needed, limit }`,
+   `Io { path, error }` or `Off`. The files come from the plans: `plan_files(roots) ->
+   BTreeSet<PathBuf>` collects every `GpuLoadParquet`'s file over a tree or a fused DAG. The
+   benchmark plans its cases, prefills their union once, then runs every round. The trailer
+   records `prefill_files`, `prefill_bytes` and `prefill_us`. A refusal is the case's
+   `status=failed reason=prefill: needs <needed> > limit <limit>`. The cache is per process, not
+   per device.
+0b. **The scan reads through `cudf::io::chunked_parquet_reader`** with one chunk, its read limit
+   above the batch the plan already sized, concatenating only if several come back (#232's
+   proposed fix). It applies to both sources, the cached span and the path fallback. The H100
+   re-measure #232 asks for comes first: `read_parquet` against the one-chunk chunked reader over
+   the same row groups, from the pinned cache, in the before and after profiles.
+1. Unless cuDF already pins, the engine installs a pinned host memory resource for cuDF IO
+   (`cudf::set_pinned_memory_resource` / `cudf::config_default_pinned_memory_resource`, `pinned_memory.hpp`; the ticket's `cudf::io::set_host_memory_resource` does not exist in 25.02 or 26.02) on a discrete GPU, once per process, before the first
+   parquet read, and leaves cuDF's default alone on an integrated part. The branch is the
+   device's `pageableMemoryAccess`, as the ticket says. An HMM host can report 1 on a discrete
+   card, so the attribute is first recorded on the H100 and the L40S; if a discrete card reports
+   1, the human decides the branch before any engine change. The test binaries and the benchmark
+   binary get it through the engine, not through a copy of the call.
+2. On the H100, the detail file records before and after `GpuLoadParquet` times for sf40
+   tp1_single TPC-H q1, q3, q6 and q8, with the copy's share estimated as above. A gain smaller
+   than that share is a finding, explained, not a failure. If cuDF already pins, or the gain is
+   noise, the task records that. The cache and the chunked reader (items 0a, 0b) are measured each
+   on its own as well as together, so each fix's share is known. No device answer changes: the GPU
+   tiers stay byte-identical, with the cache on and with it off (`pinned_host_cache_bytes = 0`).
+3. The pinned pool's size is a bounded, named constant or option. Its host-memory cost is written
+   in `architecture.md` "cuDF options". It must not pin all of host RAM. The H100 VM has 196 GB.
+4. **The completeness signoff reports the load rate with the new reader**, on the H100 from the
+   pinned cache, for sf40 tp1_single TPC-H q1, q3, q6 and q8 at least. Per query:
+   - the compressed bytes read and the decoded bytes produced;
+   - `load_us`;
+   - the rate in GB/s of each;
+   - the H2D copy rate read from the profile.
+
+   Beside them: the same rows for `read_parquet` from the path (before), for `read_parquet` from
+   the cache, and for the chunked reader from the path, so each fix's share shows. Plus the
+   prefill's bytes and time per dataset.
+5. #149 and #232 move to the archive, with the measured numbers, whichever way they fall. The
+   benchmark harness and the fused runs both get the cache through the engine; neither installs
+   its own.
+
+## Scope
+
+| path | change |
+|---|---|
+| `cpp/src/` (where the engine sets up a device, next to where #148's RMM resource would go) | install the IO host resource; the pinned host file cache |
+| `cpp/src/operators/scan.cpp` | the host-buffer source and the one-chunk chunked reader |
+| `peacockdb-core/src/` session options, the C ABI | `pinned_host_cache_bytes`, additive |
+| `cpp/tests/gpu/` | a case asserting the resource is pinned on a discrete device |
+| `scripts/create_nsys_profile.sh`, `scripts/calibration/` (`nsys_calls.py` or a sibling, `tests/`) | the load breakdown; the H100's HBM settings (`PCK_BENCH_HBM_SET`, `PCK_BENCH_HBM_PEAK_BW`) |
+| `llm-wiki/build-test.md` | the breakdown's format |
+| `.gitignore` | `testdata/calibration/loads.tsv`, one host's derived file |
+| `llm-wiki/architecture.md`, `llm-wiki/tickets/performance.md`, `llm-wiki/archive/archived-tickets.md` | the option and its cost; #149 and #232 closed |
+
+Component-level API: one additive session option, `pinned_host_cache_bytes`, through the existing
+options path to the C side; three additive C symbols and their Rust wrappers:
+- `peacock_pinned_cache_prefill`;
+- `peacock_set_pinned_host_cache_bytes`, which hands the option to C++ before the first prefill or
+  read;
+- `peacock_pinned_host_cache_stats`, the counters the per-section check and the trailer's
+  `pinned_cache=` read.
+
+No other symbol changes.
+
+## Constraints
+
+- No GB10 is available to this chain. The integrated branch is covered by a unit case on the
+  branch condition, and the ticket's "integrated does not regress" measurement is recorded as
+  deferred.
+- Host memory: the cache and cuDF's pinned pool together stay well under the host's RAM. On the
+  H100 VM (196 GB) the TPC-H and TPC-DS sf40 files a batch reads must fit, and the detail file
+  records the bytes pinned per dataset.
+- The H100 is reached through new-hosts' tooling, which is why new-hosts comes first in the
+  chain.
+
+## Signoff (2026-11-05)
+
+Solved under its constraints: the pinned host file cache and the one-chunk reader, measured alone and
+together on the H100 (`lineitem` loads 40–64% faster with the cache; readers equal within 0.2%); the
+L40S list green with the cache on and off; #149 and #232 closed, #305 opened; the load-rate table is
+in #149's archive entry. Shortcuts: Task 6 skipped (NULL_RESULT: cuDF already pins); the
+`prefill_*` trailer keys belong to bench-rows (stderr only here); `pinned_host_cache_bytes` is
+applied by the benchmark harness only, since no engine path opens a device run yet; the device tiers
+never ran under `PEACOCK_SCAN_READER=read_parquet`; the signoff's compressed bytes are the profiles'
+`h2d_bytes`; q3/q8 load breakdowns derived by hand (`nsys_calls.py` join gap, routed to sf40-baseline).
+
+---
+
+<!-- archived from llm-wiki/tasks/new-hosts.md -->
+
+**Merged 2026-11-13 as PR #195, chain L's task 2, one commit `095ece89` squashed from the branch, merged into master by `ecbbac84`.** Its plan and record: `git show d290698f:llm-wiki/tasks/new-hosts-impl.md` and `…/new-hosts-detail.md`.
+
+# Two more Nebius VMs behind nebius.sh, each with its idle guards, data and run environment
+
+Kind: production
+
+The human created two VMs for this chain. Both are up only while a run needs them.
+
+| name (this chain's) | instance | region | profile | role |
+|---|---|---|---|---|
+| `nebius-h100` | `computeinstance-e00e6yena4nzjgaym0` | eu-north1 | `editor-eu`, the existing eu-north1 profile | H100 80GB HBM3, 16 vCPU, 196 GB; runs peacockdb benchmarks |
+| `nebius-cpu128` | `computeinstance-e01t2mm4265y8x88ey` | eu-west1 | `eu-west1`, on a new service account (created by the human) | 128 cores; runs DuckDB |
+
+Today `scripts/gpu-host.sh`, its idle watcher and `gpu-host-watch.yml` serve one VM,
+`computeinstance-e00tnrse7ayntnzcyt` (nebius-gpu, L40S), whose id is hard-coded in the script and
+in `scripts/gpu-host/idle_watch.py`. This task names them for the provider (item 10) and makes
+them serve three. Below, every name is the new one.
+
+## Done when
+
+1. **`nebius.sh` takes `--instance-id <id>` and `--profile <name>`.** With neither, it behaves
+   exactly as today: the existing `INSTANCE_ID` and the caller's active profile. Every verb works
+   on any of the three VMs. Each instance gets its own ssh `HostKeyAlias` and known-hosts entry, so
+   one VM's reprovisioned key never collides with another's. The login is `dmitry` on all three,
+   with the same key (`NEBIUS_GPU_SSH_KEY` in CI). The exit-code table is unchanged.
+2. **An on-VM idle watcher on both new VMs** stops the VM after one hour unused, as nebius-gpu's
+   does. `idle_watch.py` takes its instance id from its install and not from a constant. On the CPU
+   VM, a running DuckDB process, a data fetch, or an interactive ssh session counts as use; there is
+   no card there. The 4-hour cap on one process stays on the GPU VMs. On the CPU VM, it applies
+   to DuckDB too, unless the builder shows a full timing run needs longer.
+3. **`install-watch` installs only the credentials that VM needs.** Today it copies the whole
+   `~/.nebius/config.yaml`, which carries every profile and no key file. The eu-west1 profile keeps
+   its key in a separate PEM (`--private-key-file-path`). For each VM, install-watch installs one
+   profile, self-contained (key embedded, as `.github/actions/nebius-setup` does with
+   `--private-key-file`), as root's only profile. The PEM is copied, never read or printed. The
+   repository rule against opening a Nebius credential file holds throughout. The final check,
+   that root's profile reaches the API, runs on both VMs.
+4. **`nebius-watch.yml` checks all three VMs every hour.** Each VM is a separate step or matrix
+   leg. It is skipped with a notice, not failed, when:
+   - its secrets are absent;
+   - the instance no longer exists (`nebius.sh` exit 69);
+   - its region's profile cannot be created.
+
+   The human may delete either new VM later, and the workflow must stay green when that happens.
+   One VM's failure does not stop another's check. The eu-west1 credentials come from
+   `NEBIUS_EU_WEST1_{SA_ID,PUBLIC_KEY_ID,PROJECT_ID,PRIVATE_KEY}` in the `nebius-gpu` environment.
+   They are set. The H100 uses the existing `NEBIUS_*` secrets. `gpu-tests` stays on
+   nebius-gpu only, and no other workflow is added.
+5. **Data on the VMs:** TPC-H sf40 from the `tpch-sf40` bucket and TPC-DS sf40 from the
+   `tpcds-sf40` bucket, on both VMs. Each object is checked, and a second run fetches nothing it
+   already holds. The buckets are in eu-north1, so the CPU VM fetches across regions. That is
+   expected; the endpoint and region come from the env file, as containers' bucket scripts do. The
+   CPU VM also gets DuckDB 1.5.4 (`docker/pins.env`) and the native `.duckdb` databases that
+   `benchmarks/duckdb_minimal.sh` builds.
+6. **The H100 runs the device tiers and the benchmark in containers' run image.** That means
+   containers' unfinished device runner (task 7 of
+   `origin/ENS-containers:llm-wiki/tasks/containers-impl.md`), as
+   `scripts/env/run-gpu.sh prepare|ship|run|pull`, with `nebius-h100` as its first VM. By the
+   human's decision there are no host adapters: no `scripts/env/host/`, no host files under
+   `~/.config/peacock/hosts/`. `run-gpu.sh` takes `nebius.sh`'s `--instance-id` and `--profile`
+   and calls `scripts/nebius.sh` directly for start, stop, ssh and rsh. The sf1 GPU corpus
+   passes there, as the first proof the environment works. `create_nsys_profile.sh` runs there
+   too: nsys is present, and the GPU's performance counters are open to non-root
+   (`NVreg_RestrictProfilingToAdminUsers=0`), so the metrics pass does not stop at
+   `ERR_NVGPUCTRPERM`.
+7. **Containers' fresh-VM check, on `nebius-cpu128`** (containers' tasks 6 and 6a, as
+   containers-rebase hands them over), before the DuckDB setup:
+   - `provision-vm.sh dmitry@<its address>` from the laptop, which runs `bootstrap-vm.sh`;
+   - the machine ends ready: Docker, gh and Claude Code at the pinned versions, the repository
+     and sf1 (no machine marker: containers-rebase dropped it with the launcher);
+   - a second run skips everything;
+   - 6a's fake-`ssh` tests exist and pass;
+   - the GPU-host key arrives: `provision-vm.sh` with its default `--gpu-key`, `~/.config/peacock/gpu_ed25519`, a copy of dev's `~/.ssh/id_ed25519` (which
+     nebius-gpu and the H100 already accept), and the VM's `peacock.env` names `GPU_SSH_KEY_FILE`.
+     `ssh -i "$GPU_SSH_KEY_FILE" dmitry@<H100's address> true` from the CPU VM succeeds while the
+     H100 runs.
+
+   The agent-container launcher is gone (containers-rebase). Anything the run shows broken in
+   the two scripts is fixed here.
+8. **`build-test.md` documents it all:**
+   - the section "GPU host", retitled "Nebius host": the L40S (nebius-gpu), the H100 and the
+     128-core CPU VM, their profiles, watchers and secrets, and `run-gpu.sh`;
+   - the `tpcds-sf40` bucket in the dataset table (it exists and is not documented);
+   - the human's one-time setup: the eu-west1 key pair uploaded in the web console, the
+     `nebius profile create` line, and the `gh secret set` lines.
+
+9. **The guarding reaches master during this task.** GitHub runs and dispatches `nebius-watch.yml`
+   from master's copy only, and this chain sits on an unmerged base. So the VM-guarding part goes
+   to master as one small commit, `ENS-nebius-guard`, approved in advance:
+   - item 10's rename, on master's files;
+   - `nebius.sh`'s instance and profile selection;
+   - the idle watcher, its install, and its tests;
+   - the workflow and the setup action.
+
+   That commit is prepared as soon as the guards' offline tests pass, and the human lands it on
+   master mid-task; the guards' tests must pass on master. Item 4's live check of all three VMs
+   is then dispatched from master, before `done`; it never holds the task back from review.
+   Landing is read from master's content (the workflow is there and matches), not from a hash,
+   since a landing may squash or rebase. No VM is kept up across that wait: the check runs with
+   the VMs stopped, and one VM started just for it. Nobody in the chain pushes master. The rest
+   of the task stays on the chain.
+10. **Every file and directory named `gpu-host` is named `nebius`:**
+    - `scripts/gpu-host.sh` → `scripts/nebius.sh`, `scripts/gpu-host-sync.sh` →
+      `scripts/nebius-sync.sh`, `scripts/gpu-host-test.sh` → `scripts/nebius-test.sh`;
+    - `scripts/gpu-host/` → `scripts/nebius/`, its tests `test_gpu_host.py` → `test_nebius.py`
+      and `test_gpu_host_test.py` → `test_nebius_test.py`;
+    - `.github/workflows/gpu-host-watch.yml` → `.github/workflows/nebius-watch.yml`;
+    - the state directory `~/.config/peacock/gpu-host/` → `~/.config/peacock/nebius/`, its log
+      `nebius.log`.
+
+    Every reference follows: `pipeline.yml`'s `gpu-tests` and script-test steps, the CI wiring
+    guard in `cost-report/tests/test_source_formatting/runners.rs`, `build-test.md`, `prompts.md`,
+    `.claude/commands/ensemble.md`, `.gitignore`, the tickets, and every later chain L plan. The
+    watcher's own names on the VMs stay: `peacock-gpu-idle.service`, `.timer` and its log. Records
+    (`llm-wiki/archive/`, `llm-wiki/reports/`, other chains' task files) keep the old names. So
+    does `docker/`: its files are hashed into the published images' labels, and an edit there
+    would make every image refuse the tree. A stale name there is recorded in the detail file.
+11. **The standing rules name the three hosts and their roles.** `prompts.md` (the developer's
+    GPU step, the coordinator's host and hard-stop rules), `.claude/commands/ensemble.md` and
+    `build-test.md` say, for every chain from now on:
+    - the L40S (nebius-gpu) is for correctness tests, the L40S list; no sf40 and no benchmarks
+      there;
+    - the H100 (nebius-h100) runs sf40, the benchmarks and Nsight, through `run-gpu.sh`;
+    - the 128-core CPU VM (nebius-cpu128) runs DuckDB and stages the H100's install: binaries
+      for H100 runs are built on the CPU VM; local and verda builds stay for development. The
+      recipe, "The CPU-VM build", is in `build-test.md`, "Nebius host";
+    - the coordinator pre-starts no VM: a VM starts right before its first remote command and
+      stops after its last pull (the VM-time rule); its one start is the exit-75 retry, once a
+      developer's build is done;
+    - the coordinator's hard stops cover all three VMs.
+      On every exit trigger the coordinator hard-stops all three (`stop --force`), whichever chain
+      started them. The human accepts the risk that this cuts another chain's run short (decided
+      2026-11-03). That run resumes with `PEACOCK_BENCH_RESUME=1`, and the standing rule says so.
+
+    The rules cite `build-test.md`, never a task plan (plans are deleted at archive). A
+    coordinator holds `prompts.md` and `ensemble.md` from its startup, so right after the
+    rename (item 10) and these rules land on the chain branch it re-reads `prompts.md`,
+    `.claude/commands/ensemble.md` and `build-test.md` in place and notes it in the detail file.
+    It does not exit or restart: a restart with the board unchanged spends the watchdog's idle
+    allowance. Until the rename lands it uses the old names. The exit-75 retry is the
+    coordinator's: it retries the VM's `start` itself, never a developer dispatch per try.
+
+    `build-test.md`'s "Out until further notice: the sf40 binaries, `--run-benchmarks`, Nsight"
+    goes. Later chain L tasks rely on these rules and carry no host override.
+
+## Scope
+
+| path | change |
+|---|---|
+| `scripts/gpu-host*` → `scripts/nebius*`, `gpu-host-watch.yml` → `nebius-watch.yml`, and every reference | the rename (item 10) |
+| `scripts/nebius.sh`, `scripts/nebius-sync.sh`, `scripts/nebius-test.sh` | instance and profile selection, per-instance host-key alias, credential install |
+| `scripts/nebius/idle_watch.py`, `check.py`, `*.service`, `*.timer`, `tests/` | instance id from the install; the CPU-VM activity rule |
+| `.github/workflows/nebius-watch.yml`, `.github/actions/nebius-setup/` | three VMs, each skippable; a named profile per region |
+| `scripts/env/` (containers' tree) | `run-gpu.sh` for `nebius-h100`, over `scripts/nebius.sh`; data fetch for the two new VMs; fixes `provision-vm.sh`/`bootstrap-vm.sh` need |
+| `llm-wiki/build-test.md` | "Nebius host": hosts, their roles, data, secrets, setup steps |
+| `llm-wiki/prompts.md`, `.claude/commands/ensemble.md` | the rename; the three hosts' roles and hard stops (item 11) |
+
+Component-level API: none.
+
+## Constraints
+
+- Containers' "no change to the existing GPU host scripts" restriction was containers' own.
+  This task changes them on purpose, and nebius-gpu's behaviour must not move: its tests in
+  `scripts/nebius/tests/` still pass, unmodified after the rename's path edits, with new cases
+  added beside them.
+- Every ssh to the VMs from the Bash tool needs the sandbox off (`build-test.md`).
+- A VM this task starts is stopped again by this task, or left to its watcher, which must
+  already be installed.
+
+## Signoff (2026-11-05)
+
+Solved under its constraints: three VMs named, guarded and proven live (watch runs 41899844185,
+41900251751); sf40 on both new VMs with agreeing pins; DuckDB and `tpch.sf40.duckdb` on the CPU VM;
+the sf1 list, one sf40 benchmark case and Nsight on the H100 through `run-gpu.sh`; provision verified
+twice on a fresh VM; host roles in the standing rules. The rename and guard reached master as
+`bf937124`/`e20db7e9`. Shortcuts: the sf40 C++ pair (`peacock_tpch_tests`, `peacock_tpchv_tests`)
+has no H100 path (`run-tests.sh` skips it; build-test.md says so); `scripts/env/tests` still runs by
+hand only, not in CI; `create_nsys_profile.sh --metrics` uses nsys's deprecated
+`--gpu-metrics-device` spelling, accepted on the H100.
+
+---
+
+<!-- archived from llm-wiki/tasks/containers-rebase.md -->
+
+**Merged 2026-11-06 as PR #193, chain L's task 1, four commits, merged into master by `f4291ab9`.** Its plan and record: `git show f4291ab9:llm-wiki/tasks/containers-rebase-impl.md` and `…/containers-rebase-detail.md`.
+
+# Fork containers onto master, without the join optimizer
+
+Kind: production
+
+**This task closes [#226](../tickets/benchmarks.md#t226) (benchmark provenance)**, which containers implemented and chain L now delivers.
+
+Containers (PR 192, branch `ENS-containers`, chain C task 2, state `building`) is stacked on
+`ENS-optimizer` (PR #165, join-optimizer, `done`, unmerged). Chain L needs containers' images,
+bucket scripts, provenance and per-device tree, on master's code and master's registry. Master's
+registry is the one that enables the 82 TPC-DS tp1_single cells; the branch has 71. The join
+optimizer itself is not needed. This task makes `ENS-containers-rebase`: containers' own commits
+replayed on today's master, green, as the base every later task of chain L branches from.
+
+## What a trial rebase found (2026-11-02)
+
+`git rebase --onto master ENS-optimizer ENS-containers` was run in a scratch clone, every conflict
+resolved blindly, only to count them. It needed:
+
+- **14 optimizer commits dropped and 16 containers commits replayed.** Master is 56 commits ahead
+  of the optimizer's base. Those are chain K's device work and later.
+- **5 stops, about 30 conflicted files.** By commit:
+  1. the spec commit: `llm-wiki/tasks/tasks.md`;
+  2. the images' docs: `llm-wiki/build-test.md`;
+  3. the embeddings' S3 source: `scripts/exec_model/README.md`;
+  4. **provenance**: `test_support/device_answer.rs`, `tests/test_corpus_goldens/benchmark.rs`,
+     `scripts/calibration/{fetch_record.sh,nsys_hbm.py,record.py,split_record.py}` and their
+     tests, `scripts/lib/calibration-bucket.sh`, and the four `h200/` result files;
+  5. the registry-driven case list: `tests/common/corpus_benchmark_cases.inc`,
+     `tests/peacock_gpu_benchmarks.rs`, `tests/test_corpus_goldens.rs`.
+
+## Expected difficulties
+
+1. **Containers is not independent of the optimizer branch.** Stop 4 edits files that
+   `ENS-optimizer`'s first benchmark commit created or rewrote:
+   `02f6a4d8 benchmarks: 26 device-enabled cases at sf40, the per-call record in S3 by its content`.
+   That commit brought:
+   - the S3 per-call record (`calibration-bucket.sh`, `fetch_record.sh`, `record.py`,
+     `split_record.py`);
+   - the `nsys_hbm.py` rework;
+   - the H200 result files containers moved under `h200/`.
+
+   Dropping it leaves containers' provenance commit editing code that is not there. The expected
+   route is to carry `02f6a4d8` onto master first, then replay containers. The developer checks
+   whether `02f6a4d8` itself depends on anything else of the optimizer's: `2bef3b81` (cost),
+   `69448594` (the DPhyp crate) and `3625404b` (the optimizer). Any further commit carried is named
+   in the detail file, with why. The join optimizer proper, `peacockdb-dphyp` and `exec_model`'s
+   optimizer, must not come across.
+2. **The registry moved under the case list.** `corpus_benchmark_cases.inc` is generated from
+   `testdata/cost-registry.csv`. It must be regenerated from master's registry
+   (`UPDATE_CANONICAL=1`, `the_benchmark_cases_follow_the_registry`), not hand-merged: 534 cells
+   on the branch, about 630 on master. The H200 tree check then sees cases the H200 files never
+   measured. Those must be declared as not yet measured on `h200`, in the check's own exception
+   form, and the H200 files must not be re-measured.
+2a. **The H200 list becomes CSV.** Containers holds `h200/` to `h200/cases.inc`, a
+   `corpus_query_benchmark!` text nothing expands, through `PREDATES_LIST` (`benchmark.rs:512`).
+   By the human's decision every per-device case list is
+   `testdata/benchmark-results/<device>/cases.csv`, header `dataset,sf,query,modes,status,note`:
+   `modes` `|`-joined and empty when skipped, `status` one of `ok`, `skipped`, `wrong`, `note` the
+   skip reason or the `#NN` ticket. This task converts the H200's 14 lines once, each `ok` with an
+   empty note, and the file is fixed from then on: nothing rewrites it. The mechanism stays
+   containers' own, not a second one beside it: the constant names `cases.csv`, and the rule
+   becomes **a device tree that holds a `cases.csv` is held to it; one without is held to the
+   whole main list.** `PREDATES_PROVENANCE` keeps deciding only the provenance exception. One
+   reader serves every device list, `test_support/device_cases.rs` (`DeviceCase`,
+   `parse_device_cases`, `render_device_cases`); sf40-baseline adds the H100's file and its writer
+   on it. The main list, `peacockdb-core/tests/common/corpus_benchmark_cases.inc`, stays in macro
+   form.
+3. **The two trees disagree on paths.** Master still has the old flat
+   `testdata/benchmark-results/tpch.sf40/`. Containers moves results under `<device>/`. Master's
+   files and the optimizer commit's files both land in `h200/`, and the newer of each pair wins,
+   named in the detail file.
+4. **Shared docs drifted.** `build-test.md`, `architecture.md`, `tickets.md` and the ticket files
+   moved on master: chain K's counts, sections, tickets. Containers' prose is re-applied to
+   master's text, never master's text to containers'. The case counts in `build-test.md` are
+   recounted, not merged.
+5. **The board.** Master has no chain C section; containers' copy of `tasks.md` has chain C's
+   history. The fork's board is master's board plus chain L. **Chain L absorbs the containers
+   task.** Its unfinished items go to their new owners, written in the detail file:
+   - task 4's publishing (done-when 4, the images public on ghcr) is this task's;
+   - tasks 6 and 6a, the fresh-VM check, go to new-hosts: `provision-vm.sh` and
+     `bootstrap-vm.sh` only, on `nebius-cpu128`;
+   - task 7 (the device runner, now `scripts/env/run-gpu.sh`) goes to new-hosts, without
+     containers' host adapters: it calls `scripts/nebius.sh` directly;
+   - task 10 is this task;
+   - containers' own spec, plan and detail file, which the replay brings into `llm-wiki/tasks/`,
+     are archived as a merged task's are;
+   - task 11 (the 80 GB benchmark) goes to sf40-baseline and tp4-sized, those two modes only;
+     other modes are dropped.
+
+   Dropped by the human's decision, not deferred:
+   - the agent-container launcher, `up.sh` and `down.sh`, with its live test from task 6 step 3
+     (item 8);
+   - task 12, the ensemble end to end on a scratch chain;
+   - task 5 step 3, creating the `embeddings` bucket and uploading to it, and with it the
+     embeddings' S3 path (item 8).
+6. **Containers was mid-build.** Its tip is not known to be green. This task's bar is the fork's
+   own gates, not containers' done-when:
+   - the workspace builds in every shape;
+   - the CPU and FFI tiers and `cost-report` pass. That includes master's rule that no core
+     test reads the checkout (`no_core_test_reads_the_checkout`), which containers' case-list
+     code breaks: the list is compiled in instead, in a commit of the developer's own;
+   - `scripts/env/tests` pass;
+   - the build image builds from the fork.
+
+   A failure that containers' tip also has is recorded, and fixed only if a later chain L task
+   needs that piece.
+7. **PR 192 stays as it is.** The fork is a new branch and a new PR against master. What happens
+   to PR 192 (retarget, close, or merge the optimizer first) is the human's call. The detail file
+   lists the commit mapping, old to new, for that decision.
+8. **Two pieces of containers go, by the human's decision.** They come across in the replay,
+   since the 17 commits are replayed whole, and are removed after them in commits of the
+   developer's own, never amended into rk00's.
+   - **The agent-container launcher.** Deleted: `scripts/env/up.sh`, `scripts/env/down.sh`,
+     `scripts/lib/board.sh`, `scripts/env/tests/test_up.py`, `scripts/env/tests/test_up_branch.py`.
+     Their entries leave `scripts/env/tests/laptop.py` and `machine.py`, with the fakes only they
+     used. `bootstrap-vm.sh` stops writing the instance marker (`$PEACOCK_MARKER`, "this machine
+     runs instances") and stops setting up the shared Claude Code directory up.sh mounted
+     (`CLAUDE_CONFIG_DIR` in `~/.bashrc`); no message names `up.sh`. `provision-vm.sh` stops
+     recording the VM as "the default VM for up.sh and down.sh"; the `vm` file stays, for
+     `--new-pat`. What only the launcher read goes with it: `peacock_forward`,
+     `peacock_vm_target` and the marker in `scripts/lib/peacock-config.sh`, `MACHINE_INSTANCES` in
+     `scripts/lib/machine.sh`. `scripts/lib/machine.sh` stays: `bootstrap-vm.sh` uses it.
+     **The GPU-host key stays, and is one that already works** (the human's decision, 2026-11-03).
+     `provision-vm.sh` no longer generates a key. It takes `--gpu-key <private key file>`, default
+     `~/.config/peacock/gpu_ed25519`, and refuses, naming the flag, when that file is missing. It
+     copies the key and its `.pub` over ssh's stdin to the VM's `~/.config/peacock/gpu_ed25519`
+     (600), and writes `GPU_SSH_KEY_FILE` into the VM's `peacock.env`. On dev the key is
+     `~/.ssh/id_ed25519`, which nebius-gpu and the H100 already accept, so nothing is authorized
+     anew.
+     `build-test.md`'s "Containers" shrinks to the VM and its two scripts, and "Instances" goes.
+     The images are untouched: `docker/`, `image.sh`, `run-tests.sh`, `image-inputs.sh`,
+     `images.yml`.
+   - **The embeddings' S3 path.** Deleted: `scripts/env/upload-embeddings.sh`, the `--from-s3`
+     branch of `testdata/fetch_embeddings.sh`, and `scripts/lib/embeddings-bucket.sh`: its one
+     function the origin path still reads, `embeddings_pinned_sha`, moves into
+     `fetch_embeddings.sh`. The S3 parts of `scripts/env/tests/test_embeddings.py` and
+     `test_s3.py` go. The pinned origins and `testdata/embeddings.sha256` stay, and CI,
+     GITHUB_ACTIONS and PEACOCK_NO_FETCH refuse the origins as on master.
+   - **The many-developer refusals are read through** in `provision-vm.sh`, `bootstrap-vm.sh` and
+     `scripts/lib/machine.sh`. One that still protects something stays; one that only guarded the
+     launcher goes. Each refusal and its decision, with the reason, is listed in the detail file.
+
+## Done when
+
+1. `ENS-containers-rebase` exists on origin. It is based on master and holds containers' 16
+   commits, rewritten, plus only the optimizer commits item 1 needs, each named.
+   **Every replayed commit keeps its original author.** All 17 are rk00's
+   (`rk00 <00romankolesnik@gmail.com>`), with the original author date. A rebase or cherry-pick
+   does this by default; nothing may use `--reset-author`, `--ignore-date` or a squash that loses
+   it. A conflict resolution is amended into the commit it belongs to, keeping that author. Work
+   that is genuinely new, such as the regenerated case list, the board, or fixes the gates need,
+   goes in separate commits under the developer's own identity. A test step checks it:
+   `git log --format='%h %an <%ae> %ad'` over the replayed range against the original commits,
+   matched by subject, with no difference.
+2. The gates in item 6 pass on it. The case list is regenerated from master's registry, and the
+   H200 tree check passes with its declared exceptions.
+2a. `h200/cases.inc` is gone and `h200/cases.csv` holds its 14 cases in item 2a's format, read
+   through `parse_device_cases`; the tree check holds a device tree to its `cases.csv` when it
+   has one and to the main list otherwise, each branch tested; every page naming
+   `h200/cases.inc` names the CSV.
+3. `git diff master ENS-containers-rebase` holds no file of the join optimizer: no
+   `peacockdb-dphyp`, no optimizer code in `exec_model`, no join-optimizer spec.
+4. The build and run images for cuDF 25.02 and 26.02 on `ghcr.io/asymptote-tech/` serve the fork.
+   They pull anonymously, and each one's `peacockdb.inputs` label equals the fork's own inputs.
+   The published images were built from containers' `b50d9b2a`, whose inputs equal master's, and
+   this task changes no `docker/` file, so no rebuild is expected. If a label differs, the images are
+   rebuilt through `images.yml`, which then needs to land on master first in a separate commit
+   (approved in advance). This is containers' done-when 4.
+5. The detail file holds the commit mapping, the conflicts and how each was resolved, and the
+   containers task ownership above.
+6. Item 8 holds, in developer commits after the 17 replayed ones: none of its deleted files is on
+   the fork; `git grep` over the fork outside `llm-wiki/tasks` and `llm-wiki/archive` finds no
+   `up.sh`, `down.sh`, `board.sh`, `upload-embeddings`, `--from-s3`, `embeddings-bucket` or
+   `config/peacock/machine`, but for `scripts/lib/image-inputs.sh`, which the human left
+   untouched; `scripts/env/tests` pass; the detail file lists each refusal read and its decision.
+
+## Scope
+
+Containers' own files (`docker/`, `scripts/env/`, `scripts/lib/`, `.github/workflows/images.yml`,
+the benchmark harness, `scripts/calibration/`, `testdata/benchmark-results/`), as containers' spec
+lists them. Also whatever `02f6a4d8` touches, and the shared wiki pages. No new behaviour, but
+for item 2a: `peacockdb-core/src/test_support/device_cases.rs` (new) and the list rule in
+`peacockdb-core/tests/test_corpus_goldens/benchmark.rs`. Item 8 deletes and trims: the launcher's
+five files, `upload-embeddings.sh`, `embeddings-bucket.sh`; trims `provision-vm.sh`,
+`bootstrap-vm.sh`, `scripts/lib/{machine,peacock-config}.sh`, `fetch_embeddings.sh`, the tests in
+`scripts/env/tests/`, and `build-test.md`.
+
+Component-level API: none beyond what containers already adds.
+
+## Completeness signoff (2026-11-04)
+
+Solved under its constraints: master + `02f6a4d8` (as `f3db66b1`) + containers' 16 commits, all 17
+rk00's with their dates; no optimizer file; the case list from master's registry (630 cells); the
+H200 list as `cases.csv`; launcher and embeddings' S3 path removed; rust-only, FFI (image),
+gpu-shape compile, cost-report and script gates green; the four images serve the fork unrebuilt.
+Shortcuts: #226 left open, against the spec's "closes", because it still lists open work; two new
+unit tests sit inside the carried `f3db66b1`; the FFI tiers in the build image need
+`LD_LIBRARY_PATH=/opt/cudf/lib` (as on containers' tip, now documented); `docker/run-tests.sh` and
+`scripts/env/image.sh` still cite the archived containers spec; one new SC2034. Otherwise none.
+
+---
+
+<!-- archived from llm-wiki/tasks/join-optimizer.md -->
+
+**Merged 2026-11-04 as PR #165, chain C's task, 17 commits, merged into master by `c7b845d1`.** Its plan and record: `git show c7b845d1:llm-wiki/tasks/join-optimizer-impl.md` and `…/join-optimizer-detail.md`.
+
+# join-optimizer — the prototype's join-order optimizer, runnable, reported and documented
+
+Kind: production
+
+The CPU prototype (`scripts/exec_model`) carries a join-order optimizer: it reads the engine's
+own plan goldens, estimates every join from statistics sidecars and parquet footers, reorders
+inner-join clusters with DPhyp (`peacockdb-dphyp`, a Rust crate called over its C ABI), prunes
+fact scans with dynamic filters, and replans a run whose build lands far off its estimate.
+Answers match DuckDB on every corpus query. This task makes it the only consumer of the
+prototype's plans, lays the prototype out by component, makes its inputs reproducible on any
+host, runs it over the whole corpus with a report of what it did and what it saved, and
+documents it.
+
+The optimizer is judged on CPU, by the prototype's `cpu.txt` renders. Nothing here measures it
+on the device.
+
+## The prototype reads only the engine's plans
+
+The handwritten lowerings — `tests/plans*.py`, `tests/plan_helpers.py`, their goldens
+`scripts/exec_model/{tpch,tpcds}.plans.txt`, and the suites that run them (`test_tpch.py`,
+`test_tpch_corpus.py`, `test_tpcds.py`) — go, with their CI steps. They are the prototype's
+own model of what the planner emits; the engine's `testdata/goldens/<bench>.sf1/<mode>.plans.txt`
+are the real thing, and the optimizer reads nothing else. Driver tests over mock plans stay:
+they are not plans to execute.
+
+What in `operators/` only the handwritten plans used goes with them — column addressing by
+name, simplified node shapes. What stays is what the engine's plans need: columns by position,
+each join type's own output, the aggregate forms the planner emits (ROLLUP, Welford states,
+final expressions), scans over real row groups, the expression and hashing details that make
+answers match. `design.md` says which is which.
+
+## One folder per component
+
+    scripts/exec_model/
+      engine/      plan, node, layout, runtime, batch, executors, accounting, forwarder, limit,
+                   single_partition_driver, partitioned_driver, scheduler, adaptive
+      operators/   less what the handwritten plans alone used
+      plans/       engine_plan, engine_expr, engine_ir, engine_nodes, engine_run, plan_text
+      optimizer/   stats, observed, estimator, cardinality, cost, call_cost, multijoin,
+                   disassembly, join_order, dphyp, dynamic_filters, replan
+      tests/{engine,operators,plans,optimizer}/
+
+`plans/` is the text of an engine plan turned into the prototype's tree; it is neither the
+runtime nor the optimizer. Moves only — no behaviour changes ride on them, so each move commit
+is green by the same tests as before it.
+
+## Statistics sidecars, one per dataset whatever its embeddings
+
+`testdata/gen_stats.py` writes the same file on any host. For tpch it does not yet: `part`
+and `partsupp` carry `*_embedding` columns that `generate_testdata.sh --embeddings` writes as
+`FLOAT[8]` (synthetic, the default and CI) or as DEEP1B/GloVe vectors (external), so their NDV
+and the whole-footer fingerprint differ, and a sidecar written on one host is refused on the
+other. The sidecar drops vector columns — no estimate reads them — and the fingerprint is the
+row count and the stock columns' footer statistics, not the footer's bytes. A test generates
+both ways and gets one file.
+
+## run.py: the corpus through the optimizer
+
+`scripts/exec_model/run.py` runs every corpus query of both benchmarks with the optimizer on,
+filterable by `--bench`, `--query` and `--mode`, parallel by `--jobs`. It writes, under
+`scripts/exec_model/testdata/goldens/<bench>/`:
+
+- `<mode>.cpu.txt` — the format of the engine's `cpu.txt`, rendered from the optimized run.
+  Generation only: nothing checks these against a previous copy.
+- `<mode>.optimizer.txt` — a `== <query>` section each, in the same order, holding every rule
+  that changed the plan: dynamic filters (candidate, key bounds, row groups before and after);
+  each DPhyp call (relations, edges, the estimated sets it priced, the tree it returned);
+  orientation (which joins flipped); replans (the event, estimate against truth, what was kept);
+  and the plan's diff before and after, which `<mode>.plandiff.txt` holds, a section each.
+- `cost_report.html` — one row per query: per mode, non-optimized cost | optimized cost | ratio;
+  DuckDB cost; final ratio, min over modes of the peacockdb cost / DuckDB cost; the rules that
+  fired. Cost is the engine's own function (`.cost.txt`: bytes per node kind, summed to
+  `peacockdb_cost`) applied to two runs of the prototype, without and with the optimizer: the
+  prototype's rows match the engine's and its bytes are pandas', so only two prototype runs
+  compare. The engine's `.cost.txt` figure is a column of its own.
+
+A full run's wall time on shad-gpu is measured and stated in `README.md`. If it is past forty
+minutes, profile first; Polars replaces pandas only if the profile puts the time in pandas.
+
+## The calibration record lives in S3
+
+`testdata/calibration/records.tsv` leaves git: the sf40 record is 175 thousand rows, 17 MB,
+and grows with every case the benchmark gains. It goes to the `calibration` bucket, keyed by
+dataset and scale; `build-test-shadgpu.sh` uploads what a run pulls home, and one script
+fetches it. `testdata/.gitignore` stops excepting it. No CI test reads a file that is not in
+git: the preamble check runs against a record the test writes, and the per-call model's check
+against the measured record (`test_call_cost`) runs where the record is fetched, beside the
+corpus suites.
+
+## Benchmarks: every query enabled on the device
+
+`corpus_benchmark_cases.inc` gains every (query, mode) enabled on the device in
+`corpus_cases.inc`: the named tpch queries (`aggregate_groupby`, `filter_project`, …) and
+tpcds q82, q84, q85, each at every mode it is enabled at. All at sf40, for the reason the case
+file gives: at sf1 a call sits below the clock's resolution. tpcds sf40 does not exist on
+shad-gpu yet and is generated there, beside tpch's. Measured when the device is free; trees
+committed, records to S3.
+
+## Cardinality accuracy, per join rather than in aggregate
+
+`test_cardinality_corpus` holds the corpus to a median q-error and a share within 2× — two
+thresholds read off one state of the corpus. With tpcds q64 in the corpus (37 joins, median
+q-error 4.9) the share is 69.5 % against 70 %, though the estimator is the same. The
+aggregate becomes a golden of each join's estimate and truth, so a new query is new lines in a
+diff and a worse estimate on an old one is named. Why q64's estimates miss — correlated
+filters across repeated tables — is investigated and either fixed or written into `design.md`
+as a known limit.
+
+## Documents
+
+- `scripts/exec_model/design.md` — the design as it stands, in English, no history: the
+  pipeline from plan text to optimized run, each component and why it has its shape, what the
+  prototype does not model.
+- `scripts/exec_model/README.md` — how to work with it: environment, building DPhyp and
+  `PEACOCK_DPHYP_LIB`, the test tiers and what data each needs, `run.py`.
+- `peacockdb-dphyp/design.md` — at most 200 lines: the Rust API and the C ABI, inputs and
+  outputs (relation masks, edges, the cost callback, the budget, the postfix tree, return
+  codes), the algorithm in brief, how it is tested.
+
+## Forwarders cost nothing, scatters cost their bytes
+
+`testdata/cost_model.conf` charges `GpuEmitPartitions`, `GpuMergePartitions`, `GpuUnion` and
+`GpuInterleave` their full output bytes under `cuda_shuffle_bytes`. Merge, Union and Interleave
+relabel lanes and move batches without a copy; Emit scatters rows. The conf gains
+`cuda_scatter_bytes 1.0` (`GpuEmitPartitions`) and `cuda_forward_bytes 0.0` (`GpuMergePartitions`,
+`GpuUnion`, `GpuInterleave`), and `cuda_shuffle_bytes` goes. The conf is the engine's and the
+prototype's alike, so the engine's `.cost.txt` goldens and its cost report move with it. DuckDB's
+cost (`testdata/duckdb_cost.py`) already charges streaming operators nothing; `design.md` says
+so, so the two sides are known to price the same work.
+
+## Join clusters are named
+
+A multi-join is a cluster of joins inside which the order may change. Each join node in
+`<mode>.cpu.txt` carries `mj=MJ<n>`, numbered per query in plan order, outermost first; a join
+in no cluster (a cross join, a join no rule may move) carries none. `.optimizer.txt` names its
+DPhyp calls by the same id.
+
+## Non-inner joins reorder under TES
+
+A cluster holds inner joins only, so a left, semi, anti or mark join is a wall: in tpcds q58 the
+`RightSemi` that restricts dates to one week sits above `date_dim ⋈ catalog_sales`, and the
+restriction reaches the fact table after a 1.4-million-row join. Each non-inner join gets a
+total eligibility set by conflict detection (CD-C, Moerkotte et al. 2013) and enters the cluster
+as a hyperedge, which `peacockdb-dphyp` already accepts; a cross join stays out. Named tpch
+queries that reorder only this way join the corpus, among them
+
+    SELECT c_name, o_orderkey
+    FROM customer
+    LEFT JOIN orders ON o_custkey = c_custkey
+    JOIN nation      ON n_nationkey = c_nationkey
+    WHERE n_name = 'FRANCE';
+
+as written `(customer ⟕ orders) ⋈ σ(nation)`, ≈ 1.55M rows then 62k; reordered
+`(customer ⋈ σ(nation)) ⟕ orders`, 6k rows then 62k. Answers stay equal to DuckDB's.
+
+## Dynamic filters from any build, through unions
+
+A dynamic filter is taken today only from a build that holds a filter and no join, and its key
+lifts through wiring, filters, plain projects and inner joins. tpch q5's `o_orderkey ⋈
+lineitem` has a join in its build; tpcds q5's date filter stops at the `GpuUnion` of each
+channel's sales and returns, over fact columns ordered by date. Filters run in two passes. The
+first, on the engine's plan, keeps today's build rule; a key lifts through `GpuUnion` and
+`GpuInterleave` into every branch, each branch's scan pruned on its own footers, and through a
+non-inner join into the side it outputs. The second runs on the plan DPhyp ordered, where a
+build may hold a filter or a join — its values are the probe plan's measured output, as now —
+so a restriction a reorder brought down, as q58's week, reaches the fact scan; nothing is ordered
+again after it. A probe plan runs adaptively: a build that misses inside it replans, as in the
+main run. tpch q5 gains nothing: `l_orderkey` is not ordered in lineitem, which is sorted by
+ship date. q5 of both benchmarks and q58 are run before and after, and the costs go in the
+detail file.
+
+## DuckDB's cost for the named queries
+
+`testdata/gen_duckdb_cost.sh` profiles q1..q22 and q1..q99 only, so no named tpch query has a
+DuckDB figure or a final ratio. It profiles every corpus query, the named ones included; the
+report reads them by name already. Which named queries leave room for the optimizer is written
+into the detail file.
+
+## `.optimizer.txt` that reads without the code
+
+Each section says what it measures. A DPhyp call is headed by its multi-join id; each relation
+`rN` lists its rows (exact, estimated or measured), row width and the NDV of its edge columns;
+an edge whose column is an aggregate's output says so rather than printing the aggregate's name
+as if it were a function; the dynamic filter's ordering score and the build read from memory are
+worded as what they are; `C_out` names its units and that the second figure is the plan's own
+order under the same estimates. The plan diff stays as it is, in a file of its own,
+`<mode>.plandiff.txt`, which `.optimizer.txt` points to: with it the tpcds log was too large for
+GitHub to display.
+
+## A markdown page per mode
+
+`run.py` writes `<mode>.optimizer.md` beside `<mode>.optimizer.txt`, from the same report data:
+a `## <query>` section each; per multi-join that changed order a table whose columns are the
+plan's order and then each call that changed it, and whose rows are the join tree drawn, what
+changed it (empty in the first column: DPhyp, a flip, a replan with its q-error) and its cost, the
+calls that kept the order named under it; a multi-join that kept its order is one line. A tree is
+written in words with the build side in brackets and a filtered relation marked:
+`[[nation (f)] join customer] left join orders`, the join kinds as SQL names them (join, left
+join, full join, semi join, anti join), the side a non-inner join keeps written first. The dynamic
+filters applied follow, each as scan, column, the build and key that pruned it, key range or
+values, and row groups before and after.
+
+## The report links to its evidence
+
+`cost_report.html` takes the commit it describes (`--sha`). A ratio cell other than 1.00 links
+to that query's section of `<mode>.optimizer.md` at that commit on GitHub. Rules fired becomes
+per mode: how many multi-joins changed order and how many dynamic filters applied, each linking
+to its lines in `<mode>.optimizer.txt`; DPhyp and flips count together. The `cost-report` job
+renders it with the commit's sha from the committed `.costs.txt` and publishes it beside the
+engine's page.
+
+## `optimizer.md`: the heuristics in one place
+
+`scripts/exec_model/optimizer.md`, at most 300 lines, every rule the optimizer applies and when:
+what triggers a dynamic filter and which nodes its key lifts through; what a multi-join is and
+how TES admits a non-inner join; the cost DPhyp is given — its formula, units, and which
+selectivities enter it (filters below a relation, join containment, the flat share for a residual
+predicate); orientation; what triggers a replan and what it re-optimizes. `design.md` keeps the
+why and points here for the rules.
+
+## On master as it stands
+
+master moved under the branch. The engine's joins left the recipe architecture for a C++
+session, and the prototype's pandas joins followed: the recipe backend is gone, `null_equals_null`
+is one rule for every join type, anti and mark included, and closed tickets lifted the walls the
+optimizer was built around (#152 build copies, #59 and #80 NULL equality, #153 and #159
+residuals on outer and right-semi joins). Plans gained `key IS NOT NULL` filters under a shuffled
+side at tp4 (#137), `__rowmarker__` projections and `GpuEmpty`; a third dataset, pbench, and a
+ninth `corpus_query!` argument arrived. The branch moves onto master in a few commits, each green,
+and the prototype is brought to master's execution model before its outputs are made again.
+
+- **The move.** The branch's own commits are squashed into a handful by component, then rebased:
+  DPhyp; the benchmarks and calibration; the prototype and optimizer with their goldens; the
+  engine side (the cost conf, cost goldens, cost-report, the named queries, DuckDB's cost); the
+  wiki. Where master already holds a change, its version stands. Ticket numbers taken on master
+  move to free ones.
+- **The prototype under master's model.** The plan reader reads every node and type master's
+  plans carry, the joins are master's with the optimizer's additions, and a join's NULL equality
+  is its flag alone.
+- **The optimizer's rules under the closed tickets.** Orientation prices a build as the session
+  holds it; a residual on a non-inner join no longer walls a cluster where the engine runs it; a
+  key's `IS NOT NULL` filter under an exchange is wiring a cluster reads through. Each is measured
+  before it is kept.
+- **The engine side.** The named queries take master's case format and devices; the cost goldens,
+  pbench's included, follow the conf; cost-report reads three datasets.
+- **Made again and checked.** One full `run.py`, the cardinality golden and the corpus answer suites
+  at every mode, and every move against the outputs before the rebase explained in the detail file.
+
+## Not in this task
+
+The optimizer in Rust; real parallelism in the scheduler or the driver — the scheduler names
+what may run together, and nothing executes it concurrently yet; statistics for intermediate
+results beyond the exact key NDV of a finished build; measuring the optimizer on the device.
+
+## Scope
+
+- `scripts/exec_model/**`, `testdata/gen_stats.py`, `testdata/stats/*.json`,
+  `testdata/.gitignore`, `testdata/calibration/`.
+- `scripts/build-test-shadgpu.sh`, `scripts/lib/shadgpu-env.sh`, a fetch script for the record.
+- `peacockdb-core/tests/common/corpus_benchmark_cases.inc`,
+  `peacockdb-core/tests/peacock_gpu_benchmarks.rs`, the record's preamble test,
+  `testdata/benchmark-results/**`.
+- `peacockdb-dphyp/design.md`; `.github/workflows/{pipeline,exec-model-corpus}.yml`.
+- `llm-wiki/build-test.md`.
+- `testdata/cost_model.conf` and what it moves: the engine's `.cost.txt` goldens, the
+  `cost-report` crate, `peacockdb-core/src/test_support/cost_model.rs` if it names a category.
+- `testdata/gen_duckdb_cost.sh`, `testdata/duckdb_cost.py`, the DuckDB profiles and
+  `.duckdb_cost.txt` goldens.
+- New named queries: `testdata/tpch-queries/`, `peacockdb-core/tests/common/corpus_cases.inc`,
+  their engine goldens.
+- `peacockdb-dphyp/` where a hyperedge TES needs is refused.
+- Nothing else in the engine: `peacockdb-core/src/`, `cpp/`, the wire format.
+
+## Done when
+
+`grep` finds no handwritten lowering and no `exec_model/*.plans.txt`; the layout is the one
+above; every prototype tier is green, the CI ones in CI and the corpus ones on shad-gpu;
+`gen_stats.py` writes one file from both embedding modes; `run.py` over the whole corpus writes
+the goldens, the `.optimizer.txt` files and the report, its wall time stated; `records.tsv` is
+in S3 and not in git, and nothing in CI reads it; the device-enabled benchmark cases are
+measured and committed; the cardinality golden is in and q64 is explained; the three documents
+exist, the DPhyp one within 200 lines; the wiki counts add up. Forwarders cost nothing in the
+conf; every join node carries its multi-join id; non-inner joins reorder under TES and the named
+queries that show it are in the corpus; dynamic filters come from builds with joins and lift
+through unions; every named query has a DuckDB cost; `.optimizer.txt` reads without the code,
+`<mode>.optimizer.md` holds each multi-join's evolution, and the published report links to both
+at its commit; `optimizer.md` exists within 300 lines; every answer equals DuckDB's. The branch
+sits on master in a few green commits, the prototype reads and runs master's plans by master's
+join rules, the optimizer's rules no longer encode closed tickets, and every output is made
+again on master with its moves explained.
+
+## Completeness signoff
+
+Solved under its constraints. Shortcuts: conflict detection is CD-A, not CD-C, correct and not
+complete, no crate change; orientation does not price the build as the session holds it (#294).
+Known exceptions, dearer than planned: tpcds q24 at the tp4 modes (#297), q16 by 0.02 % at all five;
+q84 is cheaper than planned, its limit a rise against its earlier ratio. The sf40 benchmarks time
+the 26 cases measured, not master's device column today; Task 8's Nsight step is deferred. Plan
+diffs sit in `.plandiff.txt` for GitHub's display limit. Regenerations and the corpus tier ran
+locally and on a second CPU host, byte-identical where both ran. The final ratio is projected,
+E × O/P / D. Also: `backend.rs`'s doc comment; DPhyp's priced sets counted, not printed; `plan_text`
+a function; the embeddings check two tests; pbench outside the prototype's suites (#291); dynamic
+filters' NULL rule master's flag; the record keyed by content; a dynamic step cap; twelve commits.
+
+---
+
 <!-- archived from llm-wiki/tasks/containers.md -->
 
 **Absorbed by chain L's containers-rebase, unmerged.** Chain C's task 2, branch `ENS-containers`,
