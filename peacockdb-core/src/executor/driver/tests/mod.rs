@@ -4,30 +4,48 @@
 //! rather than on the rows that came back: a limit test that checks the rows passes just
 //! as well when the whole input was read and thrown away.
 
-/// The mock backend and the plans built on it, `pub(crate)` because the test modules of
-/// `driver`'s subcomponents drive the same backend and cannot see a private sibling.
+/// The mock backend, `pub(crate)` because the test modules of `driver`'s subcomponents
+/// drive the same backend and cannot see a private sibling. The plans it runs are
+/// `crate::tests::plans`, which `plan`'s tests build DAGs from too.
 pub(crate) mod mock;
-/// See [`mock`].
-pub(crate) mod plans;
 
 mod budget;
+mod cap;
 mod counts;
+mod dag;
 mod failure;
 mod flow;
+mod hold_buffer;
 mod hook;
 mod init;
 mod instrument;
 mod limit;
 mod memory;
+mod random_dags;
 mod render;
 mod stress;
 mod wiring;
 
+use std::num::NonZeroUsize;
+
 use super::StepError;
 use self::mock::{Mock, Script};
 use super::partitioned::Driver;
-use crate::executor::{CallKind, PlanIndex, RunError, RunReport, TraceEvent};
+use crate::executor::{CallKind, FusedRun, PlanIndex, RunError, RunReport, TraceEvent};
 use crate::plan::GpuNode;
+use crate::plan::{SharedSource, new_hold_buffer};
+
+fn read(source: &SharedSource) -> Box<dyn GpuNode> {
+    Box::new(source.clone())
+}
+
+fn buffer(input: Box<dyn GpuNode>) -> Box<dyn GpuNode> {
+    Box::new(new_hold_buffer(input))
+}
+
+fn refs(roots: &[Box<dyn GpuNode>]) -> Vec<&dyn GpuNode> {
+    roots.iter().map(|root| root.as_ref()).collect()
+}
 
 /// Run to completion under no budget, which is what most flow cases want.
 fn run(root: &dyn GpuNode, script: &Script) -> RunReport {
@@ -42,6 +60,25 @@ fn run_with(
     // Construction can refuse — the planner's canonical form is checked there — so this
     // propagates rather than unwrapping, which is what the refusal case asserts on.
     Driver::<Mock>::new(root, script, budget)?.run(10_000)
+}
+
+/// Several roots run to completion under no budget.
+fn run_roots(roots: &[&dyn GpuNode], script: &Script) -> FusedRun {
+    run_capped(roots, script, None)
+}
+
+/// [`run_roots`] with at most `cap` roots running at once.
+fn run_capped(roots: &[&dyn GpuNode], script: &Script, cap: Option<NonZeroUsize>) -> FusedRun {
+    Driver::<Mock>::for_roots(roots, script, None, cap)
+        .and_then(|driver| driver.run_fused(10_000))
+        .expect("the plan runs")
+}
+
+fn driver_of_roots<'a>(roots: &[&'a dyn GpuNode], script: &'a Script) -> Driver<'a, Mock> {
+    let mut driver =
+        Driver::<Mock>::for_roots(roots, script, None, None).expect("the plan indexes");
+    driver.seed().expect("the limits settle");
+    driver
 }
 
 fn driver<'a>(root: &'a dyn GpuNode, script: &'a Script) -> Driver<'a, Mock> {
@@ -111,28 +148,35 @@ fn assert_accounted(report: &RunReport) {
     );
 }
 
-/// The conservation law, lane for lane: every row a node emitted was taken by its parent or
-/// left standing by an early exit, and a row in neither vanished. That is a defect no
-/// inequality can see, which is why it sits beside `in_flight_bytes` returning to zero and
-/// `holds == releases` rather than in place of them. The tree is walked through the index
+/// The conservation law, lane for lane: every row a node emitted was taken by each of its
+/// readers or left standing by an early exit, and a row in neither vanished. That is a defect
+/// no inequality can see, which is why it sits beside `in_flight_bytes` returning to zero and
+/// `holds == releases` rather than in place of them. The plan is walked through the index
 /// the report is addressed by, so nothing here re-derives a child list.
 fn assert_conserved(root: &dyn GpuNode, report: &RunReport) {
-    let index = PlanIndex::build(root).expect("the tree the run was made over indexes");
+    assert_conserved_over(&[root], report)
+}
+
+fn assert_conserved_over(roots: &[&dyn GpuNode], report: &RunReport) {
+    let index = PlanIndex::build_roots(roots).expect("the plan the run was made over indexes");
     for (node, indexed) in index.nodes.iter().enumerate() {
-        for (slot, child) in indexed.children.iter().enumerate() {
-            for lane in 0..report.lanes_of[*child] {
-                let emitted: u64 = report.emitted[*child][lane]
-                    .iter()
-                    .map(|batch| batch.rows)
-                    .sum();
-                assert_eq!(
-                    report.consumed[node][slot][lane] + report.abandoned[*child][lane],
-                    emitted,
-                    "{} slot {slot} lane {lane}: against {}",
-                    indexed.node.name(),
-                    index.nodes[*child].node.name()
-                );
-            }
+        for lane in 0..report.lanes_of[node] {
+            let emitted: u64 = report.emitted[node][lane]
+                .iter()
+                .map(|batch| batch.rows)
+                .sum();
+            let consumed: u64 = indexed
+                .readers
+                .iter()
+                .map(|reader| report.consumed[reader.parent][reader.slot][lane])
+                .sum();
+            assert_eq!(
+                consumed + report.abandoned[node][lane],
+                emitted * indexed.readers.len() as u64,
+                "{} lane {lane}: what its {} readers took and left",
+                indexed.node.name(),
+                indexed.readers.len()
+            );
         }
     }
 }

@@ -5,9 +5,9 @@
 //! mock's sizes move, and it can make a test pass for a reason nobody meant.
 
 use super::mock::{Script, spec};
-use super::plans::*;
 use super::*;
 use crate::executor::When;
+use crate::tests::plans::*;
 
 /// The test's own input, so the sizes below are data rather than expectations.
 const BATCH_ROWS: usize = 10;
@@ -171,4 +171,29 @@ fn a_limit_above_an_accumulator_saves_nothing() {
         control_reads, 6,
         "the control: the same plan with no interval reads every batch there is"
     );
+}
+
+/// A call refused before it runs was handed a batch taken from its queue. The batch goes
+/// nowhere, so the refusal releases it, as a failed call does: held and released stay equal.
+#[test]
+fn a_call_refused_before_it_runs_releases_its_input() {
+    // The scan's batch fits; the filter's call models a scratch as large again, and the two
+    // together do not.
+    let (plan, script) = (chain(), batches(1).modelling(1));
+    let mut driver = driver_with(plan.as_ref(), &script, Some(BATCH_BYTES * 3 / 2));
+    let error = loop {
+        match driver.step() {
+            Ok(true) => {}
+            Ok(false) => panic!("the run ended without tripping"),
+            Err(error) => break error,
+        }
+    };
+    assert!(
+        matches!(error, StepError::Trip(trip) if trip.when == When::PreCall && trip.slot.node == 1),
+        "the filter's call was refused: {error:?}"
+    );
+    driver.release_all().expect("what it held goes back");
+    let (holds, releases) = driver.hops();
+    assert_eq!(holds, releases, "{holds} held, {releases} released");
+    assert_eq!(driver.in_flight(), 0);
 }

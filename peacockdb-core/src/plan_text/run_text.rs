@@ -7,31 +7,31 @@
 //! Its tests are the driver's, in `driver/tests/render.rs`: rendering a report takes a run,
 //! and the mock backend that makes one deterministic lives there.
 //!
-//! The tree is walked through the driver's own [`PlanIndex`], not through a second walk of
-//! the same shape: the report is addressed by that index, and two walks agreeing is a
-//! coincidence to be avoided rather than relied on.
+//! The tree is walked through `PlanDag`, the walk the driver's `PlanIndex` is numbered by,
+//! so a node's index here is the one the report is addressed by.
 
 use std::fmt::Write as _;
 
+use super::dag_walk;
 use super::node_text::{join_parts, lanes_of, node_line_parts, numbers};
 use crate::executor::RunReport;
-use crate::executor::{PlanIndex, ROOT};
-use crate::plan::GpuNode;
+use crate::plan::{GpuNode, PlanDag};
 
-/// `root` as it ran: the early-exit marker, then one node per line with its per-batch
+/// The roots as they ran: the early-exit marker, then one node per line with its per-batch
 /// record beneath it.
-pub(crate) fn render_run(root: &dyn GpuNode, report: &RunReport) -> String {
-    let index = PlanIndex::build(root).expect("the tree the run was made over indexes");
-    let mut text = format!("early_exit={}\n", early_exit(&index, report));
-    render_node(&index, report, ROOT, 0, &mut text);
-    text
+pub(crate) fn render_runs(roots: &[&dyn GpuNode], report: &RunReport) -> String {
+    let dag = PlanDag::of(roots);
+    let tree = dag_walk::render(&dag, &mut |at, indent, prefix, text| {
+        render_node(&dag, report, at, indent, prefix, text);
+    });
+    format!("early_exit={}\n{tree}", early_exit(&dag, report))
 }
 
 /// Which limits were satisfied, by name and post-order address — the address because that
 /// is what both engines number a node by, and the name because nobody reads an address.
 /// `none` where the run drained, stated rather than left to an absence, since a smaller
 /// number with no cause reads exactly like a plan that produced less.
-fn early_exit(index: &PlanIndex<'_>, report: &RunReport) -> String {
+fn early_exit(dag: &PlanDag<'_>, report: &RunReport) -> String {
     if report.satisfied.is_empty() {
         return "none".to_string();
     }
@@ -41,8 +41,8 @@ fn early_exit(index: &PlanIndex<'_>, report: &RunReport) -> String {
         .map(|node| {
             format!(
                 "{}@{}",
-                index.nodes[*node].node.name(),
-                index.nodes[*node].post_order
+                dag.nodes[*node].node.name(),
+                dag.nodes[*node].post_order
             )
         })
         .collect();
@@ -50,14 +50,15 @@ fn early_exit(index: &PlanIndex<'_>, report: &RunReport) -> String {
 }
 
 fn render_node(
-    index: &PlanIndex<'_>,
+    dag: &PlanDag<'_>,
     report: &RunReport,
     node: usize,
-    depth: usize,
+    indent: &str,
+    prefix: &str,
     text: &mut String,
 ) {
     let batches = &report.emitted[node];
-    let mut parts = node_line_parts(index.nodes[node].node);
+    let mut parts = node_line_parts(dag.nodes[node].node);
     parts.push(format!(
         "output_rows={}",
         batches
@@ -74,8 +75,7 @@ fn render_node(
             .map(|batch| batch.bytes)
             .sum::<usize>()
     ));
-    let indent = "  ".repeat(depth);
-    let _ = writeln!(text, "{indent}{}", join_parts(parts));
+    let _ = writeln!(text, "{indent}{prefix}{}", join_parts(parts));
     // Lanes outermost and batches within, which is `partition_groups`' own nesting: on a
     // source, element i of lane j is one batch in all three lists and in the mapping.
     let _ = write!(
@@ -95,7 +95,4 @@ fn render_node(
         let _ = write!(text, " rows_skipped={}", report.rows_skipped[node]);
     }
     text.push('\n');
-    for child in &index.nodes[node].children {
-        render_node(index, report, *child, depth + 1, text);
-    }
 }

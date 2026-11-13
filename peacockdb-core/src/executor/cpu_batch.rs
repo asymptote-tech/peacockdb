@@ -1,6 +1,6 @@
 //! [`CpuBatch`](super::CpuBatch)'s side of [`Batch`](super::Batch).
 
-use super::{Batch, CpuBatch};
+use super::{BackendError, Batch, CpuBatch};
 use crate::common::{batch_varlen_content_bytes, logical_size_from_schema};
 
 impl Batch for CpuBatch {
@@ -19,5 +19,9 @@ impl Batch for CpuBatch {
             self.batch.num_rows(),
             batch_varlen_content_bytes(&self.batch),
         )
+    }
+
+    fn share(&self) -> Result<Self, BackendError> {
+        Ok(Self::new(self.batch.clone()))
     }
 }

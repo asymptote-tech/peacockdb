@@ -357,6 +357,17 @@ pub mod raw {
         ) -> i32;
 
         pub fn peacock_handle_release(executor: *mut PeacockExecutor, handle: u64);
+
+        /// A second handle over `handle`'s table, for a batch two consumers read: the
+        /// columns are shared, nothing is allocated, `handle` is NOT consumed, and each
+        /// handle is released on its own. The new one is charged to the original's
+        /// producer. An unknown handle ends the query, as `slice_handle` does.
+        pub fn peacock_handle_duplicate(
+            executor: *mut PeacockExecutor,
+            handle: u64,
+            out_handle: *mut u64,
+        ) -> i32;
+
         pub fn peacock_executor_end_plan(executor: *mut PeacockExecutor);
 
         // Conformance hook (stateless): GPU Spark-murmur3 partition ids for the

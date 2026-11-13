@@ -9,6 +9,7 @@ mod aggregate_cases;
 mod aggregate_dimension_cases;
 mod aggregate_identity_cases;
 mod aggregate_schema_cases;
+mod dag_cases;
 mod device;
 mod distinct_cases;
 mod emit_cases;

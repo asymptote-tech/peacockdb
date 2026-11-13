@@ -12,12 +12,16 @@
 use super::{MIN_TARGET_BATCH_BYTES, MemoryModel, SourceEstimate};
 use crate::common::logical_size_from_schema;
 use crate::plan::GpuNode;
+use crate::plan::PlanDag;
 use crate::plan::PlanError;
 use crate::plan::session_bytes;
 use crate::plan::{NodeRef, as_node_ref};
 
-pub(crate) fn estimate(root: &dyn GpuNode, budget: u64) -> Result<MemoryModel, PlanError> {
-    let tree = Tree::of(root);
+pub(crate) fn estimate_roots(
+    roots: &[&dyn GpuNode],
+    budget: u64,
+) -> Result<MemoryModel, PlanError> {
+    let tree = Tree::of(roots);
     let accumulator_bytes: u64 = (0..tree.nodes.len())
         .filter_map(|seq| tree.held_by_accumulator(seq))
         .sum();
@@ -93,36 +97,40 @@ fn coarse(bytes: u64) -> u64 {
     1 << (63 - bytes.leading_zeros() as u64)
 }
 
-/// The tree in canonical post-order — children left to right, then the node — which is the
-/// order the goldens render and the order every per-node figure is indexed by.
+/// The plan in `PlanDag`'s post-order — children left to right, then the node, a node read
+/// by several parents at its first visit — which is the order the goldens render and the
+/// order every per-node figure is indexed by. A shared source is one node, so it is charged
+/// once: a valid plan has no reader that holds it back, and what a held reader keeps is its
+/// buffer's.
 struct Tree<'a> {
     nodes: Vec<&'a dyn GpuNode>,
     children: Vec<Vec<usize>>,
-    parent: Vec<Option<usize>>,
+    /// Every reader of a node: one on a tree, several at a shared source, none at a root.
+    parents: Vec<Vec<usize>>,
 }
 
 impl<'a> Tree<'a> {
-    fn of(root: &'a dyn GpuNode) -> Self {
-        let mut tree = Tree {
-            nodes: Vec::new(),
-            children: Vec::new(),
-            parent: Vec::new(),
-        };
-        tree.visit(root);
-        for seq in 0..tree.nodes.len() {
-            for child in tree.children[seq].clone() {
-                tree.parent[child] = Some(seq);
-            }
+    fn of(roots: &[&'a dyn GpuNode]) -> Self {
+        let dag = PlanDag::of(roots);
+        let seq = |at: usize| dag.nodes[at].post_order;
+        let order = dag.in_post_order();
+        Tree {
+            nodes: order.iter().map(|at| dag.nodes[*at].node).collect(),
+            children: order
+                .iter()
+                .map(|at| dag.nodes[*at].children.iter().map(|c| seq(*c)).collect())
+                .collect(),
+            parents: order
+                .iter()
+                .map(|at| {
+                    dag.nodes[*at]
+                        .readers
+                        .iter()
+                        .map(|reader| seq(reader.parent))
+                        .collect()
+                })
+                .collect(),
         }
-        tree
-    }
-
-    fn visit(&mut self, node: &'a dyn GpuNode) -> usize {
-        let children: Vec<usize> = node.children().into_iter().map(|c| self.visit(c)).collect();
-        self.nodes.push(node);
-        self.children.push(children);
-        self.parent.push(None);
-        self.nodes.len() - 1
     }
 
     /// The scans, which are what the budget sizes. A `GpuEmpty` reads nothing, and the
@@ -253,8 +261,16 @@ impl<'a> Tree<'a> {
                 Some(self.bytes(build) + session_bytes(join.join_type, false, 0, self.rows(build)))
             }
             NodeRef::CrossJoin(_) => Some(self.bytes(self.children[seq][0])),
+            // Everything its input emits, which is what it keeps while a hold covers it.
+            NodeRef::HoldBuffer(_) => Some(self.bytes(self.children[seq][0])),
             _ => None,
         }
+    }
+
+    /// A hold buffer keeps what it is handed and emits the same batches, so it is where a
+    /// batch's bytes are held and not where the batch ends.
+    fn is_buffer(&self, seq: usize) -> bool {
+        matches!(as_node_ref(self.nodes[seq]), NodeRef::HoldBuffer(_))
     }
 
     /// What arrives at a node while it holds its state: a join's probe batch, per lane.
@@ -268,22 +284,25 @@ impl<'a> Tree<'a> {
     }
 
     /// A source's amplification: the largest its batch gets anywhere on the way to the
-    /// accumulator that ends the walk, counting the lanes live at that point. The maximum
-    /// rather than either end — a batch is rarely widest where it starts, and above a
-    /// merge the same batch costs one lane's worth rather than N.
+    /// accumulator that ends the walk, counting the lanes live at that point, over every
+    /// reader's path. The maximum rather than either end — a batch is rarely widest where it
+    /// starts, and above a merge the same batch costs one lane's worth rather than N.
     fn amplification(&self, source: usize) -> f64 {
         let (rows, width) = (self.rows(source).max(1), self.width(source));
-        let mut node = source;
         let mut amplification = self.lanes(source) as f64;
-        while let Some(parent) = self.parent[node] {
-            if self.held_by_accumulator(parent).is_some() {
-                break;
+        let mut seen = vec![false; self.nodes.len()];
+        let mut stack = self.parents[source].clone();
+        while let Some(parent) = stack.pop() {
+            if std::mem::replace(&mut seen[parent], true)
+                || (self.held_by_accumulator(parent).is_some() && !self.is_buffer(parent))
+            {
+                continue;
             }
             let factor = (self.rows(parent) as f64 / rows as f64)
                 * (self.width(parent) as f64 / width as f64)
                 * self.lanes(parent) as f64;
             amplification = amplification.max(factor);
-            node = parent;
+            stack.extend(&self.parents[parent]);
         }
         amplification.max(1.0)
     }
@@ -298,7 +317,10 @@ impl<'a> Tree<'a> {
                 // What this mapping emits, which is the budget's target only where the
                 // budget is what cut the batches.
                 load.largest_batch_bytes()
-            } else if let Some(held) = self.held_by_accumulator(seq) {
+            } else if let Some(held) = self
+                .held_by_accumulator(seq)
+                .filter(|_| !self.is_buffer(seq))
+            {
                 held / self.lanes(seq).max(1)
             } else {
                 self.children[seq]

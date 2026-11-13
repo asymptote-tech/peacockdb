@@ -1,0 +1,138 @@
+//! A producer's output queue for one lane, read by every edge into the producer.
+//!
+//! Each reader has a cursor, and an entry stays until the last live reader has taken it. A
+//! reader that is not the last takes a [`Batch::share`] holding a clone of the entry's charge;
+//! the last takes the original and the queue's own holder. So a batch is charged once however
+//! many read it, and on a tree, one reader per queue, nothing is ever shared. Readers take in
+//! order, so the last taker of an entry always takes it from the front.
+
+use std::collections::VecDeque;
+
+use super::accounting::Held;
+use crate::executor::{BackendError, Batch};
+
+pub(crate) struct OutQueue<T> {
+    entries: VecDeque<Held<T>>,
+    /// The absolute index of `entries[0]`: how many entries have left the front.
+    front: usize,
+    /// Per reader, the absolute index of the next entry it takes.
+    next: Vec<usize>,
+    retired: Vec<bool>,
+    /// The most entries ever queued at once. Only the tests read it, through the accessor
+    /// in `queue/tests.rs`; the report's `peak_queued` is the driver's own, per node.
+    #[cfg_attr(not(test), allow(dead_code))]
+    high_water: usize,
+    /// Rows its readers will never take, summed over readers: what a retired reader left,
+    /// and what was still queued when the run drained it.
+    abandoned: u64,
+}
+
+impl<T: Batch> OutQueue<T> {
+    pub(crate) fn new(readers: usize) -> Self {
+        Self {
+            entries: VecDeque::new(),
+            front: 0,
+            next: vec![0; readers],
+            retired: vec![false; readers],
+            high_water: 0,
+            abandoned: 0,
+        }
+    }
+
+    pub(crate) fn push(&mut self, held: Held<T>) {
+        let retired = self.retired.iter().filter(|gone| **gone).count();
+        self.abandoned += held.rows() * retired as u64;
+        self.entries.push_back(held);
+        self.high_water = self.high_water.max(self.entries.len());
+    }
+
+    pub(crate) fn has(&self, reader: usize) -> bool {
+        self.position(reader).is_some()
+    }
+
+    pub(crate) fn front_rows(&self, reader: usize) -> Option<u64> {
+        self.position(reader).map(|at| self.entries[at].rows())
+    }
+
+    /// The reader's next batch: a share while another live reader has yet to take it, else
+    /// the original.
+    pub(crate) fn take(&mut self, reader: usize) -> Result<Option<Held<T>>, BackendError> {
+        let Some(at) = self.position(reader) else {
+            return Ok(None);
+        };
+        let index = self.next[reader];
+        self.next[reader] += 1;
+        if self.is_wanted(index) {
+            let entry = &self.entries[at];
+            return Ok(Some(Held {
+                batch: entry.batch.share()?,
+                charge: entry.charge.clone(),
+            }));
+        }
+        debug_assert_eq!(at, 0, "the last taker of an entry takes the front");
+        self.front += 1;
+        Ok(self.entries.pop_front())
+    }
+
+    /// The reader stops reading, and every row it had yet to take, now or later, is
+    /// abandoned. What only it still wanted comes back, the queue's holder with it; an entry
+    /// another live reader wants stays.
+    pub(crate) fn retire(&mut self, reader: usize) -> Vec<Held<T>> {
+        if let Some(at) = self.position(reader) {
+            self.abandoned += self.entries.range(at..).map(Held::rows).sum::<u64>();
+        }
+        self.retired[reader] = true;
+        let mut released = Vec::new();
+        while !self.entries.is_empty() && !self.is_wanted(self.front) {
+            released.extend(self.entries.pop_front());
+            self.front += 1;
+        }
+        released
+    }
+
+    /// Every entry once, its rows abandoned by each live reader that never took it.
+    pub(crate) fn drain(&mut self) -> Vec<Held<T>> {
+        let mut drained = Vec::new();
+        while let Some(held) = self.entries.pop_front() {
+            self.abandoned += held.rows() * self.wanting(self.front) as u64;
+            drained.push(held);
+            self.front += 1;
+        }
+        drained
+    }
+
+    pub(crate) fn abandoned(&self) -> u64 {
+        self.abandoned
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// A retired reader's cursor may lag the front, so it is never subtracted from.
+    fn position(&self, reader: usize) -> Option<usize> {
+        if self.retired[reader] {
+            return None;
+        }
+        let at = self.next[reader] - self.front;
+        (at < self.entries.len()).then_some(at)
+    }
+
+    /// Whether a live reader has yet to take the entry at absolute `index`.
+    fn is_wanted(&self, index: usize) -> bool {
+        self.wanting(index) > 0
+    }
+
+    fn wanting(&self, index: usize) -> usize {
+        (0..self.next.len())
+            .filter(|reader| !self.retired[*reader] && self.next[*reader] <= index)
+            .count()
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -17,6 +17,9 @@ impl Batch for HandleBatch {
     fn byte_size(&self) -> usize {
         self.rows * 8
     }
+    fn share(&self) -> Result<Self, BackendError> {
+        Ok(Self { rows: self.rows })
+    }
 }
 
 fn empty_cpu_batch() -> CpuBatch {
@@ -187,4 +190,33 @@ fn one_generic_driver_serves_two_backends_with_different_batch_types() {
     );
     assert_eq!(drive_source::<FirstBackend>(FirstOps), 0);
     assert_eq!(drive_source::<SecondBackend>(SecondOps), 7);
+}
+
+/// A second reader of a shared source gets the same Arrow buffers, not a copy: what the
+/// device does by sharing a handle's owners, the CPU does by cloning the arrays' `Arc`s.
+#[test]
+fn a_shared_cpu_batch_shares_its_buffers() {
+    use datafusion::arrow::array::{ArrayRef, Int64Array, StringArray};
+    let keys: ArrayRef = Arc::new(Int64Array::from_iter_values(0..1000));
+    let names: ArrayRef = Arc::new(StringArray::from_iter_values(
+        (0..1000).map(|i| format!("row {i}")),
+    ));
+    let batch = CpuBatch::new(RecordBatch::try_from_iter([("k", keys), ("n", names)]).unwrap());
+
+    let share = batch.share().expect("a CPU share cannot fail");
+
+    assert_eq!(share.num_rows(), batch.num_rows());
+    assert_eq!(share.byte_size(), batch.byte_size());
+    for (ours, theirs) in batch
+        .record_batch()
+        .columns()
+        .iter()
+        .zip(share.record_batch().columns())
+    {
+        let (ours, theirs) = (ours.to_data(), theirs.to_data());
+        assert_eq!(ours.buffers().len(), theirs.buffers().len());
+        for (a, b) in ours.buffers().iter().zip(theirs.buffers()) {
+            assert_eq!(a.as_ptr(), b.as_ptr(), "the share copied a buffer");
+        }
+    }
 }

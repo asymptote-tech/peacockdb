@@ -5,8 +5,8 @@
 //! checked against a walk written in this file, not against the one under test.
 
 use super::mock::{Script, address_of, spec};
-use super::plans::*;
 use super::*;
+use crate::tests::plans::*;
 
 /// The tree children-first, which is what `attach_recipes` numbers by.
 fn children_first<'a>(node: &'a dyn GpuNode, into: &mut Vec<usize>) {

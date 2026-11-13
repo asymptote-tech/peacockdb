@@ -28,6 +28,36 @@ impl<'a, B: Backend> Driver<'a, B> {
         self.states[node].out_queues[lane].len()
     }
 
+    pub(crate) fn node_count(&self) -> usize {
+        self.index.len()
+    }
+
+    /// The most batches the node's queue on `lane` ever held at once.
+    pub(crate) fn queue_high_water(&self, node: usize, lane: usize) -> usize {
+        self.states[node].out_queues[lane].high_water()
+    }
+
+    /// The node the last step ran.
+    pub(crate) fn last_node(&self) -> usize {
+        self.trace
+            .last()
+            .map(|event| event.node as usize)
+            .expect("a step ran")
+    }
+
+    pub(crate) fn in_flight(&self) -> usize {
+        self.acct.in_flight()
+    }
+
+    /// How many batches a hold buffer's lane keeps.
+    pub(crate) fn kept(&self, node: usize, lane: usize) -> usize {
+        self.states[node].kept[lane].len()
+    }
+
+    pub(crate) fn is_satisfied(&self, node: usize) -> bool {
+        self.scheduler.is_satisfied(node)
+    }
+
     pub(crate) fn last_call(&self) -> Option<CallKind> {
         self.trace.last().map(|event| event.call)
     }

@@ -6,7 +6,7 @@
 use super::attach::{accumulate_and_sort, aggregate, aggregate_batches};
 use super::generated::peacock::plan as fb;
 use super::join::JoinNode;
-use super::read::{children, node_at};
+use super::read::{children, indexed, node_at};
 use super::writer::Writer;
 use super::*;
 use crate::plan::AggregateBody;
@@ -29,6 +29,7 @@ use std::sync::Arc;
 
 mod aggregate_init;
 mod intervals;
+mod roots;
 
 /// An input whose layout and schema the test writes. A recipe function is handed its
 /// node and the schemas that node declares it consumes, so that is all a case needs to
@@ -964,4 +965,29 @@ fn the_child_walk_names_every_node_kind() {
             );
         }
     }
+}
+
+#[test]
+fn a_hold_buffer_crosses_as_nothing() {
+    use crate::plan::new_hold_buffer;
+    use crate::tests::plans::{coalesce_all, filter, join, source, unload};
+    let plan = |buffered: bool| {
+        let probe = filter(source("p", 1));
+        let probe: Box<dyn GpuNode> = match buffered {
+            true => Box::new(new_hold_buffer(probe)),
+            false => probe,
+        };
+        unload(join(coalesce_all(source("b", 1)), probe))
+    };
+    let with = attach_recipes(plan(true).as_ref(), DEFAULT_CHUNK_BYTES).expect("it crosses");
+    let without = attach_recipes(plan(false).as_ref(), DEFAULT_CHUNK_BYTES).expect("it crosses");
+    assert_eq!(with.bytes, without.bytes);
+    assert_eq!(with.wire_nodes, without.wire_nodes);
+    // Post-order: 0 b, 1 coalesce, 2 p, 3 filter, 4 buffer, 5 join, 6 unload.
+    assert_eq!(with.nodes(), without.nodes() + 1);
+    assert!(with.recipes[4].is_none());
+    assert_eq!(
+        with.recipes[5], without.recipes[4],
+        "the join reads the filter's seq"
+    );
 }

@@ -179,6 +179,7 @@ impl Backend for Injected {
                 NodeExecutors::BatchForwarder(forwarder) => {
                     NodeExecutors::BatchForwarder(forwarder)
                 }
+                NodeExecutors::HoldBuffer => NodeExecutors::HoldBuffer,
             },
         )
     }

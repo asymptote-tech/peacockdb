@@ -144,6 +144,7 @@ fn every_kind() -> Vec<Box<dyn GpuNode>> {
         )),
         Box::new(GpuUnload::new(streaming(), None)),
         Box::new(GpuEmpty::new(columns(&GROUPED))),
+        Box::new(crate::plan::new_hold_buffer(streaming())),
     ]
 }
 
@@ -219,11 +220,12 @@ fn node_kind(node: &dyn GpuNode) -> u8 {
         NodeRef::Interleave(_) => 16,
         NodeRef::Unload(_) => 17,
         NodeRef::Empty(_) => 18,
+        NodeRef::HoldBuffer(_) => 19,
     }
 }
 
 const LOAD_PARQUET: u8 = 0;
-const NODE_KINDS: u8 = 19;
+const NODE_KINDS: u8 = 20;
 
 fn category_built(node: &dyn GpuNode) -> ExecutorCategory {
     CpuBackend::executors_for(&ctx(), node, 0, 0)

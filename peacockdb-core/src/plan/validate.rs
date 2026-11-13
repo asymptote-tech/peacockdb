@@ -1,4 +1,5 @@
-//! Validation of a whole tree: each node against its children, then against itself.
+//! Validation of a whole plan: each node against its children, then against itself, once
+//! however many parents read it.
 //!
 //! The two halves answer different questions. A node's own
 //! [`validate_schemas_and_partitions`](GpuNode::validate_schemas_and_partitions) judges
@@ -7,9 +8,12 @@
 //! its annotations — which no child can be blamed for and which no node-local check
 //! looks at.
 
+use std::num::NonZeroUsize;
+
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 
 use super::GpuNode;
+use super::PlanDag;
 use super::PlanError;
 use super::Schema;
 use super::emitted_columns;
@@ -17,52 +21,383 @@ use super::unholdable;
 use super::{AggregateBody, GpuCrossJoin, GpuNestedLoopJoin, NodeRef, try_as_node_ref};
 use super::{KeyDistribution, NodeKind, SortOrder};
 
-/// Post-order, so a child's complaint comes before its parent's.
-///
-/// Public because the planner is not the only thing that builds a tree: a test that
-/// rewrites a planned one into a shape no planner emits needs the same check the planner
-/// ran, and the driver does not make it — [`check_canonical_form`] is all it asks for.
-pub(crate) fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
-    if !matches!(root.kind(), NodeKind::Sink) {
-        return Err(PlanError::Invalid(format!(
-            "{}: a plan ends at the crossing back to the host — the planner roots it in \
-             GpuUnload",
-            root.name()
-        )));
+/// The structure first, then the canonical form, then every node in post-order, so a
+/// child's complaint comes before its parent's.
+pub(crate) fn validate_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
+    let dag = PlanDag::of(roots);
+    roots_are_distinct(&dag)?;
+    for &root in &dag.roots {
+        let root = dag.nodes[root].node;
+        if !is_sink(root) {
+            return Err(PlanError::Invalid(format!(
+                "{}: a plan ends at the crossing back to the host — the planner roots it in \
+                 GpuUnload",
+                root.name()
+            )));
+        }
     }
-    check_canonical_form(root)?;
-    walk(root)
+    sinks_are_roots(&dag)?;
+    limit_positions(&dag)?;
+    walk(&dag)?;
+    holds_are_buffered(&dag)
+}
+
+/// [`validate_roots`], then the cap's own buffer rule, then the wait-for graph between holds,
+/// which must have no cycle. Under the buffer rule none can form; the check is that argument
+/// made mechanical, and the first thing a later change to the rule breaks.
+pub(crate) fn validate_dag(
+    roots: &[&dyn GpuNode],
+    cap: Option<NonZeroUsize>,
+) -> Result<(), PlanError> {
+    validate_roots(roots)?;
+    let dag = PlanDag::of(roots);
+    capped_roots_are_buffered(&dag, cap)?;
+    capped_roots_keep_their_state(&dag, cap)?;
+    match first_cycle(&wait_for_edges(&dag, cap)) {
+        Some(holds) => Err(hold_cycle(&dag, holds)),
+        None => Ok(()),
+    }
+}
+
+pub(crate) fn validate_cap(
+    roots: &[&dyn GpuNode],
+    cap: Option<NonZeroUsize>,
+) -> Result<(), PlanError> {
+    let dag = PlanDag::of(roots);
+    capped_roots_are_buffered(&dag, cap)?;
+    capped_roots_keep_their_state(&dag, cap)
+}
+
+/// The roots of ordinal `cap` and above, the ones that can wait for admission, each with the
+/// region the cap holds: the root's, stopping at buffers, since the cap lifts.
+fn waiting_roots(dag: &PlanDag<'_>, cap: Option<NonZeroUsize>) -> Vec<(usize, Vec<usize>)> {
+    let admitted = cap.map_or(dag.roots.len(), NonZeroUsize::get);
+    dag.roots
+        .iter()
+        .skip(admitted)
+        .map(|root| (*root, dag.held_region_of_node(*root)))
+        .collect()
+}
+
+/// "The only unbounded storage is a node you can see" (`architecture.md`, "The scheduling
+/// rule") over the cap's holds: a waiting root's region is entered from outside only through
+/// a buffer, so a shared source it reads never waits on its admission.
+fn capped_roots_are_buffered(
+    dag: &PlanDag<'_>,
+    cap: Option<NonZeroUsize>,
+) -> Result<(), PlanError> {
+    for (root, region) in waiting_roots(dag, cap) {
+        if let Some((reader, slot, producer)) = unbuffered_entry(dag, &region, None) {
+            let name = |at: usize| dag.nodes[at].node.name();
+            return Err(PlanError::UnbufferedHold {
+                hold: root,
+                reader,
+                slot,
+                producer,
+                what: format!(
+                    "{} (node {reader}) reads {} (node {producer}) from outside the root {} \
+                     (node {root}), which waits for the cap; a GpuHoldBuffer must sit on that \
+                     edge",
+                    name(reader),
+                    name(producer),
+                    name(root)
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// The cap holds a waiting root only down to its buffers, so whatever lies below one runs
+/// while the root waits. A stateless node there is a batch in and a batch out, kept by the
+/// buffer above it; an accumulator would hold its state outside the cap, which exists to
+/// bound the state alive at once.
+fn capped_roots_keep_their_state(
+    dag: &PlanDag<'_>,
+    cap: Option<NonZeroUsize>,
+) -> Result<(), PlanError> {
+    for (root, held) in waiting_roots(dag, cap) {
+        let mut below_a_buffer = dag
+            .region_of_node(root)
+            .into_iter()
+            .filter(|node| !held.contains(node));
+        if let Some(node) = below_a_buffer.find(|node| holds_state(dag.nodes[*node].node)) {
+            let name = |at: usize| dag.nodes[at].node.name();
+            return Err(PlanError::UncappedAccumulator {
+                root,
+                node,
+                what: format!(
+                    "{} (node {node}) sits below a GpuHoldBuffer of the root {} (node {root}), \
+                     which waits for the cap, so its state would live outside the cap; only \
+                     stateless nodes may sit between a waiting root's buffer and its source",
+                    name(node),
+                    name(root)
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// The accumulators: the kinds whose state grows with what they are fed. These are the
+/// memory estimator's (`held_by_accumulator`), the buffer aside, which is the cap's own answer.
+fn holds_state(node: &dyn GpuNode) -> bool {
+    matches!(
+        try_as_node_ref(node),
+        Some(
+            NodeRef::CoalesceAllBatches(_)
+                | NodeRef::MergeSortedPartitions(_)
+                | NodeRef::AccumulateBatchesAndSort(_)
+                | NodeRef::AggregateBatches(_)
+                | NodeRef::Join(_)
+                | NodeRef::NestedLoopJoin(_)
+                | NodeRef::CrossJoin(_)
+        )
+    )
+}
+
+/// A join's probe is its second child, which is the side its hold covers.
+const PROBE_CHILD: usize = 1;
+
+fn joins<'d>(dag: &'d PlanDag<'_>) -> impl Iterator<Item = usize> + 'd {
+    (0..dag.nodes.len()).filter(|at| {
+        matches!(
+            try_as_node_ref(dag.nodes[*at].node),
+            Some(NodeRef::Join(_) | NodeRef::CrossJoin(_) | NodeRef::NestedLoopJoin(_))
+        )
+    })
+}
+
+/// No edge enters a join's held probe region from a producer outside it unless a
+/// `GpuHoldBuffer` reads that edge. A held buffer takes every batch it is offered, so it is
+/// the one reader whose producer never waits on the hold. On a tree nothing enters a region
+/// but through a buffer, so no single-query plan is refused here.
+fn holds_are_buffered(dag: &PlanDag<'_>) -> Result<(), PlanError> {
+    for join in joins(dag) {
+        let region = dag.region_of_edge(join, PROBE_CHILD);
+        if let Some((reader, slot, producer)) =
+            unbuffered_entry(dag, &region, Some((join, PROBE_CHILD)))
+        {
+            let name = |at: usize| dag.nodes[at].node.name();
+            return Err(PlanError::UnbufferedHold {
+                hold: join,
+                reader,
+                slot,
+                producer,
+                what: format!(
+                    "{} (node {reader}) reads {} (node {producer}) from outside the hold of {} \
+                     (node {join}); a GpuHoldBuffer must sit on that edge",
+                    name(reader),
+                    name(producer),
+                    name(join)
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// The first edge, as `(reader, slot, producer)` in pre-order, that carries batches into
+/// `region` from outside it with no buffer reading it: an edge out of a member, or the
+/// `held_edge` itself, to a producer that is not a member.
+fn unbuffered_entry(
+    dag: &PlanDag<'_>,
+    region: &[usize],
+    held_edge: Option<(usize, usize)>,
+) -> Option<(usize, usize, usize)> {
+    let mut inside = vec![false; dag.nodes.len()];
+    for member in region {
+        inside[*member] = true;
+    }
+    for (reader, node) in dag.nodes.iter().enumerate() {
+        for (slot, &producer) in node.children.iter().enumerate() {
+            let enters = inside[reader] || Some((reader, slot)) == held_edge;
+            if enters && !inside[producer] && !dag.is_buffer(reader) {
+                return Some((reader, slot, producer));
+            }
+        }
+    }
+    None
+}
+
+/// `(waiting, held)`, each vertex a hold named by its node: a join's by the join, the cap's
+/// by the root it keeps waiting. A join in its build phase waits on every node its build side
+/// reads, and so on each hold whose region holds one of them — never on its own root's cap,
+/// which lifted before any of its steps. A waiting root waits on the roots before it
+/// finishing, so on each hold whose region holds a node of theirs. Holds stop at buffers, so
+/// a buffer below a build is what keeps that build from waiting.
+fn wait_for_edges(dag: &PlanDag<'_>, cap: Option<NonZeroUsize>) -> Vec<(usize, usize)> {
+    let waiting = waiting_roots(dag, cap);
+    let held: Vec<(usize, Vec<usize>)> = joins(dag)
+        .map(|join| (join, dag.region_of_edge(join, PROBE_CHILD)))
+        .chain(waiting.iter().cloned())
+        .collect();
+    let edges_from = |from: usize, waits_on: &[bool], own_cap: Option<usize>| {
+        held.iter()
+            .filter(|(hold, region)| {
+                Some(*hold) != own_cap && region.iter().any(|member| waits_on[*member])
+            })
+            .map(|(hold, _)| (from, *hold))
+            .collect::<Vec<_>>()
+    };
+    let mut edges = Vec::new();
+    for join in joins(dag) {
+        let waits_on = reached_from(dag, dag.nodes[join].children[0]);
+        let own_cap = waiting
+            .iter()
+            .find(|(_, region)| region.contains(&join))
+            .map(|(root, _)| *root);
+        edges.extend(edges_from(join, &waits_on, own_cap));
+    }
+    for (root, _) in &waiting {
+        let mut waits_on = vec![false; dag.nodes.len()];
+        for before in dag.roots.iter().take_while(|earlier| *earlier != root) {
+            for (at, reached) in reached_from(dag, *before).into_iter().enumerate() {
+                waits_on[at] |= reached;
+            }
+        }
+        edges.extend(edges_from(*root, &waits_on, Some(*root)));
+    }
+    edges
+}
+
+/// `node` and everything it reads, through buffers too.
+fn reached_from(dag: &PlanDag<'_>, node: usize) -> Vec<bool> {
+    let mut seen = vec![false; dag.nodes.len()];
+    let mut stack = vec![node];
+    while let Some(at) = stack.pop() {
+        if !std::mem::replace(&mut seen[at], true) {
+            stack.extend(&dag.nodes[at].children);
+        }
+    }
+    seen
+}
+
+/// The first cycle a depth-first search finds, from the lowest vertex and along the lowest
+/// edge first, in the order its vertices are visited.
+fn first_cycle(edges: &[(usize, usize)]) -> Option<Vec<usize>> {
+    let mut vertices: Vec<usize> = edges.iter().flat_map(|(from, to)| [*from, *to]).collect();
+    vertices.sort_unstable();
+    vertices.dedup();
+    let mut sorted = edges.to_vec();
+    sorted.sort_unstable();
+    let mut done = Vec::new();
+    for start in &vertices {
+        if !done.contains(start) {
+            let mut path = Vec::new();
+            if let Some(cycle) = search(*start, &sorted, &mut path, &mut done) {
+                return Some(cycle);
+            }
+        }
+    }
+    None
+}
+
+fn search(
+    at: usize,
+    edges: &[(usize, usize)],
+    path: &mut Vec<usize>,
+    done: &mut Vec<usize>,
+) -> Option<Vec<usize>> {
+    if let Some(start) = path.iter().position(|on| *on == at) {
+        return Some(path[start..].to_vec());
+    }
+    if done.contains(&at) {
+        return None;
+    }
+    path.push(at);
+    for (_, next) in edges.iter().filter(|(from, _)| *from == at) {
+        if let Some(cycle) = search(*next, edges, path, done) {
+            return Some(cycle);
+        }
+    }
+    path.pop();
+    done.push(at);
+    None
+}
+
+fn hold_cycle(dag: &PlanDag<'_>, holds: Vec<usize>) -> PlanError {
+    let names: Vec<String> = holds
+        .iter()
+        .map(|at| format!("{} (node {at})", dag.nodes[*at].node.name()))
+        .collect();
+    PlanError::HoldCycle {
+        what: format!("holds wait on each other: {}", names.join(" → ")),
+        holds,
+    }
+}
+
+/// A root answers once, so one given twice would answer the same rows under two ordinals.
+fn roots_are_distinct(dag: &PlanDag<'_>) -> Result<(), PlanError> {
+    for (ordinal, root) in dag.roots.iter().enumerate() {
+        if let Some(first) = dag.roots[..ordinal].iter().position(|seen| seen == root) {
+            return Err(PlanError::Invalid(format!(
+                "{}: root {ordinal} is root {first} given again — each root is its own query",
+                dag.nodes[*root].node.name()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// A sink's output has already crossed to the host, so nothing on the device can read it.
+fn sinks_are_roots(dag: &PlanDag<'_>) -> Result<(), PlanError> {
+    match dag
+        .nodes
+        .iter()
+        .find(|node| !node.readers.is_empty() && is_sink(node.node))
+    {
+        Some(sink) => Err(PlanError::Invalid(format!(
+            "{}: a sink feeds another node — every GpuUnload is a root",
+            sink.node.name()
+        ))),
+        None => Ok(()),
+    }
+}
+
+fn is_sink(node: &dyn GpuNode) -> bool {
+    matches!(node.kind(), NodeKind::Sink)
 }
 
 /// Which lowering a limit got is a question about position, and a node cannot see what is
 /// above it: root-adjacent means the interval belongs to `GpuUnload`, so a limit node whose
-/// only consumer is the sink is a tree the planner does not emit.
-fn limit_positions(node: &dyn GpuNode, parent_is_sink: bool) -> Result<(), PlanError> {
-    if node.row_interval().is_some() && parent_is_sink {
-        return Err(PlanError::Invalid(format!(
-            "{}: a limit feeding only the sink is not a node — the planner puts its \
-             skip/fetch on GpuUnload, so the driver can release the batches it does not want \
-             instead of unloading them and throwing the rows away",
-            node.name()
-        )));
-    }
-    let is_sink = matches!(node.kind(), NodeKind::Sink);
-    for child in node.children() {
-        limit_positions(child, is_sink)?;
+/// only consumer is the sink is a plan the planner does not emit. Pre-order, as the tree
+/// walk was, so the highest such limit is the one named.
+fn limit_positions(dag: &PlanDag<'_>) -> Result<(), PlanError> {
+    for node in &dag.nodes {
+        let only_a_sink_reads_it = !node.readers.is_empty()
+            && node
+                .readers
+                .iter()
+                .all(|reader| is_sink(dag.nodes[reader.parent].node));
+        if node.node.row_interval().is_some() && only_a_sink_reads_it {
+            return Err(PlanError::Invalid(format!(
+                "{}: a limit feeding only the sink is not a node — the planner puts its \
+                 skip/fetch on GpuUnload, so the driver can release the batches it does not \
+                 want instead of unloading them and throwing the rows away",
+                node.node.name()
+            )));
+        }
     }
     Ok(())
 }
 
 /// The canonical-form rules a driver needs to have been applied before it runs, so a mock
 /// plan meets the same refusal a planned one would.
-pub(crate) fn check_canonical_form(root: &dyn GpuNode) -> Result<(), PlanError> {
-    limit_positions(root, false)
+pub(crate) fn check_canonical_form_of_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
+    limit_positions(&PlanDag::of(roots))
 }
 
-fn walk(node: &dyn GpuNode) -> Result<(), PlanError> {
-    for child in node.children() {
-        walk(child)?;
-    }
+/// The order `walk` checks nodes in: post-order, a shared node once.
+fn walk_order<'a, 'd>(dag: &'d PlanDag<'a>) -> impl Iterator<Item = &'a dyn GpuNode> + 'd {
+    dag.in_post_order().into_iter().map(|at| dag.nodes[at].node)
+}
+
+fn walk(dag: &PlanDag<'_>) -> Result<(), PlanError> {
+    walk_order(dag).try_for_each(check_node)
+}
+
+fn check_node(node: &dyn GpuNode) -> Result<(), PlanError> {
     node.validate_schemas_and_partitions()?;
     declares_a_column(node)?;
     structural(node)?;
@@ -321,7 +656,8 @@ fn types_across_the_edge(node: &dyn GpuNode) -> Result<(), PlanError> {
             | NodeRef::Limit(_)
             | NodeRef::MergePartitions(_)
             | NodeRef::EmitPartitions(_)
-            | NodeRef::MergeSortedPartitions(_),
+            | NodeRef::MergeSortedPartitions(_)
+            | NodeRef::HoldBuffer(_),
         ) => node.children()[0],
         // A filter that projects re-selects columns rather than carrying them; its
         // projection is checked by width above and by ordinal at the node.
@@ -363,17 +699,10 @@ fn types_across_the_edge(node: &dyn GpuNode) -> Result<(), PlanError> {
     Ok(())
 }
 
+/// A sink below a root is refused before the walk, by `sinks_are_roots`.
 fn structural(node: &dyn GpuNode) -> Result<(), PlanError> {
     let name = node.name();
     let children = node.children();
-    for child in &children {
-        if matches!(child.kind(), NodeKind::Sink) {
-            return Err(PlanError::Invalid(format!(
-                "{name}: its input is a {}, whose output has already crossed to the host",
-                child.name()
-            )));
-        }
-    }
     match (node.kind(), children.is_empty()) {
         (NodeKind::Source { .. }, false) => {
             return Err(PlanError::Invalid(format!(

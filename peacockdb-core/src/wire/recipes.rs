@@ -9,6 +9,7 @@ use super::generated::peacock::plan as fb;
 use super::read::node_at;
 use super::{CallPattern, FbKind, Payloads, ProjectRole, Recipe, RecipePlan, fb_text};
 use crate::plan::GpuNode;
+use crate::plan::PlanDag;
 use crate::plan::category_of;
 
 /// One line per node, in plan order. A node that makes no ABI call says `none` rather
@@ -54,8 +55,9 @@ pub(crate) fn render_plan_recipes(
     text
 }
 
+/// Each node once, as the recipe plan has one recipe per node.
 fn count_nodes(node: &dyn GpuNode) -> usize {
-    1 + node.children().into_iter().map(count_nodes).sum::<usize>()
+    PlanDag::of(&[node]).nodes.len()
 }
 
 /// How many lanes call, which is the multiplier on every `per batch` below it: one per

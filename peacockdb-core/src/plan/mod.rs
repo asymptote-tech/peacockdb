@@ -1,4 +1,4 @@
-//! What a plan is: the nineteen nodes, the vocabulary they are written in, and the rules a
+//! What a plan is: the twenty nodes, the vocabulary they are written in, and the rules a
 //! tree has to satisfy.
 //!
 //! The IR is neither planner nor executor — it is what passes between them, and consumers
@@ -12,12 +12,15 @@ mod accumulators;
 mod aggregate;
 mod aggregates;
 mod common;
+mod dag;
 mod error;
 mod exec_ops;
+mod hold_buffer;
 mod interval;
 mod join;
 mod layout;
 mod partition_ops;
+mod shared;
 mod source;
 mod union;
 mod unload;
@@ -27,6 +30,7 @@ mod validate;
 mod tests;
 
 use std::any::Any;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
@@ -56,6 +60,28 @@ pub enum PlanError {
     /// A plan that violates what a node requires of its children. Names the fix, since
     /// the node knows it: "the planner inserts `GpuMergePartitions` below it".
     Invalid(String),
+    /// An edge into a held region from a producer outside it, with no `GpuHoldBuffer` on it:
+    /// the producer's batches would pile into a queue while the hold stands. Indices are
+    /// `PlanDag::of(roots)`'s; the edge is `(reader, slot)`, reading `producer`, and `hold` is
+    /// the node whose hold it enters. `what` is the message, naming all four.
+    UnbufferedHold {
+        hold: usize,
+        reader: usize,
+        slot: usize,
+        producer: usize,
+        what: String,
+    },
+    /// Holds that wait on each other, in cycle order, as `PlanDag::of(roots)` indices.
+    HoldCycle { holds: Vec<usize>, what: String },
+    /// An accumulator below the buffer of a root that waits for the cap, between it and the
+    /// shared source the buffer answers: the cap holds the root only down to its buffer, so
+    /// this state would live while the root waits, outside the cap. `root` and `node` are
+    /// `PlanDag::of(roots)` indices; `what` names both.
+    UncappedAccumulator {
+        root: usize,
+        node: usize,
+        what: String,
+    },
 }
 
 // The expression IR. Types and literals are DataFusion's own — the coercions and the
@@ -963,6 +989,42 @@ impl GpuEmpty {
     }
 }
 
+/// A `GpuLoadParquet` that several parents read, each through its own clone. The only node a
+/// plan may share, so "only a source is shared" is this type rather than a check. The clones
+/// are one node to every walk, by [`GpuNode::sharing_key`]; to everything else they are the
+/// load, `as_any` included.
+#[derive(Debug, Clone)]
+pub(crate) struct SharedSource {
+    load: Arc<GpuLoadParquet>,
+}
+
+impl SharedSource {
+    // Fusing several queries' plans builds one; the planner fuses nothing, so only tests do.
+    #[allow(dead_code)]
+    pub(crate) fn new(load: GpuLoadParquet) -> Self {
+        Self {
+            load: Arc::new(load),
+        }
+    }
+}
+
+/// Keeps every batch its input emits while a hold covers it, and emits them in arrival order,
+/// one per lane per step, once the hold lifts: a hold stops here, so the subtree below runs
+/// during a join's build. The driver owns its per-lane store and it makes no device call. The
+/// rule that needs it is `llm-wiki/architecture.md`, "The scheduling rule".
+#[derive(Debug)]
+pub(crate) struct GpuHoldBuffer {
+    kind: NodeKind,
+    input: Box<dyn GpuNode>,
+}
+
+/// A buffer on the edge above `input`, carrying its layout and schema.
+// Fusing several queries' plans is what places one; the planner fuses nothing, so only tests do.
+#[allow(dead_code)]
+pub(crate) fn new_hold_buffer(input: Box<dyn GpuNode>) -> GpuHoldBuffer {
+    hold_buffer::over(input)
+}
+
 /// Output lanes are the sum of its branches', and output lane k is served by exactly one
 /// of them, so no row changes lane and no lane waits on another. The hash a branch
 /// carried says nothing about the union's numbering, so it goes.
@@ -1138,10 +1200,82 @@ pub trait GpuNode: std::fmt::Debug + IntoAnyBox {
         None
     }
 
+    /// What makes two nodes one to a walk over several roots: `Some` only for a
+    /// [`SharedSource`], whose clones all carry the same key. Every other node is itself, by
+    /// address.
+    fn sharing_key(&self) -> Option<usize> {
+        None
+    }
+
     /// The one downcast point. Consumers that need a node's own parameters — the
     /// renderer, a backend's executor match, the serializer — go through
     /// [`as_node_ref`] rather than downcasting here.
     fn as_any(&self) -> &dyn Any;
+}
+
+/// One edge into a node: the parent reading it, and which of the parent's children it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Reader {
+    pub(crate) parent: usize,
+    pub(crate) slot: usize,
+}
+
+/// A node as [`PlanDag`] numbers it. `children` are indices, in the node's own order, and may
+/// repeat one — a join reading one source on both sides; `readers` are in first-seen order,
+/// one per edge, and empty only at a root.
+#[derive(Debug)]
+pub(crate) struct DagNode<'a> {
+    pub(crate) node: &'a dyn GpuNode,
+    pub(crate) children: Vec<usize>,
+    pub(crate) readers: Vec<Reader>,
+    /// Counted when the first visit ends, so every reader's is above it.
+    pub(crate) post_order: usize,
+    /// The longest path to a root, so every reader is strictly lower than what it reads.
+    pub(crate) height: u32,
+}
+
+/// The plan as every walk over several roots sees it: indexed in first-visit pre-order, the
+/// roots walked in the order given, each node once however many parents read it. On a tree
+/// the numbers are the recursive walk's. The rules are `llm-wiki/architecture.md`, "Traits".
+#[derive(Debug)]
+pub(crate) struct PlanDag<'a> {
+    pub(crate) nodes: Vec<DagNode<'a>>,
+    pub(crate) roots: Vec<usize>,
+}
+
+impl<'a> PlanDag<'a> {
+    pub(crate) fn of(roots: &[&'a dyn GpuNode]) -> PlanDag<'a> {
+        dag::of(roots)
+    }
+
+    /// Indices in post-order: every child before any node that reads it.
+    pub(crate) fn in_post_order(&self) -> Vec<usize> {
+        dag::in_post_order(self)
+    }
+
+    /// `node` and the nodes all of whose paths to a root pass through it, ascending. On a
+    /// tree, its subtree; on a DAG, not contiguous — a node also read from outside is not in.
+    pub(crate) fn region_of_node(&self, node: usize) -> Vec<usize> {
+        dag::region_of_node(self, node)
+    }
+
+    /// What a hold on the edge `(parent, slot)` covers: the nodes all of whose paths to a root
+    /// pass through it, ascending, deciding nothing through a `GpuHoldBuffer` — the buffer
+    /// joins as any node does, and what lies only below it is not held. `parent` is not one.
+    /// On a tree with no buffer, the subtree below that edge.
+    pub(crate) fn region_of_edge(&self, parent: usize, slot: usize) -> Vec<usize> {
+        dag::region_of_edge(self, parent, slot)
+    }
+
+    /// [`Self::region_of_node`] stopping at buffers as [`Self::region_of_edge`] does: what a
+    /// hold on a whole root covers when the hold lifts.
+    pub(crate) fn held_region_of_node(&self, node: usize) -> Vec<usize> {
+        dag::held_region_of_node(self, node)
+    }
+
+    pub(crate) fn is_buffer(&self, node: usize) -> bool {
+        dag::is_buffer(self, node)
+    }
 }
 
 /// Every node kind, as a borrow of the concrete node. Adding a node is one line here and
@@ -1173,6 +1307,9 @@ pub(crate) enum NodeRef<'a> {
     Union(&'a GpuUnion),
     #[allow(dead_code)]
     Interleave(&'a GpuInterleave),
+    // Nothing but its child, as the routing nodes are.
+    #[allow(dead_code)]
+    HoldBuffer(&'a GpuHoldBuffer),
     Unload(&'a GpuUnload),
 }
 
@@ -1230,6 +1367,8 @@ fn try_node_ref_of(any: &dyn std::any::Any) -> Option<NodeRef<'_>> {
         Some(NodeRef::Union(n))
     } else if let Some(n) = any.downcast_ref::<GpuInterleave>() {
         Some(NodeRef::Interleave(n))
+    } else if let Some(n) = any.downcast_ref::<GpuHoldBuffer>() {
+        Some(NodeRef::HoldBuffer(n))
     } else {
         any.downcast_ref::<GpuUnload>().map(NodeRef::Unload)
     }
@@ -1246,6 +1385,8 @@ pub(crate) enum ExecutorCategory {
     PartitionEmitter,
     Join,
     BatchForwarder,
+    /// A `GpuHoldBuffer`: a per-lane store the driver keeps, with no executor.
+    HoldBuffer,
     Unload,
 }
 
@@ -1279,6 +1420,7 @@ pub(crate) fn category_of(node: &dyn GpuNode) -> ExecutorCategory {
         NodeRef::MergePartitions(_) | NodeRef::Union(_) | NodeRef::Interleave(_) => {
             ExecutorCategory::BatchForwarder
         }
+        NodeRef::HoldBuffer(_) => ExecutorCategory::HoldBuffer,
         NodeRef::Unload(_) => ExecutorCategory::Unload,
     }
 }
@@ -1306,6 +1448,7 @@ pub(crate) fn node_name(any: &dyn std::any::Any) -> &'static str {
         NodeRef::MergeSortedPartitions(_) => "GpuMergeSortedPartitions",
         NodeRef::Union(_) => "GpuUnion",
         NodeRef::Interleave(_) => "GpuInterleave",
+        NodeRef::HoldBuffer(_) => "GpuHoldBuffer",
         NodeRef::Unload(_) => "GpuUnload",
     }
 }
@@ -1410,15 +1553,50 @@ pub(crate) fn finalize(spec: AggSpec, state: &[Field], state_at: u32, out_type: 
 ///
 /// Public because the planner is not the only thing that builds a tree: a test that
 /// rewrites a planned one into a shape no planner emits needs the same check the planner
-/// ran, and the driver does not make it — [`check_canonical_form`] is all it asks for.
+/// ran, and the driver does not make it — [`check_canonical_form_of_roots`] is all it asks for.
 pub(crate) fn validate(root: &dyn GpuNode) -> Result<(), PlanError> {
-    validate::validate(root)
+    validate_roots(&[root])
+}
+
+/// [`validate`] over a plan with several roots, each node checked once. No root is given
+/// twice, every root is a `GpuUnload`, and no `GpuUnload` is anything but a root. Every edge
+/// into a join's held probe region from a producer outside it ends at a `GpuHoldBuffer`, or
+/// the plan is refused as [`PlanError::UnbufferedHold`].
+pub(crate) fn validate_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
+    validate::validate_roots(roots)
+}
+
+/// The one check a plan with several roots passes before it runs: [`validate_roots`], then
+/// [`validate_cap`], then that no holds wait on each other ([`PlanError::HoldCycle`]). `cap`
+/// is how many roots may run at once.
+// The entry point that runs several roots is its caller, and only tests run several yet.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn validate_dag(
+    roots: &[&dyn GpuNode],
+    cap: Option<NonZeroUsize>,
+) -> Result<(), PlanError> {
+    validate::validate_dag(roots, cap)
+}
+
+/// Under a cap of `k` below the root count, every root of ordinal `k` or above waits for
+/// admission, and its region stopping at buffers is a hold: an edge into it from outside ends
+/// at a `GpuHoldBuffer`, or the plan is refused as [`PlanError::UnbufferedHold`] naming the
+/// root. A shared source a waiting root reads is outside its region, so it runs on into the
+/// buffer. What lies below such a buffer runs while the root waits, so it must hold no
+/// state: an accumulator there is refused as [`PlanError::UncappedAccumulator`].
+// query-fuser calls it on its own; `validate_dag` reaches the same rule inside `validate`.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn validate_cap(
+    roots: &[&dyn GpuNode],
+    cap: Option<NonZeroUsize>,
+) -> Result<(), PlanError> {
+    validate::validate_cap(roots, cap)
 }
 
 /// The canonical-form rules a driver needs to have been applied before it runs, so a mock
-/// plan meets the same refusal a planned one would.
-pub(crate) fn check_canonical_form(root: &dyn GpuNode) -> Result<(), PlanError> {
-    validate::check_canonical_form(root)
+/// plan meets the same refusal a planned one would; one root or several.
+pub(crate) fn check_canonical_form_of_roots(roots: &[&dyn GpuNode]) -> Result<(), PlanError> {
+    validate::check_canonical_form_of_roots(roots)
 }
 
 /// What the plan promised its caller. The layer's contract is that the rows it hands back
