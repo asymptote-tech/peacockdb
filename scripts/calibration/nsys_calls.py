@@ -179,6 +179,20 @@ def _check_one(seen, plans_path, query):
           f"kinds the plan names")
 
 
+def calls_in(index, r_start, r_end):
+    """The calls of one thread's `(starts, rows)` that start in [r_start, r_end), in order.
+
+    Walked by index, never by a slice: a slice copies the rest of the thread for every region,
+    and a sized-batch capture holds millions of calls on one thread.
+    """
+    starts, rows = index
+    for at in range(bisect.bisect_left(starts, r_start), len(rows)):
+        call = rows[at]
+        if call[0] >= r_end:
+            return
+        yield call
+
+
 def regions(own):
     """Our domain's ranges -> [(case, seq, call_index, kind, partition, start, end, tid)].
 
@@ -347,13 +361,9 @@ def main():
         region_dev = device.span(tid, r_start, r_end)
         in_regions_ns += region_dev
 
-        starts, rows = call_index.get(tid, ((), ()))
-        lo = bisect.bisect_left(starts, r_start)
         stack = []
         host_covered = dev_covered = 0
-        for start, end, text, _ in rows[lo:]:
-            if start >= r_end:
-                break
+        for start, end, text, _ in calls_in(call_index.get(tid, ((), ())), r_start, r_end):
             if end > r_end:
                 sys.exit(f"call {text!r} straddles the end of region {ident}")
             # The stack holds the end timestamps of the calls still open at `start`;

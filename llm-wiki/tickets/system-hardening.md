@@ -13,6 +13,7 @@
 - [#204 (merge drops fetch) the device's sorted merge drops its fetch when it is handed one input](#t204)
 - [#289 (Welford count wrap) a Welford merge on cuDF 25.02 wraps a count past 2^31 silently](#t289)
 - [#307 (LargeUtf8 export) an answer whose string column passes 2 GiB is refused at the export](#t307)
+- [#308 (sf40 tp4_sized timeouts) at sf40 tp4_sized four queries time out at 30 minutes that tp1_single answers in seconds](#t308)
 
 <a id="t238"></a>
 ### #238 (fixed driver step cap) the driver's fixed step cap refuses a large row-group query as non-terminating
@@ -23,8 +24,11 @@ batch per lane, and the prototype's driver, which steps the same way, takes 137,
 tpch q8 at `tp4-rowgroup` sf1. Steps grow with the data and the lane count, so sf40, or the CLI
 at `num_cpus` lanes, can pass the cap and fail with "no termination".
 
-No corpus or benchmark case reaches it today. Measure `RunReport.steps` for q8 at sf1
-`tp4_rowgroup` first. The fix is the prototype's
+tpch q8 at `tp4_sized` sf40 failed with "no termination after 1000000 steps" on the H100
+(tp4-sized, engine `b415d375`, before dag-driver), after 223 s. That q8 is this ticket rather
+than [#308](#t308)'s timeouts is unverified: the error text is all that links them. Measure
+`RunReport.steps` for q8 at sf1 `tp4_rowgroup` and at sf40 `tp4_sized` first. The fix is the
+prototype's
 (`scripts/exec_model/engine/partitioned_driver.py`): a cap of the calls the run owes — declared
 source batches, batches queued below the root, one closing call per readiness index — checked
 against both steps and calls.
@@ -244,3 +248,15 @@ orders WHERE o_custkey NOT IN (…)`) returns most of `orders`' 60M rows, `o_com
 
 The check is in `executor/gpu_backend/mod.rs`. The same query answers at sf1. The H100 list's
 row for it is `skipped` with that reason.
+
+<a id="t308"></a>
+### #308 (sf40 tp4_sized timeouts) at sf40 tp4_sized four queries time out at 30 minutes that tp1_single answers in seconds
+On the H100, tp4-sized's run timed out at 1800 s on tpch q9, tpcds q18, q24 and q64 at
+`tp4_sized` sf40. At `tp1_single` they take 0.62 s, 0.33 s, 0.58 s and 4.9 s. They are not one
+failure. For q9 the card sat at 0 % with one host thread at 100 % for the whole 30 minutes: the
+driver stepping, not the device working. For q18 and q24 the card stayed 32-41 % busy, so those
+are slow plans, not stuck ones. q64 was not observed. The engine was `b415d375`, before
+dag-driver's executor changes, so rerun these four on the current tree first. If q9 still spins,
+count `RunReport.steps` and node calls against a query of the same shape that finishes (tpch q7 at
+`tp4_sized` sf40: 3.4 s, about 3.6k node calls). Related: [#238](#t238). The sections are in
+`testdata/benchmark-results/h100-80gb-hbm3/{tpch,tpcds}.sf40/tp4_sized.benchmark.txt`.

@@ -215,7 +215,7 @@ sharing scans, with mergeability and pipelining hints and a memory cap; run them
 
 `llm-wiki/reports/query-batching.md`: fused vs unfused vs DuckDB per batch size.
 
-### 9. [`tp4-sized.md`](tp4-sized.md) — closes no ticket — state: rebase needed(done)
+### 9. [`tp4-sized.md`](tp4-sized.md) — closes no ticket — state: done — PR #202
 
 The same query set at sf40 tp4_sized on the H100, unfused, and its sums added to the report.
 

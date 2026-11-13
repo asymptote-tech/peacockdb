@@ -699,6 +699,47 @@ def test_cases_and_device_reach_the_passes():
         assert "--record testdata/calibration/h100-80gb-hbm3/tpch.sf40/records.tsv" in r.stdout, r.stdout
 
 
+TWO_MODE_LIST = """\
+dataset,sf,query,modes,status,note
+tpch,40,q6,tp1_single|tp4_sized,ok,
+tpch,40,q8,tp1_single,ok,
+tpcds,40,q37,tp1_single|tp4_sized,ok,
+"""
+
+
+def test_cases_with_a_mode_take_that_mode_alone():
+    """A list written at two modes makes a case per mode; `--mode` keeps one, for both passes,
+    and the counters merge is held to that mode's calls of the two-mode record."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = nsys_tree(tmp, LOGGING_BENCH)
+        listed = tmp / "h100-cases.csv"
+        listed.write_text(TWO_MODE_LIST)
+        for ds in ("tpch", "tpcds"):
+            record = tree / f"testdata/calibration/h100-80gb-hbm3/{ds}.sf40/records.tsv"
+            record.parent.mkdir(parents=True)
+            record.write_text("# run: device=NVIDIA H100 80GB HBM3\ndataset\n" + ds + "\n")
+        r = nsys_profile(tmp, tree, vm, env, "--cases", listed, "--mode", "tp4_sized",
+                         "--device", "h100-80gb-hbm3")
+        ok(r)
+        names = ["bench_tpch_sf40_q6_tp4_sized", "bench_tpcds_sf40_q37_tp4_sized"]
+        runs = (tmp / "bench.log").read_text().splitlines()
+        assert runs[0] == " ".join(["--nocapture", "--test-threads=1", *names, "--exact"]), runs
+        assert runs[1:] == [f"--nocapture --test-threads=1 {name} --exact" for name in names], runs
+        readers = log_lines(tmp / "hbm.log")
+        cased = [a[a.index("--case") + 1] for a in readers if "--case" in a]
+        assert cased == ["tpch.sf40 q6 tp4-sized", "tpcds.sf40 q37 tp4-sized"], cased
+        merges = [a for a in readers if "--parts" in a]
+        assert len(merges) == 1 and merges[0][merges[0].index("--mode") + 1] == "tp4-sized", readers
+        assert not any("--mode" in a for a in readers if "--case" in a), readers
+
+        refused(nsys_profile(tmp, tree, vm, env, "--mode", "tp4_sized"), 1, "--mode")
+        refused(nsys_profile(tmp, tree, vm, env, "--cases", listed, "--mode", "tp9_wide"), 1, "tp9_wide")
+        refused(nsys_profile(tmp, tree, vm, env, "--cases", listed, "--mode", "tp4_rowgroup"), 1,
+                "tp4_rowgroup")
+        refused(nsys_profile(tmp, tree, vm, env, "--fused", "tpch.sf40", "--mode", "tp4_sized"), 1, "--mode")
+
+
 def test_cases_with_a_filter_narrow_the_trace_pass():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)

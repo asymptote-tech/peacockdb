@@ -1,5 +1,6 @@
 //! The benchmark report page over temp trees built from literal sections: what a cell reads
-//! for each kind of section, where the device's list overrides it, and the page's layout.
+//! for each kind of section, where the device's list overrides it, and the page's layout: the
+//! main table at tp1_single, then the collapsed Modes tables, one per device.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -138,12 +139,47 @@ fn strip_tags(html: &str) -> String {
     text
 }
 
-/// The row for `query` at `mode`.
-fn row(html: &str, query: &str, mode: &str) -> Vec<String> {
-    rows(html)
-        .into_iter()
-        .find(|cells| cells[0] == query && cells[1] == mode)
-        .unwrap_or_else(|| panic!("no row {query} {mode} in:\n{html}"))
+/// The rows of the first table after `marker`.
+fn table_rows(html: &str, marker: &str) -> Vec<Vec<String>> {
+    let at = html
+        .find(marker)
+        .unwrap_or_else(|| panic!("no {marker} in:\n{html}"));
+    let rest = &html[at..];
+    rows(&rest[..rest.find("</table>").expect("a table after the marker")])
+}
+
+/// tpch sf40's main table, its rows.
+fn main_rows(html: &str) -> Vec<Vec<String>> {
+    table_rows(html, "<h2 id=\"tpch-sf40\">")
+}
+
+/// `device`'s Modes table, its rows.
+fn modes_rows(html: &str, device: &str) -> Vec<Vec<String>> {
+    table_rows(html, &format!("<h3>{device}</h3>"))
+}
+
+fn find(rows: Vec<Vec<String>>, query: &str, html: &str) -> Vec<String> {
+    rows.into_iter()
+        .find(|cells| cells[0] == query)
+        .unwrap_or_else(|| panic!("no row {query} in:\n{html}"))
+}
+
+/// The main table's row for `query`.
+fn row(html: &str, query: &str) -> Vec<String> {
+    find(main_rows(html), query, html)
+}
+
+/// `device`'s Modes row for `query`.
+fn modes_row(html: &str, device: &str, query: &str) -> Vec<String> {
+    find(modes_rows(html, device), query, html)
+}
+
+/// tpch sf40's main table, from its heading up to its Modes section.
+fn main_part(html: &str) -> &str {
+    let from = html
+        .find("<h2 id=\"tpch-sf40\">")
+        .expect("a tpch sf40 table");
+    &html[from..html.find("<details>").expect("a Modes section")]
 }
 
 #[test]
@@ -155,10 +191,7 @@ fn a_timed_section_gives_its_load_execute_total_and_peak() {
         &[("q1", UNBATCHED), ("q3", TIMED)],
     );
     let html = page(root, &[("tpch", "q1"), ("tpch", "q3")]);
-    assert_eq!(
-        row(&html, "q3", "tp1_single"),
-        ["q3", "tp1_single", "1.0", "0.5", "1.5", "2.00"]
-    );
+    assert_eq!(row(&html, "q3"), ["q3", "1.0", "0.5", "1.5", "2.00"]);
     // The total links to the section's header: line 1 is q1's, then UNBATCHED's 14 lines.
     let href = section_href(
         "benchmark-results/h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
@@ -179,10 +212,16 @@ fn an_h200_section_derives_load_and_shows_no_peak() {
         &[("q1", UNBATCHED)],
     );
     let html = page(root, &[("tpch", "q1")]);
-    // load (766 + 849) µs, execute 2321 − 1615; the section predates the pinned cache.
-    assert_eq!(
-        row(&html, "q1", "tp1_single"),
-        ["q1", "tp1_single", "1.6 unpinned", "0.7", "2.3", "—"]
+    // load (766 + 849) µs, execute 2321 − 1615. No cell has a peak, so the table has no peak
+    // columns; every load predates the pinned cache, so the heading says it once.
+    assert_eq!(modes_row(&html, "h200", "q1"), ["q1", "1.6", "0.7", "2.3"]);
+    assert!(
+        html.contains("<h3>h200</h3>\n<p class=\"source\">Every load in this table is unpinned"),
+        "{html}"
+    );
+    assert!(
+        !html.contains("peak ≥ (GiB)</th><th class=\"g\">tp1"),
+        "{html}"
     );
 }
 
@@ -203,9 +242,14 @@ fn a_load_without_the_pinned_cache_is_marked_unpinned() {
     );
     let html = page(root, &[("tpch", "q1"), ("tpch", "q3"), ("tpch", "q6")]);
     // No `pinned_cache` line: a section from before the cache.
-    assert_eq!(row(&html, "q1", "tp1_single")[2], "1.6 unpinned");
-    assert_eq!(row(&html, "q3", "tp1_single")[2], "1.0 unpinned");
-    assert_eq!(row(&html, "q6", "tp1_single")[2], "1.0");
+    assert_eq!(row(&html, "q1")[1], "1.6 unpinned");
+    assert_eq!(row(&html, "q3")[1], "1.0 unpinned");
+    assert_eq!(row(&html, "q6")[1], "1.0");
+    // A Modes table that mixes the two marks each unpinned load.
+    let device = "h100-80gb-hbm3";
+    assert_eq!(modes_row(&html, device, "q1")[1], "1.6 unpinned");
+    assert_eq!(modes_row(&html, device, "q6")[1], "1.0");
+    assert!(!html.contains("Every load in this table"), "{html}");
     assert!(
         html.contains("A load marked unpinned was read without the pinned host cache"),
         "{html}"
@@ -218,18 +262,17 @@ fn a_failed_case_shows_its_reason_and_the_list_wins() {
     let rel = "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt";
     put(&root, rel, &[("q3", &failed("timeout: x"))]);
     let html = render_benchmark_report(&root, &order(&[("tpch", "q3")]), &[]);
-    assert_eq!(
-        row(&html, "q3", "tp1_single"),
-        ["q3", "tp1_single", "failed: timeout: x"]
-    );
+    assert_eq!(row(&html, "q3"), ["q3", "failed: timeout: x"]);
     assert!(html.contains("<td colspan=\"4\" class=\"off\">"), "{html}");
+    // In a Modes table the reason stands in the total, the other measures `—`.
+    assert_eq!(
+        modes_row(&html, "h100-80gb-hbm3", "q3"),
+        ["q3", "—", "—", "failed: timeout: x"]
+    );
 
     list(&root, "h100-80gb-hbm3", "tpch,40,q3,,skipped,oom: y\n");
     let html = page(root, &[("tpch", "q3")]);
-    assert_eq!(
-        row(&html, "q3", "tp1_single"),
-        ["q3", "tp1_single", "skipped: oom: y"]
-    );
+    assert_eq!(row(&html, "q3"), ["q3", "skipped: oom: y"]);
     assert!(html.contains("<td colspan=\"4\" class=\"skip\">"), "{html}");
 }
 
@@ -244,8 +287,8 @@ fn a_marker_shows_its_reason() {
     );
     let html = page(root, &[("tpch", "q2")]);
     assert_eq!(
-        row(&html, "q2", "tp1_single"),
-        ["q2", "tp1_single", "skipped: not enabled at this mode"]
+        modes_row(&html, "h200", "q2"),
+        ["q2", "—", "—", "skipped: not enabled at this mode"]
     );
 }
 
@@ -259,12 +302,13 @@ fn a_wrong_row_marks_its_cells() {
     );
     list(&root, "h100-80gb-hbm3", "tpch,40,q3,tp1_single,wrong,#7\n");
     let html = page(root, &[("tpch", "q3")]);
-    let cells = row(&html, "q3", "tp1_single");
-    assert_eq!(cells[4], "1.5 wrong answer #7", "{html}");
+    assert_eq!(row(&html, "q3")[3], "1.5 wrong answer #7", "{html}");
 }
 
+/// The main table is tp1_single on every device but h200; h200 has a Modes table only, without
+/// the queries it has nothing for.
 #[test]
-fn devices_sit_side_by_side_and_a_case_one_lacks_is_absent() {
+fn h200_sits_under_modes_only_and_an_empty_query_is_left_out() {
     let root = tree("side-by-side");
     put(
         &root,
@@ -277,31 +321,19 @@ fn devices_sit_side_by_side_and_a_case_one_lacks_is_absent() {
         &[("q6", UNBATCHED)],
     );
     let html = page(root, &[("tpch", "q3"), ("tpch", "q6")]);
-    let h100 = html.find(">h100-80gb-hbm3</th>").expect("an h100 column");
-    let h200 = html.find(">h200</th>").expect("an h200 column");
+    let main = main_part(&html);
+    assert!(main.contains(">h100-80gb-hbm3 · tp1_single</th>"), "{html}");
+    assert!(!main.contains("h200"), "{html}");
+    assert_eq!(row(&html, "q6"), ["q6", "1.0", "0.5", "1.5", "2.00"]);
+    let h100 = html
+        .find("<h3>h100-80gb-hbm3</h3>")
+        .expect("an h100 Modes table");
+    let h200 = html.find("<h3>h200</h3>").expect("an h200 Modes table");
     assert!(h100 < h200, "devices by name");
-    assert_eq!(
-        row(&html, "q3", "tp1_single"),
-        ["q3", "tp1_single", "1.0", "0.5", "1.5", "2.00", "—"]
-    );
+    assert_eq!(modes_rows(&html, "h200"), [["q6", "1.6", "0.7", "2.3"]]);
     assert!(
-        html.contains("<td colspan=\"4\" class=\"na\">—</td>"),
-        "{html}"
-    );
-    assert_eq!(
-        row(&html, "q6", "tp1_single"),
-        [
-            "q6",
-            "tp1_single",
-            "1.0",
-            "0.5",
-            "1.5",
-            "2.00",
-            "1.6 unpinned",
-            "0.7",
-            "2.3",
-            "—"
-        ]
+        html.contains("<details><summary>Modes, tpch sf40</summary>"),
+        "collapsed: {html}"
     );
 }
 
@@ -317,7 +349,8 @@ fn a_directory_without_benchmark_files_is_no_column() {
     std::fs::write(root.join("notes/tpch.sf40/notes.txt"), "q1\t1\n").unwrap();
     let html = page(root, &[("tpch", "q1")]);
     assert!(!html.contains("notes"), "{html}");
-    assert_eq!(row(&html, "q1", "tp1_single").len(), 6);
+    assert!(!html.contains("<h3>notes</h3>"), "{html}");
+    assert_eq!(modes_row(&html, "h200", "q1").len(), 4);
 }
 
 /// DuckDB's results in the format `duckdb_minimal.sh --results` writes: q3 timed, q6 failed.
@@ -356,16 +389,40 @@ fn a_duckdb_tree_is_a_column_of_its_own() {
         !html.contains("<th colspan=\"4\">duckdb-cpu128</th>"),
         "not a device: {html}"
     );
-    let h100 = html.find(">h100-80gb-hbm3</th>").unwrap();
+    let h100 = html.find(">h100-80gb-hbm3 · tp1_single</th>").unwrap();
     let duckdb = html.find("<th>duckdb-cpu128</th>").expect("a column");
     assert!(h100 < duckdb, "after the devices: {html}");
     assert!(html.contains("<th>warm (ms)</th>"), "{html}");
-    let timed = ["q3", "tp1_single", "1.0", "0.5", "1.5", "2.00", "412.0"];
-    assert_eq!(row(&html, "q3", "tp1_single"), timed);
-    // DuckDB has no mode: its time stands on each mode's row.
-    assert_eq!(row(&html, "q3", "tp4_sized")[6], "412.0");
-    assert_eq!(row(&html, "q6", "tp1_single")[6], "failed");
-    assert_eq!(row(&html, "q9", "tp1_single")[6], "—");
+    assert_eq!(
+        row(&html, "q3"),
+        ["q3", "1.0", "0.5", "1.5", "2.00", "412.0"]
+    );
+    assert_eq!(row(&html, "q6")[5], "failed");
+    assert_eq!(row(&html, "q9")[5], "—");
+    // Modes side by side under each measure, DuckDB last.
+    assert!(
+        html.contains(
+            "<th colspan=\"2\" class=\"g\">load (ms)</th><th colspan=\"2\" \
+             class=\"g\">execute (ms)</th>"
+        ),
+        "{html}"
+    );
+    assert!(
+        html.contains("<th class=\"g\">tp1<br>single</th><th>tp4<br>sized</th>"),
+        "{html}"
+    );
+    assert_eq!(
+        modes_row(&html, "h100-80gb-hbm3", "q3"),
+        [
+            "q3", "1.0", "1.0", "0.5", "0.5", "1.5", "1.5", "2.00", "2.00", "412.0"
+        ]
+    );
+    assert_eq!(
+        modes_row(&html, "h100-80gb-hbm3", "q6"),
+        [
+            "q6", "1.0", "—", "0.5", "—", "1.5", "—", "2.00", "—", "failed"
+        ]
+    );
     assert!(html.contains("<td class=\"off\">failed</td>"), "{html}");
     assert!(html.contains("<td class=\"na\">—</td>"), "{html}");
     let href = section_href("benchmark-results/duckdb-cpu128/tpch.sf40/duckdb.tsv", 3);
@@ -392,8 +449,8 @@ fn a_duckdb_time_not_warm_says_so() {
     let text = std::fs::read_to_string(&file).unwrap();
     std::fs::write(&file, text.replace("0\tyes\tok", "0\tpartial\tok")).unwrap();
     let html = page(root, &[("tpch", "q3"), ("tpch", "q6")]);
-    assert_eq!(row(&html, "q3", "tp1_single")[6], "412.0 not warm: partial");
-    assert_eq!(row(&html, "q6", "tp1_single")[6], "failed");
+    assert_eq!(row(&html, "q3")[5], "412.0 not warm: partial");
+    assert_eq!(row(&html, "q6")[5], "failed");
 }
 
 #[test]
@@ -422,21 +479,21 @@ fn the_duckdb_column_names_its_provenance() {
 }
 
 #[test]
-fn rows_follow_the_main_list_then_modes_in_order() {
+fn rows_follow_the_main_list_and_modes_their_order() {
     let root = tree("order");
     put(
         &root,
-        "h200/tpch.sf40/tp4_sized.benchmark.txt",
-        &[("q1", UNBATCHED)],
+        "h100-80gb-hbm3/tpch.sf40/tp4_sized.benchmark.txt",
+        &[("q1", TIMED), ("q7", TIMED)],
     );
     put(
         &root,
-        "h200/tpch.sf40/tp1_single.benchmark.txt",
+        "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
         &[
-            ("aggregate-groupby", UNBATCHED),
-            ("q1", UNBATCHED),
-            ("q6", UNBATCHED),
-            ("unlisted", UNBATCHED),
+            ("aggregate-groupby", TIMED),
+            ("q1", TIMED),
+            ("q6", TIMED),
+            ("unlisted", TIMED),
         ],
     );
     let html = page(
@@ -445,24 +502,26 @@ fn rows_follow_the_main_list_then_modes_in_order() {
             ("tpch", "q6"),
             ("tpch", "aggregate_groupby"),
             ("tpch", "q1"),
+            ("tpch", "q7"),
         ],
     );
-    let order: Vec<(String, String)> = rows(&html)
-        .into_iter()
-        .map(|cells| (cells[0].clone(), cells[1].clone()))
-        .collect();
-    let want = [
-        ("q6", "tp1_single"),
-        ("aggregate-groupby", "tp1_single"),
-        ("q1", "tp1_single"),
-        ("q1", "tp4_sized"),
-        ("unlisted", "tp1_single"),
-    ];
+    let queries = |rows: Vec<Vec<String>>| -> Vec<String> {
+        rows.into_iter().map(|cells| cells[0].clone()).collect()
+    };
+    // q7 has no tp1_single section: it is in the Modes table only.
     assert_eq!(
-        order,
-        want.map(|(query, mode)| (query.to_string(), mode.to_string()))
+        queries(main_rows(&html)),
+        ["q6", "aggregate-groupby", "q1", "unlisted"]
     );
+    assert_eq!(
+        queries(modes_rows(&html, "h100-80gb-hbm3")),
+        ["q6", "aggregate-groupby", "q1", "q7", "unlisted"]
+    );
+    let single = html.find("tp1<br>single").unwrap();
+    let sized = html.find("tp4<br>sized").unwrap();
+    assert!(single < sized, "modes in MODES order: {html}");
     assert!(html.contains("<h2 id=\"tpch-sf40\">"), "{html}");
+    assert!(html.contains("tpch sf40</a> — 5 queries"), "{html}");
 }
 
 #[test]
