@@ -164,3 +164,14 @@ Component-level API: none.
 - Every ssh to the VMs from the Bash tool needs the sandbox off (`build-test.md`).
 - A VM this task starts is stopped again by this task, or left to its watcher, which must
   already be installed.
+
+## Signoff (2026-11-05)
+
+Solved under its constraints: three VMs named, guarded and proven live (watch runs 41899844185,
+41900251751); sf40 on both new VMs with agreeing pins; DuckDB and `tpch.sf40.duckdb` on the CPU VM;
+the sf1 list, one sf40 benchmark case and Nsight on the H100 through `run-gpu.sh`; provision verified
+twice on a fresh VM; host roles in the standing rules. The rename and guard reached master as
+`bf937124`/`e20db7e9`. Shortcuts: the sf40 C++ pair (`peacock_tpch_tests`, `peacock_tpchv_tests`)
+has no H100 path (`run-tests.sh` skips it; build-test.md says so); `scripts/env/tests` still runs by
+hand only, not in CI; `create_nsys_profile.sh --metrics` uses nsys's deprecated
+`--gpu-metrics-device` spelling, accepted on the H100.

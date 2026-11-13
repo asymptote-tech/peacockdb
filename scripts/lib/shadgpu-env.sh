@@ -7,6 +7,9 @@
 # Sourced, never executed: no `set -e` here, and the only side effect below is a refusal
 # when this host's glibc version cannot be read, which every shipped binary needs.
 
+# stage_cargo_test_binary and stage_cargo_lib_binary, shared with scripts/env/stage-install.sh.
+. "$(dirname "${BASH_SOURCE[0]}")/stage-cargo.sh"
+
 CUDF_ROOT=/home/dmitry/data/miniforge3/envs/rapids-cuda-12.2
 export CUDF_ROOT
 
@@ -40,6 +43,15 @@ REMOTE=shad-gpu
 # The gate's checkout. A run that must leave it alone — a measurement beside it — names its
 # own directory on the host here; everything a phase writes is under it.
 REMOTE_REPO=${PEACOCK_REMOTE_REPO:-/home/info/peacockdb}
+
+# The command every remote call goes through, as `<command> <host> <cmd…>`: ssh, or
+# create_nsys_profile.sh's --ssh (`scripts/nebius.sh … rsh` reaches a Nebius VM).
+REMOTE_SSH=ssh
+remote_ssh() {
+  local cmd
+  read -r -a cmd <<< "$REMOTE_SSH"
+  "${cmd[@]}" "$REMOTE" "$@"
+}
 
 # Validation belongs before a phase's first side effect: half a deploy followed by "you
 # cannot do that" is worse than either outcome alone.
@@ -123,7 +135,7 @@ passed_count() {
 resilient_rsync() {
   local attempt=1 max_attempts=100 rc=0
   while :; do
-    rsync -P --partial --inplace --timeout=90 "$@" && return 0
+    rsync -P --partial --inplace --timeout=90 -e "$REMOTE_SSH" "$@" && return 0
     rc=$?
     if [ "$attempt" -ge "$max_attempts" ]; then
       echo "rsync: giving up after $attempt attempts (last rc=$rc)" >&2
@@ -133,67 +145,6 @@ resilient_rsync() {
     attempt=$((attempt + 1))
     sleep 5
   done
-}
-
-# stage_cargo_test_binary <target> <staging-dir> [extra cargo args...]
-#
-# Build one integration test and copy its binary into the staging dir under its
-# target name.
-stage_cargo_test_binary() {
-  local target=$1 staging=$2
-  shift 2
-  stage_cargo_binary "$target" test "$target" "$staging" --test "$target" "$@"
-}
-
-# stage_cargo_lib_binary <staged-name> <staging-dir> [extra cargo args...]
-#
-# The crate's own unit-test binary, whose artifact line has kind ["lib"] and the lib's
-# name, `peacockdb_core`. It is staged under an explicit name because the run loops glob the
-# staging directory, and that bare name beside the target binaries reads as one of them.
-stage_cargo_lib_binary() {
-  local staged=$1 staging=$2
-  shift 2
-  stage_cargo_binary peacockdb_core lib "$staged" "$staging" --lib "$@"
-}
-
-# stage_cargo_binary <cargo target name> <kind> <staged-name> <staging-dir> <cargo args...>
-#
-# The built path carries a metadata hash, so it is read out of cargo's json artifact
-# lines rather than guessed: globbing `deps/<target>-*` picks up every stale hash from
-# previous builds. The kind is matched too, since the lib and its test binary share a
-# name and only the latter is what `test: true` builds.
-stage_cargo_binary() {
-  local name=$1 kind=$2 staged=$3 staging=$4
-  shift 4
-  local exec_path
-  # `set -o pipefail` in the caller is what makes a compile failure land here as a
-  # build failure rather than as an empty result reported as a missing binary. The
-  # reader drains stdin rather than stopping at the match: cargo writes a final
-  # `build-finished` line after the artifact, and a closed pipe there is EPIPE.
-  if ! exec_path=$(cargo test --no-run -p peacockdb-core "$@" \
-      --message-format=json \
-    | python3 -c '
-import json, sys
-name, kind = sys.argv[1], sys.argv[2]
-found = None
-for line in sys.stdin:
-    try: m = json.loads(line)
-    except ValueError: continue
-    target = m.get("target") or {}
-    if found is None and m.get("executable") and target.get("name") == name and kind in target.get("kind", []):
-        found = m["executable"]
-if found: print(found)
-' "$name" "$kind"); then
-    echo "ERROR: building $staged failed (cargo output above)" >&2
-    return 1
-  fi
-  if [ -z "$exec_path" ] || [ ! -f "$exec_path" ]; then
-    echo "ERROR: $staged built, but no artifact line named its executable" >&2
-    return 1
-  fi
-  mkdir -p "$staging"
-  cp -f "$exec_path" "$staging/$staged"
-  echo "--- Staged: $staging/$staged"
 }
 
 # device_result_files <testdata dir> <the gate launch's run-id file>
@@ -226,7 +177,7 @@ device_result_files() {
 # hundred times, and eight minutes of backoff reads as a hang.
 pull_one() {
   local rel=$1 what=$2
-  if ! ssh "$REMOTE" test -f "$REMOTE_REPO/testdata/$rel"; then
+  if ! remote_ssh test -f "$REMOTE_REPO/testdata/$rel"; then
     echo "==> $what: nothing on the host"
     return 1
   fi

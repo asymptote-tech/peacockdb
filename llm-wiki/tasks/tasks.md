@@ -172,7 +172,7 @@ commit they build on (`02f6a4d8`) and nothing of the join optimizer; case list r
 master's registry; green on the CPU gates; images published. Chain L absorbs the containers task;
 the agent-container launcher, the embeddings' S3 path and the scratch-chain run are dropped.
 
-### 2. [`new-hosts.md`](new-hosts.md) — closes no ticket — state: building
+### 2. [`new-hosts.md`](new-hosts.md) — closes no ticket — state: done — PR #195
 
 The `gpu-host` scripts renamed `nebius`; `nebius.sh --instance-id/--profile` for the H100
 (eu-north1) and the 128-core CPU VM (eu-west1), 1-hour idle watchers with per-VM credentials, the
@@ -201,7 +201,7 @@ Benchmark results carry per-node `batch_rows`/`batch_bytes`, and `load_us` (devi
 TPC-H q1-q22 and the 82 TPC-DS corpus queries at sf40 tp1_single on the H100, and DuckDB on 128
 cores for the same set; queries that fail at sf40 are skipped.
 
-### 6. [`dag-driver.md`](dag-driver.md) — closes no ticket — state: rebase needed(building)
+### 6. [`dag-driver.md`](dag-driver.md) — closes no ticket — state: building
 
 Production: the driver runs plans with shared sources and several roots, without deadlock, with
 per-consumer limits and an optional concurrency cap.

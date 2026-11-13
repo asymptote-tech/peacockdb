@@ -89,6 +89,7 @@ Branch: `ENS-new-hosts`.
 C="scripts/nebius.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1"
 $C start
 D=$(scripts/nebius-sync.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 --no-data)
+scripts/env/check-build-image.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1
 $C ssh "cd ~/$D && docker run --rm --user \$(id -u):\$(id -g) -e HOME=/tmp -v \$PWD:\$PWD -w \$PWD ghcr.io/asymptote-tech/peacockdb-build:cudf-25.02 scripts/env/stage-install.sh"
 rsync -a -e "$C rsh" "nebius-cpu128:$D/cpp/install/" <local install dir>/
 $C stop
@@ -421,7 +422,8 @@ reads the three hosts' roles from the standing rules; no chain needs an override
     correctness: "Only the L40S list runs there: no sf40, no benchmarks." Beside it, the H100
     bracket: the CPU-VM build (`build-test.md`, "Nebius host", "The CPU-VM build"), then
     `nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu start` →
-    `scripts/env/run-gpu.sh … ship | run | pull` → `… stop`; sf40, benchmarks and Nsight run
+    `scripts/env/run-gpu.sh … ship | run | pull` → `… stop` (`prepare` first on a fresh VM, and
+    whenever `run` refuses its image, review round 1); sf40, benchmarks and Nsight run
     there and only there. nebius-cpu128 runs DuckDB and stages the H100's install: binaries for
     H100 runs are built on the CPU VM; local and verda builds stay for development. The VM-time
     rule: a VM starts right before its first remote command and stops right after its last
@@ -457,19 +459,20 @@ reads the three hosts' roles from the standing rules; no chain needs an override
 
 **Files:** none in the tree; detail file only.
 
-- [ ] **Step 1: The key files, as the human named them (2026-11-03).** On dev: profile `eu-west1` →
+- [x] **Step 1: The key files, as the human named them (2026-11-03).** On dev: profile `eu-west1` →
   `~/.nebius/eu-west1-sa.pem`; profile `editor-eu` → `~/.nebius/sa-key.pem`. Check only that both
-  names exist (`ls -1 ~/.nebius/`, names only; open nothing). Each VM's `install-watch` passes its
-  profile's file as `--key-file`.
-- [ ] **Step 2: H100.** `H="scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"`;
-  `$H start && $H install-watch --key-file ~/.nebius/sa-key.pem` → last log line `install-watch: watcher installed, root's profile reaches the API`;
+  names exist (`ls -1 ~/.nebius/`, names only; open nothing). Only eu-west1 keeps its key in a file:
+  the CPU VM's `install-watch` passes it as `--key-file`. editor-eu embeds its key, and `sa-key.pem`
+  is not that key (live, 2026-11-04; detail file, Task 6), so the H100's takes none.
+- [x] **Step 2: H100.** `H="scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"`;
+  `$H start && $H install-watch` → last log line `install-watch: watcher installed, root's profile reaches the API`;
   `$H ssh 'sudo cat /etc/peacock-gpu-idle.json; sleep 70; tail -1 /var/log/peacock-gpu-idle.log'`
   → install file with the H100 id and `gpu`; the log line's `instance` is the H100 id, `kind` `gpu`.
   `$H stop`.
-- [ ] **Step 3: CPU VM.** The same with `--instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1`
+- [x] **Step 3: CPU VM.** The same with `--instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1`
   and `install-watch --key-file ~/.nebius/eu-west1-sa.pem` → `kind=cpu`; the log line's `card` is `[]`, `kind` `cpu`.
   `sudo ls /root/.nebius/` shows `config.yaml` alone, no `.pem` (names only). Stop it.
-- [ ] **Step 4: The CI key on both** (done before Steps 2–3, so each new VM is up once).
+- [x] **Step 4: The CI key on both** (done before Steps 2–3, so each new VM is up once).
   `scripts/nebius.sh start` (nebius-gpu); copy its `~/.ssh/authorized_keys` (public keys only)
   to a temp file on dev and `ssh-keygen -lf` it; stop nebius-gpu. Then, while Steps 2 and 3 have
   each VM up, every fingerprint nebius-gpu holds and that VM lacks is appended to the VM's
@@ -512,26 +515,26 @@ reads the three hosts' roles from the standing rules; no chain needs an override
 - Produces: `provision-vm.sh` with stdin not a terminal skips the Claude login and prints
   `Claude Code is not logged in on <dev>: run ssh -t <dev> 'claude auth login'`, exit 0.
 
-- [ ] **Step 1: Failing test** `test_provision_without_a_terminal_names_the_claude_login` (stdin
+- [x] **Step 1: Failing test** `test_provision_without_a_terminal_names_the_claude_login` (stdin
   `/dev/null`, no credentials on the fake VM → rc 0, no `-t` ssh, stderr names `claude auth login`).
   Run `python3 scripts/env/tests/test_provision.py` → FAIL. Implement (`[ -t 0 ]` guard). Run → pass.
-- [ ] **Step 2: 6a's fake-ssh tests.** `for f in scripts/env/tests/test_{provision,bootstrap}.py; do python3 "$f"; done`
+- [x] **Step 2: 6a's fake-ssh tests.** `for f in scripts/env/tests/test_{provision,bootstrap}.py; do python3 "$f"; done`
   → each `0 failed`.
-- [ ] **Step 3: Preconditions on dev.** `test -s ~/.config/peacock/github-pat && echo yes` (never
+- [x] **Step 3: Preconditions on dev.** `test -s ~/.config/peacock/github-pat && echo yes` (never
   print it). Missing → stall for the human: `provision-vm.sh` reads the PAT from a terminal.
   *(coordinator)* commit the work so far and push `ENS-new-hosts` (a mid-task push, so the VM's
   clone can check the branch out). The VM's clone is bootstrap's only; builds there come from
   the CPU-VM build, never from it.
-- [ ] **Step 4: Run it.** `C="scripts/nebius.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1"`;
+- [x] **Step 4: Run it.** `C="scripts/nebius.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1"`;
   `$C start`; `time scripts/env/provision-vm.sh dmitry@$($C ip) --name nebius-cpu128 --ref ENS-new-hosts </dev/null` (the GPU key is the default `~/.config/peacock/gpu_ed25519`, a copy of dev's `~/.ssh/id_ed25519`, put there 2026-11-03)
   → exit 0. Check over `$C ssh`: `docker --version`, `gh --version` = `GH_VERSION`,
   `~/.local/bin/claude --version` = `CLAUDE_CODE_VERSION`, `git -C ~/peacockdb branch --show-current`
   = `ENS-new-hosts`, an sf1 set under `/var/lib/peacock/<hash>/{tpch.sf1,tpcds.sf1}`,
   and no `~/.config/peacock/machine` (`test ! -e`). Bootstrap's work counts under the 2-hour build rule; if a
   run outlasts it, record it and rerun (the rerun resumes).
-- [ ] **Step 5: Rerun** the same command → bootstrap runs again and reports every step skipped,
+- [x] **Step 5: Rerun** the same command → bootstrap runs again and reports every step skipped,
   wall time recorded, exit 0.
-- [ ] **Step 6: The GPU-host key reaches the H100.** `$C ssh 'grep -c "^GPU_SSH_KEY_FILE=" ~/.config/peacock/peacock.env; stat -c %a ~/.config/peacock/gpu_ed25519'`
+- [x] **Step 6: The GPU-host key reaches the H100.** `$C ssh 'grep -c "^GPU_SSH_KEY_FILE=" ~/.config/peacock/peacock.env; stat -c %a ~/.config/peacock/gpu_ed25519'`
   → `1` and `600`; its fingerprint equals dev's `ssh-keygen -lf ~/.ssh/id_ed25519.pub` (public
   halves only). Nothing is authorized anew: the H100 already accepts it. No host key is
   accepted blind (`prompts.md`): with the H100 started
@@ -562,22 +565,22 @@ reads the three hosts' roles from the standing rules; no chain needs an override
 - Produces: `install-duckdb.sh [--prefix <dir>]` → `/usr/local/bin/duckdb` at `DUCKDB_VERSION`
   (sha256 checked); skipped when `duckdb --version` already starts `v1.5.4`.
 
-- [ ] **Step 1: Failing tests** (fake `aws` on PATH reading a fake bucket dir):
+- [x] **Step 1: Failing tests** (fake `aws` on PATH reading a fake bucket dir):
   `test_fetch_takes_endpoint_and_region_from_env` (aws argv holds `--endpoint-url`/`--region`
   values; no key value in any argv); `test_fetch_second_run_fetches_nothing` (second run: no `s3 cp`
   of a parquet, prints `fetched 0, kept N`); `test_fetch_refetches_a_short_object`;
   `test_fetch_refuses_a_wrong_aggregate` (pinned sha differs → rc 1, the dataset named);
   `test_fetch_refuses_an_unknown_dataset` (rc 2); `test_fetch_keys_from_stdin` (`--env -`);
   `test_install_duckdb_checks_the_sha` and `test_install_duckdb_skips_the_pinned_version`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → `0 failed`; commit.
-- [ ] **Step 5: CPU VM, live.** `$C start`; `$C ssh 'df -h /var/lib/peacock'` — at least 110 GB
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → `0 failed`; commit.
+- [x] **Step 5: CPU VM, live.** `$C start`; `$C ssh 'df -h /var/lib/peacock'` — at least 110 GB
   free (parquet 56 GB + the tpch db ~38 GB + 10 %), else stall. The tree reaches the VM as the
   CPU-VM build sends it, never by `git pull`:
   `D=$(scripts/nebius-sync.sh --instance-id computeinstance-e01t2mm4265y8x88ey --profile eu-west1 --no-data)`; then
   `$C ssh "cd ~/$D && time scripts/env/fetch-sf40.sh tpch.sf40 tpcds.sf40"` → both lines,
   exit 0; again → `fetched 0` twice. Record tpch.sf40's aggregate sha256 and pin it in
   `fetch-sf40.sh` (it must match the H100's in Task 10).
-- [ ] **Step 6: DuckDB.** `$C ssh "cd ~/$D && scripts/env/install-duckdb.sh && time benchmarks/duckdb_minimal.sh --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb"`
+- [x] **Step 6: DuckDB.** `$C ssh "cd ~/$D && scripts/env/install-duckdb.sh && time benchmarks/duckdb_minimal.sh --dir /var/lib/peacock --sf 40 --skip-download --duckdb /usr/local/bin/duckdb"`
   → `/var/lib/peacock/tpch.sf40.duckdb` exists, row counts match, every query verified. Record the
   timing run's wall time: over 4 h means `CAP` for `cpu` is raised in `idle_watch.py` with that
   measurement in the comment, else it stays. (The tpcds database comes with sf40-baseline's
@@ -594,9 +597,10 @@ reads the three hosts' roles from the standing rules; no chain needs an override
 - Consumes: Task 2's `scripts/nebius.sh [--instance-id <id>] [--profile <name>] start|stop [--force]|status|ip|ssh <cmd…>|rsh <host> <cmd…>`
   (exit 64 on a bad option); Task 8's `fetch-sf40.sh --env -`; containers' `machine_data_set`,
   `machine_image_checked` (`scripts/lib/machine.sh`).
-- Produces: `run-gpu.sh [--instance-id <id>] [--profile <name>] [--dir <i>] [--cudf <v>] prepare | ship [--install <dir>] | run <list|filter|bench> | pull`.
-  The two VM options go, as given, to every `${NEBIUS_SH:-<repo>/scripts/nebius.sh}` call; with
-  neither, the VM is nebius.sh's default, nebius-gpu. Remote commands go through `nebius.sh … ssh`,
+- Produces: `run-gpu.sh --instance-id <id> [--profile <name>] [--dir <i>] [--cudf <v>] prepare | ship [--install <dir>] | run <list|filter|bench> | pull`
+  (`--instance-id` required since review round 1).
+  The two VM options go, as given, to every `${NEBIUS_SH:-<repo>/scripts/nebius.sh}` call; without
+  `--instance-id` it exits 2 before any call. Remote commands go through `nebius.sh … ssh`,
   every rsync through `-e "<nebius.sh> <options> rsh"`; the login is nebius.sh's. `run-gpu.sh`
   never starts or stops the VM: the caller does, with `scripts/nebius.sh`.
   `<i>` defaults to the repo root's basename; `--install` defaults to the repo root's `cpp/install`
@@ -627,22 +631,21 @@ reads the three hosts' roles from the standing rules; no chain needs an override
   every rsync's `-e` use it; `--ssh 'scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu rsh'`
   reaches the H100.
 
-- [ ] **Step 1: Failing tests**, a fake `NEBIUS_SH` recording its argv and fakes on PATH as
+- [x] **Step 1: Failing tests**, a fake `NEBIUS_SH` recording its argv and fakes on PATH as
   `scripts/env/tests/laptop.py` does: containers' — `test_run_refuses_old_driver` (exit 3 before
   any rsync, stderr holds both versions), `test_ship_dir_is_named_by_dir`,
   `test_ship_defaults_to_the_staged_install`, `test_run_passes_the_machines_hostname`,
   `test_prepare_refuses_stale_run_image` — and
   `test_run_gpu_passes_instance_and_profile_to_every_nebius_call` (every recorded call holds
   `--instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu` before its verb),
-  `test_run_gpu_without_options_reaches_the_default_vm` (no call holds `--instance-id` or
-  `--profile`), `test_run_gpu_bad_instance_id_is_2` (fake answers 64 → exit 2, no rsync),
+  `test_run_gpu_without_an_instance_id_is_refused` (exit 2, no nebius call; since review round 1), `test_run_gpu_bad_instance_id_is_2` (fake answers 64 → exit 2, no rsync),
   `test_run_gpu_never_starts_or_stops_the_vm` (no `start` or `stop` call over all four verbs),
   `test_prepare_sends_keys_on_stdin_only` (no key value in any argv),
   `test_prepare_says_restart_when_counters_are_admin_only` (exit 4),
   `test_run_mounts_the_data_dir_at_its_own_path`, `test_run_refuses_a_run_in_progress`,
   `test_stage_install_stages_four_tests_and_a_release_bench` (fake cargo/build.sh recording argv),
   `test_nsys_profile_uses_the_given_ssh` (fake ssh and rsync; every call through the `--ssh` command).
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** every
+- [x] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** every
   `scripts/env/tests/test_*.py` that needs no image → `0 failed`;
   `git ls-files scripts/env/host 'scripts/env/gpu.sh'` → nothing. **Step 5: Commit**
   `containers: run-gpu.sh, the device run over scripts/nebius.sh; the staged install; Nsight over any ssh`.
@@ -651,29 +654,29 @@ reads the three hosts' roles from the standing rules; no chain needs an override
 
 **Files:** none expected; fixes get a failing test first. Detail file: counts, wall times, ids.
 
-- [ ] **Step 1: The staged install, built first** (the CPU-VM build of Global Constraints;
+- [x] **Step 1: The staged install, built first** (the CPU-VM build of Global Constraints;
   the H100 stays stopped meanwhile), into `/build/peacock/new-hosts/install` → exit 0, the CPU VM
   stopped again.
-- [ ] **Step 2: Prepare.** `N="scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"`;
+- [x] **Step 2: Prepare.** `N="scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"`;
   `G="scripts/env/run-gpu.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu"`; `$N start`;
   `$G prepare` → exit 4 the first time; `$N stop --force && $N start`;
   `$G prepare` → exit 0, `fetched` lines for both sf40 sets. Check: `$N ssh 'grep RmProfilingAdminOnly /proc/driver/nvidia/params; nsys --version; ldd --version | head -1'`
   → `RmProfilingAdminOnly: 0`, an nsys version, glibc ≥ 2.39 (else stop the H100 and stall: the
   exported prefix needs the image's glibc). tpch.sf40's aggregate sha256 equals Task 8's pin.
   Second `$G prepare` → `fetched 0` twice, no pull of a new image, exit 0.
-- [ ] **Step 3: The sf1 corpus.** `$G ship --install /build/peacock/new-hosts/install && $G run list`
+- [x] **Step 3: The sf1 corpus.** `$G ship --install /build/peacock/new-hosts/install && $G run list`
   → exit 0; record per-binary counts beside the latest `GPU Tests (nebius-gpu)` run's.
-- [ ] **Step 4: One benchmark case.** `PCK_TEST_FILTER=bench_tpch_sf40_q6_tp1_single $G run bench && $G pull`
+- [x] **Step 4: One benchmark case.** `PCK_TEST_FILTER=bench_tpch_sf40_q6_tp1_single $G run bench && $G pull`
   → exit 0, a `testdata/benchmark-results/<h100 slug>/tpch.sf40/tp1_single.benchmark.txt` with
   `host=` the VM's hostname. Then remove the host record (C6), so pinned-loads' first `run
   bench` is not refused: `$N ssh 'rm -f ~/peacock/<i>/testdata/calibration/records.tsv'`. Not
   committed (sf40-baseline owns results): the local copies are restored or removed (the
   coordinator runs any `git restore`).
-- [ ] **Step 5: Nsight.** `PCK_TEST_FILTER=bench_tpch_sf40_q6_tp1_single scripts/create_nsys_profile.sh --trace --ssh "$N rsh" --host nebius-h100 --remote-dir /home/dmitry/peacock/<i> --remote-cudf-root /home/dmitry/peacock/cudf-25.02`
+- [x] **Step 5: Nsight.** `PCK_TEST_FILTER=bench_tpch_sf40_q6_tp1_single scripts/create_nsys_profile.sh --trace --ssh "$N rsh" --host nebius-h100 --remote-dir /home/dmitry/peacock/<i> --remote-cudf-root /home/dmitry/peacock/cudf-25.02`
   → `the trace pass ran 1 tests`, `calls.tsv` written. Counters: on the H100 as dmitry,
   `nsys profile --gpu-metrics-devices=all -o /tmp/m --force-overwrite=true env LD_LIBRARY_PATH=… <bench binary> --exact bench_tpch_sf40_q6_tp1_single --test-threads=1`
   → exit 0, no `ERR_NVGPUCTRPERM` in its output. Remove the local derived files (not committed).
-- [ ] **Step 6:** `$N stop` → `STOPPED`. Only then any fix: a failing test first, locally,
+- [x] **Step 6:** `$N stop` → `STOPPED`. Only then any fix: a failing test first, locally,
   with the H100 stopped; a rerun repeats Steps 1–5 from the build. Commit any fixes.
 
 ### Task 11: `build-test.md`
@@ -682,7 +685,7 @@ reads the three hosts' roles from the standing rules; no chain needs an override
 three VMs, the L40S (nebius-gpu), the H100 and the 128-core CPU VM, each with its instance id,
 region, profile and role; `nebius.sh`'s flags and aliases, `install-watch --key-file`, the CPU
 kind's rule, the install file, the three-leg watch and its notices, the secrets; `run-gpu.sh`'s
-verbs, options and exit codes, `stage-install.sh`; a subsection "The CPU-VM build", the five
+verbs, options and exit codes, `stage-install.sh`; a subsection "The CPU-VM build", the
 commands of Global Constraints verbatim with one line on why (binaries for H100 runs are built on
 the CPU VM from the workspace as it stands, never a `git pull`; local and verda builds stay for
 development), which the prompts.md H100 bracket (Task 5a) cites. "Datasets" (rows for TPC-H+V sf40 and TPC-DS
@@ -692,7 +695,7 @@ key pair uploaded in the web console,
 `nebius profile create eu-west1 --endpoint api.nebius.cloud --service-account-id <sa> --public-key-id <key> --private-key-file-path <pem> --parent-id <project>`,
 and `gh secret set NEBIUS_EU_WEST1_SA_ID --env nebius-gpu` (and the other three, values on stdin).
 
-- [ ] **Step 1:** write it, short sentences, every value from the code (`grep` each flag and path
+- [x] **Step 1:** write it, short sentences, every value from the code (`grep` each flag and path
   named against the scripts). **Step 2:** every test file under `scripts/nebius/tests/` and
   `scripts/env/tests/` (no image needed) → `0 failed`; `cargo test -p cost-report --test
   test_source_formatting` → PASS. `git grep -n -E 'gpu-host|scripts/env/gpu\.sh|host/nebius|host/ssh|config/peacock/hosts' -- . ':!llm-wiki/archive' ':!llm-wiki/reports' ':!llm-wiki/tasks' ':!docker'`
