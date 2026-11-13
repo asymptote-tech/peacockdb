@@ -72,7 +72,7 @@ vm-setup (PR #205, rk00's `ENS-vm-setup`) landed on master after chain L's squas
 workflow dispatched. `ENS-vm-setup` is never pushed to. Task 1 of the plan commits the replay with
 Roman as its author; every later commit is the coordinator's own.
 
-### 1. [`vm-setup-rebase.md`](vm-setup-rebase.md) — closes no ticket — state: approved to build
+### 1. [`vm-setup-rebase.md`](vm-setup-rebase.md) — closes no ticket — state: completeness approved — PR #206
 
 vm-setup replayed onto master as Roman's commit; `scripts/env/run-sirius.sh` (`prepare`, `run`) on
 a client library shared with `run-gpu.sh`; Sirius runs under the card lock, stamped for `pull`, its

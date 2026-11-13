@@ -43,6 +43,9 @@
 #                                sides. --clear, refused while the dir's run goes: then each record
 #                                and log the VM holds as its copy here is removed there
 #
+# Sirius is scripts/env/run-sirius.sh's, prepare and run, on this runner: status, follow, cancel and
+# pull serve its runs, logged as logs/sirius-<stamp>.log, as any run of the dir.
+#
 # --instance-id and --profile go, as given, to every scripts/nebius.sh call ($NEBIUS_SH), which
 # picks the VM. --instance-id is required, nebius-gpu's too: without it nebius.sh picks nebius-gpu
 # silently. run-gpu.sh never starts or stops the VM: the caller does, with nebius.sh. <i> is this
@@ -106,6 +109,7 @@ case $verb in
     while [ $# -gt 0 ]; do
       case $1 in
         --no-sf40) no_sf40=1; shift ;;
+        --sirius) die "sirius moved: scripts/env/run-sirius.sh prepare | run" ;;
         *) die "unknown argument to prepare: $1" ;;
       esac
     done ;;
@@ -135,47 +139,18 @@ case $verb in
         [ -z "$exact" ] || [ -z "${PCK_TEST_FILTER:-}" ] \
           || die "--exact $exact and PCK_TEST_FILTER=$PCK_TEST_FILTER both name the tests: give one" ;;
     esac ;;
+  sirius) die "sirius moved: scripts/env/run-sirius.sh prepare | run" ;;
   *) die "unknown verb ${verb:-(none)}: prepare, ship, run, follow, cancel, status or pull" ;;
 esac
-# Not cudf-*: ~/peacock/cudf-<v>/ is the run image's prefix.
-[[ "$dir" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$dir" != cudf-* ]] \
-  || die "--dir $dir: a directory name under ~/peacock/, of letters, digits, '.', '_' and '-', not cudf-*"
-[ -f "$root/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda has no cudf-$cudf.spec"
-[ -n "$instance" ] \
-  || die "name the VM with --instance-id, nebius-gpu's too: without it nebius.sh picks nebius-gpu silently"
-
 # The tree's id, which a VM dir keeps as its owner's (the usage above): PEACOCK_TREE_ID, else
 # .run-gpu-tree's, made by tree_claimed.
 TREE_RECORD=$root/.run-gpu-tree
 tree_path=$(cd "$root" && pwd -P)
-
-# tree_id_read: sets TREE_ID, empty while the tree has no record. Refuses, exit 2, a record made for
-# another path.
-tree_id_read() {
-  local lines=()
-  if [ -n "${PEACOCK_TREE_ID+set}" ]; then
-    [[ "$PEACOCK_TREE_ID" =~ ^[A-Za-z0-9._-]+$ ]] \
-      || die "PEACOCK_TREE_ID=$PEACOCK_TREE_ID: a tree's id is letters, digits, '.', '_' and '-'"
-    TREE_ID=$PEACOCK_TREE_ID
-    return 0
-  fi
-  TREE_ID=""
-  [ -f "$TREE_RECORD" ] || return 0
-  mapfile -t lines < "$TREE_RECORD"
-  [ "${lines[1]:-}" = "$tree_path" ] \
-    || die ".run-gpu-tree was written for ${lines[1]:-no path}, not this tree: a copy or a moved tree" \
-           "needs an id of its own: remove .run-gpu-tree, then name a dir of its own with --dir <name>"
-  [[ "${lines[0]:-}" =~ ^[0-9a-f]{32}$ ]] || die "$TREE_RECORD holds no id: remove it"
-  TREE_ID=${lines[0]}
-}
+. "$root/scripts/lib/gpu-vm-client.sh"
+vm_options_checked
+[ -f "$root/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda has no cudf-$cudf.spec"
 tree_id_read
 
-. "$root/scripts/lib/peacock-config.sh"
-. "$root/scripts/lib/image-inputs.sh"
-. "$root/scripts/lib/data-inputs.sh"
-. "$root/scripts/lib/machine.sh"
-MACHINE_NEBIUS="scripts/nebius.sh ${NEBIUS[*]:1}"
-. "$root/scripts/lib/ssh-retry.sh"
 BUILD_REF=${PEACOCK_BUILD_IMAGE:-$MACHINE_IMAGE:$(image_inputs_tag "$root" build "$cudf")}
 RUN_REF=${PEACOCK_RUN_IMAGE:-ghcr.io/asymptote-tech/peacockdb-run:$(image_inputs_tag "$root" run "$cudf")}
 SHIP_PAUSE=${RUN_GPU_SHIP_PAUSE:-15}  # seconds, times the attempt; the tests set 0
@@ -187,178 +162,13 @@ KIT=(scripts/env/fetch-sf40.sh scripts/env/sf40.sha256 scripts/lib/peacock-confi
      scripts/lib/pinned.sh scripts/lib/data-inputs.sh scripts/lib/machine.sh docker/pins.env
      testdata/generate_testdata.sh)
 
-# --- dev's side: every call reaches the VM through nebius.sh -------------------------------------
-
-# vm <command> [<stdin file>]: <command> on the VM; stdin is /dev/null unless named. 255 is ssh's
-# own, a dropped connection, so the command's own 255 (nvidia-smi's "other error") arrives as 254.
-# The trailer that does it follows on a new line, so <command> must be complete: a trailing
-# backslash, an open quote or an unterminated heredoc would swallow it.
-# VM_NEXT names the step after a dropped ssh's VM start, when it is not this one again.
-vm() {
-  # shellcheck disable=SC2016  # expanded on the VM, after the command
-  local rc=0 own='s=$?; [ "$s" -ne 255 ] || s=254; exit "$s"'
-  "${NEBIUS[@]}" ssh "$1"$'\n'"$own" < "${2:-/dev/null}" || rc=$?
-  [ "$rc" -ne 64 ] || die "${NEBIUS[0]} refused its options: ${NEBIUS[*]:1}"
-  if [ "$rc" -eq 255 ]; then
-    echo "run-gpu.sh: the ssh to the VM dropped." >&2
-    machine_vm_lost "${VM_NEXT:-}"
-  fi
-  return "$rc"
+# run_image_checked: RUN_ID, the ID of the run image RUN_REF names on the VM, read with its labels
+# (image_read), and every card held to it (cards_checked).
+run_image_checked() {
+  image_read "$RUN_REF" run "$cudf"
+  RUN_ID=$IMAGE_ID
+  cards_checked "$RUN_REF"
 }
-
-# What every function on_vm sends runs with: the helpers, and what starts a runner.
-VM_HELPERS=(vm_docker vm_state vm_started_at vm_status_code vm_container vm_name_free vm_name_taken vm_idle
-            vm_locked vm_started vm_follow vm_runner vm_runner_ended vm_staged_judged peacock_card_take
-            vm_records_kept vm_stamped vm_clearable vm_log_shown in_pulled_set)
-
-# on_vm <function> <arg…>: a function of run-gpu-vm.sh, sent as text and run on the VM under bash,
-# with set -euo pipefail and the helpers. on_vm_with <stdin file> <function> <arg…>: the same, the
-# file on its stdin.
-on_vm() { on_vm_with /dev/null "$@"; }
-on_vm_with() {
-  local input=$1 fn=$2 script args=""
-  shift 2
-  script="set -euo pipefail; $(declare -f "${VM_HELPERS[@]}" "$fn"); $fn \"\$@\""
-  [ $# -eq 0 ] || args=$(printf ' %q' "$@")
-  vm "bash -c $(printf '%q' "$script") run-gpu.sh$args" "$input"
-}
-
-# in_pulled_set <path under ~/peacock/<i>/>: the path is one pull brings home, here and on the VM:
-# the results, the calibration files but a going run's records.tsv, the device's answers, the logs.
-in_pulled_set() {
-  case $1 in
-    testdata/calibration/records.tsv) return 1 ;;
-    testdata/benchmark-results/*|testdata/calibration/*|logs/*) return 0 ;;
-    testdata/goldens/*) [[ ${1##*/} == gpu-result*.txt ]] ;;
-    *) return 1 ;;
-  esac
-}
-
-sha256_of() {
-  local line
-  line=$(sha256sum < "$1")
-  echo "${line%% *}"
-}
-
-# Every rsync runs through `nebius.sh … rsh`, which drops rsync's host argument, `vm`. rsh is one
-# attempt; the sync is retried whole.
-to_vm() {  # to_vm <dest under ~> <rsync arguments and sources…>
-  local dest=$1
-  shift
-  sync_retry rsync -a --partial --timeout=90 -e "${NEBIUS[*]} rsh" "$@" "vm:$dest"
-}
-from_vm() {  # from_vm <source under ~> <local dest> [<rsync arguments…>]
-  local src=$1 dest=$2
-  shift 2
-  sync_retry rsync -a --partial --timeout=90 -e "${NEBIUS[*]} rsh" "$@" "vm:$src" "$dest"
-}
-
-# following <function> <arg…>: on_vm of a call that follows a run. Ctrl-C, a TERM or a dropped ssh
-# (255) end the following alone, saying how to take it up again; the run goes on. The call runs in
-# the background: bash runs a trap only once a foreground child ends, and a TERM may come to this
-# script alone. It runs in a process group of its own (set -m), which the trap kills whole, a process
-# it forks meanwhile included.
-following() {
-  local rc=0 next="follow it again: scripts/env/run-gpu.sh ${NEBIUS[*]:1} --dir $dir follow"
-  trap 'followed_no_more 130' INT
-  trap 'followed_no_more 143' TERM
-  set -m
-  # A run in progress refuses this step again: after a dropped ssh, the next step is follow.
-  { VM_NEXT=$next; on_vm "$@"; } &
-  follower=$!
-  set +m
-  wait "$follower" || rc=$?
-  trap - INT TERM
-  [ "$rc" -ne 255 ] || followed_no_more 1
-  return "$rc"
-}
-followed_no_more() {
-  if [ -n "${follower:-}" ]; then kill -TERM -- "-$follower" 2> /dev/null || true; fi
-  echo "run-gpu.sh: no longer following; the run goes on, on the VM:" \
-       "scripts/env/run-gpu.sh ${NEBIUS[*]:1} --dir $dir follow follows it" >&2
-  exit "$1"
-}
-
-# docker, for machine_image_checked and the label reads: the VM's. Nothing runs a container here.
-# shellcheck disable=SC2032  # vm_docker's `sudo docker` runs the VM's binary, never this
-docker() { on_vm vm_docker_run "$@"; }
-
-# run_image_read: sets RUN_ID to the ID of the image RUN_REF names on the VM, and RUN_MINIMUM and
-# RUN_MINIMUM_PTX to its two driver labels, all from one read, so a tag moved since is never run.
-# Refuses, exit 2, an image missing a label or built from other inputs than this tree.
-run_image_read() {
-  local labels=(peacockdb.inputs peacockdb.driver-minimum peacockdb.driver-minimum-ptx) fmt='{{.Id}}' out
-  local values=() i rc=0
-  for i in "${labels[@]}"; do fmt+="{{\"\\n\"}}{{index .Config.Labels \"$i\"}}"; done
-  out=$(docker image inspect --format "$fmt" "$RUN_REF") || rc=$?
-  [ "$rc" -ne 1 ] || die "no $RUN_REF on the VM: run prepare first"
-  [ "$rc" -eq 0 ] || exit "$rc"
-  # $(…) drops the lines of empty labels at the end, so each is read with a default.
-  mapfile -t values <<< "$out"
-  machine_image_inputs_checked "${values[1]:-}" "$RUN_REF" "$root" "$cudf" run
-  for i in 2 3; do
-    if [ -z "${values[i]:-}" ] || [ "${values[i]}" = "<no value>" ]; then
-      die "$RUN_REF has no ${labels[i - 1]} label: publish it again with scripts/env/image.sh"
-    fi
-  done
-  RUN_ID=${values[0]} RUN_MINIMUM=${values[2]} RUN_MINIMUM_PTX=${values[3]}
-}
-
-version_below() { [ "$1" != "$2" ] && [ "$(printf '%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]; }
-
-# cards_checked: refuses, exit 3, a card below compute capability 8.0, which the run image's
-# binaries do not run on, or one whose driver is older than RUN_MINIMUM. A card past 9.x
-# JIT-compiles the image's PTX, so its driver is held to RUN_MINIMUM_PTX as well.
-cards_checked() {
-  local answer rc=0 line driver cap major need why
-  # Both streams: a missing nvidia-smi is bash's `command not found`, on stderr.
-  answer=$(vm "nvidia-smi --query-gpu=driver_version,compute_cap --format=csv,noheader 2>&1") || rc=$?
-  case $rc in
-    0) ;;
-    69|75) exit "$rc" ;;  # nebius.sh's: the VM, not its card
-    254) die "the driver query on the VM failed (exit 254 (255 on the VM)): ${answer:-no output}" ;;
-    *) die "the driver query on the VM failed (exit $rc): ${answer:-no output}" ;;
-  esac
-  [ -n "$answer" ] || die "nvidia-smi on the VM lists no GPU"
-  while IFS= read -r line; do
-    [[ "$line" =~ ^([0-9]+(\.[0-9]+)+),\ (([0-9]+)\.[0-9]+)$ ]] \
-      || die "nvidia-smi on the VM answered '$line', not a card's driver version and compute capability"
-    driver=${BASH_REMATCH[1]} cap=${BASH_REMATCH[3]} major=${BASH_REMATCH[4]}
-    if [ "$major" -lt 8 ]; then
-      echo "run-gpu.sh: a card on the VM has compute capability $cap; $RUN_REF runs on 8.0 and later" >&2
-      exit 3
-    fi
-    need=$RUN_MINIMUM why="the oldest $RUN_REF runs on"
-    if [ "$major" -ne 8 ] && [ "$major" -ne 9 ] && version_below "$need" "$RUN_MINIMUM_PTX"; then
-      need=$RUN_MINIMUM_PTX why="the oldest that JIT-compiles $RUN_REF's PTX for a card of compute capability $cap"
-    fi
-    if version_below "$driver" "$need"; then
-      echo "run-gpu.sh: a card's driver on the VM is $driver, older than $need, $why" >&2
-      exit 3
-    fi
-  done <<< "$answer"
-}
-
-# tree_claimed: the dir on the VM made or claimed for this tree, or refused, exit 2, as another's;
-# the first VM step of every verb that writes there. The record is made first, by a link, so a call
-# killed between the two never leaves a dir claimed by an id the tree has lost, and two calls at once
-# keep one id.
-tree_claimed() {
-  local tmp
-  if [ -z "$TREE_ID" ]; then
-    tmp=$(mktemp "$TREE_RECORD.XXXXXX")
-    printf '%s\n%s\n' "$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')" "$tree_path" > "$tmp"
-    ln "$tmp" "$TREE_RECORD" 2> /dev/null || true
-    rm -f "$tmp"
-    tree_id_read
-    # The link fails on a name taken by another call's record, and also on a dangling link or a
-    # directory there, or a filesystem without hard links: then there is still no record.
-    [ -n "$TREE_ID" ] || die "could not make $TREE_RECORD: remove what is there, or set PEACOCK_TREE_ID"
-  fi
-  on_vm vm_tree_claimed "$dir" "$TREE_ID"
-}
-
-. "$root/scripts/env/run-gpu-vm.sh"
 
 # --- the verbs -----------------------------------------------------------------------------------
 
@@ -373,8 +183,7 @@ cmd_prepare() {
   [ "$no_sf40" -eq 1 ] || on_vm vm_nsight
   machine_image_checked "$BUILD_REF" "$root" "$cudf"
   machine_image_checked "$RUN_REF" "$root" "$cudf" run
-  run_image_read
-  cards_checked
+  run_image_checked
   on_vm vm_data_set "$dir" "$BUILD_REF"
   if [ "$no_sf40" -eq 0 ]; then
     vm "cd ~/peacock/$dir && scripts/env/fetch-sf40.sh --env - ${SF40_SETS[*]}" "$PEACOCK_ENV"
@@ -448,8 +257,7 @@ cmd_run() {
   tree_claimed
   # The VM's run image as prepare left it: no pull, so a run never takes an image prepare did not
   # check, and a tree whose image inputs moved since is refused.
-  run_image_read
-  cards_checked
+  run_image_checked
   [ -z "${PCK_TEST_FILTER:-}" ] || envs+=("PCK_TEST_FILTER=$PCK_TEST_FILTER")
   [ -z "${PEACOCK_BENCH_RESUME:-}" ] || envs+=("PEACOCK_BENCH_RESUME=$PEACOCK_BENCH_RESUME")
   # The engine's two measurement switches (architecture.md, "cuDF options"): the cache's size and
@@ -475,8 +283,7 @@ cmd_cancel() {
 cmd_run_staged() {
   local envs=() args=(--nocapture --test-threads=1)
   tree_claimed
-  run_image_read
-  cards_checked
+  run_image_checked
   [ -z "${PCK_TEST_FILTER:-}" ] || envs+=("PCK_TEST_FILTER=$PCK_TEST_FILTER")
   [ -z "${PEACOCK_BENCH_RESUME:-}" ] || envs+=("PEACOCK_BENCH_RESUME=$PEACOCK_BENCH_RESUME")
   if [ -n "$exact" ]; then args+=(--exact "$exact"); elif [ -n "${PCK_TEST_FILTER:-}" ]; then args+=("$PCK_TEST_FILTER"); fi

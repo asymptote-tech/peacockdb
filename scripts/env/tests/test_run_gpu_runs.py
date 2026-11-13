@@ -459,6 +459,17 @@ def test_a_staged_binary_runs_under_the_runner_and_is_judged():
         assert r.returncode == 1 and first_line(r) == "exited 1", (r.returncode, r.stdout)
 
 
+def test_a_run_on_a_dir_never_shipped_leaves_cpp_install_the_user_s():
+    """A runner may start in a dir no ship made. Docker makes a bind's missing source as root, and a
+    later ship could not write a root-owned cpp/install: the start makes the dir first, as the user."""
+    with Host() as h:
+        ok(h.vm_call("vm_started", "fresh", "probe", h.card_lock, 0, "sha256:run1", "probe"))
+        until((h.vm_dir("fresh") / "run" / "status").exists, "the run's status")
+        install = h.vm_dir("fresh") / "cpp" / "install"
+        assert install.is_dir() and install.stat().st_uid == os.getuid(), install
+        assert h.world().get("root_made", []) == [], "docker made a bind's source, as root"
+
+
 def test_nsys_capture_waits_for_the_card_lock():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)

@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
-from gpu_host import DRIVER_MINIMUM, DRIVER_MINIMUM_PTX, HOSTNAME, Host, label  # noqa: E402
+from gpu_host import DRIVER_MINIMUM, DRIVER_MINIMUM_PTX, HOSTNAME, Host, label, until  # noqa: E402
 from machine import lib  # noqa: E402
 
 
@@ -223,6 +223,19 @@ def test_a_run_image_without_the_ptx_minimum_is_refused():
             for args in (("run", "list"), ("prepare", "--no-sf40")):
                 refused(h.gpu(*args), 2, "peacockdb.driver-minimum-ptx", "scripts/env/image.sh", h.run_ref)
             assert h.docker_runs() == []
+
+
+def test_the_runner_judges_only_what_it_is_told_to():
+    """A staged binary's judgment, a segfault or `running 0 tests` in its log, is the caller's to ask
+    for: a run told not to ends with its container's code, whatever its name."""
+    with Host() as h:
+        h.world(run_output="running 0 tests\n")
+        for judged, code in ((0, "0"), (1, "1")):
+            d = f"judged-{judged}"
+            ok(h.vm_call("vm_started", d, "probe", h.card_lock, judged, "sha256:run1", "probe"))
+            status = h.vm_dir(d) / "run" / "status"
+            until(status.exists, "the run's status")
+            assert status.read_text().split()[1] == code, (judged, status.read_text())
 
 
 if __name__ == "__main__":

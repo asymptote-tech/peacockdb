@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2164  # each function runs under on_vm's set -euo pipefail, cd's failure fatal
-# run-gpu.sh's VM side: functions run-gpu.sh sources and on_vm sends to the VM as text.
+# A GPU VM dir's VM side: functions scripts/lib/gpu-vm-client.sh sources and on_vm sends to the VM
+# as text.
 
 # --- the VM's side: sent by on_vm, never run here --------------------------------------------------
 
@@ -246,15 +247,18 @@ vm_ship_ready() {
   done
 }
 
-# vm_started <i> <what> <card lock> <docker run argument>…: under run/lock, once the dir is idle, a
-# runner of <what> with the run's mounts, user and hostname and these arguments, detached from this
-# session, and its log, empty. run/lock is let go once the runner wrote its state, its TERM trap set,
-# so a cancel never finds a runner it cannot stop.
+# vm_started <i> <what> <card lock> <judged> <docker run argument>…: under run/lock, once the dir is
+# idle, a runner of <what> with the run's mounts, user and hostname and these arguments, detached from
+# this session, and its log, empty. <judged> 1: the run's code is judged as a staged binary's
+# (vm_staged_judged); 0, it is the container's. run/lock is let go once the runner wrote its state,
+# its TERM trap set, so a cancel never finds a runner it cannot stop. The binds' sources are made
+# here, as the user: Docker would make a missing one as root, which a later ship could not write.
 vm_started() {
-  local dir=$1 what=$2 lock=$3 base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock} stamp runner
-  shift 3
+  local dir=$1 what=$2 lock=$3 judged=$4 base=$HOME/peacock/$1 data=${PEACOCK_DATA_DIR:-/var/lib/peacock}
+  local stamp runner
+  shift 4
   vm_docker
-  mkdir -p "$base/run" "$base/logs"
+  mkdir -p "$base/run" "$base/logs" "$base/cpp/install" "$base/testdata"
   vm_locked "$dir"
   vm_idle "$dir"
   vm_name_free "$dir"
@@ -264,7 +268,7 @@ vm_started() {
   runner="set -euo pipefail; $(declare -f vm_docker vm_container vm_started_at peacock_card_take vm_runner \
     vm_runner_ended vm_staged_judged vm_name_taken); vm_runner \"\$@\""
   # Every fd redirected: the session's pipes close when this call ends, and run/lock is let go.
-  setsid nohup bash -c "$runner" run-gpu.sh "$dir" "$what" "$stamp" "$lock" \
+  setsid nohup bash -c "$runner" run-gpu.sh "$dir" "$what" "$stamp" "$lock" "$judged" \
     --user "$(id -u):$(id -g)" --hostname "$(hostname)" --label "peacock.dir=$base" \
     -v "$base/cpp/install:/peacock/install:ro" -v "$base/testdata:/peacock/testdata" -v "$data:$data:ro" \
     "$@" < /dev/null > /dev/null 2>&1 {VM_LOCK_FD}>&- &
@@ -284,17 +288,17 @@ vm_locked() {
   fi
 }
 
-# vm_runner <i> <what> <stamp> <card lock> <docker run argument>…: the run, detached: its output to
-# its log; the card's lock, waited for and held while the container lives; the container removed;
-# a staged binary judged; its record kept under its stamp; then its status. --init: run-tests.sh as
-# PID 1 would ignore docker stop.
+# vm_runner <i> <what> <stamp> <card lock> <judged> <docker run argument>…: the run, detached: its
+# output to its log; the card's lock, waited for and held while the container lives; the container
+# removed; judged (1) as a staged binary is; its record kept under its stamp; then its status.
+# --init: run-tests.sh as PID 1 would ignore docker stop.
 # cancel sends TERM until this process ends: each one cuts short the wait in hand, and the flag
 # says what to do next, so a TERM at any point lands. The status is the client's, so a TERM that
 # comes as the run ends keeps the run's own.
 vm_runner() {
-  local dir=$1 what=$2 stamp=$3 lock=$4 base=$HOME/peacock/$1 name=peacock-$1 cancelled=0 stopped=0 child=""
-  local code="" rc=0 state owner
-  shift 4
+  local dir=$1 what=$2 stamp=$3 lock=$4 judged=$5 base=$HOME/peacock/$1 name=peacock-$1 cancelled=0 stopped=0
+  local child="" code="" rc=0 state owner
+  shift 5
   exec >> "$base/logs/$what-$stamp.log" 2>&1
   rm -f "$base/run/exit"
   trap 'cancelled=1' TERM
@@ -334,7 +338,7 @@ vm_runner() {
   if [ "$cancelled" -eq 1 ] && { [ -z "$child" ] || [ "$stopped" -eq 1 ]; }; then
     echo "run-gpu.sh: cancelled"
   elif [ -n "$child" ]; then
-    case $what in list|filter|bench) ;; *) vm_staged_judged ;; esac
+    [ "$judged" -eq 0 ] || vm_staged_judged
   fi
   # run-tests.sh refuses a record holding rows, so the next bench needs this one out of its way.
   if [ -f "$base/testdata/calibration/records.tsv" ]; then
@@ -386,7 +390,7 @@ vm_run() {
   shift 5
   for pair in "$@"; do envs+=(-e "$pair"); done
   [ -f "$base/cpp/install/lib/libpeacock_gpu.so" ] || { echo "run-gpu.sh: no install in $base: ship first" >&2; exit 2; }
-  vm_started "$dir" "$mode" "$lock" "${envs[@]}" "$image" "$mode"
+  vm_started "$dir" "$mode" "$lock" 0 "${envs[@]}" "$image" "$mode"
   if [ "$detach" -eq 1 ]; then
     echo "==> peacock-$dir: run-tests.sh $mode, detached; run-gpu.sh … status says how it goes, … follow follows it"
     return 0
@@ -404,7 +408,7 @@ vm_run_staged() {
   shift
   [ -x "$base/cpp/install/rust-benchmarks/$name" ] \
     || { echo "run-gpu.sh: no executable $base/cpp/install/rust-benchmarks/$name: stage and ship it first" >&2; exit 2; }
-  vm_started "$dir" "$name" "$lock" -e LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib \
+  vm_started "$dir" "$name" "$lock" 1 -e LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib \
     -e PEACOCK_TESTDATA_DIR=/peacock/testdata "${envs[@]}" --entrypoint "/peacock/install/rust-benchmarks/$name" \
     "$image" "$@"
   vm_follow "$dir"

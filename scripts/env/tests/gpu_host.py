@@ -9,7 +9,8 @@ directory as PEACOCK_DATA_DIR, and its own copy of /proc/driver/nvidia/params. I
 before running anything while the Host has made no more than FAKE_NEBIUS_RSH_FAILS rsh calls, as a
 dropped transport does. `rsync` is the real one, through that rsh. On the VM, docker answers from a
 JSON world (images and their labels, containers), and reads a run's binds as machine.py's docker
-does, refusing one into the VM user's home. A device run (`--gpus`) is attached: its container runs
+does, refusing one into the VM user's home; a -v source that is missing it makes, as Docker makes it
+as root, and names in the world's root_made. A device run (`--gpus`) is attached: its container runs
 in the world, prints the world's run_output, and holds while the file FAKE_HOLD names exists, then
 ends with run_code; `docker stop` ends it with 143 and `docker rm -f` with 137. With run_record, it
 first writes those rows to its calibration record, as a bench does. A second device run while one is
@@ -25,18 +26,20 @@ import json
 import os
 import pathlib
 import signal
+import shlex
 import shutil
 import subprocess
 import tempfile
 import time
 
-from machine import KEYS, REPO, RUN_OPTIONS, git, lib
+from machine import KEYS, REPO, RUN_OPTIONS, git, lib, path_without
 
 TREE_FILES = [
-    "scripts/env/run-gpu.sh", "scripts/env/run-gpu-vm.sh", "scripts/env/check-build-image.sh", "scripts/env/sf40.sha256",
+    "scripts/env/run-gpu.sh", "scripts/env/run-gpu-vm.sh", "scripts/env/run-sirius.sh", "scripts/env/run-sirius-vm.sh",
+    "scripts/env/check-build-image.sh", "scripts/env/sf40.sha256",
     "scripts/lib/image-inputs.sh", "scripts/lib/data-inputs.sh", "scripts/lib/machine.sh", "scripts/lib/peacock-config.sh",
-    "scripts/lib/s3.sh", "scripts/lib/pinned.sh", "scripts/lib/ssh-retry.sh", "testdata/generate_testdata.sh",
-    "cpp/CMakeLists.txt",
+    "scripts/lib/s3.sh", "scripts/lib/pinned.sh", "scripts/lib/ssh-retry.sh", "scripts/lib/gpu-vm-client.sh",
+    "testdata/generate_testdata.sh", "cpp/CMakeLists.txt",
 ]
 CUDF = "25.02"
 H100 = ["--instance-id", "computeinstance-e00e6yena4nzjgaym0", "--profile", "editor-eu"]
@@ -189,8 +192,16 @@ if a[0] == "ps":
 
         print(re.sub(r"\{\{(.*?)\}\}", field, flag("--format")))
     sys.exit(0)
+# A -v whose source is missing: Docker makes it, as root, which the user then cannot write. Made here
+# by the test's uid, so each is named in the world's root_made.
 if a[0] == "run":
     binds, _ = run_options(a)
+    missing = [src for src in binds.values() if not os.path.exists(src)]
+    for src in missing:
+        os.makedirs(src)
+    if missing:
+        w["root_made"] = w.get("root_made", []) + missing
+        save()
 # A device run, attached. create_delay: the client still making the container, before it exists.
 if a[0] == "run" and "--gpus" in a:
     name = flag("--name")
@@ -434,8 +445,10 @@ class Host:
             "FAKE_DOCKER_LOG": str(self.docker_log), "FAKE_DOCKER_WORLD": str(self.world_path),
             "FAKE_HOST_LOG": str(self.host_log), "FAKE_DEV_LOG": str(self.dev_log),
             "FAKE_FETCH_LOG": str(self.fetch_log), "FAKE_HOST_HOME": str(self.home),
-            "FAKE_HOST_PATH": f"{self.host_bin}:{os.environ['PATH']}", "FAKE_HOST_DATA": str(self.data),
-            "FAKE_HOST_PARAMS": str(self.params), "FAKE_HOST_ROOT": str(self.root), "FAKE_HOST_TMP": str(self.vm_tmp),
+            # The VM's commands are the fakes and this machine's, less its nvidia-smi: a dev host's
+            # own, with no driver, must never answer for the VM's cards.
+            "FAKE_HOST_PATH": f"{self.host_bin}:{path_without(tmp, {'nvidia-smi'})}",
+            "FAKE_HOST_DATA": str(self.data), "FAKE_HOST_PARAMS": str(self.params), "FAKE_HOST_ROOT": str(self.root), "FAKE_HOST_TMP": str(self.vm_tmp),
             "FAKE_HOLD": str(tmp / "hold"), "PEACOCK_CARD_LOCK": str(tmp / "vm" / "run-lock" / "peacock-card.lock"),
             "PEACOCK_SSH_PAUSES": "0 0 0",
         }
@@ -533,6 +546,14 @@ class Host:
         cmd = [str(self.tree / rel), *map(str, args)]
         return subprocess.run(cmd, env={**self.env, **(env or {})}, stdin=subprocess.DEVNULL, capture_output=True,
                               text=True, timeout=120, cwd=self.tree)
+
+    def vm_call(self, fn, *args):
+        """<fn> of run-gpu-vm.sh with <args>, run on the VM by itself, as on_vm sends it."""
+        script = (f'set -euo pipefail; . "{self.tree}/scripts/lib/peacock-config.sh"; '
+                  f'. "{self.tree}/scripts/env/run-gpu-vm.sh"; {fn} "$@"')
+        command = shlex.join(["bash", "-c", script, "run-gpu.sh", *map(str, args)])
+        return subprocess.run([str(self.nebius), *H100, "ssh", command], env=self.env, stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=120, cwd=self.tree)
 
     def world(self, **changes):
         """The world, with <changes> made under the fake docker's lock: a runner's docker may be at it."""

@@ -1238,28 +1238,5 @@ def test_fused_profile_lists_a_failed_capture_and_goes_on():
         assert "failed.tsv" in r.stderr, r.stderr
 
 
-# --- Sirius --------------------------------------------------------------------------------------
-
-# Moby's default profile as Docker 29.9 vendors it (github.com/moby/profiles seccomp/v0.2.4, commit
-# 245180c51918481c0525424b3ee025d2b435d46c), as the sha256 of its canonical JSON: sorted keys, no
-# spaces. The Sirius profile is that and one rule more.
-MOBY_DEFAULT_SHA256 = "20ef2b6bfd980e7dd56a971d9ec0d71bc0f2d1184415f2d968a19bbcff9ee2b2"
-SIRIUS_CALLS = ["io_uring_setup", "io_uring_enter", "io_uring_register", "mbind", "set_mempolicy", "get_mempolicy"]
-
-
-def test_the_sirius_profile_is_dockers_default_and_one_rule_for_six_calls():
-    import hashlib
-    profile = json.loads((REPO / "docker" / "sirius-seccomp.json").read_text())
-    assert "245180c51918481c0525424b3ee025d2b435d46c" in profile["comment"], profile["comment"]
-    assert "seccomp/default.json" in profile["comment"] and "moby/profiles" in profile["comment"]
-    *default_rules, added = profile["syscalls"]
-    assert added["names"] == SIRIUS_CALLS and added["action"] == "SCMP_ACT_ALLOW", added
-    assert set(added) == {"names", "action", "comment"}, "the rule holds no condition: no includes or excludes"
-    default = {k: v for k, v in profile.items() if k != "comment"}
-    default["syscalls"] = default_rules
-    canonical = json.dumps(default, sort_keys=True, separators=(",", ":")).encode()
-    assert hashlib.sha256(canonical).hexdigest() == MOBY_DEFAULT_SHA256, "not moby's default beside the rule"
-
-
 if __name__ == "__main__":
     raise SystemExit(main(globals()))

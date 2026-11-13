@@ -133,3 +133,14 @@ prepare --sirius` become `run-sirius.sh run` and `run-sirius.sh prepare`.
 - vm-setup's own constraints hold: never open a Nebius credential file, and secrets travel on
   ssh's stdin alone.
 - `ENS-vm-setup` is never pushed to.
+
+## Signoff
+
+Solved under its constraints, offline: vm-setup replayed as rk00's commit; Sirius in `run-sirius.sh` on
+the shared runner and client library; image by ID, card checks, stamps and `bench-sirius.sh` as specified;
+Python suites green (dev-only failures: low disk, no matplotlib, each proven green another way), CI's CPU
+gates green. Completeness: one important gap, a whole run's answers database as a false pull conflict,
+fixed and tested. Shortcuts: `run-gpu.sh` refuses the old verbs naming `run-sirius.sh` rather than as
+unknown (plan's choice); a whole run clears the VM's unpulled answers before waiting for the card; the
+three item-9 proofs are deferred. architecture.md: nothing falsified. Merge by merge commit, not GitHub's
+squash, to keep rk00's authorship; close #205 by hand.
