@@ -1,13 +1,15 @@
 //! A device session over one plan, shared by the tiers that open one, and the runs over one
-//! tree alone and over several roots fused that the fused tests compare.
+//! tree alone and over several roots fused that the fused tests compare and the fused
+//! benchmark times.
 
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 use datafusion::arrow::array::RecordBatch;
 
 use crate::executor::{
-    CpuBatch, GpuBackend, GpuContext, PrefillError, PrefillStats, Region, RunReport,
-    collect_regions, prefill_on, run, run_roots,
+    CpuBatch, FusedRun, GpuBackend, GpuContext, PrefillError, PrefillStats, Region, RunError,
+    RunReport, collect_regions, prefill_on, run, run_roots,
 };
 use crate::plan::GpuNode;
 use crate::wire::{RecipePlan, attach_recipes_for_roots};
@@ -112,6 +114,31 @@ pub(crate) fn answers_of_roots(
         .iter()
         .map(|answer| record_batches(answer))
         .collect()
+}
+
+/// `files` made resident in the process's pinned host cache, through a session over `roots`.
+pub(crate) fn prefill_for_roots(
+    roots: &[&dyn GpuNode],
+    join_scratch: u64,
+    files: &[PathBuf],
+    what: &str,
+) -> Result<PrefillStats, PrefillError> {
+    Session::open_roots(roots, join_scratch, what).prefill_pinned_cache(files)
+}
+
+/// One timed run of `roots` under `cap`, in a session of its own as a benchmark run is, and
+/// what the device recorded, drained before the session closes. A run that ends holding
+/// batches panics; a run that fails is the caller's to judge.
+pub(crate) fn run_roots_timed(
+    roots: &[&dyn GpuNode],
+    join_scratch: u64,
+    cap: NonZeroUsize,
+    what: &str,
+) -> Result<(FusedRun, Vec<Region>), RunError> {
+    let mut session = Session::open_roots(roots, join_scratch, what);
+    let fused = run_roots::<GpuBackend>(roots, &session.context(), None, Some(cap))?;
+    assert_closed(&fused.report, what);
+    Ok((fused, session.regions(what)))
 }
 
 fn assert_closed(report: &RunReport, what: &str) {

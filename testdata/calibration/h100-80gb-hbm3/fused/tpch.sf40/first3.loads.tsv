@@ -1,0 +1,20 @@
+# Where one parquet load's time goes, from an Nsight trace capture.
+# One row per (case, recipe_seq) load node: every partition region of a CudfScan call.
+#   An execution's load is all its calls (one per batch); each number is computed per
+#   execution, then the median over executions, column by column.
+# A device operation is the load's when its launching API call starts in one of the
+#   load's windows, on any thread; one launched where two loads are open is neither's.
+# h2d_gbps is bytes over summed copy time, the per-copy rate, 0 with no copies.
+# unattributed_us is load_us less the union of host reads, device operations and
+#   pinned allocations inside the windows.
+# The times are a profiled run's and are not comparable with records.tsv's.
+dataset	sf	query	mode	recipe_seq	executions	calls	load_us	host_read_source	host_read_us	h2d_count	h2d_bytes	h2d_us	h2d_gbps	h2d_pinned_bytes	h2d_pinned_gbps	h2d_pageable_bytes	h2d_pageable_gbps	h2d_max_bytes	decompress_us	decode_us	other_device_us	off_thread_device_us	pinned_alloc_count	pinned_alloc_us	unattributed_us
+tpch	40	first3	tp1-single	0	10	1	247200	none	0	3930	2898624785	63953	45.3	2897749049	45.3	875736	28.6	4376960	74885	42688	12655	0	0	0	57209
+tpch	40	first3	tp1-single	12	10	1	1332	none	0	21	2351	19	0.1	2195	0.2	156	0.0	384	12	76	84	0	0	0	1141
+tpch	40	first3	tp1-single	15	10	1	1330	none	0	23	4470	19	0.2	4210	0.3	260	0.0	640	29	89	85	0	0	0	1108
+tpch	40	first3	tp1-single	17	10	1	163880	none	0	23	31676072	600	52.8	31674720	53.4	1352	0.2	31643316	107709	56441	100	0	0	0	1552
+tpch	40	first3	tp1-single	19	10	1	39475	none	0	220	49631672	1526	32.5	49616704	32.7	14968	1.9	492584	29357	8484	153	0	0	0	2597
+tpch	40	first3	tp1-single	22	10	1	41389	none	0	538	328784853	7614	43.2	328759701	43.2	25152	5.9	708632	27202	1093	604	0	0	0	4866
+tpch	40	first3	tp1-single	40	10	1	41469	none	0	538	328784853	7610	43.2	328759701	43.2	25152	5.8	708632	27191	1093	602	0	0	0	4974
+tpch	40	first3	tp1-single	60	10	1	36285	none	0	120	26432232	798	33.1	26427436	33.4	4796	0.7	492584	29246	4817	119	0	0	0	2059
+tpch	40	first3	tp1-single	63	10	1	48826	none	0	732	299761060	7231	41.5	299715236	41.5	45824	6.9	1254166	31423	2187	331	0	0	0	8663

@@ -1,0 +1,158 @@
+//! The hold rule: for one reader of a shared load inside a hold, where a buffer would go, what
+//! it would keep, what reading the table again would cost, and which of the two to do. The
+//! rule is `decide`'s and `hold_inputs`'s doc comments in `mod.rs`.
+
+#[cfg(test)]
+mod tests;
+
+use crate::plan::{GpuNode, NodeRef, PlanDag, as_node_ref, holds_state};
+
+use super::{Baseline, Choice, EdgeCost, Fused, Headroom, HeldReader, HoldDecision, HoldInputs};
+use super::{HoldLedger, LoadTimes, budget_of, cap_inputs};
+
+pub(crate) fn place_buffer(edges: &[EdgeCost]) -> Option<&EdgeCost> {
+    edges
+        .iter()
+        .filter(|edge| edge.allowed)
+        .min_by_key(|edge| edge.bytes)
+}
+
+pub(crate) fn decide(inputs: &HoldInputs, headroom: Headroom) -> HoldDecision {
+    let decision = |choice, bytes, why: String| HoldDecision {
+        choice,
+        bytes,
+        reread_us: inputs.reread_us,
+        why,
+    };
+    let reread = inputs.reread_bytes;
+    match (place_buffer(&inputs.edges), headroom) {
+        (Some(edge), Headroom::Left(left)) if edge.bytes <= left => decision(
+            Choice::Buffer { edge: edge.edge },
+            edge.bytes,
+            format!("fits: {} <= {left}", edge.bytes),
+        ),
+        (Some(edge), Headroom::Left(left)) => decision(
+            Choice::ReRead,
+            edge.bytes,
+            format!("too large: {} > {left}", edge.bytes),
+        ),
+        (Some(edge), Headroom::Over) if edge.bytes < reread => decision(
+            Choice::Buffer { edge: edge.edge },
+            edge.bytes,
+            format!("over budget: {} < re-read {reread}", edge.bytes),
+        ),
+        (Some(edge), Headroom::Over) => decision(
+            Choice::ReRead,
+            edge.bytes,
+            format!("over budget: {} >= re-read {reread}", edge.bytes),
+        ),
+        (None, _) if inputs.edges.is_empty() => decision(
+            Choice::ReRead,
+            0,
+            "no edge: the reader takes the shared load directly".to_string(),
+        ),
+        (None, _) => decision(
+            Choice::ReRead,
+            0,
+            "no edge: each lies above a join that grew the rows, or above state a waiting root \
+             may not keep"
+                .to_string(),
+        ),
+    }
+}
+
+pub(crate) fn hold_inputs(
+    fused: &Fused,
+    held: &HeldReader,
+    baseline: &Baseline,
+    loads: &LoadTimes,
+    seqs: &[Vec<Option<u64>>],
+    names: &[String],
+) -> HoldInputs {
+    let roots: Vec<&dyn GpuNode> = fused.roots.iter().map(|root| root.as_ref()).collect();
+    let dag = PlanDag::of(&roots);
+    let member = held.member;
+    // `(Σ batch_rows, Σ batch_bytes)` recorded for what a fused node stands for; an inserted
+    // buffer stands for its child, and the shared load and a project selecting from it for the
+    // reader's own load.
+    let recorded = |mut at: usize| {
+        while fused.origins[at].is_empty()
+            && matches!(as_node_ref(dag.nodes[at].node), NodeRef::HoldBuffer(_))
+        {
+            at = dag.nodes[at].children[0];
+        }
+        let origin = match fused.origins[at].as_slice() {
+            [origin] if dag.nodes[at].node.sharing_key().is_none() => *origin,
+            _ => member,
+        };
+        let times = &baseline.per_query[origin.query];
+        (
+            times.batch_rows[origin.node],
+            times.batch_bytes[origin.node],
+        )
+    };
+    let (mut grown, mut builds, mut below) = (false, 0, None);
+    let mut edges = Vec::new();
+    for (parent, slot) in &held.path {
+        let child = dag.nodes[*parent].children[*slot];
+        if is_join(dag.nodes[child].node) {
+            let (input, _) = recorded(below.expect("a join on the path reads the node below"));
+            grown |= recorded(child).0 > input;
+            builds += recorded(dag.nodes[child].children[0]).1;
+        }
+        below = Some(child);
+        if dag.nodes[child].node.sharing_key().is_some() {
+            continue;
+        }
+        edges.push(EdgeCost {
+            edge: (*parent, *slot),
+            bytes: recorded(child).1 + builds,
+            allowed: !grown && !(held.waits && state_under(&dag, child).is_some()),
+        });
+    }
+    let seq = seqs[member.query][member.node].expect("the reader's own load has a scan seq");
+    HoldInputs {
+        reread_us: loads.load_us(&names[member.query], seq),
+        reread_bytes: baseline.per_query[member.query].batch_bytes[member.node],
+        edges,
+    }
+}
+
+fn is_join(node: &dyn GpuNode) -> bool {
+    matches!(
+        as_node_ref(node),
+        NodeRef::Join(_) | NodeRef::CrossJoin(_) | NodeRef::NestedLoopJoin(_)
+    )
+}
+
+pub(crate) fn state_under(dag: &PlanDag<'_>, at: usize) -> Option<usize> {
+    let mut stack = vec![at];
+    while let Some(next) = stack.pop() {
+        if holds_state(dag.nodes[next].node) {
+            return Some(next);
+        }
+        stack.extend(&dag.nodes[next].children);
+    }
+    None
+}
+
+pub(crate) fn choose(ledger: &HoldLedger<'_>, fused: &Fused, held: &HeldReader) -> HoldDecision {
+    let now = cap_inputs(fused, ledger.baseline, ledger.pool_bytes);
+    let largest_root = now.root_bytes.iter().max().copied().unwrap_or(0);
+    let charged = now.shared_bytes.iter().sum::<u64>() + largest_root;
+    let buffered: u64 = now.buffer_bytes.iter().sum();
+    let (budget, spent) = (budget_of(ledger.pool_bytes), charged + buffered);
+    let headroom = match spent > budget {
+        true => Headroom::Over,
+        false => Headroom::Left(budget - spent),
+    };
+    let inputs = hold_inputs(
+        fused,
+        held,
+        ledger.baseline,
+        ledger.loads,
+        ledger.seqs,
+        ledger.names,
+    );
+    decide(&inputs, headroom)
+}

@@ -78,6 +78,16 @@ const TEST_ONLY_ITEMS: &[TestOnlyItem] = &[
         item: "translate_expr",
         called_by: &["planner/mod.rs"],
     },
+    TestOnlyItem {
+        file: "test_support/mod.rs",
+        item: "line_row_order",
+        called_by: &["prototypes/fuser/tests/end_to_end.rs"],
+    },
+    TestOnlyItem {
+        file: "test_support/mod.rs",
+        item: "result_matches",
+        called_by: &["prototypes/fuser/tests/end_to_end.rs"],
+    },
 ];
 
 /// A `mod` declaration and the `#[cfg(…)]` directly above it.

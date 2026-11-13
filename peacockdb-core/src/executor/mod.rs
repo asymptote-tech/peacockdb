@@ -820,6 +820,15 @@ pub(crate) fn nodes_as_recorded(
     driver::nodes_as_recorded(root)
 }
 
+/// [`nodes_as_recorded`] over several roots, in the pre-order [`run_roots`]'s report is
+/// indexed by, a node they share once.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+pub(crate) fn nodes_as_recorded_of_roots(
+    roots: &[&dyn GpuNode],
+) -> Result<Vec<(&'static str, usize)>, PlanError> {
+    driver::nodes_as_recorded_of_roots(roots)
+}
+
 /// Which device allocator a measurement was taken under — the outcome of
 /// [`install_rmm_pool`], not the request.
 ///
@@ -1164,6 +1173,8 @@ pub(crate) struct PlanIndex<'a> {
 }
 
 impl<'a> PlanIndex<'a> {
+    // Its callers are the device harness and tests, which a rust-only build has neither of.
+    #[cfg_attr(feature = "rust-only", allow(dead_code))]
     pub(crate) fn build(root: &'a dyn GpuNode) -> Result<Self, PlanError> {
         Self::build_roots(&[root])
     }

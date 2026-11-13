@@ -97,7 +97,7 @@ def test_run_gpu_refuses_an_unknown_verb_or_option():
     with Host() as h:
         refused(h.gpu("teleport"), 2, "teleport")
         refused(h.gpu("--color", "red", "run", "list"), 2, "--color")
-        refused(h.gpu("run", "everything"), 2, "everything")
+        refused(h.gpu("run", "every thing"), 2, "every thing")
         refused(h.gpu("--dir", "../up", "ship"), 2, "--dir")
         refused(h.gpu("--cudf", "24.12", "prepare"), 2, "24.12")
         assert h.nebius_calls() == []
@@ -399,6 +399,89 @@ def test_run_before_ship_says_so():
         assert h.docker_runs() == []
 
 
+# --- run, a staged binary by name -------------------------------------------------------------
+
+FUSED = "prototype_fused_benchmarks"
+FIRST3 = "bench_fused_tpch_sf40_first3_tp1_single"
+
+
+def staged_fused(h):
+    """Prepared and shipped, with the fused binary staged executable in the install."""
+    exe = h.tree / "cpp/install/rust-benchmarks" / FUSED
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_text("staged")
+    exe.chmod(0o755)
+    prepared(h)
+    ok(h.gpu("ship"))
+    h.world(run_output="running 1 test\ntest result: ok. 1 passed\n")
+    return h
+
+
+def test_run_names_a_staged_binary():
+    with Host() as h:
+        staged_fused(h)
+        r = ok(h.gpu("run", FUSED, "--exact", FIRST3, env={"PEACOCK_BENCH_RESUME": "1"}))
+        assert "1 passed" in r.stdout, r.stdout
+        runs = h.docker_runs()
+        assert len(runs) == 1, runs
+        a = runs[0]
+        assert a[a.index("--entrypoint") + 1] == f"/peacock/install/rust-benchmarks/{FUSED}", a
+        envs = [a[i + 1] for i, x in enumerate(a) if x == "-e"]
+        assert envs == ["LD_LIBRARY_PATH=/peacock/install/lib:/opt/cudf/lib", "PEACOCK_TESTDATA_DIR=/peacock/testdata",
+                        "PEACOCK_BENCH_RESUME=1"], envs
+        assert a[a.index(RUN_REF):] == [RUN_REF, "--nocapture", "--test-threads=1", "--exact", FIRST3], a
+        assert not {"list", "filter", "bench"} & set(a), a
+        assert a[a.index("--hostname") + 1] == HOSTNAME and a[a.index("--name") + 1] == "peacock-chain-l"
+        mounts = [a[i + 1] for i, x in enumerate(a) if x == "-v"]
+        assert f"{h.vm_dir()}/cpp/install:/peacock/install:ro" in mounts, mounts
+        assert h.world()["containers"] == {}, "the run's container is left behind"
+
+
+def test_run_staged_narrows_by_the_filter():
+    with Host() as h:
+        staged_fused(h)
+        ok(h.gpu("run", FUSED, env={"PCK_TEST_FILTER": "tpcds"}))
+        a = h.docker_runs()[0]
+        assert a[a.index(RUN_REF):] == [RUN_REF, "--nocapture", "--test-threads=1", "tpcds"], a
+        assert "PCK_TEST_FILTER=tpcds" in [a[i + 1] for i, x in enumerate(a) if x == "-e"], a
+
+
+def test_run_staged_fails_on_a_segfault_in_the_log():
+    with Host() as h:
+        staged_fused(h)
+        h.world(run_output="running 1 test\nSegmentation fault\n", run_code=0)
+        r = h.gpu("run", FUSED, "--exact", FIRST3)
+        assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+
+
+def test_run_staged_fails_when_no_test_ran():
+    with Host() as h:
+        staged_fused(h)
+        h.world(run_output="running 0 tests\ntest result: ok. 0 passed\n", run_code=0)
+        r = h.gpu("run", FUSED, "--exact", "bench_fused_tpch_sf40_first4_tp1_single")
+        assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+        h.world(run_output="running 1 test\n", run_code=101)
+        assert h.gpu("run", FUSED, "--exact", FIRST3).returncode == 1
+
+
+def test_run_staged_refuses_an_unstaged_name():
+    with Host() as h:
+        staged_fused(h)
+        refused(h.gpu("run", "peacock_cpu_benchmarks"), 2, "peacock_cpu_benchmarks", "rust-benchmarks")
+        assert h.docker_runs() == []
+
+
+def test_run_staged_refuses_bad_arguments_before_the_vm():
+    with Host() as h:
+        refused(h.gpu("run", FUSED, "--exact", FIRST3, env={"PCK_TEST_FILTER": "q1"}), 2, "--exact",
+                "PCK_TEST_FILTER")
+        refused(h.gpu("run", FUSED, "--exact"), 2, "--exact")
+        refused(h.gpu("run", FUSED, "--skip", "x"), 2, "--skip")
+        refused(h.gpu("run", "../bin/sh"), 2, "../bin/sh")
+        refused(h.gpu("run", "list", "--exact", FIRST3), 2, "list")
+        assert h.nebius_calls() == []
+
+
 # --- pull --------------------------------------------------------------------------------------
 
 def test_pull_brings_the_results_the_record_and_the_log_home():
@@ -630,6 +713,114 @@ def test_cases_with_a_filter_narrow_the_trace_pass():
                         "bench_tpch_sf40_q1_tp1_single --exact"], runs
         refused(nsys_profile(tmp, tree, vm, env, "--cases", tmp / "missing.csv"), 1, "missing.csv")
         refused(nsys_profile(tmp, tree, vm, env, "--device", "H100 80GB"), 1, "--device")
+
+
+# --- create_nsys_profile.sh --fused ------------------------------------------------------------
+
+BATCHES = ["first3", "first10", "first20", "all"]
+# The fused binary: logs its arguments and the record it was given, fails a batch named in
+# FAKE_FAIL_BATCH.
+FUSED_BENCH = ('#!/bin/sh\nprintf "%s record=%s\\n" "$*" "${PEACOCK_RECORD_PATH-unset}" >> "$FAKE_BENCH_LOG"\n'
+               'case "$*" in *"_${FAKE_FAIL_BATCH:-none}_tp1_single"*) echo "boom"; exit 101 ;; esac\n'
+               'echo "running 1 test"\necho "test result: ok. 1 passed; 0 failed; 0 ignored"\n')
+
+
+# As the real reader, which cannot open a record that is not there.
+STRICT_HBM = STUB_HBM.replace(
+    "with open(os.environ",
+    "missing = [a[i + 1] for i, w in enumerate(a) if w == \"--record\" and not os.path.exists(a[i + 1])]\n"
+    "if missing:\n    sys.exit(f\"no record {missing}\")\nwith open(os.environ", 1)
+
+
+def fused_tree(tmp, records=BATCHES):
+    """nsys_tree with the fused binary staged beside the corpus one, and on the host a clean record
+    per batch in `records`, as the fused runs leave them."""
+    tree, vm, env = nsys_tree(tmp)
+    (tree / "scripts/calibration/nsys_hbm.py").write_text(STRICT_HBM)
+    bench = vm / "cpp/install/rust-benchmarks/prototype_fused_benchmarks"
+    bench.write_text(FUSED_BENCH)
+    bench.chmod(0o755)
+    for batch in records:
+        record = vm / f"testdata/calibration/fused/tpch.sf40/{batch}.records.tsv"
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(f"# run: capture=none\ndataset\ttpch\n{batch}\n")
+    return tree, vm, env
+
+
+def fused_dir(tree):
+    return tree / "testdata/calibration/fused/tpch.sf40"
+
+
+def test_fused_profile_runs_one_capture_per_batch():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = fused_tree(tmp)
+        r = ok(nsys_profile(tmp, tree, vm, env, "--fused", "tpch.sf40", "--trace"))
+        runs = (tmp / "bench.log").read_text().splitlines()
+        assert runs == [f"--nocapture --test-threads=1 bench_fused_tpch_sf40_{b}_tp1_single --exact record=unset"
+                        for b in BATCHES], runs
+        for b in BATCHES:
+            assert (fused_dir(tree) / f"{b}.calls.tsv").is_file(), (b, r.stdout)
+            assert (fused_dir(tree) / f"{b}.loads.tsv").is_file(), (b, r.stdout)
+        assert not (fused_dir(tree) / "failed.tsv").exists()
+        assert not (tree / "testdata/calibration/calls.tsv").exists(), "the corpus's files are not touched"
+
+
+def test_fused_profile_joins_each_batch_against_its_own_record():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = fused_tree(tmp, records=["first3", "first10", "all"])
+        r = nsys_profile(tmp, tree, vm, env, "--fused", "tpch.sf40", "--metrics")
+        assert r.returncode == 1, (r.returncode, r.stdout, r.stderr)
+        runs = (tmp / "bench.log").read_text().splitlines()
+        assert len(runs) == 4 and all(run.endswith("record=" + str(vm / "testdata/calibration/fused/tpch.sf40"
+                                                                       "/records-metrics.tsv")) for run in runs), runs
+        readers = log_lines(tmp / "hbm.log")
+        joins = [a for a in readers if "--capture" in a]
+        joined = ["first3", "first10", "all"]  # first20 has no record, so its join is refused
+        assert [a[a.index("--case") + 1] for a in joins] == [f"tpch.sf40 {b} tp1-single" for b in joined], joins
+        assert [a[a.index("--record") + 1] for a in joins] == [
+            f"testdata/calibration/fused/tpch.sf40/{b}.records.tsv" for b in joined], joins
+        (merge,) = [a for a in readers if "--parts" in a]
+        records = [merge[i + 1] for i, w in enumerate(merge) if w == "--record"]
+        assert records == [f"testdata/calibration/fused/tpch.sf40/{b}.records.tsv"
+                           for b in ("first3", "first10", "all")], merge
+        assert len([w for w in merge if w == "--parts"]) == 3, merge
+        assert (fused_dir(tree) / "hbm.tsv").is_file(), r.stdout
+        failed = (fused_dir(tree) / "failed.tsv").read_text().splitlines()
+        assert len(failed) == 1 and failed[0].startswith("first20\tmetrics\t"), failed
+        for b in BATCHES:
+            assert (vm / f"testdata/calibration/fused/tpch.sf40/{b}.records.tsv").exists() == (b != "first20"), \
+                "a clean record is never removed or replaced"
+
+
+def test_fused_profile_refuses_a_filter():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = fused_tree(tmp)
+        for extra_env, args, word in (({"PCK_TEST_FILTER": "first3"}, (), "PCK_TEST_FILTER"),
+                                      ({}, ("--cases", tmp / "x.csv"), "--cases"),
+                                      ({}, ("--device", "h100-80gb-hbm3"), "--device")):
+            r = nsys_profile(tmp, tree, vm, {**env, **extra_env}, "--fused", "tpch.sf40", *args)
+            assert r.returncode != 0, (word, r.stdout, r.stderr)
+            assert "--fused" in r.stderr and word in r.stderr, (word, r.stderr)
+        r = nsys_profile(tmp, tree, vm, env, "--fused", "tpch")
+        assert r.returncode != 0 and "tpch" in r.stderr, r.stderr
+        assert not (tmp / "rsh.log").exists(), (tmp / "rsh.log").read_text()
+
+
+def test_fused_profile_lists_a_failed_capture_and_goes_on():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = fused_tree(tmp)
+        r = nsys_profile(tmp, tree, vm, {**env, "FAKE_FAIL_BATCH": "first10"}, "--fused", "tpch.sf40", "--trace")
+        assert r.returncode != 0, (r.stdout, r.stderr)
+        failed = (fused_dir(tree) / "failed.tsv").read_text().splitlines()
+        assert [line.split("\t")[:2] for line in failed] == [["first10", "trace"]], failed
+        for b in ("first3", "first20", "all"):
+            assert (fused_dir(tree) / f"{b}.calls.tsv").is_file(), b
+        assert not (fused_dir(tree) / "first10.calls.tsv").exists()
+        assert "failed.tsv" in r.stderr, r.stderr
 
 
 if __name__ == "__main__":
