@@ -58,11 +58,11 @@ Starting a chain, and everything else the human does: `llm-wiki/README.md`.
   subject near its verb. These three are read under pressure by an agent looking for a single
   fact, and a long sentence hides the fact in the middle of itself.
 - **Every commit keeps code, code comments, and llm-wiki content in agreement.**
-- **Never open a Nebius credential file.** `~/.nebius/config.yaml`, `~/.nebius/credentials.yaml`
-  and any `*.pem` under `~/.nebius/`, on any host, the VM's copy included: no `cat`, `grep`,
-  `sed`, Read, or redaction attempt. A redaction leaked a service account's private key into a
-  transcript on 2026-10-14. Reach the cloud through `scripts/nebius.sh`; learn the CLI from
-  `nebius … --help`.
+- **Never open a Nebius credential file.** `~/.nebius/config.yaml`, `~/.nebius/credentials.yaml`,
+  any `*.pem` under `~/.nebius/`, and `~/.config/peacock/nebius.yaml`, on the laptop and on a VM,
+  on any host, the VM's copy in `/root/.nebius/` included: no `cat`, `grep`, `sed`, Read, or
+  redaction attempt. A redaction leaked a service account's private key into a transcript on
+  2026-10-14. Reach the cloud through `scripts/nebius.sh`; learn the CLI from `nebius … --help`.
 
 ## Board protocol
 
@@ -423,24 +423,32 @@ Build/test workflows, hosts, and datasets: `llm-wiki/build-test.md`. Style:
 - **A GPU step is bracketed, on the VM its work belongs to** (`build-test.md`, "Nebius host",
   host roles). The VM-time rule: a VM starts right before its first remote command and stops
   right after its last pull, never up across a local build, CI, a review or the human.
-  - The L40S (nebius-gpu), for correctness: `scripts/build-test.sh --gpu --build` (local, in
-    the build image, the L40S stopped) → `scripts/nebius.sh start` →
-    `scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt ship` → `… run
-    --detach list`, polled with `… status`, → `scripts/nebius.sh stop`. `… prepare --no-sf40`
+  - The L40S (nebius-gpu), for correctness: `scripts/build-test.sh --gpu --build` (local, in the
+    build image, the L40S stopped) → `scripts/nebius.sh start` →
+    `scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt ship` →
+    `… run --detach list`, polled with `… status` or watched with `… follow`, →
+    `scripts/nebius.sh stop`. `… cancel` ends a run that must not finish. `… prepare --no-sf40`
     comes first on a fresh VM, and again whenever `run` refuses its image, exit 2. Only the L40S
     list runs there: no sf40, no benchmarks.
   - The H100 (nebius-h100), for sf40, benchmarks and Nsight, there and only there: the CPU-VM
     build (`build-test.md`, "Nebius host", "The CPU-VM build"), then
     `scripts/nebius.sh --instance-id computeinstance-e00e6yena4nzjgaym0 --profile editor-eu start`
-    → `scripts/env/run-gpu.sh … ship | run | pull` → `… stop`. `prepare` comes first on a fresh
-    VM, and again whenever `run` refuses its image, exit 2: the run image no longer matches the tree.
+    → `scripts/env/run-gpu.sh … ship | run | pull` → `… stop`; `… follow` takes up a run's log,
+    and `… cancel` ends a run. `prepare` comes first on a fresh VM, and again whenever `run`
+    refuses its image, exit 2: the run image no longer matches the tree.
   - The 128-core CPU VM (nebius-cpu128) runs DuckDB and stages the H100's install: binaries for
     H100 runs are built there. Local builds, in the build image, stay for development.
 
-  If a host is lost mid-step: `status`, `start` (on 75, report to the coordinator, which owns
-  the retry), `ship` again, rerun the step. A soft stop's exit 2 is someone else's run on the card:
-  leave it. Never edit `~/.ssh/config` for a VM, and never accept a host key by hand:
-  `nebius.sh` resolves the IP and replaces a changed key itself.
+  If the ssh to a host drops mid-step, a `run` or `follow` exits 1 naming `follow`; any other
+  step's ssh to the VM exits 255 naming `nebius.sh status`; a `ship` stream tried five times
+  exits 1 naming the stream; a `pull`'s rsync, tried four times, ends with rsync's own exit (255
+  or 30) and no hint. Then run `scripts/nebius.sh … status`. RUNNING: the run goes on there;
+  `run-gpu.sh … follow` takes it up from its first line, `… cancel` ends it, and `ship` or `run`
+  again is refused, exit 2, while it goes. Not RUNNING (a preemptible VM stopped under the run):
+  `start` (on 75, report to the coordinator, which owns the retry); `… status` then reads the
+  run as `ended without a status`; `ship` again, and rerun the step. A soft stop's exit 2 is
+  someone else's run on the card: leave it. Never edit `~/.ssh/config` for a VM, and never
+  accept a host key by hand: `nebius.sh` resolves the IP and replaces a changed key itself.
 - **You never look at CI.** Not a run, not its logs, not its config. Work the tests
   directly, locally or on a remote host. A CI failure reaches you as a failing test the
   coordinator hands you, carrying its signature; that is the only form you ever see it in.

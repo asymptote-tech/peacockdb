@@ -20,7 +20,8 @@ class World:
     def __init__(self, install=None, raw_install=None):
         self.calls = []
         self.ps = " 1 900 bash\n 2 900 sshd\n"
-        self.dir = tempfile.mkdtemp()
+        self.owned = tempfile.TemporaryDirectory()  # removed with the World
+        self.dir = self.owned.name
         self.now = 5_000_000.0
         self.state_path, self.log_path = self.dir + "/state.json", self.dir + "/log"
         self.install_path, self.pts = self.dir + "/install.json", self.dir + "/pts"
@@ -211,12 +212,12 @@ def test_session_before_boot_or_ahead_of_now_is_not_activity():
 
 
 def test_load_install_reads_both_kinds():
-    d = tempfile.mkdtemp()
-    for kind, iid in (("cpu", CPU_ID), ("gpu", "computeinstance-e00e6yena4nzjgaym0")):
-        p = os.path.join(d, kind)
-        pathlib.Path(p).write_text(json.dumps({"instance_id": iid, "kind": kind}))
-        assert w.load_install(p) == (iid, kind, None)
-    assert w.load_install(os.path.join(d, "absent")) == (GPU_ID, "gpu", None)
+    with tempfile.TemporaryDirectory() as d:
+        for kind, iid in (("cpu", CPU_ID), ("gpu", "computeinstance-e00e6yena4nzjgaym0")):
+            p = os.path.join(d, kind)
+            pathlib.Path(p).write_text(json.dumps({"instance_id": iid, "kind": kind}))
+            assert w.load_install(p) == (iid, kind, None)
+        assert w.load_install(os.path.join(d, "absent")) == (GPU_ID, "gpu", None)
 
 
 if __name__ == "__main__":

@@ -3,8 +3,8 @@
 # A CPU VM's layout, and the steps bootstrap-vm.sh takes in the build image (llm-wiki/build-test.md,
 # "CPU VMs"). Every path but the data directory comes from $HOME, and every container runs as
 # the caller's uid:gid. Sourced after image-inputs.sh and data-inputs.sh.
-# A step function (machine_image_checked, machine_image_label_checked, machine_cargo_fetch,
-# machine_data_set, machine_cudf_source) is called as a statement of its own, never in `$(…)` or
+# A step function (machine_image_checked, machine_image_label_checked, machine_image_inputs_checked,
+# machine_cargo_fetch, machine_data_set) is called as a statement of its own, never in `$(…)` or
 # before `||`: set -e is what stops it at a failed step, and both turn it off inside. The others
 # print a value for `$(…)`.
 
@@ -17,53 +17,38 @@ MACHINE_DATA=${PEACOCK_DATA_DIR:-/var/lib/peacock}
 MACHINE_REGISTRY=$HOME/.cache/peacock/cargo-registry
 # Where the build image's cargo keeps downloaded crates (CARGO_HOME=/opt/rust/cargo).
 IMAGE_REGISTRY=/opt/rust/cargo/registry
+# Where a step's container sees the tree and the stage: a host path can cross the image's
+# /home/peacock, mode 750, which only uid 1000 enters.
+MACHINE_TREE=/peacock/tree
+MACHINE_STAGE=/peacock/stage
+
+# How a person reaches the machine docker runs on: empty on that machine itself (bootstrap-vm.sh);
+# scripts/nebius.sh with the call's options where docker is a VM's, set by run-gpu.sh and
+# check-build-image.sh.
+MACHINE_NEBIUS=
+
+# machine_vm_lost [<next>] — what to do once an ssh to the VM dropped or found it stopped: a
+# preemptible VM is stopped under whatever runs. <next> is the step after the start, this one again
+# by default. On stderr.
+machine_vm_lost() {
+  echo "${0##*/}: the VM may have been stopped (a preemptible one is): if $MACHINE_NEBIUS status" \
+    "does not say RUNNING, $MACHINE_NEBIUS start; then ${1:-run this step again}." >&2
+}
 
 # machine_cudf_gitlink <tree> — the third_party/cudf commit <tree>'s index pins.
 machine_cudf_gitlink() { git -C "$1" ls-files -s third_party/cudf | awk '$1 == 160000 { print $2 }'; }
 
-# machine_cudf_source <tree> — sets CUDF_SOURCE to the machine's checkout of the third_party/cudf
-# commit <tree> pins, with the paths the build image's prefetch takes, which the FFI build's
-# configure reads. One a commit, so a build's never moves under it; fetched under a lock when the
-# machine has none, and appearing only whole. A clone's own third_party/cudf is never read.
-machine_cudf_source() {
-  local tree=$1 commit url stage lock mask
-  commit=$(machine_cudf_gitlink "$tree")
-  url=$(git config --file "$tree/.gitmodules" --get submodule.third_party/cudf.url || true)
-  if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]] || [ -z "$url" ]; then
-    echo "${0##*/}: $tree pins no third_party/cudf commit, or its .gitmodules names no URL" >&2
-    return 2
-  fi
-  CUDF_SOURCE=$MACHINE_DATA/cudf/$commit
-  mask=$(umask)
-  umask 002
-  mkdir -p "$MACHINE_DATA/cudf"
-  exec {lock}> "$MACHINE_DATA/cudf/.$commit.lock"
-  flock "$lock"
-  if [ ! -d "$CUDF_SOURCE" ]; then
-    stage=$CUDF_SOURCE.partial
-    rm -rf "$stage"
-    git init -q "$stage"
-    if ! git -C "$stage" fetch -q --depth 1 --filter=blob:none "$url" "$commit"; then
-      rm -rf "$stage"
-      echo "${0##*/}: cannot fetch third_party/cudf $commit from $url" >&2
-      return 2
-    fi
-    git -C "$stage" sparse-checkout set --no-cone /cmake/ /cpp/cmake/ /VERSION /RAPIDS_BRANCH
-    git -C "$stage" checkout -q FETCH_HEAD
-    mv "$stage" "$CUDF_SOURCE"
-  fi
-  exec {lock}>&-
-  umask "$mask"
-}
-
 # machine_image_checked <ref> <tree> <cudf> [<kind>] — pulls the image <ref>, of <kind> build (the
-# default) or run, then machine_image_label_checked. A failed pull names the images.yml dispatch
-# that publishes <tree>'s image: return 2 when the registry has no such tag, else docker's status (a
-# network error, or the caller's ssh). docker's stderr goes to a file, not `$(…)`, so a docker
+# default) or run, then machine_image_label_checked. A failed pull says why: no such tag, naming the
+# images.yml dispatch that publishes <tree>'s image, return 2; a full disk (space or inodes), which
+# a retry cannot help, return 2; the caller's ssh dropped (255), its own hint above; the VM not
+# RUNNING, nebius.sh's refusal, 1; else docker's status, a registry or network error. docker's
+# stderr goes to a file, not `$(…)`, so a docker
 # wrapper's own exit still ends the script; an EXIT trap, ahead of the caller's own, then prints
 # the file and removes it. The trap runs inside the pull's `2>`, so it writes to a copy of stderr.
 machine_image_checked() {
-  local ref=$1 tree=$2 cudf=$3 kind=${4:-build} err rc=0 unpublished=0 branch publish caller_trap=() stderr
+  local ref=$1 tree=$2 cudf=$3 kind=${4:-build} err rc=0 unpublished=0 full=0 stopped=0
+  local branch publish caller_trap=() stderr
   err=$(mktemp)
   exec {stderr}>&2
   eval "caller_trap=($(trap -p EXIT))"  # trap -- '<command>' EXIT, or nothing
@@ -73,9 +58,32 @@ machine_image_checked() {
   docker pull "$ref" 2> "$err" || rc=$?
   cat "$err" >&2
   grep -qE ': not found$|manifest unknown' "$err" && unpublished=1
+  grep -q 'no space left on device' "$err" && full=1
+  grep -q 'is not RUNNING; refusing to ssh' "$err" && stopped=1
   rm -f "$err"
   if [ "${#caller_trap[@]}" -gt 0 ]; then trap -- "${caller_trap[2]}" EXIT; else trap - EXIT; fi
   exec {stderr}>&-
+  if [ "$rc" -ne 0 ] && [ "$full" = 1 ] && [ -n "$MACHINE_NEBIUS" ]; then
+    echo "${0##*/}: cannot pull $ref: the VM's disk is full (above), its space or its inodes, and" \
+      "a retry fails the same way. Free space on the VM first: $MACHINE_NEBIUS ssh" \
+      "'docker system df; df -h; df -i' shows what docker holds, the disk and its inodes." >&2
+    return 2
+  fi
+  if [ "$rc" -ne 0 ] && [ "$full" = 1 ]; then
+    echo "${0##*/}: cannot pull $ref: this machine's disk is full (above), its space or its" \
+      "inodes, and a retry fails the same way. Free space first: docker system df shows what" \
+      "docker holds, df -h the disk and df -i its inodes." >&2
+    return 2
+  fi
+  if [ "$rc" -eq 255 ]; then
+    echo "${0##*/}: cannot pull $ref: the ssh to the VM dropped (above)." >&2
+    return 255
+  fi
+  if [ "$rc" -ne 0 ] && [ "$stopped" = 1 ]; then
+    echo "${0##*/}: cannot pull $ref: the VM is not RUNNING (above)." >&2
+    machine_vm_lost
+    return "$rc"
+  fi
   if [ "$rc" -ne 0 ]; then
     branch=$(git -C "$tree" rev-parse --abbrev-ref HEAD 2> /dev/null || true)
     [ -n "$branch" ] && [ "$branch" != HEAD ] || branch="<this tree's branch>"
@@ -94,11 +102,18 @@ ${MACHINE_IMAGE%-build}-$kind:$(image_inputs_tag "$tree" "$kind" "$cudf"):
 }
 
 # machine_image_label_checked <ref> <tree> <cudf> [<kind>] — the image <ref> as it is, no pull:
-# refuses it, naming each input that differs, unless its peacockdb.inputs label is image_inputs
-# over <tree>.
+# machine_image_inputs_checked over its peacockdb.inputs label.
 machine_image_label_checked() {
-  local ref=$1 tree=$2 cudf=$3 kind=${4:-build} label differ
-  label=$(docker image inspect --format '{{index .Config.Labels "peacockdb.inputs"}}' "$ref")
+  local label
+  label=$(docker image inspect --format '{{index .Config.Labels "peacockdb.inputs"}}' "$1")
+  machine_image_inputs_checked "$label" "$@"
+}
+
+# machine_image_inputs_checked <label> <ref> <tree> <cudf> [<kind>] — refuses the image <ref>,
+# naming each input that differs, unless <label>, its peacockdb.inputs label as read, is
+# image_inputs over <tree>.
+machine_image_inputs_checked() {
+  local label=$1 ref=$2 tree=$3 cudf=$4 kind=${5:-build} differ
   if [ -z "$label" ] || [ "$label" = "<no value>" ]; then
     echo "${0##*/}: $ref has no peacockdb.inputs label: publish it again with scripts/env/image.sh" >&2
     return 2
@@ -119,8 +134,8 @@ machine_cargo_fetch() {
   exec {lock}> "$MACHINE_REGISTRY.lock"
   flock "$lock"
   docker run --rm --user "$MACHINE_USER" \
-    --mount "type=bind,src=$2,dst=$2,readonly" --mount "type=bind,src=$MACHINE_REGISTRY,dst=$IMAGE_REGISTRY" \
-    -w "$2" "$1" cargo fetch --locked
+    --mount "type=bind,src=$2,dst=$MACHINE_TREE,readonly" --mount "type=bind,src=$MACHINE_REGISTRY,dst=$IMAGE_REGISTRY" \
+    -w "$MACHINE_TREE" "$1" cargo fetch --locked
   exec {lock}>&-
 }
 
@@ -143,8 +158,8 @@ machine_data_set() {
     for entry in "${DATA_SETS[@]}"; do
       read -r -a words <<< "$entry"
       docker run --rm --user "$MACHINE_USER" --network none -e PEACOCK_NO_FETCH=1 \
-        --mount "type=bind,src=$stage,dst=$stage" -w "$stage" "$ref" \
-        bash -c 'umask 002 && exec "$@"' bash "$stage/generate_testdata.sh" "${words[@]:1}"
+        --mount "type=bind,src=$stage,dst=$MACHINE_STAGE" -w "$MACHINE_STAGE" "$ref" \
+        bash -c 'umask 002 && exec "$@"' bash "$MACHINE_STAGE/generate_testdata.sh" "${words[@]:1}"
       if [ ! -d "$stage/${words[0]}" ]; then
         echo "${0##*/}: the generator made no ${words[0]} in $stage" >&2
         return 2

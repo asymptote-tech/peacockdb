@@ -66,8 +66,8 @@ const RUNNER_SIDE: &[(&str, &str, &str)] = &[
         "python3 \"scripts/env/tests/$n\"",
         "the step's on_runner files need what the image cannot give the runner's uid: a locale \
          that sorts unlike C, en_US.UTF-8 (#309), or a user name, which bootstrap-vm.sh and \
-         provision-vm.sh read as a VM's or laptop's own user; stdlib only, so the runner's \
-         python3 runs them",
+         provision-vm.sh read as a VM's or laptop's own user, and real ssh needs; stdlib only, \
+         so the runner's python3 runs them",
     ),
     (
         "./.github/actions/build-image",

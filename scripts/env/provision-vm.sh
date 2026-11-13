@@ -8,15 +8,19 @@
 # <login> has sudo on the VM. The developer's Linux user there is --user, this machine's by default,
 # and bootstrap-vm.sh runs as it at --ref on every run. --env is needed until ~/.config/peacock holds
 # the storage keys. --gpu-key is a private key the GPU hosts already accept, beside its .pub,
-# ~/.config/peacock/gpu_ed25519 by default. The PAT, asked for once, and the GPU key reach the VM on
-# ssh's stdin alone. The VM is recorded as --name, its address by default. --new-pat replaces the
-# PAT here and on every recorded VM it reaches. A rerun skips what is done.
+# ~/.config/peacock/gpu_ed25519 by default. ~/.config/peacock/nebius.yaml must hold the two Nebius
+# profiles nebius-profiles.sh cuts, and nothing else; a missing one is cut first, from
+# ~/.nebius/config.yaml. The PAT, asked for once, the GPU key and nebius.yaml reach the VM on ssh's
+# stdin alone. The VM is recorded as --name, its address by default. --new-pat replaces the PAT here
+# and on every recorded VM it reaches. A rerun skips what is done.
 [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; } || {
   echo "${0##*/}: this machine's bash is $BASH_VERSION, older than 4.4: install a current one (on macOS, brew install bash)" >&2; exit 2; }
 # Above, in bash 3.2's syntax and before any source: macOS ships 3.2, and what follows needs 4.4.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$here/../lib/peacock-config.sh"
+# shellcheck source-path=SCRIPTDIR source=../lib/ssh-retry.sh
+. "$here/../lib/ssh-retry.sh"
 shopt -s inherit_errexit
 
 die() { echo "provision-vm.sh: $*" >&2; exit 2; }
@@ -52,7 +56,8 @@ else
   dev=$user@$address
 fi
 
-# What this machine must hold, checked before anything is written here or there.
+# What this machine must hold, checked before anything is written here or there. The one exception
+# is a missing nebius.yaml: it is cut here, and kept when a later check refuses.
 if [ -n "$target" ]; then
   for key in user.name user.email; do
     [ -n "$(git -C "$here" config --get "$key" || true)" ] \
@@ -70,9 +75,13 @@ if [ -n "$target" ]; then
   gpu_key=${gpu_key:-$PEACOCK_GPU_KEY}
   [ -f "$gpu_key" ] || die "no GPU key $gpu_key: --gpu-key names a private key the GPU hosts accept"
   [ -f "$gpu_key.pub" ] || die "no $gpu_key.pub beside the GPU key: --gpu-key names a key with its .pub"
+  peacock_nebius_cli
+  peacock_nebius_config_cut
+  peacock_nebius_config_checked "$PEACOCK_NEBIUS" "$PEACOCK_NEBIUS_CONFIG"
 fi
 
-# The token is read and checked before anything is kept, so a wrong one leaves nothing behind.
+# The token is read and checked before anything is kept, so a wrong one leaves nothing behind but a
+# nebius.yaml cut above.
 if [ -n "$new_pat" ] || [ ! -s "$PEACOCK_PAT" ]; then
   command -v gh > /dev/null || die "no gh on this machine to check the token with"
   origin=$(git -C "$here" remote get-url origin)
@@ -105,7 +114,7 @@ if [ -n "${token:-}" ]; then
 fi
 
 ssh_opts=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
-on() { local who=$1; shift; ssh "${ssh_opts[@]}" -- "$who" "$@"; }
+on() { local who=$1; shift; ssh_retry ssh "${ssh_opts[@]}" -- "$who" "$@"; }
 # remote_test <command> — <command>'s status as the developer on the VM; an ssh failure stops the run.
 remote_test() {
   local rc=0
@@ -134,7 +143,11 @@ if [ "$user" != "$login" ]; then
     install -m 600 -o "$user" -g "$gid" "$(getent passwd "$login" | cut -d: -f6)/.ssh/authorized_keys" \
       "$home/.ssh/authorized_keys"
   fi
-  echo "$user ALL=(ALL) NOPASSWD:ALL" | install -m 440 /dev/stdin "/etc/sudoers.d/peacock-$user"
+  # From a file: uutils' install (Ubuntu 26.04) refuses /dev/stdin onto a file that exists.
+  sudoers=$(mktemp)
+  trap 'rm -f "$sudoers"' EXIT
+  echo "$user ALL=(ALL) NOPASSWD:ALL" > "$sudoers"
+  install -m 440 "$sudoers" "/etc/sudoers.d/peacock-$user"
 fi
 ROOT
 
@@ -143,18 +156,18 @@ ROOT
   if [ -n "$ref" ]; then run+=" --ref $(printf %q "$ref")"; fi
   on "$dev" "$run"'; s=$?; rm -f "$f"; exit $s' < "$here/bootstrap-vm.sh"
 
-  # Secrets on ssh's stdin only, from a copy named as the VM keeps them. The VM's peacock.env names
-  # its own copy of the GPU key, on a line of its own whether or not the file ended in a newline.
-  stage=$(mktemp -d)
+  # Secrets on ssh's stdin only, from a copy named as the VM keeps them. nebius.yaml is copied, never
+  # read: only the CLI reads it.
+  # Staged in ~/.config/peacock, as every secret stays: a killed run leaves nothing in /tmp.
+  stage=$(mktemp -d "$PEACOCK_CONFIG/provision.XXXXXX")
   trap 'rm -rf "$stage"' EXIT
   cp "$PEACOCK_ENV" "$stage/peacock.env"
   cp "$gpu_key" "$stage/gpu_ed25519"
   cp "$gpu_key.pub" "$stage/gpu_ed25519.pub"
+  cp "$PEACOCK_NEBIUS_CONFIG" "$stage/nebius.yaml"
   chmod 600 "$stage"/*
-  tar -C "$stage" -cf - peacock.env gpu_ed25519 gpu_ed25519.pub \
-    | on "$dev" 'umask 077 && mkdir -p .config/peacock && chmod 700 .config/peacock &&
-                 tar -C .config/peacock -xf - && cd .config/peacock &&
-                 { [ -z "$(tail -c 1 peacock.env)" ] || echo; echo "GPU_SSH_KEY_FILE=$HOME/.config/peacock/gpu_ed25519"; } >> peacock.env'
+  tar -C "$stage" -cf - peacock.env gpu_ed25519 gpu_ed25519.pub nebius.yaml \
+    | on "$dev" 'umask 077 && mkdir -p .config/peacock && chmod 700 .config/peacock && tar -C .config/peacock -xf -'
   rm -rf "$stage"
   if [ -n "$new_pat" ] || ! remote_test 'env -u GH_TOKEN -u GITHUB_TOKEN gh auth status > /dev/null 2>&1'; then
     on "$dev" 'gh auth login --with-token --insecure-storage' < "$PEACOCK_PAT"
@@ -191,7 +204,7 @@ if [ -n "$target" ]; then
   if remote_test 'test -s "$HOME/.claude/.credentials.json"'; then
     echo "Claude Code is logged in on $dev"
   elif [ -t 0 ]; then
-    ssh "${ssh_opts[@]}" -t -- "$dev" "$login_cmd"
+    ssh_retry ssh "${ssh_opts[@]}" -t -- "$dev" "$login_cmd"
   else
     echo "Claude Code is not logged in on $dev: run ssh -t $dev '$login_cmd'" >&2
   fi

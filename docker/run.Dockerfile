@@ -1,12 +1,12 @@
-# check=skip=InvalidDefaultArgInFrom
 # The run image for one cuDF version: the runtime of the environment the binaries were built
 # against, and nothing to build with. Built by scripts/env/image.sh, which passes every
 # docker/pins.env line as a build arg; its use and size are in
 # llm-wiki/build-test.md, "Images". The binaries are mounted at /peacock/install and the data at
 # /peacock/testdata (docker/run-tests.sh). The CUDA driver is the host's, mounted by the NVIDIA
 # Container Toolkit under `docker run --gpus all`. No secret, host or user home is in any layer.
-# No default: without --build-arg CUDF the last FROM names no stage and the build stops (line 1).
-ARG CUDF
+# Each pin's ARG defaults to its pins.env value (test_pins.py holds them equal), so a plain
+# `docker build` builds the same layers.
+ARG CUDF=25.02
 
 # /opt/cudf is the build image's prefix less what only a build or Python needs
 # (docker/runtime-spec.sh), at the same path. The download tools stay in this stage, and so does
@@ -14,8 +14,8 @@ ARG CUDF
 # (libcuvs_static.a alone is 1 GB) go in the same step.
 FROM ubuntu:24.04 AS prefix
 ARG CUDF
-ARG MICROMAMBA_VERSION
-ARG MICROMAMBA_SHA256
+ARG MICROMAMBA_VERSION=2.9.0-0
+ARG MICROMAMBA_SHA256=366cd9cd8be14df1ab8ed50352a82111082a36686b2d389fdb79a92c3fafb3e3
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
@@ -38,12 +38,12 @@ RUN /tmp/runtime-spec.sh "/tmp/conda/cudf-${CUDF}.spec" > /tmp/runtime.spec \
 # toolkit driver of the spec's cudart (pins.env). The stage is chosen by version, as the build
 # image chooses its gcc.
 FROM ubuntu:24.04 AS run-25.02
-ARG DRIVER_MINIMUM_25_02
+ARG DRIVER_MINIMUM_25_02=535.104.05
 RUN [ -n "${DRIVER_MINIMUM_25_02}" ]
 LABEL peacockdb.driver-minimum=${DRIVER_MINIMUM_25_02}
 
 FROM ubuntu:24.04 AS run-26.02
-ARG DRIVER_MINIMUM_26_02
+ARG DRIVER_MINIMUM_26_02=575.57.08
 RUN [ -n "${DRIVER_MINIMUM_26_02}" ]
 LABEL peacockdb.driver-minimum=${DRIVER_MINIMUM_26_02}
 
@@ -57,3 +57,7 @@ COPY docker/run-tests.sh /opt/run/run-tests.sh
 USER peacock
 WORKDIR /tmp
 ENTRYPOINT ["/opt/run/run-tests.sh"]
+# The driver a card of compute capability 10 or later needs to JIT the binaries' PTX (pins.env).
+# Last, so a change to it rebuilds no layer.
+ARG DRIVER_MINIMUM_PTX=575.51.03
+LABEL peacockdb.driver-minimum-ptx=${DRIVER_MINIMUM_PTX}

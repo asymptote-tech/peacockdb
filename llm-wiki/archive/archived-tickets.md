@@ -196,6 +196,19 @@ keeps the plan's order, 3.6–6.5 % cheaper than with the defect; q69's anti joi
 `test_an_anti_join_keeps_the_unmatched_share_where_the_domain_is_wider_than_both_keys` and
 `test_a_right_anti_join_keeps_the_probe_s_unmatched_share_where_the_domain_is_wider`.
 
+<a id="t313"></a>
+### #313 — the results line's `tr -s` squeezes `__` in a value, so `test_results_name_version_threads_host` fails at random
+`duckdb_minimal.sh`'s `word()` writes each value of the `# ` line of `--results` with
+`tr -s ' \t' '_'`. `-s` squeezes runs of `_` too, not only the whitespace it replaced, so a value
+that holds `__` is changed. The test's data directory is a `mkdtemp`, whose random part can hold
+`__`: `db=` then differs from the directory, and the test fails, about one run in two hundred.
+A host or CPU name with `__` is changed the same way.
+
+The fix: squeeze whitespace only, `sed 's/[[:space:]]\+/_/g'`.
+
+**Done.** `word()` replaces each run of whitespace with one `_` (`sed -E 's/[[:space:]]+/_/g'`), so
+a `__` in a value stays; `test_a_value_holding_a_double_underscore_comes_through_unchanged` holds it.
+
 <a id="t174"></a>
 ### #174 (two clamps, one rule) — two clamps for one rule, and nothing compares them
 **Done 2026-10-21 by [`guard-checks`](../tasks/guard-checks.md), on `ENS-guard-checks` (PR #170); awaiting merge.**

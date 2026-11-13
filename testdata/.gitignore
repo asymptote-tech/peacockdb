@@ -2,8 +2,9 @@
 # Anchored to this dir (leading /) so they ONLY match the data dirs at
 # testdata/<dataset>.sf<N>/ and NOT the committed goldens under
 # testdata/goldens/<dataset>.sf<N>/ (the unanchored form caught those too).
-/tpch.sf*/
-/tpcds.sf*/
+# No trailing /: on a VM each is a link to the machine's set, which git sees as a file.
+/tpch.sf*
+/tpcds.sf*
 
 # Calibration output: the derived text is committed so `git diff` shows the numbers move
 # (llm-wiki names each file's writer). The record is not: it lives in the `calibration`

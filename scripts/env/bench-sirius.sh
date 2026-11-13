@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sirius on the H100, by flags (sirius-bench in llm-wiki/archive/archived-tasks.md): per dataset,
-# run-gpu.sh's sirius verb over a device list's queries, then pull, then the answers rendered at
-# home.
+# run-sirius.sh's run over a device list's queries, then run-gpu.sh's pull, then the answers
+# rendered at home.
 #
 #   bench-sirius.sh --instance-id <id> [--profile <name>] --dataset tpch|tpcds|all [--sf <n>]
 #                   [--cases <cases.csv>] [--query <q>]… [--runs <n>] [--timeout <s>] [--resume]
@@ -14,7 +14,7 @@
 # list as --list, so it replaces its own rows and answers alone and keeps the rest; it refuses a
 # sirius.tsv of another Sirius commit or host, and a kept timed row whose answer the database
 # lacks. Per dataset, tpch before tpcds:
-#   run-gpu.sh … sirius -- --dataset <ds> --sf <sf> --queries <stems> --runs <n> --timeout <s>
+#   run-sirius.sh … run -- --dataset <ds> --sf <sf> --queries <stems> --runs <n> --timeout <s>
 #     [--list <every stem>] [--resume]
 #   run-gpu.sh … pull
 #   scripts/build-test.sh -- python3 testdata/duckdb_result.py --dataset <ds> --sf <sf>
@@ -23,11 +23,12 @@
 # The render runs in the build image, whose DuckDB is the 1.5.4 the oracle is pinned at. --runs is
 # 10 by default (test_support's MEASURED_RUNS), --timeout 900 s a query, the pin excluded. --resume
 # keeps the rows this Sirius commit and host already wrote. --dry-run prints the commands and runs
-# none. --instance-id and --profile go to every run-gpu.sh call; the VM is the caller's to start
-# and stop, and `run-gpu.sh … prepare --sirius` readies it.
+# none. --instance-id and --profile go to every run-sirius.sh and run-gpu.sh call; the VM is the
+# caller's to start and stop, and `run-gpu.sh … prepare` then `run-sirius.sh … prepare` ready it.
 #
-# Exit 0; 2 bad input, refused before any call; else the exit of the run-gpu.sh call that stopped
-# the run (1 the run failed, 2 the runner refused, 3 and 4 run-gpu.sh's, 75 and 69 the VM's).
+# Exit 0; 2 bad input, refused before any call; else the exit of the run-sirius.sh or run-gpu.sh
+# call that stopped the run (1 the run failed, 2 the runner refused, 3 and 4 theirs, 75 and 69 the
+# VM's).
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -36,6 +37,7 @@ die() { echo "bench-sirius.sh: $*" >&2; exit 2; }
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(git -C "$here" rev-parse --show-toplevel)
+RUN_SIRIUS=("${RUN_SIRIUS_SH:-$here/run-sirius.sh}")
 RUN_GPU=("${RUN_GPU_SH:-$here/run-gpu.sh}")
 BUILD_TEST=${BUILD_TEST_SH:-$root/scripts/build-test.sh}
 instance="" profile="" dataset="" sf="" cases="" runs="" timeout="" resume=0 dry_run=0 queries=()
@@ -108,8 +110,8 @@ for query in "${!wanted[@]}"; do
 done
 [ ${#plan[@]} -gt 0 ] || die "no row of $cases at sf$sf for ${sets[*]}: nothing to run"
 
-gpu=("${RUN_GPU[@]}" --instance-id "$instance")
-[ -z "$profile" ] || gpu+=(--profile "$profile")
+vm=(--instance-id "$instance")
+[ -z "$profile" ] || vm+=(--profile "$profile")
 extra=()
 [ "$resume" -eq 0 ] || extra+=(--resume)
 
@@ -130,9 +132,9 @@ for entry in "${plan[@]}"; do
   read -r ds list every <<< "$entry"
   narrowed=()
   [ ${#queries[@]} -eq 0 ] || narrowed=(--list "$every")
-  step "${gpu[@]}" sirius -- --dataset "$ds" --sf "$sf" --queries "$list" --runs "$runs" --timeout "$timeout" \
-    "${narrowed[@]}" "${extra[@]}"
-  step "${gpu[@]}" pull
+  step "${RUN_SIRIUS[@]}" "${vm[@]}" run -- --dataset "$ds" --sf "$sf" --queries "$list" --runs "$runs" \
+    --timeout "$timeout" "${narrowed[@]}" "${extra[@]}"
+  step "${RUN_GPU[@]}" "${vm[@]}" pull
   step "$BUILD_TEST" -- python3 testdata/duckdb_result.py --dataset "$ds" --sf "$sf" \
     --answers "testdata/calibration/sirius/$ds.sf$sf/answers.duckdb" --out "testdata/goldens/$ds.sf$sf/sirius-result.txt"
 done

@@ -11,7 +11,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
 from gpu_host import CPU_VM, Host, label  # noqa: E402
-from machine import NO_HOST, UNPUBLISHED  # noqa: E402
+from machine import NO_HOST, NO_SPACE, UNPUBLISHED  # noqa: E402
 
 SCRIPT = "scripts/env/check-build-image.sh"
 # What image-ref.sh prints for a tree whose inputs the moving tag does not hold: a published image by
@@ -103,6 +103,40 @@ def test_check_build_image_names_a_pull_that_failed_otherwise():
         assert r.returncode == 1, (r.returncode, r.stderr)
         assert f"cannot pull {h.build_ref}" in r.stderr and NO_HOST in r.stderr, r.stderr
         assert "gh workflow run images.yml --ref master -f kind=build -f cudf=25.02" in r.stderr, r.stderr
+
+
+def test_check_build_image_names_a_full_disk_on_the_vm():
+    with Host() as h:
+        images = h.world()["images"]
+        images.pop(h.build_ref)
+        h.world(images=images, pull_error=NO_SPACE)
+        r = checked(h, *CPU_VM)
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        for words in ("disk is full", NO_SPACE, f"scripts/nebius.sh {' '.join(CPU_VM)} ssh 'docker system df; df -h; df -i'"):
+            assert words in r.stderr, (words, r.stderr)
+        assert "try again" not in r.stderr and r.stdout == "", (r.stdout, r.stderr)
+
+
+def test_check_build_image_names_a_vm_lost_mid_pull():
+    with Host() as h:
+        r = checked(h, *CPU_VM, env={"FAKE_NEBIUS_RC": "255", "FAKE_NEBIUS_RC_ON": f"docker pull {h.build_ref}"})
+        assert r.returncode == 255, (r.returncode, r.stderr)
+        for words in ("the ssh to the VM dropped", f"scripts/nebius.sh {' '.join(CPU_VM)} status", "run this step again"):
+            assert words in r.stderr, (words, r.stderr)
+        assert "registry or network" not in r.stderr and r.stdout == "", (r.stdout, r.stderr)
+
+
+def test_check_build_image_names_a_stopped_vm_at_the_label_read_and_before_the_pull():
+    # The label's read drops its ssh (255); the pull finds the VM stopped, nebius.sh's refusal (1).
+    stopped = {"FAKE_NEBIUS_RC": "1", "FAKE_NEBIUS_RC_TEXT": f"nebius: {CPU_VM[1]} is not RUNNING; refusing to ssh"}
+    for code, env in ((255, {"FAKE_NEBIUS_RC": "255", "FAKE_NEBIUS_RC_ON": "docker image inspect"}),
+                      (1, {**stopped, "FAKE_NEBIUS_RC_ON": "docker pull"})):
+        with Host() as h:
+            r = checked(h, *CPU_VM, env=env)
+            assert r.returncode == code, (code, r.returncode, r.stderr)
+            for words in ("may have been stopped", f"scripts/nebius.sh {' '.join(CPU_VM)} start", "run this step again"):
+                assert words in r.stderr, (code, words, r.stderr)
+            assert "registry or network" not in r.stderr and r.stdout == "", (code, r.stdout, r.stderr)
 
 
 def test_check_build_image_without_an_instance_id_is_refused():

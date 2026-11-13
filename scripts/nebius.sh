@@ -12,21 +12,33 @@
 #   nebius.sh ip                the IP, or exit 1 when not RUNNING
 #   nebius.sh start             start, wait for RUNNING and for ssh (idempotent); RUNNING
 #                                 with no ssh is exit 1, and a VM this call started is stopped
-#   nebius.sh stop [--force]    soft: refuse while a process is on the card, or, on a VM
-#                                 without one, while duckdb runs; --force: stop anyway
-#   nebius.sh ssh <cmd…>        run a command on the VM
-#   nebius.sh rsh <host> <cmd…> the same, for rsync -e (rsync's host argument is dropped)
+#   nebius.sh stop [--force]    soft: refuse while the card has a process or its lock is held,
+#                                 or, on a VM without one, while duckdb runs; a failing
+#                                 nvidia-smi is logged and refuses nothing; --force: stop anyway
+#   nebius.sh ssh <cmd…>        run a command on the VM; an ssh that fails before
+#                                 authenticating is tried again, four attempts in all
+#   nebius.sh rsh <host> <cmd…> one attempt, for rsync -e: the sync around it is what is retried
+#                                 (rsync's host argument is dropped)
 #   nebius.sh install-watch [--key-file <pem>]
 #                               install the idle watcher, root's one profile and the install file;
-#                                 --key-file embeds the PEM of a profile that keeps its key in one;
-#                                 a profile that embeds its key already refuses it
+#                                 a profile's key path gets the file it names embedded, or the PEM
+#                                 --key-file names; beside an embedded key --key-file is refused
+#
+# Every CLI call names its config, GPU_HOST_NEBIUS_CONFIG, else ~/.config/peacock/nebius.yaml; a
+# missing nebius.yaml is cut first by scripts/env/nebius-profiles.sh where ~/.nebius/config.yaml
+# exists. The CLI is NEBIUS, else nebius on PATH, else ~/.nebius/bin's; no config or no CLI is exit 1.
+# The ssh key is GPU_HOST_KEY, else ~/.config/peacock/gpu_ed25519 when it exists.
 #
 # Exit codes: 0 done; 2 busy, soft stop refused; 75 no capacity, retry later; 69 instance gone;
 # 1 other; 64 usage.
 #
-# NEVER print, cat or grep a Nebius credential file (~/.nebius/config.yaml and friends).
+# NEVER print, cat or grep a Nebius credential file (~/.nebius/config.yaml, nebius.yaml, …).
 # One redaction attempt already leaked a private key into a transcript.
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib/ssh-retry.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/ssh-retry.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/peacock-config.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/peacock-config.sh"
 
 DEFAULT_ID=computeinstance-e00tnrse7ayntnzcyt
 INSTANCE_ID=$DEFAULT_ID
@@ -34,46 +46,55 @@ PROFILE=
 
 bad_option() { echo "nebius: $1" >&2; exit 64; }
 
-id_set=0 profile_set=0
+id_set=0 profile_set=0 GIVEN=()
 while :; do
   case ${1:-} in
     --instance-id)
       [ "$id_set" -eq 0 ] || bad_option "--instance-id given twice"
       [[ ${2:-} =~ ^computeinstance-[a-z0-9]+$ ]] || bad_option "--instance-id '${2:-}' is not a computeinstance id"
-      INSTANCE_ID=$2; id_set=1; shift 2;;
+      INSTANCE_ID=$2; id_set=1; GIVEN+=("$1" "$2"); shift 2;;
     --profile)
       [ "$profile_set" -eq 0 ] || bad_option "--profile given twice"
       [[ ${2:-} =~ ^[A-Za-z0-9_.-]+$ ]] || bad_option "--profile '${2:-}' is not a profile name"
-      PROFILE=$2; profile_set=1; shift 2;;
+      PROFILE=$2; profile_set=1; GIVEN+=("$1" "$2"); shift 2;;
     *) break;;
   esac
 done
 # One alias per instance in the one known-hosts file, so one VM's new key never touches another's.
 if [ "$INSTANCE_ID" = "$DEFAULT_ID" ]; then ALIAS=nebius-gpu; else ALIAS=nebius-$INSTANCE_ID; fi
 
-NEBIUS=${NEBIUS:-nebius}
 SSH=${GPU_HOST_SSH:-ssh}
 KEYSCAN=${GPU_HOST_KEYSCAN:-ssh-keyscan}
 RSYNC=${GPU_HOST_RSYNC:-rsync}
 USER_ON_VM=${GPU_HOST_USER:-dmitry}
 STATE_DIR=${GPU_HOST_STATE_DIR:-$HOME/.config/peacock/nebius}
-NEBIUS_CONFIG=${GPU_HOST_NEBIUS_CONFIG:-$HOME/.nebius/config.yaml}
+NEBIUS_CONFIG=${GPU_HOST_NEBIUS_CONFIG:-$PEACOCK_NEBIUS_CONFIG}
 POLL=${GPU_HOST_POLL:-10}
 START_TIMEOUT=${GPU_HOST_START_TIMEOUT:-900}
 STOP_TIMEOUT=${GPU_HOST_STOP_TIMEOUT:-600}
 CLI_TIMEOUT=${GPU_HOST_CLI_TIMEOUT:-120}
 KNOWN_HOSTS=$STATE_DIR/known_hosts
 LOG=$STATE_DIR/nebius.log
-[ -x "$HOME/.nebius/bin/nebius" ] && PATH=$HOME/.nebius/bin:$PATH
+
+verb=${1:-}; shift || true
+case $verb in
+  status|ip|start|stop|ssh|rsh|install-watch) ;;
+  *) sed -n '2,33p' "$0" >&2; exit 64;;
+esac
+# Exit 1, not peacock-config.sh's 2: here 2 is "busy".
+if [ -z "${GPU_HOST_NEBIUS_CONFIG:-}" ]; then peacock_nebius_config_cut || exit 1; fi
+[ -f "$NEBIUS_CONFIG" ] \
+  || { echo "nebius: no $NEBIUS_CONFIG: make it with scripts/env/nebius-profiles.sh" >&2; exit 1; }
+if [ -z "${NEBIUS:-}" ]; then peacock_nebius_cli || exit 1; NEBIUS=$PEACOCK_NEBIUS; fi
 mkdir -p "$STATE_DIR"; touch "$KNOWN_HOSTS"
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$LOG" >&2; }
 
-# cli <args…>: the Nebius CLI, bounded, with --profile when one was given. A hung API call must
-# not hold the caller (and a paid VM) past GPU_HOST_CLI_TIMEOUT; timeout(1) exits 124 then. Its
-# stdin is /dev/null: stdin belongs to the remote command (`nebius.sh ssh … < patch`, rsync's -e
-# transport).
-cli() { timeout "$CLI_TIMEOUT" "$NEBIUS" "$@" ${PROFILE:+--profile "$PROFILE"} </dev/null; }
+# cli <args…>: the Nebius CLI on NEBIUS_CONFIG, bounded, with --profile when one was given. A hung
+# API call must not hold the caller (and a paid VM) past GPU_HOST_CLI_TIMEOUT; timeout(1) exits 124
+# then. Its stdin is /dev/null: stdin belongs to the remote command (`nebius.sh ssh … < patch`,
+# rsync's -e transport).
+cli() { timeout "$CLI_TIMEOUT" "$NEBIUS" "$@" --config "$NEBIUS_CONFIG" ${PROFILE:+--profile "$PROFILE"} </dev/null; }
 
 # classify_error <stderr text> <cli rc> [code for a timeout, default 1] -> exit code.
 # Only the CLI's own error codes decide 69 and 75; a bare "not found" (a missing binary, a
@@ -129,8 +150,9 @@ ssh_opts() {
   printf '%s\n' -o "HostKeyAlias=$ALIAS" -o "UserKnownHostsFile=$KNOWN_HOSTS" \
     -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=15 \
     -o ServerAliveInterval=30 -o ServerAliveCountMax=4
-  [ -n "${GPU_HOST_KEY:-}" ] && printf '%s\n' -i "$GPU_HOST_KEY"
-  return 0
+  if [ -n "${GPU_HOST_KEY:-}" ]; then printf '%s\n' -i "$GPU_HOST_KEY"
+  elif [ -f "$PEACOCK_GPU_KEY" ]; then printf '%s\n' -i "$PEACOCK_GPU_KEY"
+  fi
 }
 
 # trust_current_key <ip>: the API says <ip> is this instance's, so its key is the one we
@@ -146,24 +168,29 @@ trust_current_key() {
   else log "host key stored for $INSTANCE_ID at $ip: $new"; fi
 }
 
-# vm_ssh <cmd…>: one ssh to the VM at its current IP, repairing the stored key once if the
-# API vouches for the IP.
-vm_ssh() {
-  local ip err rc opts
+# vm_ssh_with <attempts> <cmd…>: one ssh to the VM at its current IP, through the helper, repairing
+# the stored key once if the API vouches for the IP. An rsync's transport is one attempt: the rsync
+# around it is what is retried, so retries never nest. Only a refusal before authenticating is
+# ssh's own: after it, that text on stderr is the remote command's, and the command may have run.
+vm_ssh_with() {
+  local attempts=$1 ip err rc opts authenticated
+  shift
   ip=$(current_ip)
   [ -n "$ip" ] || { echo "nebius: $INSTANCE_ID is not RUNNING; refusing to ssh" >&2; return 1; }
   mapfile -t opts < <(ssh_opts)
   grep -q "^$ALIAS " "$KNOWN_HOSTS" || trust_current_key "$ip" || return 1
   err=$(mktemp); rc=0
-  "$SSH" "${opts[@]}" "$USER_ON_VM@$ip" "$@" 2>"$err" || rc=$?
-  if [ "$rc" -eq 255 ] && grep -qE 'HOST IDENTIFICATION HAS CHANGED|Host key verification failed' "$err"; then
+  ssh_retry_up_to "$attempts" authenticated "$SSH" "${opts[@]}" "$USER_ON_VM@$ip" "$@" 2>"$err" || rc=$?
+  if [ "$rc" -eq 255 ] && [ "$authenticated" = 0 ] \
+    && grep -qE 'HOST IDENTIFICATION HAS CHANGED|Host key verification failed' "$err"; then
     rm -f "$err"
     [ "$(current_ip)" = "$ip" ] || { echo "nebius: IP moved during the call; retry" >&2; return 1; }
     trust_current_key "$ip" || return 1
-    "$SSH" "${opts[@]}" "$USER_ON_VM@$ip" "$@"; return $?
+    ssh_retry_up_to "$attempts" authenticated "$SSH" "${opts[@]}" "$USER_ON_VM@$ip" "$@"; return $?
   fi
   cat "$err" >&2; rm -f "$err"; return "$rc"
 }
+vm_ssh() { vm_ssh_with "$SSH_RETRY_ATTEMPTS" "$@"; }
 
 wait_for_state() {  # <wanted> <timeout seconds>
   local want=$1 limit=$2 waited=0 s
@@ -200,9 +227,10 @@ cmd_start() {
     rm -f "$err"; started=1
   fi
   wait_for_state RUNNING "$START_TIMEOUT" || exit 75
-  local waited=0
+  # Wall clock, not a count of polls: each vm_ssh may spend minutes in its own retries.
+  local deadline=$((SECONDS + START_TIMEOUT))
   until vm_ssh true 2>/dev/null; do
-    if [ "$waited" -ge "$START_TIMEOUT" ]; then
+    if [ "$SECONDS" -ge "$deadline" ]; then
       # Up but unreachable is a broken host, not a capacity problem: exit 1, never 75, or the
       # coordinator retries for hours against a paid VM. A VM this call started is stopped
       # again; one that was already running is someone else's.
@@ -212,24 +240,33 @@ cmd_start() {
       fi
       exit 1
     fi
-    sleep "$POLL"; waited=$((waited + POLL)); [ "$POLL" -eq 0 ] && waited=$((waited + 1))
+    sleep "$POLL"
   done
   log "up: $(cmd_status)"
 }
 
 cmd_stop() {
-  local force=0 s busy
+  local force=0 s busy lock smi
   [ "${1:-}" = --force ] && force=1
   s=$(state)
   case $s in STOPPED|STOPPING) log "stop: already $s"; return 0;; esac
   [ "$s" = STARTING ] && { wait_for_state RUNNING "$START_TIMEOUT" || true; }
   if [ "$force" -eq 0 ]; then
-    # The card's apps on a GPU VM; a VM without nvidia-smi (the CPU VM) has no card, and there a
-    # DuckDB run is the work a stop would cut short. A failing probe reads as unreachable.
-    busy=$(vm_ssh 'if command -v nvidia-smi >/dev/null; then nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader; else pgrep -a -x duckdb || true; fi' 2>/dev/null) \
-      || busy="?unreachable"
-    if [ "$busy" = "?unreachable" ]; then log "stop: host unreachable over ssh; stopping on the API's state"
-    elif [ -n "$busy" ]; then log "stop: busy: $(tr '\n' ';' <<<"$busy") — not stopping"; exit 2
+    # The card's apps; the CPU VM has no nvidia-smi, and there a DuckDB run is the work. A held
+    # card lock (opened read-only: sticky /run/lock refuses another's open that may create) is a run
+    # or a capture. A failing nvidia-smi (a driver mismatch) names no app: its lines come marked,
+    # not busy. A failing probe reads as unreachable.
+    lock=$(printf '%q' "$PEACOCK_CARD_LOCK")
+    # shellcheck disable=SC2016  # the probe's $(…) and $apps expand on the VM
+    if busy=$(vm_ssh 'if command -v nvidia-smi >/dev/null; then if apps=$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null); then [ -z "$apps" ] || echo "$apps"; else s=$?; echo "$apps" | while IFS= read -r l; do echo "?nvidia-smi exit $s: $l"; done; fi; else pgrep -a -x duckdb || true; fi;'" if [ -e $lock ] && ! flock -n 9 9< $lock; then echo 'card lock $lock held'; fi" 2>/dev/null); then
+      smi=$(grep '^?nvidia-smi' <<<"$busy" || true)
+      busy=$(grep -v '^?nvidia-smi' <<<"$busy" || true)
+      if [ -n "$smi" ]; then
+        log "stop: nvidia-smi on the VM failed, so the card's apps are unknown and hold no stop: $(tr '\n' ';' <<<"${smi//\?nvidia-smi/nvidia-smi}")"
+      fi
+      if [ -n "$busy" ]; then log "stop: busy: $(tr '\n' ';' <<<"$busy") — not stopping"; exit 2; fi
+    else
+      log "stop: host unreachable over ssh; stopping on the API's state"
     fi
   fi
   log "stopping $INSTANCE_ID$([ "$force" -eq 1 ] && echo ' (--force)')"
@@ -246,70 +283,55 @@ cmd_stop() {
 
 install_fail() { log "install-watch FAILED: $1"; exit 1; }
 
-# tcli <args…>: the CLI on install-watch's temp copy of the config. These calls stay local
-# (--skip-auth on the update), and their output never reaches a log: it can hold a key.
-tcli() { timeout "$CLI_TIMEOUT" "$NEBIUS" -c "$install_dir/config.yaml" --no-check-update "$@" </dev/null; }
+# bounded_nebius <args…>: the CLI, bounded as cli() is, without its --profile: install-watch asks
+# it the active profile of NEBIUS_CONFIG, and the cut makes its calls with it on a temp copy. Those
+# stay local (--skip-auth on the update), and their output never reaches a log.
+bounded_nebius() { timeout "$CLI_TIMEOUT" "$NEBIUS" "$@"; }
 
-# profile_names <keep>: `profile list` on stdin (CLI 0.12: a name per line, the active one with
-# " [default]") -> the names other than <keep>. Any other shape exits 1 and echoes nothing.
-profile_names() {
-  python3 -c '
-import re, sys
-keep, names = sys.argv[1], []
-for line in sys.stdin.read().splitlines():
-    m = re.fullmatch(r"([A-Za-z0-9_.-]+)( \[default\])?", line)
-    if not m or (m.group(2) and m.group(1) != keep): sys.exit(1)
-    names.append(m.group(1))
-if keep not in names: sys.exit(1)
-print("\n".join(n for n in names if n != keep))' "$1"
+# active_profile: NEBIUS_CONFIG's active profile, or a failure when it has none or the answer is
+# not a profile name. The name is logged and read as <name>[=<pem>], and an answer of another shape
+# may be anything, so it is not traced under set -x either.
+active_profile() {
+  local -
+  set +x
+  local a
+  a=$(peacock_nebius_on bounded_nebius "$NEBIUS_CONFIG" profile active 2>/dev/null) || return 1
+  [[ "$a" =~ ^[A-Za-z0-9_.-]+$ ]] || return 1
+  printf '%s\n' "$a"
 }
 
-# The VM gets one profile, self-contained, as root's only one. It is cut down on dev in a temp
-# copy, so no other profile or key reaches the VM even for a moment. The config and the PEM are
-# copied, never read here: only the CLI reads them (build-test.md, "Credential files").
+# The VM gets one profile, self-contained, as root's only one. It is cut on dev from a temp copy,
+# so no other profile or key reaches the VM even for a moment. The config and the PEM are copied,
+# never read here: only the CLI reads them (build-test.md, "Credential files").
 cmd_install_watch() {
-  local key='' p path endpoint sa pk others
+  local key='' p why
   case "$#:${1:-}" in
     0:) ;;
     2:--key-file) key=$2;;
     *) bad_option "install-watch takes only --key-file <pem>";;
   esac
   [ -z "$key" ] || [ -f "$key" ] || install_fail "--key-file $key: no such file"
-  install_dir=$(mktemp -d); trap 'rm -rf "$install_dir"' EXIT
-  install -m 600 "$NEBIUS_CONFIG" "$install_dir/config.yaml"
+  # bash runs EXIT on HUP, INT and TERM too, so the copy, which holds every profile, never stays;
+  # it is made in ~/.config/peacock, as every secret is, never in /tmp.
+  install -d -m 700 "$PEACOCK_CONFIG"
+  install_dir=$(mktemp -d "$PEACOCK_CONFIG/install-watch.XXXXXX"); trap 'rm -rf "$install_dir"' EXIT
   p=$PROFILE
-  [ -n "$p" ] || p=$(tcli profile active 2>/dev/null) || install_fail "no active profile in $NEBIUS_CONFIG"
-  path=$(tcli -p "$p" config get private-key-file-path 2>/dev/null) || install_fail "no profile $p in $NEBIUS_CONFIG"
-  # A profile with no key path embeds its key already; another --key-file would replace a working key.
-  [ -z "$key" ] || [ -n "$path" ] || install_fail "profile $p embeds its key; run install-watch without --key-file"
-  if [ -n "$key" ]; then
-    # update prompts for these three unless given them, and keeps the path beside the embedded key.
-    endpoint=$(tcli -p "$p" config get endpoint 2>/dev/null) || install_fail "cannot read profile $p's endpoint"
-    sa=$(tcli -p "$p" config get service-account-id 2>/dev/null) || install_fail "cannot read profile $p's ids"
-    pk=$(tcli -p "$p" config get public-key-id 2>/dev/null) || install_fail "cannot read profile $p's ids"
-    tcli profile update "$p" --skip-auth --endpoint "$endpoint" --service-account-id "$sa" \
-      --public-key-id "$pk" --private-key-file "$key" >/dev/null 2>&1 || install_fail "cannot embed --key-file into profile $p"
-    tcli -p "$p" config unset private-key-file-path >/dev/null 2>&1 || install_fail "cannot drop profile $p's key path"
-  elif [ -n "$path" ]; then
-    install_fail "profile $p reads its key from a file on this machine; pass that file as --key-file"
+  [ -n "$p" ] || p=$(active_profile) || install_fail "the active profile of $NEBIUS_CONFIG is missing or not a profile name; it is not shown"
+  # The cut's stderr is its refusal alone: every CLI call in it drops its own.
+  if ! peacock_nebius_cut bounded_nebius "$NEBIUS_CONFIG" "$(mktemp "$install_dir/config.yaml.XXXXXX")" \
+      "$install_dir/config.yaml" "$p" "$p${key:+=$key}" 2>"$install_dir/refusal"; then
+    why=$(<"$install_dir/refusal")
+    install_fail "$NEBIUS cannot cut profile $p alone out of $NEBIUS_CONFIG${key:+ with --key-file $key}: ${why#"${0##*/}: "}"
   fi
-  # The CLI refuses to delete the active profile, so activate first.
-  tcli profile activate "$p" >/dev/null 2>&1 || install_fail "cannot activate profile $p"
-  others=$(tcli profile list 2>/dev/null | profile_names "$p") ||
-    install_fail "profile list of $NEBIUS_CONFIG has an unexpected shape"
-  local n count=0
-  for n in $others; do
-    tcli profile delete "$n" >/dev/null 2>&1 || install_fail "cannot delete profile $n from the copy"
-    count=$((count + 1))
-  done
-  log "install-watch: profile $p goes to the VM alone; $count other(s) left out"
+  log "install-watch: profile $p goes to the VM alone; $PEACOCK_NEBIUS_LEFT_OUT other(s) left out"
 
   local here; here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   vm_ssh 'mkdir -p ~/peacock-gpu-idle'
-  local ip opts; ip=$(current_ip); mapfile -t opts < <(ssh_opts)
-  "$RSYNC" -a -e "$SSH ${opts[*]}" "$here/nebius/idle_watch.py" "$here/nebius/peacock-gpu-idle.service" \
-    "$here/nebius/peacock-gpu-idle.timer" "$USER_ON_VM@$ip:peacock-gpu-idle/"
-  "$RSYNC" -a -e "$SSH ${opts[*]}" "$install_dir/config.yaml" "$USER_ON_VM@$ip:peacock-gpu-idle/nebius-config.yaml"
+  # This script's rsh, with the options it was given, drops rsync's host argument, `vm`.
+  local rsh=("$here/nebius.sh" "${GIVEN[@]}" rsh)
+  sync_retry "$RSYNC" -a -e "${rsh[*]}" "$here/nebius/idle_watch.py" "$here/nebius/peacock-gpu-idle.service" \
+    "$here/nebius/peacock-gpu-idle.timer" vm:peacock-gpu-idle/
+  sync_retry "$RSYNC" -a -e "${rsh[*]}" "$install_dir/config.yaml" vm:peacock-gpu-idle/nebius-config.yaml
   # The install file goes first: a timer that ticks without it stops nebius-gpu.
   # shellcheck disable=SC2016  # the $(...) is meant to expand on the VM, not here
   vm_ssh "id=$INSTANCE_ID"'
@@ -339,14 +361,12 @@ cmd_install_watch() {
   log "install-watch: watcher installed, root's profile reaches the API"
 }
 
-verb=${1:-}; shift || true
 case $verb in
   status) cmd_status;;
   ip) ip=$(current_ip); [ -n "$ip" ] || exit 1; echo "$ip";;
   start) cmd_start;;
   stop) cmd_stop "$@";;
   ssh) vm_ssh "$@";;
-  rsh) shift; vm_ssh "$@";;
+  rsh) shift; vm_ssh_with 1 "$@";;
   install-watch) cmd_install_watch "$@";;
-  *) sed -n '2,25p' "$0" >&2; exit 64;;
 esac

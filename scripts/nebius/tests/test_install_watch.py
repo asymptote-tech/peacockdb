@@ -1,9 +1,10 @@
 """install-watch on any of the three VMs: one self-contained profile, made on dev from a copy of
 the caller's config, and the install file that names the watcher's instance and kind.
 
-Each test's HOME holds an empty ~/.nebius/config.yaml and a k.pem holding FAKE. The fake nebius
-never reads either; a FAKE in any argv or output means the script read the key."""
-import pathlib, subprocess, sys
+Each test's HOME holds an empty ~/.config/peacock/nebius.yaml, ~/.nebius/config.yaml at mode 000,
+and a k.pem holding FAKE. The fake nebius reads none; a FAKE in any argv or output means the script
+read the key."""
+import pathlib, re, subprocess, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from fakes import World  # noqa: E402
 from harness import main  # noqa: E402
@@ -16,18 +17,21 @@ CPU = "computeinstance-e01t2mm4265y8x88ey"
 def setup(**over):
     w = World(state="RUNNING", **over)
     home = w.dir / "home"
-    (home / ".nebius").mkdir(parents=True)
+    (home / ".config" / "peacock").mkdir(parents=True)
+    (home / ".config" / "peacock" / "nebius.yaml").write_text("")
+    (home / ".nebius").mkdir()
     (home / ".nebius" / "config.yaml").write_text("")
+    (home / ".nebius" / "config.yaml").chmod(0)
     (home / "k.pem").write_text("FAKE")
     (w.dir / "tmp").mkdir()
     return w, home
 
 
-def install(w, home, *args):
-    # The real default source, ~/.nebius/config.yaml under the fake HOME; temp dirs under the world.
+def install(w, home, *args, shell=()):
+    # The real default source, ~/.config/peacock/nebius.yaml under the fake HOME; temp dirs under the world.
     env = {**w.env(), "HOME": str(home), "TMPDIR": str(w.dir / "tmp")}
     del env["GPU_HOST_NEBIUS_CONFIG"]
-    p = subprocess.run([SCRIPT, *args], env=env, capture_output=True, text=True, timeout=60,
+    p = subprocess.run([*shell, SCRIPT, *args], env=env, capture_output=True, text=True, timeout=60,
                        stdin=subprocess.DEVNULL)
     return p.returncode, p.stdout, p.stderr
 
@@ -42,6 +46,34 @@ def profile_calls(w):
 
 def ssh_commands(w):
     return [" ".join(c) for c in calls(w, "ssh")]
+
+
+def test_install_watch_asks_the_active_profile_of_its_config():
+    w, home = setup(profiles=["default", "eu-west1"], active_profile="eu-west1")
+    env = {**w.env(), "HOME": str(home), "TMPDIR": str(w.dir / "tmp")}
+    p = subprocess.run([SCRIPT, "install-watch"], env=env, capture_output=True, text=True, timeout=60,
+                       stdin=subprocess.DEVNULL)
+    assert p.returncode == 0, (p.returncode, p.stderr)
+    active = [c for c in calls(w, "nebius") if c[-2:] == ["profile", "active"]]
+    assert len(active) == 1, calls(w, "nebius")
+    assert active[0][active[0].index("--config") + 1] == env["GPU_HOST_NEBIUS_CONFIG"], active
+    assert w.read()["profiles"] == ["eu-west1"], w.read()["profiles"]
+    log = (w.dir / "state" / "nebius.log").read_text()
+    for text in (p.stdout, p.stderr, log):
+        assert "FAKE-KEY-MATERIAL" not in text, text
+
+
+def test_install_watch_refuses_an_active_profile_of_another_shape_without_echoing_it():
+    for shell in ((), ("bash", "-x")):
+        w, home = setup(profiles=["default"], active_profile="default\n    private-key: FAKE-KEY-MATERIAL")
+        rc, out, err = install(w, home, "install-watch", shell=shell)
+        assert rc == 1, (shell, rc, err)
+        log = (w.dir / "state" / "nebius.log").read_text()
+        for text in (out, err, log):
+            assert "FAKE-KEY-MATERIAL" not in text and "private-key" not in text, (shell, text)
+        assert "active profile" in err, err
+        assert not calls(w, "ssh") and not calls(w, "rsync"), w.read()["calls"]
+        assert not any((w.dir / "tmp").iterdir()), list((w.dir / "tmp").iterdir())
 
 
 def test_install_watch_writes_the_instance_and_kind():
@@ -67,10 +99,11 @@ def test_install_watch_keeps_one_profile():
     assert sorted(deleted) == ["default", "eu-west1"], pc
     assert any(c[-2:] == ["activate", "editor-eu"] for c in pc), pc
     assert w.read()["profiles"] == ["editor-eu"] and w.read()["active_profile"] == "editor-eu"
+    # Every call is on the temp copy, never the source.
     for c in pc:
-        assert "-c" in c, c
-        config = pathlib.Path(c[c.index("-c") + 1])
-        assert config.name == "config.yaml" and home / ".nebius" not in config.parents, c
+        assert "--config" in c, c
+        config = pathlib.Path(c[c.index("--config") + 1])
+        assert config.name.startswith("config.yaml.") and home / ".config" / "peacock" in config.parents, c
 
 
 def test_install_watch_ships_one_profile_only():
@@ -82,11 +115,42 @@ def test_install_watch_ships_one_profile_only():
     sources = [a for a in shipped[0][1:-1] if not a.startswith("-") and a != shipped[0][shipped[0].index("-e") + 1]]
     assert len(sources) == 1, shipped
     source = pathlib.Path(sources[0])
-    assert source.name == "config.yaml" and w.dir / "tmp" in source.parents, source
+    stage = source.parent
+    assert source.name == "config.yaml" and stage.parent == home / ".config" / "peacock", source
     for c in calls(w, "rsync"):
         for a in c[1:]:
-            assert str(home / ".nebius") not in a and not a.endswith(".pem"), c
+            assert (str(home) not in a or a.startswith(f"{stage}/")) and not a.endswith(".pem"), c
     assert not any((w.dir / "tmp").iterdir()), list((w.dir / "tmp").iterdir())
+
+
+def test_install_watch_retries_an_rsync_that_exits_255():
+    w, home = setup(rsync_255=1)
+    rc, out, err = install(w, home, "install-watch")
+    assert rc == 0, (rc, err)
+    kit = [c for c in calls(w, "rsync") if any(a.endswith("idle_watch.py") for a in c)]
+    config = [c for c in calls(w, "rsync") if c[-1].endswith("nebius-config.yaml")]
+    assert len(kit) == 2 and len(config) == 1, calls(w, "rsync")
+    assert "attempt 1 of 4 exited 255" in err, err
+
+
+def test_install_watch_syncs_through_nebius_sh_rsh():
+    for given, words in (([], []), (["--instance-id", H100, "--profile", "editor-eu"],
+                                    ["--instance-id", H100, "--profile", "editor-eu"])):
+        w, home = setup(profiles=["default", "editor-eu"])
+        rc, out, err = install(w, home, *given, "install-watch")
+        assert rc == 0, (given, rc, err)
+        rsyncs = calls(w, "rsync")
+        assert len(rsyncs) == 2, rsyncs
+        for c in rsyncs:
+            assert c[c.index("-e") + 1] == " ".join([SCRIPT, *words, "rsh"]), c
+            assert c[-1].startswith("vm:peacock-gpu-idle/"), c
+        # The transport works as rsync would run it: <transport> <host> <command>.
+        w.set(calls=[])
+        transport = rsyncs[0][rsyncs[0].index("-e") + 1].split()
+        p = subprocess.run([*transport, "vm", "true"], env={**w.env(), "HOME": str(home)}, capture_output=True,
+                           text=True, timeout=60, stdin=subprocess.DEVNULL)
+        assert p.returncode == 0, (given, p.returncode, p.stderr)
+        assert len(calls(w, "ssh")) == 1, calls(w, "ssh")
 
 
 def test_install_watch_removes_its_temp_dir_on_failure():
@@ -143,15 +207,61 @@ def test_install_watch_refuses_a_missing_key_file():
     assert not calls(w, "ssh") and not calls(w, "rsync"), w.read()["calls"]
 
 
-def test_install_watch_refuses_a_key_path_profile_without_a_key_file():
-    # Shipped as it is, the profile names a PEM that exists on dev only.
-    config = {"endpoint": "api.nebius.cloud", "service-account-id": "serviceaccount-w1",
-              "public-key-id": "publickey-w1", "private-key-file-path": "/home/u/.nebius/eu-west1-sa.pem"}
-    w, home = setup(profiles=["default", "eu-west1"], profile_config=config)
+def test_install_watch_embeds_the_pem_a_key_path_names():
+    w, home = setup(profiles=["default", "eu-west1"])
+    pem = home / ".nebius" / "eu-west1-sa.pem"
+    pem.write_text("FAKE")
+    w.set(profile_key_paths={"eu-west1": str(pem)})
+    rc, out, err = install(w, home, "--profile", "eu-west1", "install-watch")
+    assert rc == 0, (rc, err)
+    pc = profile_calls(w)
+    update = [i for i, c in enumerate(pc) if "update" in c]
+    assert len(update) == 1, pc
+    u = pc[update[0]]
+    assert u[u.index("update") + 1] == "eu-west1" and u[u.index("--private-key-file") + 1] == str(pem), u
+    unset = [i for i, c in enumerate(pc) if c[-3:] == ["config", "unset", "private-key-file-path"]]
+    assert unset and unset[0] > update[0] and "eu-west1" in pc[unset[0]], pc
+    assert w.read()["profile_key_paths"]["eu-west1"] == "", w.read()["profile_key_paths"]
+    commands = ssh_commands(w)
+    assert not [c for c in commands if ".pem" in c], commands
+
+
+def test_install_watch_stages_the_cut_in_the_config_dir_and_removes_it():
+    # Never in /tmp: the copy holds every profile, and a killed run must not leave it there.
+    for case in ("installed", "refused"):
+        w, home = setup(profiles=["default", "eu-west1"])
+        if case == "refused":
+            w.set(profile_key_paths={"eu-west1": str(home / ".nebius" / "absent.pem")})
+        rc, out, err = install(w, home, "--profile", "eu-west1", "install-watch")
+        assert rc == (0 if case == "installed" else 1), (case, rc, err)
+        config = home / ".config" / "peacock"
+        copies = {pathlib.Path(c[c.index("--config") + 1]).parent for c in profile_calls(w) if "--config" in c}
+        copies.discard(config)
+        assert copies and all(d.parent == config and d.name.startswith("install-watch.") for d in copies), copies
+        assert sorted(p.name for p in config.iterdir()) == ["nebius.yaml"], (case, list(config.iterdir()))
+        assert not any((w.dir / "tmp").iterdir()), (case, list((w.dir / "tmp").iterdir()))
+
+
+def test_install_watch_refuses_a_key_path_naming_no_file():
+    w, home = setup(profiles=["default", "eu-west1"])
+    absent = str(home / ".nebius" / "eu-west1-sa.pem")
+    w.set(profile_key_paths={"eu-west1": absent})
     rc, out, err = install(w, home, "--profile", "eu-west1", "install-watch")
     assert rc == 1, (rc, err)
-    assert "--key-file" in err and "eu-west1" in err, err
+    assert "eu-west1" in err and absent in err, err
+    log = (w.dir / "state" / "nebius.log").read_text()
+    assert "eu-west1" in log and absent in log and str(w.dir / "nebius") in log, log
+    assert "bounded_nebius" not in err, err
+    assert not [c for c in profile_calls(w) if "update" in c], profile_calls(w)
     assert not calls(w, "ssh") and not calls(w, "rsync"), w.read()["calls"]
+    assert not any((w.dir / "tmp").iterdir()), list((w.dir / "tmp").iterdir())
+
+
+def test_install_watch_and_nebius_profiles_share_one_cut():
+    scripts = pathlib.Path(SCRIPT).parent
+    texts = {f: (scripts / f).read_text() for f in ("nebius.sh", "env/nebius-profiles.sh", "lib/peacock-config.sh")}
+    holding = sorted(f for f, t in texts.items() if re.search(r"\bprofile delete\b", t))
+    assert holding == ["lib/peacock-config.sh"], holding
 
 
 def test_install_watch_refuses_a_key_file_for_a_profile_that_embeds_its_key():
@@ -174,6 +284,7 @@ def test_install_watch_refuses_an_unexpected_profile_list_without_echoing_it():
     log = (w.dir / "state" / "nebius.log").read_text()
     for text in (out, err, log):
         assert "SECRETLINE" not in text and "private-key" not in text, text
+    assert "version 0.12.293" in log and "bounded_nebius" not in err, (log, err)
     assert not calls(w, "ssh") and not calls(w, "rsync"), w.read()["calls"]
     assert not any((w.dir / "tmp").iterdir())
 

@@ -8,9 +8,12 @@ Tests, CI, hosts, testdata etc
 - [#178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault](#t178)
 - [#176 (CI coverage one-way) the CI coverage guard checks one direction only](#t176)
 - [#306 (no_sort ties by position) a `no_sort` comparison pairs rows by position, so tied rows in another order fail](#t306)
-- [#309 (no en_US in build image) the build image has no en_US.UTF-8 locale and no name for a foreign uid, so four script test files cannot run in it](#t309)
+- [#309 (no en_US in build image) the build image has no en_US.UTF-8 locale and no name for a foreign uid, so five script test files cannot run in it](#t309)
 - [#310 (nebius-gpu fills with images) `gpu-tests` keeps every image and sf1 set it pulls, so nebius-gpu's disk runs out](#t310)
 - [#311 (LIMIT without ORDER BY) a `LIMIT` with no `ORDER BY` is checked against DuckDB's own rows, so another engine's right rows fail](#t311)
+- [#312 (start waits out a refusal) `nebius.sh start` waits its full 900 s after the API has already refused the start](#t312)
+- [#314 (bootstrap skips the clone) `bootstrap-vm.sh` never updates an existing clone, so a pin or script bumped in git reaches a VM only by hand](#t314)
+- [#315 (no free-space check) neither `bootstrap-vm.sh` nor `build-test.sh` checks free space first, so a small disk fails mid-build](#t315)
 
 <a id="t178"></a>
 ### #178 (shared shad-gpu pool) the GPU host is shared, and a pool that cannot be built is a neighbour's fault
@@ -66,7 +69,7 @@ Both are `wrong #306` in the H100's `cases.csv`, and q73 in Sirius's `sirius.tsv
 accepts a permutation of tied rows. The fix needs the sort keys, which the oracle does not hold.
 
 <a id="t309"></a>
-### #309 (no en_US in build image) the build image has no en_US.UTF-8 locale and no name for a foreign uid, so four script test files cannot run in it
+### #309 (no en_US in build image) the build image has no en_US.UTF-8 locale and no name for a foreign uid, so five script test files cannot run in it
 Two tests need a locale that sorts unlike C, and fail without one.
 `test_fetch_sf40.py::test_fetch_aggregate_is_in_the_c_locales_order` proves `fetch-sf40.sh` checks
 an sf40 set in C order under en_US. `test_image.py::test_the_inputs_are_the_same_in_every_locale`
@@ -74,10 +77,11 @@ proves an image's label is the same in every locale. In the build image `locale 
 `C.utf8` and `POSIX`, and there are no locale sources to build one. So the cost-report job runs
 both files on the runner, its `on_runner` list.
 
-`test_bootstrap.py` and `test_provision.py` need a user name (`id -un`). In the image the runner's
-uid 1001 has none: only uid 1000, `peacock`, does. So they run on the runner too, and any
-developer whose uid is not 1000 hits the same. The fix is a passwd entry made at run time for the
-caller's uid; it too changes the build image's inputs.
+`test_bootstrap.py` and `test_provision.py` need a user name (`id -un`), and `test_ssh_retry.py`
+runs the real ssh, which refuses a uid with no name. In the image the runner's uid 1001 has none:
+only uid 1000, `peacock`, does. So they run on the runner too, and any developer whose uid is not
+1000 hits the same. The fix is a passwd entry made at run time for the caller's uid; it too
+changes the build image's inputs.
 
 The fix: the `locales` package and `en_US.UTF-8` generated in `docker/build.Dockerfile`, then the
 files join the in-image loop and their `RUNNER_SIDE` entry in `ci_images.rs` goes. It changes the
@@ -104,3 +108,35 @@ and is `wrong #311` in its `sirius.tsv`. peacockdb passes only because its scan 
 
 The fix: an oracle for a bare `LIMIT` that checks the row count and that each row is in the
 unlimited result, as `data_fusion_subset` does on the CPU side.
+<a id="t312"></a>
+### #312 (start waits out a refusal) `nebius.sh start` waits its full 900 s after the API has already refused the start
+`cmd_start` sends `compute instance start --async`, then polls the state until `RUNNING` for
+`START_TIMEOUT`, 900 s. When the region has no capacity, the start operation fails with
+`NotEnoughResources` in about five minutes and the instance stays `STOPPED`, yet the poll runs on to
+900 s before the exit 75. `gpu-tests`' 30-minute retry window so holds two attempts, not six.
+
+The fix: keep the operation's ID from `--async` and, while polling, read the operation; a finished
+operation with an error exits at once, through `classify_error`, so a capacity refusal is 75.
+
+<a id="t314"></a>
+### #314 (bootstrap skips the clone) `bootstrap-vm.sh` never updates an existing clone, so a pin or script bumped in git reaches a VM only by hand
+`bootstrap-vm.sh` clones `~/peacockdb` when it is missing and otherwise leaves it as it is, yet
+reads the clone's `docker/pins.env`, `scripts/lib/` and `testdata/generate_testdata.sh`.
+`provision-vm.sh` pipes the caller's own `bootstrap-vm.sh`, so the two disagree once the branch
+moves. On a fresh VM, after `SUPERPOWERS_VERSION` was bumped and pushed, a rerun still refused
+with the old pin until the clone was pulled by hand; the refusal names `docker/pins.env`, not the
+clone's copy of it.
+
+The fix: on a clean clone on `--ref`'s branch, `git pull --ff-only` before anything reads it; a
+dirty or diverged clone is refused, naming the clone, its commit and the remote's.
+
+<a id="t315"></a>
+### #315 (no free-space check) neither `bootstrap-vm.sh` nor `build-test.sh` checks free space first, so a small disk fails mid-build
+A developer machine needs the build image (15.5 GB unpacked), an incremental
+`target-img-<v>` (about 14 GB for the rust-only build) and sf1 (0.8 GB): about 30 GB free, more
+for the C++ build. On a 48 GB VM with 27 GB free, `build-test.sh --rust-only --build` ran 15
+minutes and ended in a rustc panic, `No space left on device`. CI's build-image action refuses
+below 25 GB up front (`need_gb`).
+
+The fix: `bootstrap-vm.sh` and `build-test.sh` refuse below a stated free-space floor before the
+pull or the build, naming the space free, the floor and `docker system df`.

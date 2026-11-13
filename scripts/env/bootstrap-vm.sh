@@ -4,10 +4,11 @@
 #   bootstrap-vm.sh [--ref <branch>] [--cudf <v>]
 #
 # Run as the machine user, with sudo; provision-vm.sh runs it so. Installs what is missing: Docker,
-# and gh and Claude Code with the superpowers plugin at docker/pins.env's versions; makes the data
-# directory the machine's users share; clones the repository into ~/peacockdb at <ref>, master by
-# default, and the third_party/cudf it pins. In the build image of cuDF <v> (25.02 by default) and
-# of the clone's inputs, by its inputs tag, it fills cargo's registry and generates sf1. A step
+# and gh, nebius and Claude Code with the superpowers plugin at docker/pins.env's versions; makes
+# the data directory the machine's users share; clones the repository into ~/peacockdb at <ref>,
+# master by default. In the build image of cuDF <v> (25.02 by default) and of the clone's inputs,
+# by its inputs tag, it fills cargo's registry and generates sf1, which the clone's testdata/<ds>
+# links to. Last, it checks out the clone's third_party/cudf, which the C++ configure reads. A step
 # already done is skipped.
 set -euo pipefail
 shopt -s inherit_errexit
@@ -38,7 +39,7 @@ if [ -n "$ref" ] && [ -e "$clone" ]; then
   [ "$on_branch" = "$ref" ] \
     || die "$clone is on ${on_branch:-a detached HEAD}, not $ref: --ref names the branch the clone is or will be on"
 fi
-command -v sudo > /dev/null || die "no sudo: Docker, gh and the base tools are installed with it"
+command -v sudo > /dev/null || die "no sudo: Docker, gh, nebius and the base tools are installed with it"
 
 packages=()
 for tool in git curl python3 flock; do
@@ -64,9 +65,6 @@ if ! getent group peacock > /dev/null; then sudo groupadd peacock; fi
 if [[ " $(id -nG "$(id -un)") " != *" peacock "* ]]; then sudo usermod -aG peacock "$(id -un)"; fi
 if [ ! -d "$MACHINE_DATA" ]; then sudo install -d -o "$(id -un)" -g peacock -m 2775 "$MACHINE_DATA"; fi
 
-# The cuDF cmake files the FFI build reads, at the commit the clone pins.
-machine_cudf_source "$clone"
-
 # pin <name> — its value in the clone's docker/pins.env.
 pin() {
   local line
@@ -80,11 +78,29 @@ gh_version=$(pin GH_VERSION)
 gh_sha=$(pin GH_SHA256)
 if [ "$(/usr/local/bin/gh --version 2> /dev/null | awk 'NR == 1 { print $3 }')" != "$gh_version" ]; then
   tarball=$(mktemp)
+  # Every way out removes the download, as the nebius one's below.
+  trap 'rm -f "$tarball"' EXIT
   curl -fsSL -o "$tarball" \
     "https://github.com/cli/cli/releases/download/v$gh_version/gh_${gh_version}_linux_amd64.tar.gz"
   echo "$gh_sha  $tarball" | sha256sum -c --quiet -
   sudo tar -xzf "$tarball" -C /usr/local --strip-components=1 --no-same-owner "gh_${gh_version}_linux_amd64/bin/gh"
   rm -f "$tarball"
+  trap - EXIT
+fi
+
+# nebius from the URL the build image takes; nebius.sh finds it on PATH.
+nebius_version=$(pin NEBIUS_VERSION)
+nebius_sha=$(pin NEBIUS_SHA256)
+if [ "$(nebius version 2> /dev/null)" != "$nebius_version" ]; then
+  url=https://artifacts.nebius.cloud/cli/release/$nebius_version/linux/x86_64/nebius
+  binary=$(mktemp)
+  # Every way out, an interrupt included, removes the download; the script has no EXIT trap of its own.
+  trap 'rm -f "$binary"' EXIT
+  curl -fsSL --retry 3 -o "$binary" "$url" || die "cannot download $url"
+  echo "$nebius_sha  $binary" | sha256sum -c --status - || die "$url is not docker/pins.env's NEBIUS_SHA256"
+  sudo install -m 755 "$binary" /usr/local/bin/nebius
+  rm -f "$binary"
+  trap - EXIT
 fi
 
 # Claude Code stays at its pin: it never updates itself.
@@ -103,29 +119,58 @@ fi
 [ "$(claude_at)" = "$claude_version" ] || die "Claude Code at $claude is not $claude_version"
 
 # The marketplace pins each plugin to a commit and cannot be added at one, so the pin is checked
-# on what the install recorded.
-plugin_version=$(pin SUPERPOWERS_VERSION)
-plugin_sha=$(pin SUPERPOWERS_SHA)
+# on what the install recorded for the user scope, which install and update write. The local copy
+# of the marketplace is added or updated first: an install reads that copy. `plugin install` leaves
+# an installed plugin as it is, so one at another version is updated.
+plugin=superpowers@claude-plugins-official
+plugin_pin="$(pin SUPERPOWERS_VERSION) at $(pin SUPERPOWERS_SHA)"
 record=$HOME/.claude/plugins/installed_plugins.json
-plugin_is_pinned() {
-  python3 - "$record" "$plugin_version" "$plugin_sha" << 'PY'
+# plugin_recorded — the plugin's user-scope installs in the record, "<version> at <commit>" each,
+# "; " between them, or nothing. A record of another shape is refused, exit 2.
+plugin_recorded() {
+  python3 - "$record" "$plugin" << 'PY'
 import json, sys
-path, version, sha = sys.argv[1:]
+path, plugin = sys.argv[1:]
+def refuse(why):
+    print(f"bootstrap-vm.sh: {path} {why}", file=sys.stderr)
+    sys.exit(2)
 try:
-    entries = json.load(open(path))["plugins"]["superpowers@claude-plugins-official"]
-except (OSError, KeyError, ValueError):
-    sys.exit(1)
-sys.exit(0 if any(e.get("version") == version and e.get("gitCommitSha") == sha for e in entries) else 1)
+    entries = json.load(open(path)).get("plugins", {}).get(plugin, [])
+except OSError:
+    entries = []
+except (ValueError, AttributeError):
+    refuse("is not the JSON object this script reads")
+if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+    refuse(f"holds {plugin} as something that is not a list of installs, which this script "
+           "cannot read")
+users = [e for e in entries if e.get("scope") == "user"]
+print("; ".join(f"{e.get('version')} at {e.get('gitCommitSha')}" for e in users))
 PY
 }
-if ! plugin_is_pinned; then
-  if ! grep -qs claude-plugins-official "$HOME/.claude/plugins/known_marketplaces.json"; then
-    "$claude" plugin marketplace add "$MARKETPLACE"
+# claude_step <argument…> — one `claude` call, refused by name when it fails.
+claude_step() { "$claude" "$@" || die "claude $* failed (above)"; }
+before=$(plugin_recorded)
+if [[ "; $before; " != *"; $plugin_pin; "* ]]; then
+  if grep -qs claude-plugins-official "$HOME/.claude/plugins/known_marketplaces.json"; then
+    claude_step plugin marketplace update claude-plugins-official
+  else
+    claude_step plugin marketplace add "$MARKETPLACE"
   fi
-  "$claude" plugin install superpowers@claude-plugins-official
+  if [ -z "$before" ]; then
+    claude_step plugin install "$plugin"
+  else
+    claude_step plugin update "$plugin"
+  fi
+  after=$(plugin_recorded)
+  if [[ "; $after; " != *"; $plugin_pin; "* ]]; then
+    [ -n "$after" ] || die "$record records no superpowers for the user after its install (above)"
+    [ "$after" != "$before" ] || die "the update changed nothing: $record records superpowers \
+$after, not the pin, $plugin_pin. The marketplace may still give that version, or the update \
+failed (above)"
+    die "the marketplace gives superpowers $after, not the pin, $plugin_pin: bump \
+docker/pins.env's SUPERPOWERS_VERSION and SUPERPOWERS_SHA to it"
+  fi
 fi
-plugin_is_pinned || die "superpowers is not $plugin_version at $plugin_sha in $record: the marketplace has \
-moved on, so docker/pins.env's SUPERPOWERS_VERSION and SUPERPOWERS_SHA must be bumped to what it installed"
 
 # The docker group this run joined takes effect at the next login.
 if ! docker info > /dev/null 2>&1; then docker() { sudo docker "$@"; }; fi
@@ -134,6 +179,27 @@ ref=$MACHINE_IMAGE:$(image_inputs_tag "$clone" build "$cudf")
 machine_image_checked "$ref" "$clone" "$cudf"
 machine_cargo_fetch "$ref" "$clone"
 machine_data_set "$ref" "$clone"
+# The tests read testdata/<ds>; build-test.sh mounts a link's target where it lies. Nothing there,
+# a link that dangles or one into the machine's data dir is linked to this set, so a rerun after the
+# generator changed repoints it; anything else, a directory, a file or a link elsewhere, is the
+# developer's own set, kept.
+for entry in "${DATA_SETS[@]}"; do
+  link=$clone/testdata/${entry%% *}
+  if [ ! -e "$link" ] || { [ -L "$link" ] && [[ $(readlink "$link") == "$MACHINE_DATA"/* ]]; }; then
+    ln -sfn "$DATA_SET/${entry%% *}" "$link"
+  else
+    echo "bootstrap-vm.sh: $link is a set of its own, kept; the machine's is $DATA_SET/${entry%% *}"
+  fi
+done
+# The C++ configure, the FFI's too, reads cuDF's cmake files from the clone's own submodule; no step
+# above reads them, so a failed fetch stops nothing else. Two runs at once each check it out, so
+# the checkout is serialised under a lock in the clone's git dir, a linked worktree's common one.
+git_dir=$(git -C "$clone" rev-parse --path-format=absolute --git-common-dir)
+exec {submodule_lock}> "$git_dir/peacock-submodule.lock"
+flock "$submodule_lock"
+git -C "$clone" submodule update --init --depth 1 third_party/cudf \
+  || die "cannot check out $clone/third_party/cudf at $(machine_cudf_gitlink "$clone")"
+exec {submodule_lock}>&-
 
 cat << EOF
 The machine is ready. scripts/env/provision-vm.sh, run on your own machine, does the rest; by

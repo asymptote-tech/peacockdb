@@ -2,9 +2,11 @@
 
 Run from a clone on the fake machine of `machine.py`, with a fake sudo and curl that record their
 argv, so a refusal can be checked to come before anything is installed, and nothing is downloaded.
-A whole run has curl serve a stand-in gh tarball, which the clone's pin then names, and finds
-Claude Code and superpowers at their pins; sudo runs nothing.
+A whole run has curl serve a stand-in gh tarball and nebius binary, which the clone's pins then
+name, and finds Claude Code and superpowers at their pins; sudo runs nothing. No PATH here holds
+the host's nebius; a test that wants one installs its own.
 """
+import fcntl
 import hashlib
 import json
 import os
@@ -15,24 +17,32 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
-from machine import FAKE_ROOT_ID, NO_HOST, UNPUBLISHED, Machine, git, lib, path_without  # noqa: E402
+from machine import FAKE_ROOT_ID, NO_HOST, NO_SPACE, UNPUBLISHED, Machine, git, lib, path_without  # noqa: E402
 
 FAKE_SUDO = '#!/bin/sh\nprintf "%s\\n" "sudo $*" >> "$FAKE_SUDO_LOG"\nexit "${FAKE_SUDO_STATUS:-1}"\n'
 FAKE_CURL = '#!/bin/sh\nprintf "%s\\n" "curl $*" >> "$FAKE_SUDO_LOG"\nexit 22\n'
 GH_TARBALL = b"a stand-in gh tarball"
-# curl writing GH_TARBALL to its -o, and failing a download to stdout (the Claude Code installer).
+NEBIUS_BINARY = b"a stand-in nebius binary"
+# curl writing the nebius binary to its -o for a URL of Nebius's, unless FAKE_NEBIUS_MISSING, the
+# gh tarball for any other, and failing a download to stdout (the Claude Code installer).
 SERVING_CURL = r'''#!/bin/sh
 printf "%s\n" "curl $*" >> "$FAKE_SUDO_LOG"
+body=$FAKE_GH_TARBALL
+for a in "$@"; do
+  case "$a" in *artifacts.nebius.cloud*) [ -z "$FAKE_NEBIUS_MISSING" ] || exit 22; body=$FAKE_NEBIUS_BINARY ;; esac
+done
 while [ $# -gt 0 ]; do
-  if [ "$1" = -o ]; then printf %s "$FAKE_GH_TARBALL" > "$2"; exit 0; fi
+  if [ "$1" = -o ]; then printf %s "$body" > "$2"; exit 0; fi
   shift
 done
 exit 22
 '''
+NEBIUS_INSTALL = re.compile(r"^sudo install -m 755 \S+ /usr/local/bin/nebius$", re.M)
 
 
 def bootstrap(m, *args, **env):
@@ -49,21 +59,33 @@ def pin(m, name):
                 if ln.startswith(name + "="))
 
 
+def set_pin(m, name, value):
+    pins = m.clone / "docker" / "pins.env"
+    pins.write_text("".join(f"{name}={value}\n" if ln.startswith(name + "=") else ln + "\n"
+                            for ln in pins.read_text().splitlines()))
+
+
 def whole_run_env(m):
     """Readies `m` for a whole run of bootstrap-vm.sh; returns the environment it runs with."""
-    pins = m.clone / "docker" / "pins.env"
-    sha = hashlib.sha256(GH_TARBALL).hexdigest()
-    pins.write_text("".join(f"GH_SHA256={sha}\n" if ln.startswith("GH_SHA256=") else ln + "\n"
-                            for ln in pins.read_text().splitlines()))
+    set_pin(m, "GH_SHA256", hashlib.sha256(GH_TARBALL).hexdigest())
+    set_pin(m, "NEBIUS_SHA256", hashlib.sha256(NEBIUS_BINARY).hexdigest())
     m.world(label=m.label("25.02"))
     record = m.home / ".claude" / "plugins" / "installed_plugins.json"
     record.parent.mkdir(parents=True, exist_ok=True)
     record.write_text(json.dumps({"plugins": {"superpowers@claude-plugins-official": [
-        {"version": pin(m, "SUPERPOWERS_VERSION"), "gitCommitSha": pin(m, "SUPERPOWERS_SHA")}]}}))
+        {"scope": "user", "version": pin(m, "SUPERPOWERS_VERSION"), "gitCommitSha": pin(m, "SUPERPOWERS_SHA")}]}}))
     m.install("sudo", FAKE_SUDO)
     m.install("curl", SERVING_CURL)
+    tmpdir = m.home.parent / "tmpdir"
+    tmpdir.mkdir(exist_ok=True)
     return {"FAKE_SUDO_LOG": str(m.home.parent / "sudo.log"), "FAKE_SUDO_STATUS": "0",
-            "FAKE_GH_TARBALL": GH_TARBALL.decode()}
+            "FAKE_GH_TARBALL": GH_TARBALL.decode(), "FAKE_NEBIUS_BINARY": NEBIUS_BINARY.decode(),
+            "TMPDIR": str(tmpdir), "FAKE_CLAUDE_LOG": str(m.home.parent / "claude.log"),
+            "FAKE_MARKET_VERSION": pin(m, "SUPERPOWERS_VERSION"), "FAKE_MARKET_SHA": pin(m, "SUPERPOWERS_SHA")}
+
+
+def nebius_url(m):
+    return f"https://artifacts.nebius.cloud/cli/release/{pin(m, 'NEBIUS_VERSION')}/linux/x86_64/nebius"
 
 
 def bootstrap_whole(m):
@@ -122,7 +144,7 @@ def test_bootstrap_takes_the_ref_the_clone_is_on():
 
 def test_bootstrap_updates_the_package_lists_once_before_any_install():
     with Machine() as m:
-        system = path_without(m.home.parent, {"docker", "sudo", "curl", "gh"})
+        system = path_without(m.home.parent, {"docker", "sudo", "curl", "gh", "nebius"})
         m.bin.joinpath("docker").unlink()
         r, log = bootstrap(m, FAKE_SUDO_STATUS="0", PATH=f"{m.bin}:{system}")
         apt = [line for line in log.splitlines() if line.startswith("sudo apt-get")]
@@ -176,6 +198,80 @@ def test_bootstrap_names_no_launcher():
         assert scripts_named(r.stderr) == set(), r.stderr
 
 
+def test_bootstrap_installs_the_pinned_nebius_cli():
+    """With none on PATH, and with one of another version."""
+    for installed in [None, "0.12.1"]:
+        with Machine() as m:
+            env = whole_run_env(m)
+            if installed:
+                m.install("nebius", f"#!/bin/sh\necho {installed}\n")
+            r = m.run("bootstrap-vm.sh", env=env)
+            assert r.returncode == 0, (installed, r.returncode, r.stderr)
+            log = (m.home.parent / "sudo.log").read_text()
+            assert f" {nebius_url(m)}\n" in log, (installed, log)
+            assert len(NEBIUS_INSTALL.findall(log)) == 1, (installed, log)
+            assert list((m.home.parent / "tmpdir").iterdir()) == [], (installed, log)
+
+
+def test_bootstrap_refuses_a_nebius_cli_of_another_sha():
+    with Machine() as m:
+        env = whole_run_env(m)
+        set_pin(m, "NEBIUS_SHA256", hashlib.sha256(b"another build").hexdigest())
+        m.world(label=m.label("25.02"))
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2 and "bootstrap-vm.sh: " in r.stderr, (r.returncode, r.stderr)
+        assert "NEBIUS_SHA256" in r.stderr and nebius_url(m) in r.stderr, r.stderr
+        log = (m.home.parent / "sudo.log").read_text()
+        assert not NEBIUS_INSTALL.search(log), log
+        assert list((m.home.parent / "tmpdir").iterdir()) == [], log
+        assert [c for c in m.docker_calls() if c[0] == "run"] == [], m.docker_calls()
+
+
+def test_bootstrap_names_a_nebius_cli_it_cannot_download():
+    with Machine() as m:
+        r = m.run("bootstrap-vm.sh", env={**whole_run_env(m), "FAKE_NEBIUS_MISSING": "1"})
+        assert r.returncode == 2 and f"cannot download {nebius_url(m)}" in r.stderr, (r.returncode, r.stderr)
+        log = (m.home.parent / "sudo.log").read_text()
+        assert not NEBIUS_INSTALL.search(log), log
+        assert list((m.home.parent / "tmpdir").iterdir()) == [], log
+
+
+def test_bootstrap_leaves_no_download_when_the_nebius_install_fails():
+    with Machine() as m:
+        env = whole_run_env(m)
+        m.install("sudo", FAKE_SUDO.replace('exit "${FAKE_SUDO_STATUS:-1}"',
+                                            '[ "$1" != install ] || exit 1; exit "${FAKE_SUDO_STATUS:-1}"'))
+        r = m.run("bootstrap-vm.sh", env=env)
+        log = (m.home.parent / "sudo.log").read_text()
+        assert r.returncode != 0 and NEBIUS_INSTALL.search(log), (r.returncode, r.stderr, log)
+        assert list((m.home.parent / "tmpdir").iterdir()) == [], log
+
+
+def test_bootstrap_leaves_no_download_when_the_gh_install_fails():
+    # A download that fails, and a tarball of another sha.
+    for curl, tarball in ((FAKE_CURL, None), (None, "another gh tarball")):
+        with Machine() as m:
+            env = whole_run_env(m)
+            if curl:
+                m.install("curl", curl)
+            if tarball:
+                env["FAKE_GH_TARBALL"] = tarball
+            r = m.run("bootstrap-vm.sh", env=env)
+            log = (m.home.parent / "sudo.log").read_text()
+            assert r.returncode != 0 and "github.com/cli/cli/releases" in log, (r.returncode, r.stderr, log)
+            assert list((m.home.parent / "tmpdir").iterdir()) == [], (curl is None, log)
+
+
+def test_bootstrap_skips_the_nebius_cli_at_its_pin():
+    with Machine() as m:
+        env = whole_run_env(m)
+        m.install("nebius", f"#!/bin/sh\n[ \"$*\" = version ] && echo {pin(m, 'NEBIUS_VERSION')}\n")
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 0, (r.returncode, r.stderr)
+        log = (m.home.parent / "sudo.log").read_text()
+        assert "artifacts.nebius.cloud" not in log and "/usr/local/bin/nebius" not in log, log
+
+
 def test_bootstrap_refuses_an_image_of_other_inputs():
     with Machine() as m:
         env = whole_run_env(m)
@@ -184,11 +280,16 @@ def test_bootstrap_refuses_an_image_of_other_inputs():
         r = m.run("bootstrap-vm.sh", env=env)
         assert r.returncode == 2 and "third_party/cudf" in r.stderr and "docker/pins.env" not in r.stderr, r.stderr
         assert [c for c in m.docker_calls() if c[0] == "run"] == [], m.docker_calls()
+
+
+def test_a_plain_build_is_refused_naming_image_sh():
+    """A plain `docker build` has no peacockdb.inputs label."""
     with Machine() as m:
         env = whole_run_env(m)
         m.world(label=None)
         r = m.run("bootstrap-vm.sh", env=env)
-        assert r.returncode == 2 and "peacockdb.inputs" in r.stderr, r.stderr
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        assert "peacockdb.inputs" in r.stderr and "scripts/env/image.sh" in r.stderr, r.stderr
         assert [c for c in m.docker_calls() if c[0] == "run"] == [], m.docker_calls()
 
 
@@ -202,6 +303,19 @@ def test_bootstrap_uses_the_image_of_the_clones_inputs():
         assert [c for c in calls if c[0] == "pull"] == [["pull", ref]], calls
         runs = [c for c in calls if c[0] == "run"]
         assert runs and all(ref in c for c in runs), runs
+
+
+def test_bootstrap_names_a_full_disk_on_its_own_machine():
+    # bootstrap-vm.sh runs on the VM itself: the commands are named for this machine, no nebius.sh.
+    with Machine() as m:
+        env = whole_run_env(m)
+        m.world(pull_error=NO_SPACE)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        for words in ("this machine's disk is full", "docker system df", "df -h", "df -i"):
+            assert words in r.stderr, (words, r.stderr)
+        assert "try again" not in r.stderr and "nebius.sh" not in r.stderr, r.stderr
+        assert [c for c in m.docker_calls() if c[0] == "run"] == [], m.docker_calls()
 
 
 def test_bootstrap_names_the_publish_of_an_unpublished_image():
@@ -241,9 +355,22 @@ def test_bootstrap_fetches_the_registry_with_the_clone_read_only():
         [fetch] = [c for c in m.docker_calls() if c[0] == "run" and "cargo" in c]
         registry = m.home / ".cache" / "peacock" / "cargo-registry"
         assert fetch[-3:] == ["cargo", "fetch", "--locked"], fetch
-        assert f"type=bind,src={m.clone},dst={m.clone},readonly" in fetch, fetch
+        assert f"type=bind,src={m.clone},dst=/peacock/tree,readonly" in fetch, fetch
+        assert fetch[fetch.index("-w") + 1] == "/peacock/tree", fetch
         assert f"type=bind,src={registry},dst=/opt/rust/cargo/registry" in fetch, fetch
         assert fetch[fetch.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}", fetch
+
+
+def test_the_generator_runs_at_a_container_path():
+    with Machine() as m:
+        bootstrap_whole(m)
+        stage = m.data_dir / f"{data_hash(m)}.partial"
+        runs = generator_runs(m)
+        assert len(runs) == 2, runs
+        for run in runs:
+            assert f"type=bind,src={stage},dst=/peacock/stage" in run, run
+            assert run[run.index("-w") + 1] == "/peacock/stage", run
+            assert "/peacock/stage/generate_testdata.sh" in run, run
 
 
 def test_bootstrap_generates_sf1_by_generator_inputs_once():
@@ -258,34 +385,295 @@ def test_bootstrap_generates_sf1_by_generator_inputs_once():
         assert len(generator_runs(m)) == 2, generator_runs(m)
 
 
-def test_bootstrap_keeps_one_cudf_checkout_a_commit():
+def sf1_links(m):
+    """Each sf1 set's entry in the clone's testdata/: the link's target, or the entry itself."""
+    entries = {}
+    for ds in ("tpch.sf1", "tpcds.sf1"):
+        path = m.clone / "testdata" / ds
+        entries[ds] = os.readlink(path) if path.is_symlink() else path
+    return entries
+
+
+def test_bootstrap_links_the_clone_s_sf1_to_the_machine_s_set():
+    # The tests read testdata/<ds>; build-test.sh mounts the target where it lies.
     with Machine() as m:
-        (m.clone / "third_party" / "cudf" / "VERSION").write_text("the clone's own, never read\n")
         bootstrap_whole(m)
-        checkout = m.data_dir / "cudf" / m.cudf_sha
-        assert (checkout / "VERSION").read_text() == "25.02.00\n"
-        assert (checkout / "cmake" / "rapids_config.cmake").is_file()
-        assert not (checkout / "README.md").exists(), "a path outside the sparse set was checked out"
+        data_set = m.data_dir / data_hash(m)
+        assert sf1_links(m) == {ds: str(data_set / ds) for ds in ("tpch.sf1", "tpcds.sf1")}, sf1_links(m)
+        assert git(m.clone, "status", "--porcelain", "--untracked-files=all", "testdata") == "", "git sees the links"
+
+
+def test_bootstrap_repoints_the_links_to_a_new_set():
+    with Machine() as m:
+        bootstrap_whole(m)
+        old = data_hash(m)
+        with open(m.clone / "testdata" / "generate_testdata.sh", "a") as f:
+            f.write("# another generator\n")
+        git(m.clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "generator")
+        bootstrap_whole(m)
+        new = data_hash(m)
+        assert new != old, new
+        assert sf1_links(m) == {ds: str(m.data_dir / new / ds) for ds in ("tpch.sf1", "tpcds.sf1")}, sf1_links(m)
+
+
+def test_bootstrap_keeps_a_set_of_the_clone_s_own_and_names_it():
+    with Machine() as m:
+        own = m.clone / "testdata" / "tpch.sf1"
+        own.mkdir()
+        (own / "lineitem.parquet").write_text("a developer's own\n")
+        r = bootstrap_whole(m)
+        assert not own.is_symlink() and (own / "lineitem.parquet").read_text() == "a developer's own\n"
+        assert str(own) in r.stdout + r.stderr and "kept" in r.stdout + r.stderr, (r.stdout, r.stderr)
+        assert sf1_links(m)["tpcds.sf1"] == str(m.data_dir / data_hash(m) / "tpcds.sf1"), sf1_links(m)
+
+
+def test_bootstrap_keeps_a_link_of_the_clone_s_own_and_names_it():
+    # Only a link into the machine's data dir, or one that dangles, is bootstrap's to repoint.
+    with Machine() as m:
+        own = m.home.parent / "my-sets" / "tpch.sf1"
+        own.mkdir(parents=True)
+        link = m.clone / "testdata" / "tpch.sf1"
+        link.symlink_to(own)
+        r = bootstrap_whole(m)
+        assert os.readlink(link) == str(own), os.readlink(link)
+        assert str(link) in r.stdout + r.stderr and "kept" in r.stdout + r.stderr, (r.stdout, r.stderr)
+        assert sf1_links(m)["tpcds.sf1"] == str(m.data_dir / data_hash(m) / "tpcds.sf1"), sf1_links(m)
+
+
+OLD_PLUGIN = {"version": "7.0.0", "gitCommitSha": "bb92a777" + "0" * 32}
+NEWER_PLUGIN = {"version": "9.9.9", "gitCommitSha": "99" * 20}
+
+
+def plugin_state(m, recorded=None, known=None, entries=None):
+    """superpowers as installed_plugins.json records it, its user-scope install (None: none) or the
+    plugin's entries as they are given; and the marketplace copy known_marketplaces.json holds
+    (None: the marketplace is unknown)."""
+    plugins = m.home / ".claude" / "plugins"
+    for name in ("installed_plugins.json", "known_marketplaces.json"):
+        (plugins / name).unlink(missing_ok=True)
+    if recorded is not None:
+        entries = [{"scope": "user", **recorded}]
+    if entries is not None:
+        (plugins / "installed_plugins.json").write_text(json.dumps(
+            {"plugins": {"superpowers@claude-plugins-official": entries}}))
+    if known is not None:
+        (plugins / "known_marketplaces.json").write_text(json.dumps({"claude-plugins-official": known}))
+
+
+def recorded(m, scope="user"):
+    entries = json.loads((m.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+    return [(e["version"], e["gitCommitSha"]) for e in entries["plugins"]["superpowers@claude-plugins-official"]
+            if e.get("scope") == scope]
+
+
+def claude_calls(m):
+    log = m.home.parent / "claude.log"
+    return [c for c in map(json.loads, log.read_text().splitlines()) if c != ["--version"]] if log.exists() else []
+
+
+def test_bootstrap_installs_superpowers_where_it_is_absent():
+    with Machine() as m:
+        env = whole_run_env(m)
+        plugin_state(m)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert recorded(m) == [(pin(m, "SUPERPOWERS_VERSION"), pin(m, "SUPERPOWERS_SHA"))], recorded(m)
+        assert claude_calls(m) == [["plugin", "marketplace", "add", "anthropics/claude-plugins-official"],
+                                   ["plugin", "install", "superpowers@claude-plugins-official"]], claude_calls(m)
+
+
+def test_bootstrap_updates_an_installed_superpowers_to_the_pin():
+    # `plugin install` leaves an installed plugin as it is: an older one is updated instead.
+    with Machine() as m:
+        env = whole_run_env(m)
+        plugin_state(m, recorded=OLD_PLUGIN, known=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+        assert recorded(m) == [(pin(m, "SUPERPOWERS_VERSION"), pin(m, "SUPERPOWERS_SHA"))], recorded(m)
+        assert claude_calls(m) == [["plugin", "marketplace", "update", "claude-plugins-official"],
+                                   ["plugin", "update", "superpowers@claude-plugins-official"]], claude_calls(m)
+
+
+def test_bootstrap_refuses_a_marketplace_that_is_not_at_the_pin_naming_the_pins():
+    # After a fresh install and after an update alike, what the marketplace gave is what to pin.
+    for state in ({}, {"recorded": OLD_PLUGIN, "known": OLD_PLUGIN}):
+        with Machine() as m:
+            env = {**whole_run_env(m), "FAKE_MARKET_VERSION": NEWER_PLUGIN["version"],
+                   "FAKE_MARKET_SHA": NEWER_PLUGIN["gitCommitSha"]}
+            plugin_state(m, **state)
+            r = m.run("bootstrap-vm.sh", env=env)
+            assert r.returncode == 2, (state, r.returncode, r.stderr)
+            given = f"{NEWER_PLUGIN['version']} at {NEWER_PLUGIN['gitCommitSha']}"
+            for words in (f"the marketplace gives superpowers {given}", "not the pin",
+                          "SUPERPOWERS_VERSION", "SUPERPOWERS_SHA"):
+                assert words in r.stderr, (state, words, r.stderr)
+
+
+def at_the_pin(m):
+    return [(pin(m, "SUPERPOWERS_VERSION"), pin(m, "SUPERPOWERS_SHA"))]
+
+
+MARKET_UPDATE = ["plugin", "marketplace", "update", "claude-plugins-official"]
+MARKET_ADD = ["plugin", "marketplace", "add", "anthropics/claude-plugins-official"]
+INSTALL = ["plugin", "install", "superpowers@claude-plugins-official"]
+UPDATE = ["plugin", "update", "superpowers@claude-plugins-official"]
+
+
+def test_bootstrap_installs_an_absent_superpowers_from_an_updated_marketplace():
+    # A marketplace copy from an earlier run is stale: it is updated before the install.
+    with Machine() as m:
+        env = whole_run_env(m)
+        plugin_state(m, known=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 0, (r.returncode, r.stderr)
+        assert recorded(m) == at_the_pin(m) and claude_calls(m) == [MARKET_UPDATE, INSTALL], claude_calls(m)
+
+
+def test_bootstrap_updates_a_superpowers_whose_marketplace_is_unknown():
+    with Machine() as m:
+        env = whole_run_env(m)
+        plugin_state(m, recorded=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 0, (r.returncode, r.stderr)
+        assert recorded(m) == at_the_pin(m) and claude_calls(m) == [MARKET_ADD, UPDATE], claude_calls(m)
+
+
+def test_bootstrap_names_a_plugin_step_that_fails():
+    for state, step in (({}, "plugin marketplace add"), ({"known": OLD_PLUGIN}, "plugin marketplace update"),
+                        ({"known": OLD_PLUGIN}, "plugin install"),
+                        ({"recorded": OLD_PLUGIN, "known": OLD_PLUGIN}, "plugin update")):
+        with Machine() as m:
+            env = {**whole_run_env(m), "FAKE_CLAUDE_FAIL": step}
+            plugin_state(m, **state)
+            r = m.run("bootstrap-vm.sh", env=env)
+            assert r.returncode == 2, (step, r.returncode, r.stderr)
+            assert f"bootstrap-vm.sh: claude {step}" in r.stderr and "failed" in r.stderr, (step, r.stderr)
+
+
+def test_bootstrap_refuses_an_install_that_records_nothing():
+    with Machine() as m:
+        env = {**whole_run_env(m), "FAKE_CLAUDE_INSTALL_RECORDS_NOTHING": "1"}
+        plugin_state(m, known=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2 and "records no superpowers" in r.stderr, (r.returncode, r.stderr)
+
+
+def test_bootstrap_takes_only_the_user_scope_install_as_pinned():
+    # A project's install at the pin is not the developer's: the user-scope one is updated.
+    with Machine() as m:
+        env = whole_run_env(m)
+        project = {"scope": "project", "version": pin(m, "SUPERPOWERS_VERSION"), "gitCommitSha": pin(m, "SUPERPOWERS_SHA")}
+        plugin_state(m, entries=[project, {"scope": "user", **OLD_PLUGIN}], known=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 0, (r.returncode, r.stderr)
+        assert UPDATE in claude_calls(m) and recorded(m) == at_the_pin(m), claude_calls(m)
+        assert recorded(m, "project") == at_the_pin(m), recorded(m, "project")
+
+
+def test_bootstrap_refuses_a_record_of_another_shape_by_name():
+    # An older record holds the plugin as one object, not a list of installs.
+    with Machine() as m:
+        env = whole_run_env(m)
+        plugin_state(m, entries=dict(OLD_PLUGIN), known=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        assert "installed_plugins.json" in r.stderr and "not a list" in r.stderr, r.stderr
+        assert "Traceback" not in r.stderr and claude_calls(m) == [], (r.stderr, claude_calls(m))
+
+
+def test_bootstrap_names_an_update_that_changed_nothing():
+    # The record is as before: the marketplace may still give that version, or the update failed.
+    with Machine() as m:
+        env = {**whole_run_env(m), "FAKE_MARKET_VERSION": OLD_PLUGIN["version"],
+               "FAKE_MARKET_SHA": OLD_PLUGIN["gitCommitSha"]}
+        plugin_state(m, recorded=OLD_PLUGIN, known=OLD_PLUGIN)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        assert "the update changed nothing" in r.stderr and f"{OLD_PLUGIN['version']} at" in r.stderr, r.stderr
+        assert "marketplace gives" not in r.stderr, r.stderr
+
+
+def test_bootstrap_checks_out_the_clone_s_third_party_cudf():
+    """cpp/CMakeLists.txt includes cuDF's cmake files from the clone's own submodule, which a clone
+    leaves empty; build-test.sh refuses a cpu or gpu build without it."""
+    with Machine() as m:
+        bootstrap_whole(m)
+        own = m.clone / "third_party" / "cudf"
+        assert (own / "cmake" / "rapids_config.cmake").read_text() == "# 25.02.00\n"
+        status = git(m.clone, "submodule", "status")
+        assert status.split()[:2] == [m.cudf_sha, "third_party/cudf"], status  # no -, + or U flag
+        assert git(own, "rev-parse", "--is-shallow-repository") == "true"
         shutil.move(m.cudf_origin, m.home.parent / "cudf-origin-gone")
         bootstrap_whole(m)
 
 
-def test_bootstrap_refuses_a_cudf_commit_it_cannot_fetch():
+def test_a_cudf_checkout_that_fails_is_named_after_every_other_step():
+    """Nothing before the data set reads the submodule's files, so a failed fetch stops nothing else."""
     with Machine() as m:
-        missing = "0123456789abcdef0123456789abcdef01234567"
-        git(m.clone, "update-index", "--cacheinfo", f"160000,{missing},third_party/cudf")
-        r, _ = bootstrap(m, FAKE_SUDO_STATUS="0")
-        assert r.returncode == 2 and missing in r.stderr, r.stderr
-        assert not (m.data_dir / "cudf" / missing).exists()
-        assert not list((m.data_dir / "cudf").glob("*.partial")), list((m.data_dir / "cudf").iterdir())
-        assert m.docker_calls() == [], m.docker_calls()
+        gone = m.home.parent / "cudf-origin-gone"
+        shutil.move(m.cudf_origin, gone)
+        env = whole_run_env(m)
+        before = git(m.clone, "status", "--porcelain")  # the pins the whole run is given
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2 and m.cudf_sha in r.stderr, (r.returncode, r.stderr)
+        assert (m.data_dir / data_hash(m) / "tpch.sf1").is_dir(), "the checkout stopped the run before sf1"
+        assert git(m.clone, "status", "--porcelain") == before, git(m.clone, "status", "--porcelain")
+        shutil.move(gone, m.cudf_origin)
+        bootstrap_whole(m)
+        assert (m.clone / "third_party" / "cudf" / "cmake" / "rapids_config.cmake").is_file()
+
+
+def test_a_clone_whose_git_dir_lies_elsewhere_gets_its_third_party_cudf():
+    """A --separate-git-dir clone or a linked worktree has a .git file, not a directory."""
+    with Machine() as m:
+        elsewhere = m.home.parent / "clone.git"
+        shutil.move(m.clone / ".git", elsewhere)
+        (m.clone / ".git").write_text(f"gitdir: {elsewhere}\n")
+        bootstrap_whole(m)
+        assert (m.clone / "third_party" / "cudf" / "cmake" / "rapids_config.cmake").is_file()
+
+
+def waits_on(pid, lock):
+    """Whether a child of `pid` is a flock holding an fd on `lock`."""
+    for proc in pathlib.Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            fields = (proc / "stat").read_text().rsplit(")", 1)[1].split()
+            if int(fields[1]) != pid or (proc / "comm").read_text().strip() != "flock":
+                continue
+            if any(os.readlink(fd) == str(lock) for fd in (proc / "fd").iterdir()):
+                return True
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+    return False
+
+
+def test_the_cudf_checkout_waits_for_the_clone_s_lock():
+    with Machine() as m:
+        lock = pathlib.Path(git(m.clone, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        lock = lock / "peacock-submodule.lock"
+        env = {**m.env, **whole_run_env(m)}
+        script = str(m.clone / "scripts" / "env" / "bootstrap-vm.sh")
+        own = m.clone / "third_party" / "cudf"
+        with open(lock, "w") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            run = subprocess.Popen([script], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True)
+            deadline = time.monotonic() + 60
+            while not waits_on(run.pid, lock):
+                assert run.poll() is None and time.monotonic() < deadline, run.communicate()
+                time.sleep(0.05)
+            assert list(own.iterdir()) == [], list(own.iterdir())
+        out, err = run.communicate(timeout=120)
+        assert run.returncode == 0, (out, err)
+        assert (own / "cmake" / "rapids_config.cmake").is_file()
 
 
 def test_bootstrap_leaves_the_shared_directory_writable_by_the_group():
     with Machine() as m:
         bootstrap_whole(m)
-        made = [m.data_dir / "cudf", m.data_dir / "cudf" / m.cudf_sha, m.data_dir / data_hash(m),
-                m.data_dir / data_hash(m) / "tpch.sf1"]
+        made = [m.data_dir / data_hash(m), m.data_dir / data_hash(m) / "tpch.sf1"]
         for path in made:
             assert path.stat().st_mode & stat.S_IWGRP, (path, oct(path.stat().st_mode))
 

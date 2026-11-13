@@ -1,6 +1,8 @@
-"""The images' committed inputs: docker/pins.env against the spec, and the explicit conda specs."""
+"""The images' committed inputs: docker/pins.env against the spec and the Dockerfiles' defaults, and
+the explicit conda specs."""
 import pathlib
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -8,7 +10,9 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" /
 import spec_hashes  # noqa: E402
 from harness import main  # noqa: E402
 
-DOCKER = pathlib.Path(__file__).resolve().parents[3] / "docker"
+ROOT = pathlib.Path(__file__).resolve().parents[3]
+DOCKER = ROOT / "docker"
+DOCKERFILES = ["build.Dockerfile", "run.Dockerfile"]
 
 SEMVER = r"\d+\.\d+\.\d+"
 SHA256 = r"[0-9a-f]{64}"
@@ -22,6 +26,7 @@ PINS = {
     "NVCC_VERSION": r"12\.9\.86",
     "DRIVER_MINIMUM_25_02": r"535\.104\.05",
     "DRIVER_MINIMUM_26_02": r"575\.57\.08",
+    "DRIVER_MINIMUM_PTX": r"575\.51\.03",
     "CMAKE_VERSION": r"4\.2\.3",
     "CMAKE_SHA256": SHA256,
     "NINJA_VERSION": r"1\.12\.1",
@@ -161,6 +166,71 @@ def test_the_sirius_venv_is_duckdb_and_pyarrow_at_their_pins():
     pins = read_pins()
     locked = {m["name"]: m["version"] for m in map(LOCK_LINE.fullmatch, lines)}
     assert locked == {"duckdb": pins["SIRIUS_DUCKDB"], "pyarrow": pins["PYARROW_VERSION"]}, locked
+
+
+def dockerfile_args(name):
+    """Each `ARG` of a Dockerfile as (line number, line, name, default or None). image_inputs drops
+    a lower-case, several-name or continued ARG line's pins from the inputs label, and this reader
+    takes only the one form, so any other ARG line is refused here."""
+    for number, line in enumerate((DOCKER / name).read_text().splitlines(), 1):
+        if not re.match(r"\s*ARG\s", line, re.IGNORECASE):
+            continue
+        m = re.fullmatch(r"ARG (\w+)(?:=(\S+))?", line)
+        assert m, (f"{name}:{number}: {line!r} is not `ARG NAME` or `ARG NAME=VALUE` alone on its line, "
+                   "the one form this test reads")
+        yield number, line, m[1], m[2]
+
+
+def instructions(name):
+    """A Dockerfile's lines less comments and blank lines, each as (line number, line)."""
+    return [(number, ln) for number, ln in enumerate((DOCKER / name).read_text().splitlines(), 1)
+            if ln.strip() and not ln.lstrip().startswith("#")]
+
+
+def keyword(line):
+    return line.split()[0].upper()
+
+
+def test_every_pin_a_dockerfile_declares_defaults_to_the_pin():
+    """So `docker build -f docker/<kind>.Dockerfile .` builds what image.sh builds, less its labels."""
+    pins = read_pins()
+    wrong = [f"{name}:{number}: {line} (pins.env: {arg}={pins[arg]})"
+             for name in DOCKERFILES for number, line, arg, default in dockerfile_args(name)
+             if arg in pins and default != pins[arg]]
+    assert not wrong, "ARGs whose default is not their pin:\n" + "\n".join(wrong)
+
+
+def test_cudf_defaults_to_25_02_before_the_first_from():
+    for name in DOCKERFILES:
+        lines = instructions(name)
+        first_from = next(i for i, (_, ln) in enumerate(lines) if keyword(ln) == "FROM")
+        assert [ln for _, ln in lines[:first_from]] == ["ARG CUDF=25.02"], (name, lines[:first_from])
+        # A stage's own default would shadow the global one: a plain build's FROM and RUNs would disagree.
+        staged = [line for number, line, arg, default in dockerfile_args(name)
+                  if arg == "CUDF" and default is not None and number > lines[first_from][0]]
+        assert not staged, (name, staged)
+
+
+def test_cudf_submodule_defaults_to_the_index():
+    mode, commit, *_ = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-s", "third_party/cudf"],
+                                      check=True, capture_output=True, text=True).stdout.split()
+    assert mode == "160000", mode
+    defaults = [(name, default) for name in DOCKERFILES
+                for _, _, arg, default in dockerfile_args(name) if arg == "CUDF_SUBMODULE"]
+    assert defaults == [("build.Dockerfile", commit)], (defaults, commit)
+
+
+def test_the_run_image_labels_the_ptx_driver_minimum():
+    """After every layer of the final stage, so a change to the pin rebuilds none."""
+    lines = [ln for _, ln in instructions("run.Dockerfile")]
+    last_from = max(i for i, ln in enumerate(lines) if keyword(ln) == "FROM")
+    final = lines[last_from:]
+    pin = read_pins()["DRIVER_MINIMUM_PTX"]
+    wanted = [f"ARG DRIVER_MINIMUM_PTX={pin}", "LABEL peacockdb.driver-minimum-ptx=${DRIVER_MINIMUM_PTX}"]
+    assert all(ln in final for ln in wanted), final
+    last_layer = max(i for i, ln in enumerate(final) if keyword(ln) in ("RUN", "COPY", "ADD"))
+    early = [ln for ln in wanted if final.index(ln) < last_layer]
+    assert not early, f"before the final stage's {final[last_layer]!r}: {early}"
 
 
 if __name__ == "__main__":

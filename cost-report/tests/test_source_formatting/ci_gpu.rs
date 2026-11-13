@@ -1,7 +1,8 @@
 //! The gpu-tests job's place on nebius-gpu. The VM is shared: a developer's clone of the
 //! repository is `~/peacock/peacockdb/` there and its run the container `peacock-peacockdb`, the
 //! names `run-gpu.sh` gives the CI checkout by default. So the job names a directory of its own,
-//! every `run-gpu.sh` call the same, and its cleanup removes that container alone, on every outcome.
+//! every `run-gpu.sh` call the same, and a fixed tree id, since its checkout is new on every run;
+//! and on every outcome its cleanup cancels that dir's run, before the soft stop.
 
 use crate::ci_workflow::{commands, job_lines, job_steps, logical_lines, run_scripts, unquoted};
 use crate::repo_root;
@@ -15,7 +16,11 @@ const CHECKOUT_DIR: &str = "peacockdb";
 /// A step's `name:`, if it has one.
 fn step_name<'a>(step: &[&'a str]) -> Option<&'a str> {
     step.iter()
-        .find_map(|l| l.trim_start().trim_start_matches("- ").strip_prefix("name:"))
+        .find_map(|l| {
+            l.trim_start()
+                .trim_start_matches("- ")
+                .strip_prefix("name:")
+        })
         .map(str::trim)
 }
 
@@ -85,11 +90,156 @@ fn dir_of(words: &[String]) -> Option<&str> {
         .map(|pair| pair[1].as_str())
 }
 
-/// What is wrong with gpu-tests' directory and container on the VM: the run step's `--dir`
+/// A script's verb: its first word past the options, each of which takes a value, as both
+/// `run-gpu.sh`'s and `nebius.sh`'s do.
+fn verb_of(words: &[String]) -> Option<String> {
+    let mut rest = words.get(1..)?;
+    while rest.first().is_some_and(|w| w.starts_with("--")) {
+        rest = rest.get(2..)?;
+    }
+    rest.first().map(|w| unquoted(w))
+}
+
+/// A step's `if:`, if it has one.
+fn step_condition<'a>(step: &[&'a str]) -> Option<&'a str> {
+    step.iter()
+        .find_map(|l| l.trim_start().trim_start_matches("- ").strip_prefix("if:"))
+        .map(str::trim)
+}
+
+/// The line of the job's own `env:` that sets `name`, and its value as written.
+fn job_env<'a>(lines: &[&'a str], name: &str) -> Option<(usize, &'a str)> {
+    let indent = |l: &str| l.len() - l.trim_start().len();
+    let at = lines
+        .iter()
+        .position(|l| indent(l) == 4 && l.trim() == "env:")?;
+    lines[at + 1..]
+        .iter()
+        .enumerate()
+        .take_while(|(_, l)| {
+            let body = l.trim_start();
+            body.is_empty() || body.starts_with('#') || indent(l) > 4
+        })
+        .find_map(|(i, l)| Some((at + 1 + i, l.trim().strip_prefix(name)?.strip_prefix(':')?)))
+        .map(|(i, value)| (i, value.trim()))
+}
+
+/// What is wrong with the job's tree id: none in the job's `env:`, not a literal id, which an
+/// expression is not, or another line of the job naming it: a step's `env:`, an assignment, an
+/// `unset` or a `$GITHUB_ENV` line would give some calls another id.
+fn tree_id_problems(lines: &[&str]) -> Vec<String> {
+    let Some((set, value)) = job_env(lines, "PEACOCK_TREE_ID") else {
+        return vec![
+            "gpu-tests: the job's env: sets no PEACOCK_TREE_ID. The checkout is new on every run, \
+             so each would make a random id, and the next run would be refused its dir"
+                .to_string(),
+        ];
+    };
+    let mut problems: Vec<String> = lines
+        .iter()
+        .enumerate()
+        .filter(|&(i, l)| {
+            i != set && !l.trim_start().starts_with('#') && l.contains("PEACOCK_TREE_ID")
+        })
+        .map(|(_, l)| {
+            format!(
+                "gpu-tests: `{}` names PEACOCK_TREE_ID beside the job's env:, which alone sets \
+                 it: a call with another id is refused ~/peacock/<dir>/",
+                l.trim()
+            )
+        })
+        .collect();
+    let id = unquoted(value);
+    let literal = !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if !literal {
+        problems.push(format!(
+            "gpu-tests: PEACOCK_TREE_ID is `{value}`, not a literal id: an expression that changes \
+             between runs is refused the dir the last run claimed, and run-gpu.sh takes letters, \
+             digits, '.', '_' and '-' alone"
+        ));
+    }
+    problems
+}
+
+/// What is wrong with the cleanup: no `run-gpu.sh … cancel`, or one whose step's `if:` does not
+/// start `always()`, whose failure ends the step (no `||` after it on its line, or one followed by
+/// anything but `echo`, `true` or `:`), or that comes after a `nebius.sh stop`. A cancel of
+/// another dir than `<dir>` is the caller's to refuse, as any call is.
+fn cancel_problems(steps: &[Vec<&str>], dir: &str) -> Vec<String> {
+    let is_cancel = |words: &Vec<String>| {
+        words.first().is_some_and(|w| w == RUN_GPU) && verb_of(words).as_deref() == Some("cancel")
+    };
+    let is_stop = |words: &Vec<String>| {
+        words.first().is_some_and(|w| w.ends_with("nebius.sh"))
+            && verb_of(words).as_deref() == Some("stop")
+    };
+    // Each logical line of every `run:`, in the job's order, with its step.
+    let lines: Vec<(&Vec<&str>, String)> = steps
+        .iter()
+        .flat_map(|step| {
+            run_scripts(step)
+                .iter()
+                .flat_map(|s| logical_lines(s))
+                .map(move |l| (step, l))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let cancels: Vec<usize> = (0..lines.len())
+        .filter(|&at| commands(&lines[at].1).iter().any(is_cancel))
+        .collect();
+    if cancels.is_empty() {
+        return vec![format!(
+            "gpu-tests: no step runs `{RUN_GPU} … --dir {dir} cancel`, so the run of a cancelled \
+             job, or one whose ssh dropped, keeps the card, the idle watcher stays off, and the \
+             next run's `run` is refused"
+        )];
+    }
+    let mut problems = Vec::new();
+    for at in cancels {
+        let (step, line) = &lines[at];
+        let condition = step_condition(step);
+        if !condition.is_some_and(|c| c.starts_with("always()")) {
+            problems.push(format!(
+                "gpu-tests: the step running `{line}` runs on {condition:?}, not on \
+                 `always() && …`: a cancelled job, or one whose ssh dropped, would leave its run \
+                 on the VM"
+            ));
+        }
+        // The first `||` of the line: what comes before it is the list a failure falls through,
+        // and what follows must not fail the step itself, as `exit 1` or `false` would.
+        let forgiven = line.split_once("||").is_some_and(|(head, tail)| {
+            commands(head).last().is_some_and(is_cancel)
+                && commands(tail)
+                    .iter()
+                    .all(|words| ["echo", "true", ":"].contains(&words[0].as_str()))
+        });
+        if !forgiven {
+            problems.push(format!(
+                "gpu-tests: `{line}` fails the step when the cancel fails, a VM stopped or out of \
+                 reach, and the soft stop after it never runs: end it `|| echo …` alone"
+            ));
+        }
+        if let Some((_, stop)) = lines[..at]
+            .iter()
+            .find(|(_, l)| commands(l).iter().any(is_stop))
+        {
+            problems.push(format!(
+                "gpu-tests: `{stop}` comes before `{line}`: the run holds the card's lock, so \
+                 the soft stop is refused and the VM stays up"
+            ));
+        }
+    }
+    problems
+}
+
+/// What is wrong with gpu-tests' directory, tree and run on the VM: the run step's `--dir`
 /// missing or the checkout's, another `run-gpu.sh` call naming another, a `docker rm`, `kill` or
-/// `stop` naming anything but `peacock-<dir>` alone, or no cleanup step running `docker rm -f
-/// peacock-<dir>` under an `if:` that starts `always()`.
-fn gpu_container_problems(workflow: &str) -> Vec<String> {
+/// `stop` naming anything but `peacock-<dir>` alone, the cleanup's cancel (`cancel_problems`), or
+/// the job's tree id (`tree_id_problems`).
+fn gpu_job_problems(workflow: &str) -> Vec<String> {
     let Some(lines) = job_lines(workflow, "gpu-tests") else {
         return vec!["gpu-tests: no such job".to_string()];
     };
@@ -104,7 +254,7 @@ fn gpu_container_problems(workflow: &str) -> Vec<String> {
         return vec![format!(
             "gpu-tests: the `{GPU_RUN_STEP}` step's {RUN_GPU} names no --dir of its own: the \
              default, {CHECKOUT_DIR}, is a developer's clone's on the VM too, and the cleanup \
-             would remove that clone's run"
+             would cancel that clone's run"
         )];
     };
     let mut problems = Vec::new();
@@ -128,90 +278,290 @@ fn gpu_container_problems(workflow: &str) -> Vec<String> {
             }
         }
     }
-    let removes = |step: &&Vec<&str>| {
-        step_commands(step).iter().any(|words| {
-            container_stop(words).is_some_and(|(verb, names, force)| {
-                verb == "rm" && force && names == [container.as_str()]
-            })
-        })
-    };
-    let Some(step) = steps.iter().find(removes) else {
-        problems.push(format!(
-            "gpu-tests: no step runs `docker rm -f {container}`, so a cancelled run's container \
-             keeps the card, and the next run's `run` refuses the busy name"
-        ));
-        return problems;
-    };
-    let condition = step
-        .iter()
-        .find_map(|l| l.trim_start().trim_start_matches("- ").strip_prefix("if:"))
-        .map(str::trim);
-    if !condition.is_some_and(|c| c.starts_with("always()")) {
-        problems.push(format!(
-            "gpu-tests: the step removing {container} runs on {condition:?}, not on \
-             `always() && …`: a failed or cancelled run would leave its container on the VM"
-        ));
-    }
+    problems.extend(cancel_problems(&steps, &dir));
+    problems.extend(tree_id_problems(&lines));
     problems
 }
 
-/// A cancelled or failed `gpu-tests` run leaves its container running on nebius-gpu, which keeps
-/// the card busy and the idle watcher off; and a cleanup of `peacock-peacockdb` would remove a
-/// developer's run instead. The job's calls name `--dir ci`, the cleanup removes `peacock-<dir>`
-/// of the run step, under an `if:` that starts `always()`, and nothing in the job stops another.
-#[test]
-fn the_gpu_job_owns_its_dir_and_removes_its_container() {
-    let text = std::fs::read_to_string(repo_root().join(".github/workflows/pipeline.yml"))
-        .expect("read pipeline.yml");
-    let problems = gpu_container_problems(&text);
-    assert!(problems.is_empty(), "{}", problems.join("\n"));
+const ALWAYS: &str = "        if: always() && steps.start.outcome == 'success'\n";
+const STOP: &str = "scripts/nebius.sh stop || echo \"soft stop declined (rc=$?)\"";
+const SHIP: &str = "--dir ci ship";
+const RUN: &str = "--dir ci run list";
 
-    let job = |ship: &str, run: &str, cleanup: &str| {
-        format!(
-            "jobs:\n  gpu-tests:\n    runs-on: ubuntu-latest\n    steps:\n      \
-             - uses: actions/checkout@v4\n      - name: Ship\n        run: {RUN_GPU} \
-             --instance-id x {ship}\n      - name: {GPU_RUN_STEP}\n        run: {RUN_GPU} \
-             --instance-id x {run}\n{cleanup}  next-job:\n    runs-on: ubuntu-latest\n"
-        )
-    };
-    let step = |condition: &str, run: &str| {
-        format!("      - name: Clean up\n{condition}        run: |\n          {run}\n")
-    };
-    let always = "        if: always() && steps.start.outcome == 'success'\n";
-    let rm = |name: &str| format!("scripts/nebius.sh ssh 'docker rm -f {name}' || true");
-    let (ship, run) = ("--dir ci ship", "--dir ci run list");
-    let and_then = |second: &str| format!("{}\n          {second}", rm("peacock-ci"));
-    let stop_elsewhere = format!(
-        "{}      - name: Stop\n        run: scripts/nebius.sh ssh 'docker kill {}'\n",
-        step(always, &rm("peacock-ci")),
-        "peacock-peacockdb"
+/// A job's `env:` setting `PEACOCK_TREE_ID` to `value`.
+fn tree_id(value: &str) -> String {
+    format!("    env:\n      PEACOCK_TREE_ID: {value}\n")
+}
+
+/// A gpu-tests job: its `env:` lines, a ship and a run step given their verbs, and a cleanup.
+fn doctored_job(env: &str, ship: &str, run: &str, cleanup: &str) -> String {
+    format!(
+        "jobs:\n  gpu-tests:\n    runs-on: ubuntu-latest\n{env}    steps:\n      \
+         - uses: actions/checkout@v4\n      - name: Ship\n        run: {RUN_GPU} \
+         --instance-id x {ship}\n      - name: {GPU_RUN_STEP}\n        run: {RUN_GPU} \
+         --instance-id x {run}\n{cleanup}  next-job:\n    runs-on: ubuntu-latest\n"
+    )
+}
+
+/// The same with the `ci` tree id.
+fn ci_job(ship: &str, run: &str, cleanup: &str) -> String {
+    doctored_job(&tree_id("ci"), ship, run, cleanup)
+}
+
+/// A cleanup step under `condition`, its `run:` the lines.
+fn cleanup_step(condition: &str, lines: &[&str]) -> String {
+    format!(
+        "      - name: Clean up\n{condition}        run: |\n          {}\n",
+        lines.join("\n          ")
+    )
+}
+
+fn cancel_line(dir: &str) -> String {
+    format!("{RUN_GPU} --instance-id x --dir {dir} cancel")
+}
+
+fn forgiven_cancel(dir: &str) -> String {
+    format!("{} || echo \"cancel failed (rc=$?)\"", cancel_line(dir))
+}
+
+/// The cleanup the job has, with `more` between the cancel and the stop.
+fn ci_cleanup(more: &str) -> String {
+    cleanup_step(ALWAYS, &[&forgiven_cancel("ci"), more, STOP])
+}
+
+fn rm_line(name: &str) -> String {
+    format!("scripts/nebius.sh ssh 'docker rm -f {name}' || true")
+}
+
+/// Jobs the guard refuses, each named by what is wrong with it.
+fn refused_jobs() -> Vec<(&'static str, String)> {
+    let kill_elsewhere = format!(
+        "{}      - name: Stop\n        run: \
+         scripts/nebius.sh ssh 'docker kill peacock-peacockdb'\n",
+        ci_cleanup("")
     );
-    assert_eq!(
-        gpu_container_problems(&job(ship, run, &step(always, &rm("peacock-ci")))),
-        Vec::<String>::new()
+    let tree_in_a_step = ci_cleanup("").replace(
+        "        run: |",
+        "        env:\n          PEACOCK_TREE_ID: ci\n        run: |",
     );
-    for (what, text) in [
-        ("no --dir", job("ship", "run list", &step(always, &rm("peacock-peacockdb")))),
+    let step_over = ci_cleanup("").replace(
+        "        run: |",
+        "        env:\n          PEACOCK_TREE_ID: ${{ github.run_id }}\n        run: |",
+    );
+    vec![
+        ("no --dir", ci_job("ship", "run list", &ci_cleanup(""))),
         (
             "the checkout's dir",
-            job("--dir peacockdb ship", "--dir peacockdb run list", &step(always, &rm("peacock-peacockdb"))),
+            ci_job(
+                "--dir peacockdb ship",
+                "--dir peacockdb run list",
+                &cleanup_step(ALWAYS, &[&forgiven_cancel("peacockdb"), STOP]),
+            ),
         ),
-        ("another dir", job("--dir other ship", run, &step(always, &rm("peacock-ci")))),
-        ("another container", job(ship, run, &step(always, &rm("peacock-peacockdb")))),
-        ("a longer name", job(ship, run, &step(always, &rm("peacock-ci-old")))),
-        ("a name it starts", job(ship, run, &step(always, &rm("peacock-cix")))),
-        ("a second container", job(ship, run, &step(always, &rm("peacock-ci peacock-peacockdb")))),
-        ("a second docker rm", job(ship, run, &step(always, &and_then(&rm("peacock-peacockdb"))))),
-        ("a kill elsewhere", job(ship, run, &stop_elsewhere)),
-        ("a stop", job(ship, run, &step(always, &and_then("docker stop -t 5 peacock-x")))),
-        ("by substitution", job(ship, run, &step(always, &rm("peacock-ci $(docker ps -q)")))),
-        ("no if", job(ship, run, &step("", &rm("peacock-ci")))),
-        ("not always()", job(ship, run, &step("        if: success()\n", &rm("peacock-ci")))),
-        ("commented out", job(ship, run, &step(always, &format!("# {}", rm("peacock-ci"))))),
-        ("no cleanup", job(ship, run, "")),
+        (
+            "another dir",
+            ci_job("--dir other ship", RUN, &ci_cleanup("")),
+        ),
+        (
+            "another container",
+            ci_job(SHIP, RUN, &ci_cleanup(&rm_line("peacock-peacockdb"))),
+        ),
+        (
+            "a longer name",
+            ci_job(SHIP, RUN, &ci_cleanup(&rm_line("peacock-ci-old"))),
+        ),
+        (
+            "a name it starts",
+            ci_job(SHIP, RUN, &ci_cleanup(&rm_line("peacock-cix"))),
+        ),
+        (
+            "a second container",
+            ci_job(
+                SHIP,
+                RUN,
+                &ci_cleanup(&rm_line("peacock-ci peacock-peacockdb")),
+            ),
+        ),
+        ("a kill elsewhere", ci_job(SHIP, RUN, &kill_elsewhere)),
+        (
+            "a stop",
+            ci_job(
+                SHIP,
+                RUN,
+                &ci_cleanup("scripts/nebius.sh ssh 'docker stop -t 5 peacock-x'"),
+            ),
+        ),
+        (
+            "by substitution",
+            ci_job(
+                SHIP,
+                RUN,
+                &ci_cleanup(&rm_line("peacock-ci $(docker ps -q)")),
+            ),
+        ),
+        ("no cleanup", ci_job(SHIP, RUN, "")),
+        (
+            "no PEACOCK_TREE_ID",
+            doctored_job("", SHIP, RUN, &ci_cleanup("")),
+        ),
+        (
+            "PEACOCK_TREE_ID in a step alone",
+            doctored_job("", SHIP, RUN, &tree_in_a_step),
+        ),
+        (
+            "an id per run",
+            doctored_job(&tree_id("${{ github.run_id }}"), SHIP, RUN, &ci_cleanup("")),
+        ),
+        (
+            "an empty id",
+            doctored_job(&tree_id("\"\""), SHIP, RUN, &ci_cleanup("")),
+        ),
+        (
+            "an id run-gpu.sh refuses",
+            doctored_job(&tree_id("ci/x"), SHIP, RUN, &ci_cleanup("")),
+        ),
+        ("a step's id over the job's", ci_job(SHIP, RUN, &step_over)),
+        (
+            "an id inline",
+            ci_job(
+                SHIP,
+                RUN,
+                &ci_cleanup(&format!(
+                    "PEACOCK_TREE_ID=x {RUN_GPU} --instance-id x --dir ci status"
+                )),
+            ),
+        ),
+        (
+            "an id unset",
+            ci_job(SHIP, RUN, &ci_cleanup("unset PEACOCK_TREE_ID")),
+        ),
+        (
+            "an id for the later steps",
+            ci_job(
+                SHIP,
+                RUN,
+                &ci_cleanup("echo PEACOCK_TREE_ID=x >> \"$GITHUB_ENV\""),
+            ),
+        ),
+    ]
+}
+
+/// Cleanups the guard refuses, each named by what is wrong with it.
+fn refused_cleanups() -> Vec<(&'static str, String)> {
+    let cancel_step =
+        |condition: &str, lines: &[&str]| ci_job(SHIP, RUN, &cleanup_step(condition, lines));
+    vec![
+        ("no cancel", cancel_step(ALWAYS, &[STOP])),
+        (
+            "a cancel of another dir",
+            cancel_step(ALWAYS, &[&forgiven_cancel("other"), STOP]),
+        ),
+        (
+            "a cancel under success()",
+            cancel_step("        if: success()\n", &[&forgiven_cancel("ci"), STOP]),
+        ),
+        (
+            "a cancel with no if",
+            cancel_step("", &[&forgiven_cancel("ci"), STOP]),
+        ),
+        (
+            "a cancel commented out",
+            cancel_step(ALWAYS, &[&format!("# {}", forgiven_cancel("ci")), STOP]),
+        ),
+        (
+            "a cancel that fails the step",
+            cancel_step(ALWAYS, &[&cancel_line("ci"), STOP]),
+        ),
+        (
+            "a cancel after another command's ||",
+            cancel_step(ALWAYS, &[&format!("true || {}", cancel_line("ci")), STOP]),
+        ),
+        (
+            "a cancel before another command's ||",
+            cancel_step(
+                ALWAYS,
+                &[&format!("{}; true || echo", cancel_line("ci")), STOP],
+            ),
+        ),
+        (
+            "a second cancel under success()",
+            ci_job(
+                SHIP,
+                RUN,
+                &format!(
+                    "{}{}",
+                    ci_cleanup(""),
+                    cleanup_step("        if: success()\n", &[&forgiven_cancel("ci")])
+                ),
+            ),
+        ),
+        (
+            "a cancel after the stop",
+            cancel_step(ALWAYS, &[STOP, &forgiven_cancel("ci")]),
+        ),
+        (
+            "a cancel whose || exits",
+            cancel_step(ALWAYS, &[&format!("{} || exit 1", cancel_line("ci")), STOP]),
+        ),
+        (
+            "a cancel whose || is false",
+            cancel_step(ALWAYS, &[&format!("{} || false", cancel_line("ci")), STOP]),
+        ),
+        (
+            "a cancel whose || block exits",
+            cancel_step(
+                ALWAYS,
+                &[
+                    &format!("{} || {{ echo failed; exit 1; }}", cancel_line("ci")),
+                    STOP,
+                ],
+            ),
+        ),
+    ]
+}
+
+/// A cancelled `gpu-tests` job, or one whose ssh dropped, leaves its run going on nebius-gpu,
+/// which keeps the card busy and the idle watcher off; a cancel of `peacockdb` would end a
+/// developer's run instead; and a checkout new on every run claims `~/peacock/<dir>/` by a new
+/// random id each time. The job's calls name `--dir ci`, its `env:` alone sets a literal
+/// `PEACOCK_TREE_ID`, and its cleanup cancels the run step's dir under an `if:` that starts
+/// `always()`, forgiven by `echo`, `true` or `:` alone, before the soft stop. Nothing in the job
+/// stops another container.
+#[test]
+fn the_gpu_job_owns_its_dir_and_cancels_its_run() {
+    let text = std::fs::read_to_string(repo_root().join(".github/workflows/pipeline.yml"))
+        .expect("read pipeline.yml");
+    let problems = gpu_job_problems(&text);
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+
+    for (what, text) in [
+        ("the cleanup", ci_job(SHIP, RUN, &ci_cleanup(""))),
+        (
+            "its own container removed",
+            ci_job(SHIP, RUN, &ci_cleanup(&rm_line("peacock-ci"))),
+        ),
+        (
+            "a quoted id",
+            doctored_job(&tree_id("\"ci\""), SHIP, RUN, &ci_cleanup("")),
+        ),
+        (
+            "a cancel forgiven by true",
+            ci_job(
+                SHIP,
+                RUN,
+                &cleanup_step(ALWAYS, &[&format!("{} || true", cancel_line("ci")), STOP]),
+            ),
+        ),
     ] {
+        assert_eq!(
+            gpu_job_problems(&text),
+            Vec::<String>::new(),
+            "{what}\n{text}"
+        );
+    }
+    for (what, text) in refused_jobs().into_iter().chain(refused_cleanups()) {
         assert!(
-            !gpu_container_problems(&text).is_empty(),
+            !gpu_job_problems(&text).is_empty(),
             "{what}: accepted\n{text}"
         );
     }

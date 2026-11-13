@@ -44,3 +44,13 @@ These are design targets / back-of-envelope figures for an H100/H200-class GPU,
 not measured results. The point of co-location is the data movement: the
 rescored candidate set stays resident instead of being copied to and from a
 separate service.
+
+## Building and testing
+
+Builds and the engine's tests run in the build image through `scripts/build-test.sh`, so a host
+needs Docker; device runs go through `scripts/env/run-gpu.sh` in the run image, and the script
+tests under `scripts/env/tests/` and `scripts/nebius/tests/` run on the host's `python3`. The lines a
+developer needs are one table in
+[build-test.md, "Local build workflows and caches"](llm-wiki/build-test.md#local-build-workflows-and-caches).
+A CPU VM to build on is set up as
+[build-test.md, "A fresh VM"](llm-wiki/build-test.md#a-fresh-vm) says.

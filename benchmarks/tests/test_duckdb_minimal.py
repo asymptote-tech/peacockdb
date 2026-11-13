@@ -147,6 +147,18 @@ def test_results_name_version_threads_host():
         assert results(tmp / "four.tsv")[1]["threads"] == "4"
 
 
+def test_a_value_holding_a_double_underscore_comes_through_unchanged():
+    # Whitespace in a value becomes `_`; a `__` already there, as a mkdtemp name may hold, stays.
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        directory = tmp / "data__dir"
+        directory.mkdir()
+        linked(directory)
+        ok(run("--cases", cases(tmp), "--results", tmp / "duckdb.tsv", directory=directory))
+        db = results(tmp / "duckdb.tsv")[1]["db"]
+        assert db == str(directory / "tpch.sf1.duckdb"), db
+
+
 def test_results_have_the_fixtures_shape():
     """`parse_duckdb_results` (test_support) owns the format and is tested over
     `testdata/fixtures/duckdb-results.tsv`; what the script writes has that file's keys and columns."""

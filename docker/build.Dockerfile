@@ -1,37 +1,36 @@
-# check=skip=InvalidDefaultArgInFrom
 # The build image for one cuDF version: every build mode (rust-only, the FFI build, --features gpu,
 # the staged test and benchmark binaries) and the agents that drive them. Built by
 # scripts/env/image.sh, which passes every docker/pins.env line as a build arg; its use and size
 # are in llm-wiki/build-test.md, "Images". No secret, host, user home or provider is in
 # any layer: the image is public, which is also why Claude Code is not in it (the machine's install
 # is mounted). It runs as any uid: nothing is found through HOME, and what a tool writes is
-# world-writable in the container's own layer or under /tmp.
-# No default: without --build-arg CUDF the FROM below names no stage and the build stops (line 1).
-ARG CUDF
+# world-writable in the container's own layer or under /tmp. Each pin's ARG defaults to its
+# pins.env value (test_pins.py holds them equal), so a plain `docker build` builds the same layers.
+ARG CUDF=25.02
 
 # The gcc each cuDF version is built with, chosen by stage so the rest of the file reads one name.
 FROM ubuntu:24.04 AS cudf-25.02
-ARG GCC_25_02
+ARG GCC_25_02=12
 ENV GCC_VERSION=${GCC_25_02}
 
 # 25.10 has a build image and no run image: CI's second cuDF leg.
 FROM ubuntu:24.04 AS cudf-25.10
-ARG GCC_25_10
+ARG GCC_25_10=14
 ENV GCC_VERSION=${GCC_25_10}
 
 FROM ubuntu:24.04 AS cudf-26.02
-ARG GCC_26_02
+ARG GCC_26_02=14
 ENV GCC_VERSION=${GCC_26_02}
 
 FROM cudf-${CUDF} AS toolchain
 ARG CUDF
-ARG NVCC_VERSION
-ARG MICROMAMBA_VERSION
-ARG MICROMAMBA_SHA256
-ARG CMAKE_VERSION
-ARG CMAKE_SHA256
-ARG NINJA_VERSION
-ARG NINJA_SHA256
+ARG NVCC_VERSION=12.9.86
+ARG MICROMAMBA_VERSION=2.9.0-0
+ARG MICROMAMBA_SHA256=366cd9cd8be14df1ab8ed50352a82111082a36686b2d389fdb79a92c3fafb3e3
+ARG CMAKE_VERSION=4.2.3
+ARG CMAKE_SHA256=5bb505d5e0cca0480a330f7f27ccf52c2b8b5214c5bba97df08899f5ef650c23
+ARG NINJA_VERSION=1.12.1
+ARG NINJA_SHA256=6f98805688d19672bd699fbbfa2c2cf0fc054ac3df1f0e6a47664d963d530255
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 
@@ -95,7 +94,7 @@ ENV PATH=/opt/nvcc/bin:${PATH} \
 # the tree's index pins, as far as the configure reads it. The flatbuffers mirror holds the one
 # tag cpp/CMakeLists.txt names, so a configure asking for another fails naming it.
 FROM toolchain AS prefetch
-ARG CUDF_SUBMODULE
+ARG CUDF_SUBMODULE=43505bb975f46ce4e140fdaf55192611d6e231ac
 COPY cpp/ /src/cpp/
 COPY flatbuffers/ /src/flatbuffers/
 COPY scripts/build.sh /src/scripts/build.sh
@@ -114,23 +113,23 @@ RUN git init -q third_party/cudf \
  && find /opt/prefetch/cpm -mindepth 2 -maxdepth 2 -name cmake.lock -exec chmod a+rw {} +
 
 FROM toolchain
-ARG DUCKDB_VERSION
-ARG DUCKDB_SHA256
-ARG PYTHON_VERSION
-ARG PYTHON_STANDALONE_TAG
-ARG PYTHON_SHA256
-ARG PANDAS_VERSION
-ARG PYARROW_VERSION
-ARG NUMPY_VERSION
-ARG MATPLOTLIB_VERSION
-ARG PY_DUCKDB_VERSION
-ARG RUST_VERSION
-ARG GH_VERSION
-ARG GH_SHA256
-ARG AWS_CLI_VERSION
-ARG AWS_CLI_SHA256
-ARG NEBIUS_VERSION
-ARG NEBIUS_SHA256
+ARG DUCKDB_VERSION=1.5.4
+ARG DUCKDB_SHA256=1f2fa724fb054b3dbe1a9cbd13de5b76997d850e7087ec762ba88db04e0180cf
+ARG PYTHON_VERSION=3.13.0
+ARG PYTHON_STANDALONE_TAG=20241008
+ARG PYTHON_SHA256=455200e1a202e9d9ef4b630c04af701c0a91dcaa6462022efc76893fc762ec95
+ARG PANDAS_VERSION=3.0.6
+ARG PYARROW_VERSION=25.0.1
+ARG NUMPY_VERSION=2.5.4
+ARG MATPLOTLIB_VERSION=3.11.2
+ARG PY_DUCKDB_VERSION=1.5.4
+ARG RUST_VERSION=1.99.0
+ARG GH_VERSION=2.102.1
+ARG GH_SHA256=77b9e297e94c50336823d0f84de7ef1be60cba704601fa0d98f129f47a94987b
+ARG AWS_CLI_VERSION=2.38.3
+ARG AWS_CLI_SHA256=ae55fa4aa6653fc296f38eac500873e3b0e798d02a35f305c692d02fc835c548
+ARG NEBIUS_VERSION=0.12.293
+ARG NEBIUS_SHA256=a4176af5d90c7efd8dbcd938d087dd43b749e6cb131746332870c79aa421d026
 
 # DuckDB and its tpch/tpcds extensions: INSTALL finds them installed and fetches nothing, once
 # the extension directory is set to PEACOCK_DUCKDB_EXTENSION_DIR, as testdata/generate_testdata.sh

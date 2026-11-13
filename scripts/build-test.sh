@@ -9,7 +9,10 @@
 # $PEACOCK_BUILD_IMAGE, else in the image `scripts/env/image-ref.sh build <v>` finds, either refused
 # unless its peacockdb.inputs label is this tree's for <v>: docker run as
 # the caller's uid, the tree at its own path, cargo's target in <tree>/target-img-<v>, HOME in
-# <tree>/.home-img, the cargo registry and ccache under ~/.cache/peacock. Inside it:
+# <tree>/.home-img, the cargo registry and ccache under ~/.cache/peacock; a testdata/<ds> link out
+# of the tree has its target mounted read-only where it points, and a dangling one is refused. A
+# tree or a worktree's git dir under the image's home, /home/peacock, is refused for a uid other
+# than 1000, which cannot enter it. Inside it:
 #
 #   -- <command...>  runs the command; its exit is the script's
 #   (cpu, default)   --build: the C++ library and its tests into cpp/build, then every Rust target
@@ -21,7 +24,8 @@
 #
 # The cpu and gpu builds own cpp/build and stamp it with <v> in cpp/build/.peacock-cudf. A
 # cpp/build of another version, or one with no stamp (a host configure), is refused, not
-# reconfigured. --run runs every target even after one fails.
+# reconfigured. Both need third_party/cudf checked out. A shell in the image is <v>'s alone: a
+# --cudf naming another is refused there. --run runs every target even after one fails.
 # These reach the container by name when set, never by value: RUSTFLAGS CMAKE_GENERATOR LDFLAGS
 # LD_LIBRARY_PATH PCK_TEST_FILTER PCK_SHARD UPDATE_CANONICAL PEACOCK_NO_FETCH RUST_TEST_THREADS
 # CARGO_BUILD_JOBS, the regeneration knobs PCK_UPDATE_SECTIONS PEACOCK_REWRITE_RECIPE_BYTES
@@ -31,8 +35,9 @@
 # are terminals and this is no background job of its terminal. HUP, INT or TERM kills it, one that
 # comes before docker has created it too. One left by a build-test.sh that is gone is refused.
 #
-# Exit 0; 1 a build or a test failed; 2 bad input, or a refused image, target dir, cpp/build or
-# leftover container; 129, 130 or 143 interrupted. Outside the image, any other is the container's.
+# Exit 0; 1 a build or a test failed; 2 bad input, or a refused image, tree, target dir, cpp/build,
+# leftover container or dangling testdata link; 129, 130 or 143 interrupted. Outside the image, any
+# other is the container's.
 set -euo pipefail
 
 usage() { sed -n '2,${/^#/!q;p;}' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
@@ -88,6 +93,10 @@ done
 known=""
 for spec in "$root"/docker/conda/cudf-*.spec; do spec=${spec##*/cudf-}; known+="${spec%.spec} "; done
 [ -f "$root/docker/conda/cudf-$cudf.spec" ] || die "no cuDF $cudf: docker/conda holds specs for ${known% }"
+# Inside, PEACOCK_CUDF names the image's version when the docker run set it, as the outer half does:
+# /opt/cudf, gcc and the target dir are that version's, so another --cudf is refused.
+[ "${PEACOCK_IN_IMAGE:-}" != 1 ] || [ -z "${PEACOCK_CUDF:-}" ] || [ "$cudf" = "$PEACOCK_CUDF" ] \
+  || die "this shell is the build image of cuDF $PEACOCK_CUDF, not $cudf: run --cudf $cudf from the host"
 if [ ${#command[@]} -gt 0 ]; then
   if [ "$build$run$no_release_bench" != 000 ] || [ -n "$mode_flag" ]; then
     die "a command runs alone: drop --build, --run, --gpu, --rust-only and --no-release-bench beside --"
@@ -99,9 +108,25 @@ fi
   || die "--no-release-bench is a --gpu --build flag"
 [ "$mode" != gpu ] || [ "$run" = 0 ] \
   || die "a device run is not this script's: build with --gpu --build, then $DEVICE_RUN ship and $DEVICE_RUN run list"
+# cpp/CMakeLists.txt includes cuDF's cmake files from the submodule, which a worktree lacks until checked out.
+[ ${#command[@]} -gt 0 ] || [ "$mode" = rust-only ] || [ -f "$root/third_party/cudf/cmake/rapids_config.cmake" ] \
+  || die "third_party/cudf is not checked out, and the C++ configure reads its cmake files: git submodule update --init --depth 1 third_party/cudf"
 
 # ---- outside the image: run this script again inside it --------------------------------------
 if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
+  # The tree, and a worktree's git dir, which lies in its main clone's, keep their own paths in the
+  # container: cpp/build's CMake cache and compile_commands.json, which host tools read, name the
+  # tree. PEACOCK_IMAGE_HOME is for the tests.
+  common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)
+  image_home=${PEACOCK_IMAGE_HOME:-/home/peacock}
+  if [ "$(id -u)" != 1000 ]; then
+    for path in "$root" "$common"; do
+      case "$path/" in
+        "$image_home"/*)
+          die "$path lies under $image_home, the build image's home: mode 750, uid 1000's, so uid $(id -u) cannot reach it in the container. Use a clone outside $image_home" ;;
+      esac
+    done
+  fi
   # Per worktree, because a build script bakes CARGO_MANIFEST_DIR into what it builds.
   target=${CARGO_TARGET_DIR:-$root/target-img-$cudf}
   case "$target/" in
@@ -132,9 +157,18 @@ if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
   stat=$(< "/proc/$$/stat")
   read -r _ _ pgrp _ _ tpgid _ <<< "${stat##*) }"
   if [ -t 0 ] && [ -t 1 ] && { [ "$tpgid" = -1 ] || [ "$tpgid" = "$pgrp" ]; }; then args+=(-it); fi
-  # A worktree's git dir lies in its main clone's.
-  common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)
   case "$common/" in "$root"/*) ;; *) args+=(-v "$common:$common") ;; esac
+  # testdata/<ds> may link a set outside the tree, as bootstrap-vm.sh links the machine's: its
+  # target is mounted read-only where the link points, so the link resolves inside. A dangling one
+  # is refused: docker would make the missing target, as root.
+  for link in "$root"/testdata/*; do
+    [ -L "$link" ] || continue
+    dest=$(readlink "$link")
+    [ -e "$link" ] || die "$link links $dest, which does not exist: on a VM, run scripts/env/bootstrap-vm.sh again (provision-vm.sh does), or remove the link"
+    case "$dest" in /*) ;; *) dest=${link%/*}/$dest ;; esac
+    dest=$(realpath -s -m -- "$dest")
+    case "$dest/" in "$root"/*) ;; *) args+=(-v "$(readlink -f -- "$link"):$dest:ro") ;; esac
+  done
   args+=(-w "$root" -e PEACOCK_IN_IMAGE=1 -e "PEACOCK_CUDF=$cudf" -e "HOME=$root/.home-img"
          -e "CARGO_TARGET_DIR=$target" -v "$registry:/opt/rust/cargo/registry" -v "$ccache:/tmp/ccache")
   # A CI step's report files; GITHUB_OUTPUT and the like stay the runner's, written by redirecting.
@@ -166,6 +200,8 @@ if [ "${PEACOCK_IN_IMAGE:-}" != 1 ]; then
 fi
 
 # ---- inside the image -------------------------------------------------------------------------
+# The FFI binaries load libcudf from the image's prefix, a command's as well as --run's.
+export LD_LIBRARY_PATH=/opt/cudf/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 if [ ${#command[@]} -gt 0 ]; then exec "${command[@]}"; fi
 cd "$root"
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$root/target-img-$cudf}
@@ -354,8 +390,6 @@ run_target() {  # <package> <name> <cargo selector...>
 
 if [ "$mode" = cpu ]; then
   [ "$(cat "$STAMP" 2>/dev/null)" = "$cudf" ] || die "cpp/build is not a cuDF $cudf build: run --build first"
-  # The FFI binaries load libcudf from the image's prefix.
-  export LD_LIBRARY_PATH=/opt/cudf/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
   echo "==> ctest -L cpu"
   if ! ctest --test-dir cpp/build -L cpu --output-on-failure; then
     echo "!!! ctest -L cpu failed"

@@ -1,7 +1,9 @@
-"""`bench-sirius.sh`: Sirius on the H100 by flags, over a fake run-gpu.sh and build-test.sh.
+"""`bench-sirius.sh`: Sirius on the H100 by flags, over a fake run-sirius.sh, run-gpu.sh and
+build-test.sh.
 
-The fakes record their argv. run-gpu.sh exits as FAKE_RUN_GPU_RC maps its verb (0 otherwise), so a
-VM lost mid-run, or the runner's own refusal, reaches bench-sirius.sh as the real one's would.
+The fakes record their argv. run-sirius.sh and run-gpu.sh exit as FAKE_RC maps `<script> <verb>`
+(0 otherwise), so a VM lost mid-run, or the runner's own refusal, reaches bench-sirius.sh as the real
+one's would.
 build-test.sh stands for the build image the render runs in, with DuckDB 1.5.4.
 """
 import csv
@@ -41,7 +43,7 @@ args = sys.argv[1:]
 while args and args[0].startswith("--") and args[0] != "--":
     args = args[2:]
 verb = args[0] if args else ""
-sys.exit(json.loads(os.environ.get("FAKE_RUN_GPU_RC", "{}")).get(verb, 0) if "run-gpu" in sys.argv[0] else 0)
+sys.exit(json.loads(os.environ.get("FAKE_RC", "{}")).get(f"{os.path.basename(sys.argv[0])} {verb}", 0))
 '''
 
 
@@ -49,14 +51,14 @@ def bench(*args, rc=None, cases=CASES):
     """bench-sirius.sh <args> with --cases a temp list of `cases`, none with None: (proc, calls)."""
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
-        for name in ("run-gpu.sh", "build-test.sh"):
+        for name in ("run-sirius.sh", "run-gpu.sh", "build-test.sh"):
             (tmp / name).write_text(FAKE)
             (tmp / name).chmod(0o755)
         if cases is not None:
             (tmp / "cases.csv").write_text(cases)
             args = (*args, "--cases", str(tmp / "cases.csv"))
-        env = {**os.environ, "RUN_GPU_SH": str(tmp / "run-gpu.sh"), "BUILD_TEST_SH": str(tmp / "build-test.sh"),
-               "FAKE_LOG": str(tmp / "log"), "FAKE_RUN_GPU_RC": json.dumps(rc or {})}
+        env = {**os.environ, "RUN_SIRIUS_SH": str(tmp / "run-sirius.sh"), "RUN_GPU_SH": str(tmp / "run-gpu.sh"),
+               "BUILD_TEST_SH": str(tmp / "build-test.sh"), "FAKE_LOG": str(tmp / "log"), "FAKE_RC": json.dumps(rc or {})}
         proc = subprocess.run([str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60,
                               stdin=subprocess.DEVNULL)
         log = tmp / "log"
@@ -67,7 +69,7 @@ def bench(*args, rc=None, cases=CASES):
 def sirius(dataset, queries, runs="10", timeout="900", resume=(), within=None):
     """The runner's call; `within`, the dataset's whole list, for a run --query narrows."""
     narrowed = ["--list", within] if within is not None else []
-    return [*H100, "sirius", "--", "--dataset", dataset, "--sf", "40", "--queries", queries, "--runs", runs,
+    return [*H100, "run", "--", "--dataset", dataset, "--sf", "40", "--queries", queries, "--runs", runs,
             "--timeout", timeout, *narrowed, *resume]
 
 
@@ -84,7 +86,7 @@ def steps(calls):
 def test_a_dataset_runs_then_pulls_then_renders_at_home():
     proc, calls = bench(*H100, "--dataset", "tpch")
     assert proc.returncode == 0, proc.stderr
-    assert steps(calls) == [("run-gpu.sh", sirius("tpch", TPCH)), ("run-gpu.sh", [*H100, "pull"]),
+    assert steps(calls) == [("run-sirius.sh", sirius("tpch", TPCH)), ("run-gpu.sh", [*H100, "pull"]),
                             ("build-test.sh", render("tpch"))], steps(calls)
     assert calls[-1]["cwd"] == str(REPO), calls[-1]
 
@@ -109,7 +111,7 @@ def test_a_narrowed_run_names_the_whole_list_so_the_rest_of_the_file_stays():
     then writes every query's answer: pulling a one-query run leaves the dataset whole."""
     proc, calls = bench(*H100, "--dataset", "tpch", "--query", "q6")
     assert proc.returncode == 0, proc.stderr
-    assert steps(calls) == [("run-gpu.sh", sirius("tpch", "q6", within=TPCH)), ("run-gpu.sh", [*H100, "pull"]),
+    assert steps(calls) == [("run-sirius.sh", sirius("tpch", "q6", within=TPCH)), ("run-gpu.sh", [*H100, "pull"]),
                             ("build-test.sh", render("tpch"))], steps(calls)
     proc, calls = bench(*H100, "--dataset", "tpch")
     assert "--list" not in calls[0]["argv"], "an unnarrowed run is the whole list already"
@@ -118,15 +120,15 @@ def test_a_narrowed_run_names_the_whole_list_so_the_rest_of_the_file_stays():
 def test_all_runs_tpch_then_tpcds_each_to_its_render():
     proc, calls = bench(*H100, "--dataset", "all")
     assert proc.returncode == 0, proc.stderr
-    assert steps(calls) == [("run-gpu.sh", sirius("tpch", TPCH)), ("run-gpu.sh", [*H100, "pull"]),
-                            ("build-test.sh", render("tpch")), ("run-gpu.sh", sirius("tpcds", TPCDS)),
+    assert steps(calls) == [("run-sirius.sh", sirius("tpch", TPCH)), ("run-gpu.sh", [*H100, "pull"]),
+                            ("build-test.sh", render("tpch")), ("run-sirius.sh", sirius("tpcds", TPCDS)),
                             ("run-gpu.sh", [*H100, "pull"]), ("build-test.sh", render("tpcds"))], steps(calls)
 
 
 def test_a_query_narrowed_to_one_dataset_leaves_the_other_out():
     proc, calls = bench(*H100, "--dataset", "all", "--query", "q17")
     assert proc.returncode == 0, proc.stderr
-    assert [c["argv"] for c in calls if "sirius" in c["argv"]] == [sirius("tpcds", "q17", within=TPCDS)], calls
+    assert [c["argv"] for c in calls if c["tool"] == "run-sirius.sh"] == [sirius("tpcds", "q17", within=TPCDS)], calls
 
 
 def test_a_skipped_list_row_runs_like_any_other():
@@ -158,12 +160,13 @@ def test_a_dry_run_prints_every_command_and_calls_nothing():
     assert lines[1][1:] == [*H100, "pull"] and lines[2][1:] == render("tpch"), lines
 
 
-def test_run_gpu_s_exits_pass_through_and_stop_the_run():
-    for verb, code in [("sirius", 3), ("sirius", 4), ("sirius", 75), ("sirius", 69), ("sirius", 1), ("pull", 75)]:
-        proc, calls = bench(*H100, "--dataset", "all", rc={verb: code})
-        assert proc.returncode == code, (verb, code, proc.returncode, proc.stderr)
-        assert not [c for c in calls if c["tool"] == "build-test.sh"], (verb, code, calls)
-        assert len([c for c in calls if "sirius" in c["argv"]]) == 1, (verb, code, calls)
+def test_the_vm_scripts_exits_pass_through_and_stop_the_run():
+    for step, code in [("run-sirius.sh run", 3), ("run-sirius.sh run", 4), ("run-sirius.sh run", 75),
+                       ("run-sirius.sh run", 69), ("run-sirius.sh run", 1), ("run-gpu.sh pull", 75)]:
+        proc, calls = bench(*H100, "--dataset", "all", rc={step: code})
+        assert proc.returncode == code, (step, code, proc.returncode, proc.stderr)
+        assert not [c for c in calls if c["tool"] == "build-test.sh"], (step, code, calls)
+        assert len([c for c in calls if c["tool"] == "run-sirius.sh"]) == 1, (step, code, calls)
 
 
 def test_the_default_list_is_the_h100_s():
