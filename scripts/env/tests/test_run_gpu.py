@@ -353,6 +353,20 @@ def test_run_passes_the_pinned_cache_and_scan_reader_switches():
         assert envs == ["PEACOCK_PINNED_HOST_CACHE_BYTES=0", "PEACOCK_SCAN_READER=read_parquet"], envs
 
 
+def test_run_passes_the_case_timeout_and_the_answer_switch():
+    with Host() as h:
+        prepared(h)
+        ok(h.gpu("ship"))
+        env = {"PEACOCK_BENCH_RESUME": "1", "PEACOCK_BENCH_CASE_TIMEOUT_S": "1800", "PCK_WRITE_GPU_RESULT": "1"}
+        ok(h.gpu("run", "bench", env=env))
+        a = h.docker_runs()[0]
+        envs = [a[i + 1] for i, x in enumerate(a) if x == "-e"]
+        assert envs == ["PEACOCK_BENCH_RESUME=1", "PEACOCK_BENCH_CASE_TIMEOUT_S=1800", "PCK_WRITE_GPU_RESULT=1"], envs
+        ok(h.gpu("run", "bench", env={"PEACOCK_BENCH_CASE_TIMEOUT_S": "", "PCK_WRITE_GPU_RESULT": ""}))
+        a = h.docker_runs()[1]
+        assert "-e" not in a, a
+
+
 def test_run_refuses_a_run_in_progress():
     with Host() as h:
         prepared(h)
@@ -407,6 +421,23 @@ def test_pull_brings_the_results_the_record_and_the_log_home():
         assert str(logs) in r.stdout
 
 
+def test_pull_brings_the_gpu_answers():
+    with Host() as h:
+        prepared(h)
+        ok(h.gpu("ship"))
+        g = h.vm_dir() / "testdata/goldens"
+        (g / "tpch.sf40").mkdir(parents=True, exist_ok=True)
+        (g / "tpch.sf40/gpu-result.txt").write_text("cudf=25.02\n== q1 mode=tp1-single\nrow\n")
+        (g / "tpch.sf40/gpu-result-26.02.txt").write_text("cudf=26.02\n")
+        (g / "tpch.sf40/duckdb-result.txt").write_text("written on the VM\n")
+        r = ok(h.gpu("pull"))
+        home = h.tree / "testdata/goldens/tpch.sf40"
+        assert (home / "gpu-result.txt").read_text() == "cudf=25.02\n== q1 mode=tp1-single\nrow\n"
+        assert (home / "gpu-result-26.02.txt").is_file()
+        assert not (home / "duckdb-result.txt").exists(), "only the device's answers come home"
+        assert "gpu-result" in r.stdout
+
+
 def test_pull_before_ship_says_so():
     with Host() as h:
         refused(h.gpu("pull"), 2, "ship")
@@ -445,30 +476,43 @@ STUB_CALLS = r'''import sys
 a = sys.argv[1:]
 open(a[a.index("--out") + 1], "w").write("# calls\nrow\n")
 '''
+STUB_LOADS = STUB_CALLS.replace("# calls", "# loads")
 # As nsys_calls.py refuses a capture of a query with a join: a message and exit 1, nothing written.
 REFUSING_CALLS = 'import sys\nsys.exit("capture does not match q3\'s recipes")\n'
 
 
-def nsys_profile(tmp, extra_env=None, calls=STUB_CALLS):
-    """`create_nsys_profile.sh --trace` over fakes, the VM a directory and nsys a stub: the run
-    and the tree it ran in."""
-    tmp = pathlib.Path(tmp)
+STUB_HBM = r"""import json, os, sys
+a = sys.argv[1:]
+with open(os.environ["FAKE_HBM_LOG"], "a") as f:
+    f.write(json.dumps(a) + "\n")
+open(a[a.index("--out") + 1], "w").write("# hbm\nrow\n")
+"""
+LOGGING_BENCH = ('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_BENCH_LOG"\necho "running 1 test"\n'
+                 'echo "test result: ok. 1 passed; 0 failed; 0 ignored"\n')
+
+
+def nsys_tree(tmp, bench_text=FAKE_BENCH, calls=STUB_CALLS):
+    """A tree holding create_nsys_profile.sh, a VM directory holding a benchmark binary, and the
+    env that reaches the VM through a fake rsh alone."""
     tree = tmp / "tree"
     for rel in ("scripts/create_nsys_profile.sh", "scripts/lib/shadgpu-env.sh", "scripts/lib/calibration-bucket.sh",
-                "scripts/lib/stage-cargo.sh", "peacockdb-core/tests/common/corpus_benchmark_cases.inc"):
+                "scripts/lib/stage-cargo.sh", "scripts/lib/bench-cases.sh", "scripts/calibration/device_cases.py",
+                "scripts/calibration/record.py", "scripts/calibration/nvtx_names.py",
+                "peacockdb-core/tests/common/corpus_benchmark_cases.inc"):
         if (REPO / rel).exists():
             (tree / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / rel, tree / rel)
-    (tree / "scripts/calibration").mkdir()
+    (tree / "scripts/calibration").mkdir(parents=True, exist_ok=True)
     (tree / "scripts/calibration/nsys_calls.py").write_text(calls)
-    (tree / "scripts/calibration/nsys_loads.py").write_text(STUB_CALLS)
+    (tree / "scripts/calibration/nsys_loads.py").write_text(STUB_LOADS)
+    (tree / "scripts/calibration/nsys_hbm.py").write_text(STUB_HBM)
     cases = (tree / "peacockdb-core/tests/common/corpus_benchmark_cases.inc").read_text()
     for ds in set(re.findall(r"corpus_query_benchmark!\(\s*(\w+)\s*,", cases)):
         (tree / "testdata/goldens" / f"{ds}.sf1").mkdir(parents=True)
     vm = tmp / "vm" / "peacock" / "chain-l"
     (vm / "cpp/install/rust-benchmarks").mkdir(parents=True)
     bench = vm / "cpp/install/rust-benchmarks/peacock_gpu_benchmarks"
-    bench.write_text(FAKE_BENCH)
+    bench.write_text(bench_text)
     bench.chmod(0o755)
     bins = {"host-bin": {"nsys": FAKE_NSYS}, "dev-bin": {"ssh": LOUD_SSH}, ".": {"rsh": FAKE_RSH}}
     for d, files in bins.items():
@@ -478,21 +522,27 @@ def nsys_profile(tmp, extra_env=None, calls=STUB_CALLS):
             (tmp / d / name).chmod(0o755)
     env = {**os.environ, "PATH": f"{tmp / 'dev-bin'}:{os.environ['PATH']}",
            "FAKE_HOST_PATH": f"{tmp / 'host-bin'}:{os.environ['PATH']}", "FAKE_RSH_LOG": str(tmp / "rsh.log"),
-           "FAKE_DEV_LOG": str(tmp / "ssh.log"), "PCK_TEST_FILTER": "bench_tpch_sf40_q6_tp1_single",
-           "CARGO_TARGET_DIR": str(tmp / "target"), **(extra_env or {})}
-    r = subprocess.run(["bash", "scripts/create_nsys_profile.sh", "--trace", "--ssh", f"{tmp / 'rsh'} --vm h100",
-                        "--host", "nebius-h100", "--remote-dir", str(vm), "--remote-cudf-root", str(tmp / "cudf")],
-                       cwd=tree, env=env, capture_output=True, text=True, timeout=120)
-    return r, tree
+           "FAKE_DEV_LOG": str(tmp / "ssh.log"), "FAKE_BENCH_LOG": str(tmp / "bench.log"),
+           "FAKE_HBM_LOG": str(tmp / "hbm.log"), "CARGO_TARGET_DIR": str(tmp / "target")}
+    env.pop("PCK_TEST_FILTER", None)
+    return tree, vm, env
+
+
+def nsys_profile(tmp, tree, vm, env, *args):
+    return subprocess.run(["bash", "scripts/create_nsys_profile.sh", *args, "--ssh", f"{tmp / 'rsh'} --vm h100",
+                           "--host", "nebius-h100", "--remote-dir", str(vm), "--remote-cudf-root", str(tmp / "cudf")],
+                          cwd=tree, env=env, capture_output=True, text=True, timeout=120)
 
 
 def test_nsys_profile_uses_the_given_ssh():
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
-        r, tree = nsys_profile(tmp)
+        tree, vm, env = nsys_tree(tmp)
+        r = nsys_profile(tmp, tree, vm, {**env, "PCK_TEST_FILTER": "bench_tpch_sf40_q6_tp1_single"}, "--trace")
         ok(r)
         assert "the trace pass ran 1 tests" in r.stdout, r.stdout
         assert (tree / "testdata/calibration/calls.tsv").is_file()
+        assert (tree / "testdata/calibration/loads.tsv").is_file()
         assert (tree / "testdata/calibration/capture.sqlite").read_text() == "sqlite"
         assert not (tmp / "ssh.log").exists(), (tmp / "ssh.log").read_text()
         calls = log_lines(tmp / "rsh.log")
@@ -508,7 +558,9 @@ def test_nsys_profile_writes_the_load_breakdown_when_the_call_breakdown_refuses(
     """nsys_calls.py refuses any capture of a query with a join; loads.tsv does not depend on it,
     so it is written, and the run still fails for the refusal."""
     with tempfile.TemporaryDirectory() as tmp:
-        r, tree = nsys_profile(pathlib.Path(tmp), calls=REFUSING_CALLS)
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = nsys_tree(tmp, calls=REFUSING_CALLS)
+        r = nsys_profile(tmp, tree, vm, {**env, "PCK_TEST_FILTER": "bench_tpch_sf40_q6_tp1_single"}, "--trace")
         assert r.returncode != 0, (r.stdout, r.stderr)
         assert (tree / "testdata/calibration/loads.tsv").is_file(), (r.stdout, r.stderr)
 
@@ -516,10 +568,68 @@ def test_nsys_profile_writes_the_load_breakdown_when_the_call_breakdown_refuses(
 def test_nsys_profile_passes_the_pinned_cache_and_scan_reader_switches():
     """The traced binary runs on the host, so a switch set here must reach it there."""
     with tempfile.TemporaryDirectory() as tmp:
-        r, _ = nsys_profile(pathlib.Path(tmp), {"PEACOCK_PINNED_HOST_CACHE_BYTES": "0",
-                                                "PEACOCK_SCAN_READER": "read_parquet"})
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = nsys_tree(tmp)
+        switches = {"PCK_TEST_FILTER": "bench_tpch_sf40_q6_tp1_single", "PEACOCK_PINNED_HOST_CACHE_BYTES": "0",
+                    "PEACOCK_SCAN_READER": "read_parquet"}
+        r = nsys_profile(tmp, tree, vm, {**env, **switches}, "--trace")
         ok(r)
         assert "switches: cache=0 reader=read_parquet" in r.stdout, r.stdout
+
+
+DEVICE_LIST = """\
+dataset,sf,query,modes,status,note
+tpch,40,q6,tp1_single,ok,
+tpch,40,q1,tp1_single,wrong,#7
+tpch,40,q9,,skipped,timeout: the case ran past 1800 s
+tpcds,40,q37,tp1_single,ok,
+"""
+
+
+def test_cases_and_device_reach_the_passes():
+    """`--cases` takes a device list's `ok` and `wrong` rows as the cases of both passes, the
+    `skipped` row none; `--device` reads the records from the device's own directory."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = nsys_tree(tmp, LOGGING_BENCH)
+        listed = tmp / "h100-cases.csv"
+        listed.write_text(DEVICE_LIST)
+        for ds in ("tpch", "tpcds"):
+            record = tree / f"testdata/calibration/h100-80gb-hbm3/{ds}.sf40/records.tsv"
+            record.parent.mkdir(parents=True)
+            record.write_text("# run: device=NVIDIA H100 80GB HBM3\ndataset\n" + ds + "\n")
+        r = nsys_profile(tmp, tree, vm, env, "--cases", listed, "--device", "h100-80gb-hbm3")
+        ok(r)
+        names = ["bench_tpch_sf40_q6_tp1_single", "bench_tpch_sf40_q1_tp1_single", "bench_tpcds_sf40_q37_tp1_single"]
+        runs = (tmp / "bench.log").read_text().splitlines()
+        assert runs[0] == " ".join(["--nocapture", "--test-threads=1", *names, "--exact"]), runs
+        assert runs[1:] == [f"--nocapture --test-threads=1 {name} --exact" for name in names], runs
+        assert "bench_tpch_sf40_q9_tp1_single" not in "".join(runs)
+        assert "counters, case 3 of 3: tpcds.sf40 q37 tp1-single" in r.stdout, r.stdout
+        readers = log_lines(tmp / "hbm.log")
+        records = [a[i + 1] for a in readers for i, w in enumerate(a) if w == "--record"]
+        assert set(records) == {"testdata/calibration/h100-80gb-hbm3/tpch.sf40/records.tsv",
+                                "testdata/calibration/h100-80gb-hbm3/tpcds.sf40/records.tsv"}, readers
+        cased = [a[a.index("--case") + 1] for a in readers if "--case" in a]
+        assert cased == ["tpch.sf40 q6 tp1-single", "tpch.sf40 q1 tp1-single", "tpcds.sf40 q37 tp1-single"], cased
+        assert (tree / "testdata/calibration/hbm.tsv").is_file()
+        assert "--record testdata/calibration/h100-80gb-hbm3/tpch.sf40/records.tsv" in r.stdout, r.stdout
+
+
+def test_cases_with_a_filter_narrow_the_trace_pass():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        tree, vm, env = nsys_tree(tmp, LOGGING_BENCH)
+        listed = tmp / "h100-cases.csv"
+        listed.write_text(DEVICE_LIST)
+        r = nsys_profile(tmp, tree, vm, {**env, "PCK_TEST_FILTER": "_tpch_"}, "--trace", "--cases", listed,
+                         "--device", "h100-80gb-hbm3")
+        ok(r)
+        runs = (tmp / "bench.log").read_text().splitlines()
+        assert runs == ["--nocapture --test-threads=1 bench_tpch_sf40_q6_tp1_single "
+                        "bench_tpch_sf40_q1_tp1_single --exact"], runs
+        refused(nsys_profile(tmp, tree, vm, env, "--cases", tmp / "missing.csv"), 1, "missing.csv")
+        refused(nsys_profile(tmp, tree, vm, env, "--device", "H100 80GB"), 1, "--device")
 
 
 if __name__ == "__main__":

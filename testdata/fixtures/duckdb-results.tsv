@@ -1,0 +1,4 @@
+# duckdb=1.5.4 threads=128 host=nebius-cpu128 cpu=AMD_EPYC_9654_96-Core_Processor cores=128 memory_gib=1007.7 db=/var/lib/peacock/tpch.sf40.duckdb resident_pct=100.0 floor_ms=31
+query	ms_2nd_min	runs_ms	workset_bytes	disk_read_bytes	warm	status
+q1	412	431,412,409,415,420,413	2147483648	0	yes	ok
+aggregate_groupby	-	-	1073741824	-	-	failed

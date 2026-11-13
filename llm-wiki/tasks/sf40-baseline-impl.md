@@ -396,7 +396,7 @@ fn device_list_problem(device: &str, own: &Files, list: &Files) -> Result<(), St
   `--build-only`: build `<ds>`'s database (import and the row-count check against the parquet),
   then exit 0 without warming or timing any query; refused with `--cases`, `--answers` or
   `--results` (exit 2).
-- Produces `bench-each.sh [--instance-id <id>] [--profile <name>] --cases <file> --mode <mode> [--within <csv>] --timeout <s> --records <dir> [--dir <i>]`;
+- Produces `bench-each.sh --instance-id <id> [--profile <name>] --cases <file> --mode <mode> [--within <csv>] --timeout <s> --records <dir> [--dir <i>]`;
   `<vm options>` below are its `--instance-id`, `--profile` and `--dir`, passed on as given to
   `run-gpu.sh`; `<nebius options>` are `--instance-id` and `--profile` alone (`nebius.sh` has
   no `--dir` and exits 64 on it):

@@ -99,6 +99,46 @@ def test_traffic_lands_on_the_call_that_moved_it():
     assert rows[BUSY_CALL]["node_type"] == "CudfFilter"
 
 
+def gapped_capture(directory, gap_at):
+    """`three_call_capture`'s case, with ten periods unsampled from `gap_at(spans)` on."""
+    path = directory / "capture-gap.sqlite"
+    cap = Capture(path)
+    spans = cap.case(CASE, [(0, 0, "CudfScan", ["read_parquet"]),
+                            (1, 0, "CudfFilter", ["apply_boolean_mask"]),
+                            (2, 0, "CudfProject", ["compute_column"])])
+    busy, start = spans[BUSY_CALL], gap_at(spans)
+    stamps = [at for at in range(spans[0][0] - 500, spans[-1][1] + 2000, PERIOD)
+              if not start <= at < start + 10 * PERIOD]
+    cap.metric(nsys_hbm.DRAM_READ, [(at, BUSY_READ if busy[0] <= at < busy[1] else 0.0)
+                                    for at in stamps])
+    cap.metric(nsys_hbm.DRAM_WRITE, [(at, 0.0) for at in stamps])
+    cap.close()
+    return path
+
+
+def test_a_gap_after_the_last_range_is_no_stall():
+    """A process's teardown after its case — the H100's, freeing a 147 GiB pinned cache — can
+    stall sampling with no region left to read as zero-traffic."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        rows = hbm_of(gapped_capture(tmp, lambda spans: spans[-1][1] + 500),
+                      three_row_record(tmp), tmp / "hbm.tsv", "--peak-bw", str(PEAK_BW))
+    moved = [int(r["hbm_bytes"]) for r in rows]
+    assert moved[0] == 0 and moved[BUSY_CALL] > 0 and moved[2] == 0, moved
+
+
+def test_a_gap_inside_the_case_is_refused():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        path = gapped_capture(tmp, lambda spans: spans[2][0])
+        try:
+            hbm_of(path, three_row_record(tmp), tmp / "hbm.tsv", "--peak-bw", str(PEAK_BW))
+        except SystemExit as refused:
+            assert "gaps in GPU metric sampling" in str(refused.code), refused.code
+        else:
+            raise AssertionError("a gap inside the case was not refused")
+
+
 def test_a_newer_nsys_names_the_unit_in_the_metric():
     # nsys 2024.5 writes 'DRAM Read Bandwidth [Throughput %]' where 2023.2 wrote
     # 'DRAM Read Bandwidth'; the samples mean the same, so the lookup takes either.

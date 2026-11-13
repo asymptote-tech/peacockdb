@@ -12,6 +12,7 @@
 - [#260 (26.02 decimal avg fault) on cuDF 26.02 a multi-batch decimal avg faults in cuDF's shared-memory groupby](#t260)
 - [#204 (merge drops fetch) the device's sorted merge drops its fetch when it is handed one input](#t204)
 - [#289 (Welford count wrap) a Welford merge on cuDF 25.02 wraps a count past 2^31 silently](#t289)
+- [#307 (LargeUtf8 export) an answer whose string column passes 2 GiB is refused at the export](#t307)
 
 <a id="t238"></a>
 ### #238 (fixed driver step cap) the driver's fixed step cap refuses a large row-group query as non-terminating
@@ -229,3 +230,17 @@ count is `u64` and answers right. cuDF 25.06 and later sum in INT64 (`kMergeM2Co
 **Fix proposed:** on a cuDF older than 25.06, refuse by name a merge whose count column's maximum
 exceeds `INT32_MAX`, as the join session refuses past its `size_type` limits. The check goes with
 25.02.
+
+<a id="t307"></a>
+### #307 (LargeUtf8 export) an answer whose string column passes 2 GiB is refused at the export
+The device refuses a query whose answer has more than 2 GiB of text in one string column. Past
+2 GiB cuDF's export writes the column as `LargeUtf8`, and `GpuUnload` checks it against the
+plan's `Utf8`. Found at tpch sf40, H100, tp1_single (sf40-baseline): `anti-join` (`SELECT * FROM
+orders WHERE o_custkey NOT IN (…)`) returns most of `orders`' 60M rows, `o_comment` among them:
+
+    call failed: GpuUnload lane 0: the exported stream is not the sink's rows: Invalid argument
+    error: column types must match schema types, expected Utf8 but found LargeUtf8 at column
+    index 8 (declared vs exported: 8 o_comment: Utf8 vs LargeUtf8)
+
+The check is in `executor/gpu_backend/mod.rs`. The same query answers at sf1. The H100 list's
+row for it is `skipped` with that reason.

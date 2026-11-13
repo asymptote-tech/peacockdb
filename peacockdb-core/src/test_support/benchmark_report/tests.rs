@@ -10,7 +10,8 @@ use crate::test_support::{
     section_href,
 };
 
-/// A section written now: two loaders (1000 µs) and an unload (500 µs).
+/// A section written now: two loaders (1000 µs) and an unload (500 µs), read from the pinned
+/// host cache.
 const TIMED: &str = "\
 GpuUnload
   time_us=[[500]] total_us=500 batch_rows=[[10]] batch_bytes=[[80]]
@@ -27,10 +28,10 @@ peak_bytes=2147483648
 runs=[1700,1700,1700,1700,1700,1700,1700,1700,1700,1700]
 build=release
 allocator=rmm-pool
-pinned_cache=off source=env
-prefill_files=0
-prefill_bytes=0
-prefill_us=0
+pinned_cache=on cap=147.4GiB resident=1.0GiB files=2 fills=2 fill_us=900 fallbacks=0 evictions=0 reloads=0 source=default
+prefill_files=2
+prefill_bytes=1073741824
+prefill_us=900
 device=NVIDIA H100 80GB HBM3
 driver=580.95.05
 cuda=12.9
@@ -178,10 +179,36 @@ fn an_h200_section_derives_load_and_shows_no_peak() {
         &[("q1", UNBATCHED)],
     );
     let html = page(root, &[("tpch", "q1")]);
-    // load (766 + 849) µs, execute 2321 − 1615.
+    // load (766 + 849) µs, execute 2321 − 1615; the section predates the pinned cache.
     assert_eq!(
         row(&html, "q1", "tp1_single"),
-        ["q1", "tp1_single", "1.6", "0.7", "2.3", "—"]
+        ["q1", "tp1_single", "1.6 unpinned", "0.7", "2.3", "—"]
+    );
+}
+
+#[test]
+fn a_load_without_the_pinned_cache_is_marked_unpinned() {
+    let root = tree("unpinned");
+    let off = TIMED
+        .lines()
+        .map(|line| match line.starts_with("pinned_cache=") {
+            true => "pinned_cache=off source=env\n".to_string(),
+            false => format!("{line}\n"),
+        })
+        .collect::<String>();
+    put(
+        &root,
+        "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
+        &[("q1", UNBATCHED), ("q3", &off), ("q6", TIMED)],
+    );
+    let html = page(root, &[("tpch", "q1"), ("tpch", "q3"), ("tpch", "q6")]);
+    // No `pinned_cache` line: a section from before the cache.
+    assert_eq!(row(&html, "q1", "tp1_single")[2], "1.6 unpinned");
+    assert_eq!(row(&html, "q3", "tp1_single")[2], "1.0 unpinned");
+    assert_eq!(row(&html, "q6", "tp1_single")[2], "1.0");
+    assert!(
+        html.contains("A load marked unpinned was read without the pinned host cache"),
+        "{html}"
     );
 }
 
@@ -270,7 +297,7 @@ fn devices_sit_side_by_side_and_a_case_one_lacks_is_absent() {
             "0.5",
             "1.5",
             "2.00",
-            "1.6",
+            "1.6 unpinned",
             "0.7",
             "2.3",
             "—"
@@ -286,11 +313,112 @@ fn a_directory_without_benchmark_files_is_no_column() {
         "h200/tpch.sf40/tp1_single.benchmark.txt",
         &[("q1", UNBATCHED)],
     );
-    std::fs::create_dir_all(root.join("duckdb/tpch.sf40")).unwrap();
-    std::fs::write(root.join("duckdb/tpch.sf40/duckdb.tsv"), "q1\t1\n").unwrap();
+    std::fs::create_dir_all(root.join("notes/tpch.sf40")).unwrap();
+    std::fs::write(root.join("notes/tpch.sf40/notes.txt"), "q1\t1\n").unwrap();
     let html = page(root, &[("tpch", "q1")]);
-    assert!(!html.contains("duckdb"), "{html}");
+    assert!(!html.contains("notes"), "{html}");
     assert_eq!(row(&html, "q1", "tp1_single").len(), 6);
+}
+
+/// DuckDB's results in the format `duckdb_minimal.sh --results` writes: q3 timed, q6 failed.
+fn duckdb(root: &Path, tree: &str, dataset: &str, host: &str) {
+    let dir = root.join(tree).join(format!("{dataset}.sf40"));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("duckdb.tsv"),
+        format!(
+            "# duckdb=1.5.4 threads=128 host={host} cpu=x cores=128 memory_gib=1007.7 db=/d \
+             resident_pct=100.0 floor_ms=29\n\
+             query\tms_2nd_min\truns_ms\tworkset_bytes\tdisk_read_bytes\twarm\tstatus\n\
+             q3\t412\t431,412\t100\t0\tyes\tok\n\
+             q6\t-\t-\t100\t-\t-\tfailed\n"
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_duckdb_tree_is_a_column_of_its_own() {
+    let root = tree("duckdb-column");
+    put(
+        &root,
+        "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
+        &[("q3", TIMED), ("q6", TIMED), ("q9", TIMED)],
+    );
+    put(
+        &root,
+        "h100-80gb-hbm3/tpch.sf40/tp4_sized.benchmark.txt",
+        &[("q3", TIMED)],
+    );
+    duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
+    let html = page(root, &[("tpch", "q3"), ("tpch", "q6"), ("tpch", "q9")]);
+    assert!(
+        !html.contains("<th colspan=\"4\">duckdb-cpu128</th>"),
+        "not a device: {html}"
+    );
+    let h100 = html.find(">h100-80gb-hbm3</th>").unwrap();
+    let duckdb = html.find("<th>duckdb-cpu128</th>").expect("a column");
+    assert!(h100 < duckdb, "after the devices: {html}");
+    assert!(html.contains("<th>warm (ms)</th>"), "{html}");
+    let timed = ["q3", "tp1_single", "1.0", "0.5", "1.5", "2.00", "412.0"];
+    assert_eq!(row(&html, "q3", "tp1_single"), timed);
+    // DuckDB has no mode: its time stands on each mode's row.
+    assert_eq!(row(&html, "q3", "tp4_sized")[6], "412.0");
+    assert_eq!(row(&html, "q6", "tp1_single")[6], "failed");
+    assert_eq!(row(&html, "q9", "tp1_single")[6], "—");
+    assert!(html.contains("<td class=\"off\">failed</td>"), "{html}");
+    assert!(html.contains("<td class=\"na\">—</td>"), "{html}");
+    let href = section_href("benchmark-results/duckdb-cpu128/tpch.sf40/duckdb.tsv", 3);
+    assert!(
+        html.contains(&format!(
+            "<td class=\"n\"><a href=\"{href}\">412.0</a></td>"
+        )),
+        "{html}"
+    );
+}
+
+/// A time taken with the database not resident in the page cache is not the warm protocol's: its
+/// cell says what the verdict was.
+#[test]
+fn a_duckdb_time_not_warm_says_so() {
+    let root = tree("duckdb-not-warm");
+    put(
+        &root,
+        "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
+        &[("q3", TIMED), ("q6", TIMED)],
+    );
+    duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
+    let file = root.join("duckdb-cpu128/tpch.sf40/duckdb.tsv");
+    let text = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(&file, text.replace("0\tyes\tok", "0\tpartial\tok")).unwrap();
+    let html = page(root, &[("tpch", "q3"), ("tpch", "q6")]);
+    assert_eq!(row(&html, "q3", "tp1_single")[6], "412.0 not warm: partial");
+    assert_eq!(row(&html, "q6", "tp1_single")[6], "failed");
+}
+
+#[test]
+fn the_duckdb_column_names_its_provenance() {
+    let root = tree("duckdb-provenance");
+    put(
+        &root,
+        "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
+        &[("q3", TIMED)],
+    );
+    duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
+    let html = page(root, &[("tpch", "q3")]);
+    assert!(
+        html.contains(
+            "duckdb-cpu128, tpch sf40: DuckDB 1.5.4, 128 threads, host nebius-cpu128, floor 29 ms"
+        ),
+        "{html}"
+    );
+    // What one time holds: a whole CLI process, so its floor is named for a reader to subtract.
+    assert!(
+        html.contains(
+            "one DuckDB CLI process's wall time: the process started, the database opened"
+        ),
+        "{html}"
+    );
 }
 
 #[test]

@@ -18,6 +18,13 @@
 !/calibration/calls.tsv
 !/calibration/plots/
 !/calibration/plots/**
+# A device's derived files beside its fetched record, which stays ignored: the directory and
+# the dataset's directory re-included, then the three files.
+!/calibration/*-*/
+/calibration/*-*/*/*
+!/calibration/*-*/*/calls.tsv
+!/calibration/*-*/*/loads.tsv
+!/calibration/*-*/*/hbm.tsv
 
 # The device's recorded answers from a cuDF other than shad-gpu's 25.02. `gpu-result.txt`
 # IS committed — one version per file, so the comparison with DuckDB reads one engine's

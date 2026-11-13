@@ -325,7 +325,7 @@ fn merged_cells(
     let header = format!("{query} mode={mode}");
     let rows: Vec<CsvRow> = registry::load_csv()
         .into_iter()
-        .filter(|row| row.dataset == dataset && row.sf == sf)
+        .filter(|row| row.dataset == dataset && row.sf == declared_sf(sf))
         .collect();
     // Nothing is carried out of a file another cuDF recorded: the provenance line covers the
     // whole file, so keeping those sections would make the one line a lie about them.
@@ -361,6 +361,16 @@ fn merged_cells(
         push_section(&mut out, name, body);
     }
     out
+}
+
+/// The sf a file's cells are declared at in the registry. The benchmark times sf1's cells at
+/// sf40 (`BENCHMARK_SF` in `test_corpus_goldens`) and records its answers there, and the
+/// registry has no sf40 rows: read at sf40 itself, every recorded answer would drop the others.
+pub(crate) fn declared_sf(sf: &str) -> &str {
+    match sf {
+        "40" => "1",
+        other => other,
+    }
 }
 
 /// Whether `rows` still enable the device cell a `<query> mode=<mode>` header names. `skip`

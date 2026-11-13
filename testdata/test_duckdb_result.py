@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""`duckdb_result.py`'s rendering, held to arrow-rs's (#235). No DuckDB and no parquet.
+"""`duckdb_result.py`'s rendering, held to arrow-rs's (#235). No DuckDB and no parquet, but for
+`Answers`, which needs both and is skipped without them (CI has neither).
 
 Two things only this side can get wrong. A timestamp: arrow-rs prints `NaiveDateTime`'s
 `Debug` form and `isoformat()` does not, so a millisecond timestamp would be a false
@@ -13,8 +14,10 @@ Run: python3 testdata/test_duckdb_result.py
 
 import datetime
 import decimal
+import importlib.util
 import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -224,6 +227,129 @@ class QueryFiles(unittest.TestCase):
         names = [q.stem for q in dr.query_files("tpch", None)]
         self.assertEqual(names[:3], ["q1", "q2", "q3"])
         self.assertEqual(names[-1], "shuffle-stddev")
+
+
+HAS_DUCKDB = importlib.util.find_spec("duckdb") is not None
+NEEDS_DUCKDB = unittest.skipUnless(
+    HAS_DUCKDB and (dr.ROOT / "tpch.sf1").is_dir(),
+    "needs the duckdb 1.5.4 wheel and testdata/tpch.sf1 (dev, the build image); CI has neither",
+)
+
+
+def answers_db(path, dataset, stems):
+    """An answers database as `duckdb_minimal.sh --answers` writes one: each query's answer a
+    table named by its stem, created under the oracle's session rules."""
+    import duckdb
+
+    con = duckdb.connect()
+    con.execute("SET threads=1")
+    con.execute("SET default_null_order='nulls_last_on_asc_first_on_desc'")
+    con.execute("SET integer_division=true")
+    for table in sorted((dr.ROOT / f"{dataset}.sf1").glob("*.parquet")):
+        con.execute(f"CREATE VIEW {table.stem} AS SELECT * FROM read_parquet('{table}')")
+    con.execute(f"ATTACH '{path}' AS answers")
+    for stem in stems:
+        sql = dr.duckdb_text((dr.ROOT / f"{dataset}-queries" / f"{stem}.sql").read_text())
+        con.execute(f'CREATE OR REPLACE TABLE answers."{stem}" AS {sql.strip().rstrip(";")}')
+    con.close()
+
+
+class Answers(unittest.TestCase):
+    """sf40's answers come from an answers database rather than from parquet: DuckDB at sf40
+    runs on the 128-core VM, and this renders what it stored."""
+
+    @NEEDS_DUCKDB
+    def test_answers_render_as_the_parquet_path_does(self):
+        """q1 is a `no_sort` line, so its rows keep DuckDB's order through the table."""
+        with tempfile.TemporaryDirectory() as scratch:
+            db = pathlib.Path(scratch) / "answers.duckdb"
+            answers_db(db, "tpch", ["q1", "q3"])
+            got = dr.answer_sections("tpch", db, None)
+        want = dr.parquet_sections("tpch", {"q1", "q3"})
+        self.assertTrue(want.startswith("== q1\n+"), want[:80])
+        self.assertEqual(got, want)
+
+    @NEEDS_DUCKDB
+    def test_a_missing_answer_is_failed(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            db = pathlib.Path(scratch) / "answers.duckdb"
+            answers_db(db, "tpch", ["q1"])
+            text = dr.answer_sections("tpch", db, {"q1", "q3"})
+        self.assertIn("== q3\nfailed: no answer recorded\n", text)
+        self.assertTrue(text.startswith("== q1\n+"), text[:80])
+
+    @NEEDS_DUCKDB
+    def test_an_answers_database_holding_no_answer_is_refused(self):
+        """An empty golden reads as "DuckDB answers nothing" to every comparison."""
+        import duckdb
+
+        with tempfile.TemporaryDirectory() as scratch:
+            db = pathlib.Path(scratch) / "answers.duckdb"
+            duckdb.connect(str(db)).close()
+            with self.assertRaises(SystemExit) as caught:
+                dr.answer_sections("tpch", db, None)
+        self.assertIn("no table", str(caught.exception))
+
+    @NEEDS_DUCKDB
+    def test_answers_are_written_beside_the_sf40_goldens(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            db = root / "answers.duckdb"
+            answers_db(db, "tpch", ["q6"])
+            dr.generate("tpch", "40", None, answers=db, root=root)
+            text = (root / "goldens/tpch.sf40/duckdb-result.txt").read_text()
+        self.assertTrue(text.startswith("== q6\n+"), text)
+
+    def test_a_streamed_fingerprint_is_the_in_memory_one(self):
+        """An answer too large to hold, fingerprinted batch by batch through an outside sort,
+        writes the same text: nulls, a float column, a non-ASCII cell and the separator's
+        neighbours included."""
+        names = ["id", "s", "x"]
+        types = ["BIGINT", "VARCHAR", "DOUBLE"]
+        rows = [(3, "z", 0.5), (1, "é", None), (2, None, 2.5), (10, "a\x02", -1.0), (1, "é", 7.0)]
+        batches = [rows[:2], rows[2:3], rows[3:]]
+        self.assertEqual(dr.fingerprint_stream(names, types, iter(batches)),
+                         dr.fingerprint(names, types, rows))
+        self.assertEqual(dr.fingerprint_stream(names, types, iter([])),
+                         dr.fingerprint(names, types, []))
+
+    @NEEDS_DUCKDB
+    def test_an_answer_over_the_cap_by_its_row_count_is_fingerprinted_unrendered(self):
+        """At sf40 an answer can be 96M rows (tpch filter-project): rendered first and measured
+        after, it outgrows the host. Its row count already puts it over the cap."""
+        import duckdb
+
+        with tempfile.TemporaryDirectory() as scratch:
+            db = pathlib.Path(scratch) / "answers.duckdb"
+            con = duckdb.connect(str(db))
+            con.execute('CREATE TABLE "big" AS SELECT range AS k, (range % 7)::DECIMAL(15,2) AS q '
+                        "FROM range(30000)")
+            want = dr.fingerprint(*dr.described(con.execute('SELECT * FROM "big" ORDER BY rowid')))
+            con.close()
+            render = dr.render
+            dr.render = lambda *a, **k: self.fail("an answer over the cap was rendered")
+            try:
+                text = dr.answer_sections("tpch", db, None)
+            finally:
+                dr.render = render
+        self.assertEqual(text, "== big\n" + want)
+
+    def test_answers_need_a_scale(self):
+        """`--answers` is sf40's source and parquet is sf1's: each without the other's scale, and
+        an answers file for more than one dataset, is refused before DuckDB is asked anything."""
+        script = str(dr.ROOT / "duckdb_result.py")
+        cases = [
+            (["--dataset", "tpch", "--answers", "a.duckdb"], ["--answers", "--sf"]),
+            (["--dataset", "tpch", "--sf", "1", "--answers", "a.duckdb"], ["--answers", "--sf 1"]),
+            (["--dataset", "tpch", "--sf", "40"], ["--sf 40", "--answers"]),
+            (["--sf", "40", "--answers", "a.duckdb"], ["--answers", "one --dataset"]),
+        ]
+        for argv, words in cases:
+            r = subprocess.run([sys.executable, "-I", script, *argv], capture_output=True, text=True,
+                               timeout=60)
+            self.assertEqual(r.returncode, 2, (argv, r.stderr))
+            for word in words:
+                self.assertIn(word, r.stderr, (argv, r.stderr))
 
 
 if __name__ == "__main__":
