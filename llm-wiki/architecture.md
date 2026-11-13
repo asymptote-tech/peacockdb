@@ -857,9 +857,9 @@ the driver-held in-flight batches plus Σ cached `resident_bytes()` over live ex
 Per call: pre-check `resident + scratch_bytes(rows, bytes)` against the budget; execute; remove
 consumed inputs, add outputs at actual `byte_size()`, refresh that one executor's figure, and
 post-check. The three calls that consume their executor skip the post-call read and forget the
-slot instead, a consumed executor holding nothing. `CallStats.scratch_bytes` is measured — the
-CPU directly, a device through RMM hooks — so model quality is observable and under-estimates
-are recorded with their magnitude.
+slot instead, a consumed executor holding nothing. `CallStats.scratch_bytes` is measured on the
+CPU backend, so model quality is observable there and under-estimates are recorded with their
+magnitude. No device executor measures it (`None`), so a device under-estimate goes unrecorded.
 
 Four things in `executor/driver/accounting.rs` are load-bearing.
 
@@ -1403,8 +1403,10 @@ schema=[name:type, …]`. An execution line drops the schema, adds `output_rows`
 `output_bytes`, and carries a second line beneath it — `in_rows` nested by child then by that
 child's lane, `batch_rows` and `batch_bytes` by this node's lane then by batch, plus
 `abandoned` where a run left something behind. A benchmark line is the plan line without its
-schema, with `time_us=[[…]] total_us=N` beneath it — device microseconds by lane and by call —
-and its file is not a golden: nothing asserts against it. Indentation draws the tree in all
+schema, with `time_us=[[…]] total_us=N batch_rows=[[…]] batch_bytes=[[…]]` beneath it. `time_us`
+is device microseconds by lane and by call. The last two are by lane and by batch, as in the
+execution line and written by the same renderer, from the run the times come from. Its file is
+not a golden: nothing asserts against it. Indentation draws the tree in all
 three. The files themselves are in [build-test.md](build-test.md).
 
 **Every column reference renders `name@ordinal`.** The ordinal is authoritative and the name

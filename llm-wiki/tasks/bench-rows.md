@@ -61,3 +61,13 @@ both and does not redo them.
 | `llm-wiki/architecture.md` "Node display" | the benchmark line's new fields |
 
 Component-level API: none.
+
+## Signoff (2026-11-05)
+
+Solved under its constraints: per-node `batch_rows`/`batch_bytes`; `load_us`, `execute_us`,
+`peak_bytes`, the pinned cache and the prefill in the trailer; one reader and a committed page of every
+device tree; the format read back from one H100 case (tpch sf40 q3); a resumed run re-measures any
+section not in the current format. Shortcuts: the page does not mark unpinned loads (every H200 load
+predates the cache; handed to sf40-baseline); writer and reader are tied by one real H100 section,
+not a rust-only round trip; `peak_bytes` is a lower bound only as far as the join session's
+per-row model holds; the page was read as text, never opened in a browser.
