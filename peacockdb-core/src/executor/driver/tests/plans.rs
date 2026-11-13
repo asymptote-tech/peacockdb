@@ -35,6 +35,7 @@ pub(crate) fn source(table: &str, lanes: usize) -> Box<dyn GpuNode> {
             index,
             rows: 100,
             bytes: 800,
+            compressed_bytes: 0,
         })
         .collect();
     let scan = ScanMetadata {

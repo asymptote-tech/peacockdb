@@ -936,6 +936,12 @@ impl GpuLoadParquet {
         self.survivors.iter().map(|group| group.bytes).sum()
     }
 
+    /// Read by the GPU benchmark's `[load-bytes]` line alone.
+    #[cfg_attr(any(not(feature = "test-support"), feature = "rust-only"), allow(dead_code))]
+    pub(crate) fn compressed_bytes(&self) -> u64 {
+        self.survivors.iter().map(|group| group.compressed_bytes).sum()
+    }
+
     /// The largest batch the mapping produces. One batch per lane, one per row group and a
     /// budgeted size are three different answers to this, which is why the model reads it
     /// off the mapping rather than off the budget.
@@ -1014,7 +1020,10 @@ impl GpuUnload {
 pub(crate) struct RowGroupMeta {
     pub(crate) index: u32,
     pub(crate) rows: u64,
+    /// Uncompressed, over the projected columns: what batches and lanes are sized by.
     pub(crate) bytes: u64,
+    /// The same chunks compressed, as the file holds them: what a load reads and copies.
+    pub(crate) compressed_bytes: u64,
 }
 
 /// How a lane's row groups are cut into batches. Three named forms rather than one number

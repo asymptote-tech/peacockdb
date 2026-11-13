@@ -652,6 +652,7 @@ fn loading(partition_groups: Vec<Vec<Vec<u32>>>, survivors: Vec<u32>) -> GpuLoad
                 index,
                 rows: 100,
                 bytes: 1000,
+                compressed_bytes: 0,
             })
             .collect(),
         can_be_null: vec![false],

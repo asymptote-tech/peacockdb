@@ -39,6 +39,7 @@ fn source(nullable: &[bool]) -> Box<dyn GpuNode> {
             index: 0,
             rows: 100,
             bytes: 800,
+            compressed_bytes: 0,
         }],
         can_be_null: nullable.to_vec(),
     };
@@ -231,6 +232,7 @@ fn rowmarker_source() -> Box<dyn GpuNode> {
             index: 0,
             rows: 100,
             bytes: 0,
+            compressed_bytes: 0,
         }],
         can_be_null: Vec::new(),
     };

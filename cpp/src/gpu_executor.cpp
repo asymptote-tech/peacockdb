@@ -1,5 +1,6 @@
 #include "peacock_gpu.h"
 #include "peacock/partitioning.hpp"
+#include "peacock/pinned_host_cache.h"
 #include "peacock/rmm_pool.hpp"
 #include "plan_executor.h"
 #include "plan_executor_internal.h"
@@ -22,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -177,6 +179,98 @@ int peacock_install_rmm_pool(uint64_t bytes, PeacockRmmPoolInfo* out_info) {
   out_info->initial_bytes = static_cast<uint64_t>(status.initial_bytes);
   out_info->maximum_bytes = static_cast<uint64_t>(status.maximum_bytes);
   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// The pinned host file cache
+// ---------------------------------------------------------------------------
+
+// The C values are the C++ enumerators cast, so the two lists must agree member by member.
+#define PCK_SAME_VALUE(c, cpp) static_assert(c == static_cast<int>(cpp), #c " must equal " #cpp)
+PCK_SAME_VALUE(PEACOCK_PINNED_CACHE_ON, peacock::PinnedCacheState::On);
+PCK_SAME_VALUE(PEACOCK_PINNED_CACHE_OFF, peacock::PinnedCacheState::Off);
+PCK_SAME_VALUE(PEACOCK_PINNED_CACHE_INTEGRATED, peacock::PinnedCacheState::Integrated);
+PCK_SAME_VALUE(PEACOCK_PINNED_CACHE_NO_DEVICE, peacock::PinnedCacheState::NoDevice);
+PCK_SAME_VALUE(PEACOCK_PINNED_CACHE_FROM_DEFAULT, peacock::PinnedCacheSource::Default);
+PCK_SAME_VALUE(PEACOCK_PINNED_CACHE_FROM_SESSION, peacock::PinnedCacheSource::Session);
+PCK_SAME_VALUE(PEACOCK_PINNED_CACHE_FROM_ENV, peacock::PinnedCacheSource::Env);
+
+static void fill_cache_stats(peacock::PinnedCacheStatus const& status,
+                             PeacockPinnedCacheStats* out) {
+  out->state = static_cast<int32_t>(status.sizing.state);
+  out->source = static_cast<int32_t>(status.sizing.source);
+  out->capacity_bytes = status.stats.capacity_bytes;
+  out->resident_bytes = status.stats.resident_bytes;
+  out->files = status.stats.files;
+  out->fills = status.stats.fills;
+  out->fill_bytes = status.stats.fill_bytes;
+  out->fill_us = status.stats.fill_us;
+  out->fallbacks = status.stats.fallbacks;
+  out->evictions = status.stats.evictions;
+  out->reloads = status.stats.reloads;
+}
+
+// The cache's first use reads PEACOCK_PINNED_HOST_CACHE_BYTES, and a value that is no count
+// throws there; it must not cross extern "C".
+template <typename Status>
+static int answer_cache_stats(Status status, PeacockPinnedCacheStats* out) {
+  if (!out) return 1;
+  try {
+    fill_cache_stats(status(), out);
+    return 0;
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "[pinned-cache] %s\n", e.what());
+    return -1;
+  }
+}
+
+int peacock_set_pinned_host_cache_bytes(uint64_t bytes, PeacockPinnedCacheStats* out) {
+  return answer_cache_stats(
+      [bytes] {
+        return peacock::set_pinned_host_cache_bytes(bytes == PEACOCK_PINNED_CACHE_DEFAULT_BYTES
+                                                        ? std::nullopt
+                                                        : std::optional<std::size_t>(bytes));
+      },
+      out);
+}
+
+int peacock_pinned_host_cache_stats(PeacockPinnedCacheStats* out) {
+  return answer_cache_stats(peacock::pinned_host_cache_status, out);
+}
+
+int peacock_pinned_cache_prefill(peacock_executor_t* executor, const char* const* paths,
+                                 size_t n_paths, peacock_prefill_stats_t* out) {
+  if (!executor || !out || (!paths && n_paths > 0)) return PEACOCK_PREFILL_BAD_ARGUMENT;
+  *out = {};
+  try {
+    peacock::PinnedHostCache& cache = peacock::pinned_host_cache();
+    // Off before any stat, so a cache that is off never answers for a file it would not read.
+    if (cache.stats().capacity_bytes == 0) return PEACOCK_PREFILL_OFF;
+    const std::vector<std::string> named(paths, paths + n_paths);
+    const peacock::PrefillOutcome outcome = cache.prefill(named);
+    out->files = outcome.files;
+    out->bytes = outcome.bytes;
+    out->us = outcome.us;
+    out->needed = outcome.needed;
+    out->limit = outcome.limit;
+    switch (outcome.status) {
+      case peacock::PrefillOutcome::Status::Ok:
+        return PEACOCK_PREFILL_OK;
+      case peacock::PrefillOutcome::Status::DoesNotFit:
+        return PEACOCK_PREFILL_DOES_NOT_FIT;
+      case peacock::PrefillOutcome::Status::Off:
+        return PEACOCK_PREFILL_OFF;
+      case peacock::PrefillOutcome::Status::Io:
+        out->files = outcome.failed_index;
+        executor->last_error = named[outcome.failed_index] + ": " + std::strerror(outcome.error);
+        return PEACOCK_PREFILL_IO;
+    }
+    executor->last_error = "unknown prefill outcome";
+    return PEACOCK_PREFILL_BAD_ARGUMENT;
+  } catch (const std::exception& e) {
+    executor->last_error = e.what();
+    return PEACOCK_PREFILL_BAD_ARGUMENT;
+  }
 }
 
 int peacock_set_node_timing(int mode) {

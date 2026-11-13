@@ -648,6 +648,7 @@ fn scan_of_no_column(schema: Schema) -> Box<dyn GpuNode> {
             index: 0,
             rows: 5,
             bytes: 0,
+            compressed_bytes: 0,
         }],
         can_be_null: Vec::new(),
     };

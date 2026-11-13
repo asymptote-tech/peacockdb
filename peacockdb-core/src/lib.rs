@@ -39,7 +39,11 @@ use datafusion::optimizer::Optimizer;
 
 pub fn build_session_state(target_partitions: usize) -> SessionContext {
     let base = SessionContext::new();
-    let mut config = base.state().config().clone();
+    let mut config = base
+        .state()
+        .config()
+        .clone()
+        .with_option_extension(executor::PeacockOptions::default());
     config.options_mut().execution.target_partitions = target_partitions;
     // The registration door read_table does not take: DataFusion's own register_parquet
     // builds its format from this config alone (#183, archive/archived-tasks.md, utf8-everywhere).

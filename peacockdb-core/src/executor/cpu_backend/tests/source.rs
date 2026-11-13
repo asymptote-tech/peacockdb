@@ -59,6 +59,7 @@ fn loader(projection: Vec<u32>, partition_groups: Vec<Vec<Vec<u32>>>) -> GpuLoad
                 index,
                 rows: 2,
                 bytes: 16,
+                compressed_bytes: 0,
             })
             .collect(),
         can_be_null: vec![false, false],
@@ -198,6 +199,7 @@ fn a_column_the_file_holds_in_another_type_is_refused_rather_than_cast() {
                 index,
                 rows: 2,
                 bytes: 16,
+                compressed_bytes: 0,
             })
             .collect(),
         can_be_null: vec![false, false],
@@ -238,6 +240,7 @@ fn a_scan_of_no_column_answers_the_rowmarker_per_row() {
                 index,
                 rows: 2,
                 bytes: 0,
+                compressed_bytes: 0,
             })
             .collect(),
         can_be_null: Vec::new(),

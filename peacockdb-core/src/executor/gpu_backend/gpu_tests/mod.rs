@@ -131,6 +131,7 @@ fn mapped(partition_groups: Vec<Vec<Vec<u32>>>) -> Box<dyn GpuNode> {
                 index: index as u32,
                 rows: group.num_rows() as u64,
                 bytes: group.total_byte_size() as u64,
+                compressed_bytes: 0,
             }
         })
         .collect();

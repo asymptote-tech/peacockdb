@@ -406,6 +406,7 @@ fn source_named(table: &str) -> Box<dyn GpuNode> {
             index,
             rows: 100 + u64::from(index),
             bytes: 800,
+            compressed_bytes: 0,
         })
         .collect();
     let scan = ScanMetadata {
@@ -432,6 +433,7 @@ fn other_source() -> Box<dyn GpuNode> {
             index: 4,
             rows: 7,
             bytes: 64,
+            compressed_bytes: 0,
         }],
         can_be_null: vec![true, false],
     };

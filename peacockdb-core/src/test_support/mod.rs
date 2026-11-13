@@ -9,6 +9,9 @@
 //! component's, so everything below is private with `pub(crate)` items, a type that crosses
 //! out is declared in this file, and no `pub` signature here names an engine type.
 
+// The prefill's pure half: the harness that calls it is not in a rust-only build, its tests are.
+#[cfg_attr(feature = "rust-only", allow(dead_code))]
+mod benchmark_prefill;
 mod benchmark_section;
 // `run_section`, the trailer's writer, serves the benchmark harness, which a rust-only build
 // does not compile; its test runs in every shape.

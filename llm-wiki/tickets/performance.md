@@ -6,14 +6,13 @@ These issues should be fixed on a pre-prod performance path.
 ## Contents
 
 - [#150 (uncompressed embeddings) store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%](#t150)
-- [#149 (pinned host memory) the parquet load must use pinned host memory](#t149)
 - [#148 (RMM allocator) the engine installs no RMM allocator, and `gpu_memory_limit` is accepted and ignored](#t148)
 - [#231 (26.02 big aggregate) one grouped aggregate call past about 100M rows is several times slower on libcudf 26.02](#t231)
-- [#232 (chunked parquet reader) the scan reads through `read_parquet`, which is several times slower than the chunked reader](#t232)
 - [#242 (26.02 join paths) the join session calls only the cuDF API that 25.02 and 26.02 share, and leaves 26.02's faster joins unused](#t242)
 - [#248 (join parallelism gaps) three join shapes run on one lane or skewed after the rewrite](#t248)
 - [#286 (offset row-group skip) an OFFSET that reaches a scan still reads every row group it skips](#t286)
 - [#290 (stacked limits) a limit DataFusion pushed down and kept above becomes two adjacent `GpuLimit`s](#t290)
+- [#305 (snappy batch floor) a parquet load's Snappy decompression takes about 29 ms however few bytes it holds](#t305)
 
 <a id="t150"></a>
 ### #150 (uncompressed embeddings) store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%
@@ -31,23 +30,6 @@ MB more) and the load path. Not free to do, though: sf40 is generated, uploaded 
 shad-gpu, so it means re-uploading 40 GB and re-verifying the 16 sf40 goldens. Measure with
 `load_ms` per vector probe and the `unsnap` line from `nsys stats`.
 
-
-<a id="t149"></a>
-### #149 (pinned host memory) the parquet load must use pinned host memory
-**Priority: high**
-
-Nothing in the engine sets a host memory resource for IO, so parquet loads from pageable host
-memory — 10.6 GB/s H2D on the H200 against 47.3 GB/s pinned, 2 GiB buffers, 2nd-min of 5.
-
-A discrete GPU's DMA engine transfers by physical address and cannot be handed a page the OS may
-move, so a pageable source is bounced through an internal pinned staging buffer: a host memcpy
-of every byte, which is what bounds the rate — H200's 10.6 GB/s sits just under its 11.8 GB/s
-single-core memcpy, nowhere near its link rate. That is 4.4x on every byte the loader moves, and
-the load dominates: 400-690 ms against 19-48 ms of execute on sf40. cuDF exposes
-`cudf::io::set_host_memory_resource` and defaults to pageable — [#148](#t148)'s shape one side
-over. Condition it on the device: GB10 shows 59.5 vs 59.2 because it has one physical pool, so
-`pageableMemoryAccess` is the branch. Tests: compare the existing `[bench] … load_ms=` on both
-hosts, asserting the discrete host improves and the integrated one does not regress.
 
 <a id="t148"></a>
 ### #148 (RMM allocator) the engine installs no RMM allocator, and `gpu_memory_limit` is accepted and ignored
@@ -105,44 +87,6 @@ above already folds several partial states. The cap is a measured number per lib
 named where it is set, not a batch-size heuristic. Or pin 25.02 by decision and record why.
 First, a re-measure on H200 with the same CUDA on both versions, to separate the library from
 the toolkit.
-
-<a id="t232"></a>
-### #232 (chunked parquet reader) the scan reads through `read_parquet`, which is several times slower than the chunked reader
-
-`scan.cpp` loads every row-group batch with `cudf::io::read_parquet`. On GB10 the same bytes
-through `cudf::io::chunked_parquet_reader` with one chunk load 5.6x faster.
-
-Measured in `reports/dgx-spark.md` §2 (GB10, libcudf 26.02, CUDA 13.0, 2nd-minimum of repeated
-runs, idle host), whole-table q6 load:
-
-| reader | batches | q6 load |
-|---|--:|--:|
-| `cudf::io::read_parquet` | — | 340 ms |
-| `chunked_parquet_reader`, 16 GiB chunk | 1 | 60.3-61.6 ms |
-| same, 4 GiB | 4 | 60.7-61.0 ms |
-| same, 1 GiB | 15 | 62.5-64.4 ms |
-| same, 512 MiB | 29 | 81.3-82.2 ms |
-| same, 128 MiB | 115 | 240.1-245.2 ms |
-
-One chunk has the same single-shot semantics, so the gap is the reader, not chunking. Nor is it
-the allocator: reserving 60% of memory up front, which makes pool growth impossible, changes
-nothing (#148). The host floor says the fast number is right: `dd` reads the 9.0 GB file from
-page cache at 23.6 GB/s, so q6's ~1.5 GB of compressed columns needs ~64 ms. `KVIKIO_NTHREADS`
-explains part of the gap (1 thread 480 ms, 16 threads 323 ms) and not the rest; the mechanism is
-unproven. Load dominates a single query: q6 is 19.2 ms execute against 399.9 ms load
-(`reports/benchmark-minimal.md`). A cost, not a wrong answer.
-
-**Corpus queries:** every device scan. The difference shows in the benchmark tree's load
-column, not in any corpus cell.
-
-**Fix proposed:** first re-measure on H200, since every number above is GB10 on CUDA 13.0 and
-shad-gpu runs CUDA 12.2: `read_parquet` against a one-chunk `chunked_parquet_reader` over the
-same row groups, with NVTX ranges to name the mechanism. If it holds, `scan.cpp` builds a
-`chunked_parquet_reader` over the call's row groups, sets `chunk_read_limit` above the batch the
-plan already sized (one chunk), and concatenates only if it returns several. The read limit is
-the plan's, not a second size: 1-4 GiB was the sweet spot and 128 MiB cost 4x, so a batch sized
-below 1 GiB wants re-measuring too. Tests: the device tiers stay byte-identical; a benchmark
-section for the load.
 
 <a id="t242"></a>
 ### #242 (26.02 join paths) the join session calls only the cuDF API that 25.02 and 26.02 share, and leaves 26.02's faster joins unused
@@ -229,3 +173,20 @@ the part scan's `GpuLimit 0..+28`, at every mode.
 pair with one `GpuLimit` whose interval is `RowInterval::over(outer, inner)`, the composition
 the limits task adds for the root fold. Test: the three examples above plan one `GpuLimit`
 each and answer as today. Their plan goldens and `nested-limits`' lose a line.
+
+
+<a id="t305"></a>
+### #305 (snappy batch floor) a parquet load's Snappy decompression takes about 29 ms however few bytes it holds
+On the H100 (tpch sf40, tp1-single, from the pinned cache) each load's decompression is one
+`nvcomp::unsnap_kernel` launch, and it takes about 29 ms whatever the load holds: q8's `supplier`
+(1.9 MB copied) 29.0 ms, q3's `customer` 29.3 ms, against 125.8 ms for q8's 4.9 GB `lineitem`.
+
+It is now the largest part of a small load: 81 % of `customer` (29.4 of 36.0 ms), and q8's four
+mid-size loads pay 119 ms of it together. The before profile shows the same 29 ms, so the cache
+did not cause it; it only stopped hiding it behind the host read.
+
+One launch decompresses every page of the load as a batch, so its time follows its slowest page,
+not its bytes. Next: the page sizes per column chunk from the footers, and the launch's per-chunk
+time. If one large page sets it, it is a writer setting in `testdata/generate_testdata.sh`, as
+#150 is. The numbers are a `create_nsys_profile.sh --trace` capture's kernels inside each load's
+window, as `nsys_loads.py` draws it; the loads' times are in [#149](../archive/archived-tickets.md#t149).
