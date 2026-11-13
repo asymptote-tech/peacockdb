@@ -80,9 +80,22 @@ def test_soft_stop_refused_while_the_card_lock_is_held():
     w = World(state="RUNNING", card_lock="held")
     rc, _, err = run(w, "stop")
     assert rc == 2 and w.read()["state"] == "RUNNING", (rc, err)
-    assert "card lock /run/lock/peacock-card.lock held" in err, err
+    assert f"card lock {w.dir / 'card.lock'} held" in err, err
     rc, _, err = run(w, "stop", "--force")
     assert rc == 0 and w.read()["state"] == "STOPPED", (rc, err)
+
+
+def test_soft_stop_goes_on_when_nvidia_smi_fails_naming_it():
+    # A driver/library mismatch after an update: what nvidia-smi prints then is no card's app.
+    text = "Failed to initialize NVML: Driver/library version mismatch"
+    w = World(state="RUNNING", smi_fails=[18, text])
+    rc, _, err = run(w, "stop")
+    assert rc == 0 and w.read()["state"] == "STOPPED", (rc, err)
+    assert "nvidia-smi" in err and text in err and "busy" not in err, err
+    # A held card lock still holds the stop.
+    w = World(state="RUNNING", smi_fails=[18, text], card_lock="held")
+    rc, _, err = run(w, "stop")
+    assert rc == 2 and w.read()["state"] == "RUNNING" and "card lock" in err, (rc, err)
 
 
 def test_soft_stop_stops_on_another_user_s_free_card_lock():

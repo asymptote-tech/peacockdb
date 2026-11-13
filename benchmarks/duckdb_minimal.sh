@@ -788,9 +788,10 @@ echo "database $(gb $DB_BYTES) GiB, $(gb $RESIDENT_BYTES) GiB resident (${RESIDE
 
 # --------------------------------------------------------------------------- results file
 # One owner reads it, test_support's parse_duckdb_results. Every value in the `# ` line is one
-# word: whitespace inside one (a CPU's model name) becomes `_`.
+# word: each run of whitespace inside one (a CPU's model name) becomes one `_`, and a `_` already
+# there stays as it is.
 if [ -n "$RESULTS_TSV" ]; then
-  word() { printf '%s' "$*" | tr -s ' \t' '_'; }
+  word() { printf '%s' "$*" | sed -E 's/[[:space:]]+/_/g'; }
   version=$("$DUCKDB" -csv -noheader -c "SELECT version();" 2>/dev/null | tail -1)
   threads=$("$DUCKDB" "$DB" -csv -noheader -c "${TIMED_PRAGMA} SELECT current_setting('threads');" 2>/dev/null | tail -1)
   cpu=$(awk -F': *' '/^model name/ { print $2; exit }' /proc/cpuinfo)

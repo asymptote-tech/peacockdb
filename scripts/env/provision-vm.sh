@@ -158,7 +158,8 @@ ROOT
 
   # Secrets on ssh's stdin only, from a copy named as the VM keeps them. nebius.yaml is copied, never
   # read: only the CLI reads it.
-  stage=$(mktemp -d)
+  # Staged in ~/.config/peacock, as every secret stays: a killed run leaves nothing in /tmp.
+  stage=$(mktemp -d "$PEACOCK_CONFIG/provision.XXXXXX")
   trap 'rm -rf "$stage"' EXIT
   cp "$PEACOCK_ENV" "$stage/peacock.env"
   cp "$gpu_key" "$stage/gpu_ed25519"

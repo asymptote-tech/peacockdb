@@ -290,7 +290,10 @@ class Laptop:
         self.bin, self.vm_bin = tmp / "bin", tmp / "vm-bin"
         self.config.mkdir(parents=True, mode=0o700)
         make_key(self.config / "gpu_ed25519", "Default")
-        laptop_bin = {"ssh": FAKE_SSH, "gh": FAKE_GH, "ssh-keygen": FAKE_SSH_KEYGEN}
+        # tar records its arguments, then is the real one unless FAKE_TAR_FAIL is set.
+        fake_tar = (f'#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_TAR_LOG"\n[ -z "${{FAKE_TAR_FAIL:-}}" ] || exit 1\n'
+                    f'exec {shutil.which("tar")} "$@"\n')
+        laptop_bin = {"ssh": FAKE_SSH, "gh": FAKE_GH, "ssh-keygen": FAKE_SSH_KEYGEN, "tar": fake_tar}
         for d, files in ((self.bin, laptop_bin), (self.vm_bin, {**VM_BIN, "gh": FAKE_GH})):
             d.mkdir()
             for name, text in files.items():
@@ -304,12 +307,13 @@ class Laptop:
         (tmp / "claude").write_text(FAKE_CLAUDE)
         (tmp / "claude").chmod(0o755)
         self.ssh_log, self.gh_log, self.keygen_log = tmp / "ssh.log", tmp / "gh.log", tmp / "ssh-keygen.log"
-        self.nebius_log = tmp / "nebius.log"
+        self.nebius_log, self.tar_log = tmp / "nebius.log", tmp / "tar.log"
         self.received = tmp / "received.env"
         self.write_env(KEYS)
         self.env = {"PATH": f"{self.bin}:{os.environ['PATH']}", "HOME": str(self.home), "LANG": "C.UTF-8",
                     "FAKE_SSH_LOG": str(self.ssh_log), "FAKE_GH_LOG": str(self.gh_log),
                     "FAKE_SSH_KEYGEN_LOG": str(self.keygen_log), "FAKE_NEBIUS_LOG": str(self.nebius_log),
+                    "FAKE_TAR_LOG": str(self.tar_log),
                     "FAKE_VMS": str(self.vms), "FAKE_VM_BIN": str(self.vm_bin),
                     "FAKE_BASE_PATH": vm_path(), "FAKE_CLAUDE": str(tmp / "claude"),
                     "PEACOCK_SSH_PAUSES": "0 0 0"}

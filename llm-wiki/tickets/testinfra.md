@@ -11,7 +11,6 @@ Tests, CI, hosts, testdata etc
 - [#309 (no en_US in build image) the build image has no en_US.UTF-8 locale and no name for a foreign uid, so five script test files cannot run in it](#t309)
 - [#310 (nebius-gpu fills with images) `gpu-tests` keeps every image and sf1 set it pulls, so nebius-gpu's disk runs out](#t310)
 - [#312 (start waits out a refusal) `nebius.sh start` waits its full 900 s after the API has already refused the start](#t312)
-- [#313 (results line squeezes __) the results line's `tr -s` squeezes `__` in a value, so `test_results_name_version_threads_host` fails at random](#t313)
 - [#314 (bootstrap skips the clone) `bootstrap-vm.sh` never updates an existing clone, so a pin or script bumped in git reaches a VM only by hand](#t314)
 - [#315 (no free-space check) neither `bootstrap-vm.sh` nor `build-test.sh` checks free space first, so a small disk fails mid-build](#t315)
 
@@ -107,16 +106,6 @@ one it generates; or a prune step in `gpu-tests`'s cleanup.
 
 The fix: keep the operation's ID from `--async` and, while polling, read the operation; a finished
 operation with an error exits at once, through `classify_error`, so a capacity refusal is 75.
-
-<a id="t313"></a>
-### #313 (results line squeezes __) the results line's `tr -s` squeezes `__` in a value, so `test_results_name_version_threads_host` fails at random
-`duckdb_minimal.sh`'s `word()` writes each value of the `# ` line of `--results` with
-`tr -s ' \t' '_'`. `-s` squeezes runs of `_` too, not only the whitespace it replaced, so a value
-that holds `__` is changed. The test's data directory is a `mkdtemp`, whose random part can hold
-`__`: `db=` then differs from the directory, and the test fails, about one run in two hundred.
-A host or CPU name with `__` is changed the same way.
-
-The fix: squeeze whitespace only, `sed 's/[[:space:]]\+/_/g'`.
 
 <a id="t314"></a>
 ### #314 (bootstrap skips the clone) `bootstrap-vm.sh` never updates an existing clone, so a pin or script bumped in git reaches a VM only by hand

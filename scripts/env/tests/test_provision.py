@@ -202,6 +202,20 @@ def test_a_second_provision_rewrites_the_sudoers_file():
         assert list(vm_tmp.iterdir()) == [], list(vm_tmp.iterdir())
 
 
+def test_the_secrets_are_staged_in_the_config_dir_and_removed():
+    # Never in /tmp: a killed run or a power loss must not leave keys outside ~/.config/peacock.
+    for fail in (None, "1"):
+        with Laptop() as lap:
+            lap.add_vm("vm1.test")
+            env = {"FAKE_TAR_FAIL": fail} if fail else None
+            r = lap.provision(TARGET, "--env", lap.received, "--user", "dev1", stdin=PAT + "\n", env=env)
+            assert (r.returncode != 0) == bool(fail), (fail, r.returncode, r.stderr)
+            (args,) = lap.tar_log.read_text().splitlines()
+            stage = pathlib.Path(args.split()[1])
+            assert stage.parent == lap.config and stage.name.startswith("provision."), args
+            assert not stage.exists(), list(lap.config.iterdir())
+
+
 def test_provision_without_a_terminal_names_the_claude_login():
     with Laptop() as lap:
         lap.add_vm("vm1.test")

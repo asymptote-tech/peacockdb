@@ -13,7 +13,8 @@
 #   nebius.sh start             start, wait for RUNNING and for ssh (idempotent); RUNNING
 #                                 with no ssh is exit 1, and a VM this call started is stopped
 #   nebius.sh stop [--force]    soft: refuse while the card has a process or its lock is held,
-#                                 or, on a VM without one, while duckdb runs; --force: stop anyway
+#                                 or, on a VM without one, while duckdb runs; a failing
+#                                 nvidia-smi is logged and refuses nothing; --force: stop anyway
 #   nebius.sh ssh <cmd…>        run a command on the VM; an ssh that fails before
 #                                 authenticating is tried again, four attempts in all
 #   nebius.sh rsh <host> <cmd…> one attempt, for rsync -e: the sync around it is what is retried
@@ -78,7 +79,7 @@ LOG=$STATE_DIR/nebius.log
 verb=${1:-}; shift || true
 case $verb in
   status|ip|start|stop|ssh|rsh|install-watch) ;;
-  *) sed -n '2,32p' "$0" >&2; exit 64;;
+  *) sed -n '2,33p' "$0" >&2; exit 64;;
 esac
 # Exit 1, not peacock-config.sh's 2: here 2 is "busy".
 if [ -z "${GPU_HOST_NEBIUS_CONFIG:-}" ]; then peacock_nebius_config_cut || exit 1; fi
@@ -245,21 +246,27 @@ cmd_start() {
 }
 
 cmd_stop() {
-  local force=0 s busy lock
+  local force=0 s busy lock smi
   [ "${1:-}" = --force ] && force=1
   s=$(state)
   case $s in STOPPED|STOPPING) log "stop: already $s"; return 0;; esac
   [ "$s" = STARTING ] && { wait_for_state RUNNING "$START_TIMEOUT" || true; }
   if [ "$force" -eq 0 ]; then
-    # The card's apps on a GPU VM; a VM without nvidia-smi (the CPU VM) has no card, and there a
-    # DuckDB run is the work a stop would cut short. A held card lock is a run or a capture, maybe
-    # with nothing on the card yet; it is opened read-only, as another user's file in sticky
-    # /run/lock refuses an open that may create it. A failing probe reads as unreachable.
+    # The card's apps; the CPU VM has no nvidia-smi, and there a DuckDB run is the work. A held
+    # card lock (opened read-only: sticky /run/lock refuses another's open that may create) is a run
+    # or a capture. A failing nvidia-smi (a driver mismatch) names no app: its lines come marked,
+    # not busy. A failing probe reads as unreachable.
     lock=$(printf '%q' "$PEACOCK_CARD_LOCK")
-    busy=$(vm_ssh 'if command -v nvidia-smi >/dev/null; then nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader; else pgrep -a -x duckdb || true; fi;'" if [ -e $lock ] && ! flock -n 9 9< $lock; then echo 'card lock $lock held'; fi" 2>/dev/null) \
-      || busy="?unreachable"
-    if [ "$busy" = "?unreachable" ]; then log "stop: host unreachable over ssh; stopping on the API's state"
-    elif [ -n "$busy" ]; then log "stop: busy: $(tr '\n' ';' <<<"$busy") — not stopping"; exit 2
+    # shellcheck disable=SC2016  # the probe's $(…) and $apps expand on the VM
+    if busy=$(vm_ssh 'if command -v nvidia-smi >/dev/null; then if apps=$(nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader 2>/dev/null); then [ -z "$apps" ] || echo "$apps"; else s=$?; echo "$apps" | while IFS= read -r l; do echo "?nvidia-smi exit $s: $l"; done; fi; else pgrep -a -x duckdb || true; fi;'" if [ -e $lock ] && ! flock -n 9 9< $lock; then echo 'card lock $lock held'; fi" 2>/dev/null); then
+      smi=$(grep '^?nvidia-smi' <<<"$busy" || true)
+      busy=$(grep -v '^?nvidia-smi' <<<"$busy" || true)
+      if [ -n "$smi" ]; then
+        log "stop: nvidia-smi on the VM failed, so the card's apps are unknown and hold no stop: $(tr '\n' ';' <<<"${smi//\?nvidia-smi/nvidia-smi}")"
+      fi
+      if [ -n "$busy" ]; then log "stop: busy: $(tr '\n' ';' <<<"$busy") — not stopping"; exit 2; fi
+    else
+      log "stop: host unreachable over ssh; stopping on the API's state"
     fi
   fi
   log "stopping $INSTANCE_ID$([ "$force" -eq 1 ] && echo ' (--force)')"
@@ -304,8 +311,10 @@ cmd_install_watch() {
     *) bad_option "install-watch takes only --key-file <pem>";;
   esac
   [ -z "$key" ] || [ -f "$key" ] || install_fail "--key-file $key: no such file"
-  # bash runs EXIT on HUP, INT and TERM too, so the copy, which holds every profile, never stays.
-  install_dir=$(mktemp -d); trap 'rm -rf "$install_dir"' EXIT
+  # bash runs EXIT on HUP, INT and TERM too, so the copy, which holds every profile, never stays;
+  # it is made in ~/.config/peacock, as every secret is, never in /tmp.
+  install -d -m 700 "$PEACOCK_CONFIG"
+  install_dir=$(mktemp -d "$PEACOCK_CONFIG/install-watch.XXXXXX"); trap 'rm -rf "$install_dir"' EXIT
   p=$PROFILE
   [ -n "$p" ] || p=$(active_profile) || install_fail "the active profile of $NEBIUS_CONFIG is missing or not a profile name; it is not shown"
   # The cut's stderr is its refusal alone: every CLI call in it drops its own.

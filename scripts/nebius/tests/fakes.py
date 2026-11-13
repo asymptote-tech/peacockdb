@@ -12,11 +12,12 @@ world = {
   "remote": None,             # {"stderr": text, "rc": n}: the remote command, once authenticated
   "host_key": "ssh-ed25519 AAAAKEY1",
   "card": "",                 # what nvidia-smi --query-compute-apps prints
-  "no_gpu": False,            # a CPU VM: nvidia-smi is absent (exit 127); a probe that checks first prints cpu_busy
+  "smi_fails": None,          # [code, text]: nvidia-smi prints text and exits code instead
+  "no_gpu": False,            # a CPU VM: no nvidia-smi on its PATH, and the probe asks pgrep for cpu_busy
   "cpu_busy": "",             # what the probe's `pgrep -a -x duckdb` prints on a CPU VM
   "card_lock": "",            # held | another's | "": the card lock as the probe's flock finds it. another's:
-                              # free, but made by another user, so an open that may create it is refused
-                              # (fs.protected_regular=2 in sticky /run/lock) and reads as held
+                              # free, but made by another user: free to a read-only open (flock on an fd),
+                              # held to one that may create it (flock on the path, fs.protected_regular)
   "stop_error": "",           # stderr text and rc 1 on `stop`
   "get_error": "",            # stderr text and rc 1 on `get`
   "hang": [],                 # verbs ("get", "start", "stop") that sleep 5 s before answering
@@ -45,6 +46,9 @@ a caller that does not give them /dev/null loses the bytes meant for the remote 
 fake ssh echoes its stdin back when the remote command is `cat`. Its own lines go to its `-E` log
 when it has one, with ssh's `Authenticated to` line once the key is accepted; `-G` prints the
 `loglevel` and is not a call. The fake rsync only records, and exits as `rsync_255` says.
+
+The soft stop's probe runs for real, under bash, with only VM_BIN's fakes on its PATH (no nvidia-smi
+on a CPU VM) and the card lock at PEACOCK_CARD_LOCK, a file in the world.
 """
 import json, os, pathlib, stat, sys, tempfile
 
@@ -154,17 +158,13 @@ if log is not sys.stderr:
 cmd = " ".join(args[at + 1:])
 if w["remote"]:
     print(w["remote"]["stderr"], file=sys.stderr); sys.exit(w["remote"]["rc"])
-if "nvidia-smi" in cmd and not w["no_gpu"]:
-    print(w["card"], end="")
-elif "nvidia-smi" in cmd:
-    # A CPU VM: only a probe that looks for nvidia-smi first gets as far as its pgrep.
-    if "command -v nvidia-smi" not in cmd:
-        print("bash: line 1: nvidia-smi: command not found", file=sys.stderr); sys.exit(127)
-    print(w["cpu_busy"], end="")
-read_only = re.search(r"flock -n 9 9< (\S+);", cmd)
-creating = re.search(r"flock -n (/\S+) true", cmd)
-if (read_only and w["card_lock"] == "held") or (creating and w["card_lock"] in ("held", "another's")):
-    print(f"card lock {(read_only or creating).group(1)} held")
+if "--query-compute-apps" in cmd:
+    # The stop probe runs for real, under bash, with only the VM's nvidia-smi, pgrep and flock on
+    # PATH, each a fake answering from the world; a CPU VM has no nvidia-smi.
+    vm_bin = os.path.join(os.path.dirname(w_path), "vm-cpu-bin" if w["no_gpu"] else "vm-gpu-bin")
+    r = __import__("subprocess").run(["/bin/bash", "-c", cmd], env={"PATH": vm_bin, "FAKE_WORLD": w_path},
+                                     capture_output=True, text=True)
+    sys.stdout.write(r.stdout); sys.stderr.write(r.stderr); sys.exit(r.returncode)
 if cmd.strip() == "cat":
     sys.stdout.write(sys.stdin.read())
 if "/proc/uptime" in cmd:
@@ -175,6 +175,29 @@ if "HOME=/root" in cmd and "compute instance get" in cmd and w["root_profile"] !
     print("Error: rpc error: code = Unauthenticated desc = bad credentials", file=sys.stderr); sys.exit(1)
 sys.exit(0)
 '''
+
+# The VM's own commands the stop probe runs, answering from the world: nvidia-smi prints `card`, or
+# smi_fails' text with its exit; pgrep prints `cpu_busy`; flock -n fails while `card_lock` is held,
+# and, given a path rather than an fd, for another user's lock too.
+VM_BIN = {
+    "nvidia-smi": """
+w = json.load(open(os.environ["FAKE_WORLD"]))
+if w["smi_fails"]:
+    print(w["smi_fails"][1]); sys.exit(w["smi_fails"][0])
+print(w["card"], end="")
+""",
+    "pgrep": """
+w = json.load(open(os.environ["FAKE_WORLD"]))
+print(w["cpu_busy"], end=""); sys.exit(0 if w["cpu_busy"] else 1)
+""",
+    "flock": """
+w = json.load(open(os.environ["FAKE_WORLD"]))
+# By an fd (`flock -n 9 9< lock`), a read-only open: free unless held. By a path, an open that may
+# create the file: another user's in sticky /run/lock is refused (fs.protected_regular), so held.
+by_fd = sys.argv[-1].isdigit()
+sys.exit(1 if w["card_lock"] == "held" or (not by_fd and w["card_lock"] == "another's") else 0)
+""",
+}
 
 KEYSCAN = r'''#!/usr/bin/env python3
 import json, os, sys
@@ -198,7 +221,8 @@ if dropped:
 DEFAULT = {"exists": True, "state": "STOPPED", "ip": "203.0.113.7", "start_error": "",
            "start_to": "RUNNING", "states_after_start": [], "ssh": "ok",
            "ssh_refusals": 0, "ssh_seconds": 0, "rsync_255": 0, "remote": None,
-           "host_key": "ssh-ed25519 AAAAKEY1", "card": "", "no_gpu": False, "cpu_busy": "", "card_lock": "",
+           "host_key": "ssh-ed25519 AAAAKEY1", "card": "", "smi_fails": None, "no_gpu": False, "cpu_busy": "",
+           "card_lock": "",
            "stop_error": "", "get_error": "",
            "hang": [], "ip_sequence": [], "root_profile": "ok",
            "profiles": ["default"], "active_profile": "default", "profile_list": None,
@@ -218,6 +242,13 @@ class World:
         self.path = self.dir / "world.json"
         self.write({**DEFAULT, **over, "calls": []})
         (self.dir / "nebius-config.yaml").write_text("")
+        (self.dir / "card.lock").write_text("")
+        for kind, names in (("vm-gpu-bin", VM_BIN), ("vm-cpu-bin", ("pgrep", "flock"))):
+            (self.dir / kind).mkdir()
+            for name in names:
+                f = self.dir / kind / name
+                f.write_text(f"#!{sys.executable}\nimport json, os, sys\n" + VM_BIN[name])
+                f.chmod(0o755)
         for name, body in (("nebius", NEBIUS), ("ssh", SSH), ("ssh-keyscan", KEYSCAN), ("rsync", RSYNC)):
             f = self.dir / name
             f.write_text(body)
@@ -239,4 +270,5 @@ class World:
                 "GPU_HOST_RSYNC": str(self.dir / "rsync"),
                 "GPU_HOST_NEBIUS_CONFIG": str(self.dir / "nebius-config.yaml"),
                 "GPU_HOST_STATE_DIR": str(self.dir / "state"), "GPU_HOST_POLL": "0",
-                "GPU_HOST_START_TIMEOUT": "5", "GPU_HOST_STOP_TIMEOUT": "5", "PEACOCK_SSH_PAUSES": "0 0 0"}
+                "GPU_HOST_START_TIMEOUT": "5", "GPU_HOST_STOP_TIMEOUT": "5", "PEACOCK_SSH_PAUSES": "0 0 0",
+                "PEACOCK_CARD_LOCK": str(self.dir / "card.lock")}

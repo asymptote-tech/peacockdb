@@ -103,7 +103,7 @@ def test_install_watch_keeps_one_profile():
     for c in pc:
         assert "--config" in c, c
         config = pathlib.Path(c[c.index("--config") + 1])
-        assert config.name.startswith("config.yaml.") and w.dir / "tmp" in config.parents, c
+        assert config.name.startswith("config.yaml.") and home / ".config" / "peacock" in config.parents, c
 
 
 def test_install_watch_ships_one_profile_only():
@@ -115,10 +115,11 @@ def test_install_watch_ships_one_profile_only():
     sources = [a for a in shipped[0][1:-1] if not a.startswith("-") and a != shipped[0][shipped[0].index("-e") + 1]]
     assert len(sources) == 1, shipped
     source = pathlib.Path(sources[0])
-    assert source.name == "config.yaml" and w.dir / "tmp" in source.parents, source
+    stage = source.parent
+    assert source.name == "config.yaml" and stage.parent == home / ".config" / "peacock", source
     for c in calls(w, "rsync"):
         for a in c[1:]:
-            assert str(home) not in a and not a.endswith(".pem"), c
+            assert (str(home) not in a or a.startswith(f"{stage}/")) and not a.endswith(".pem"), c
     assert not any((w.dir / "tmp").iterdir()), list((w.dir / "tmp").iterdir())
 
 
@@ -223,6 +224,22 @@ def test_install_watch_embeds_the_pem_a_key_path_names():
     assert w.read()["profile_key_paths"]["eu-west1"] == "", w.read()["profile_key_paths"]
     commands = ssh_commands(w)
     assert not [c for c in commands if ".pem" in c], commands
+
+
+def test_install_watch_stages_the_cut_in_the_config_dir_and_removes_it():
+    # Never in /tmp: the copy holds every profile, and a killed run must not leave it there.
+    for case in ("installed", "refused"):
+        w, home = setup(profiles=["default", "eu-west1"])
+        if case == "refused":
+            w.set(profile_key_paths={"eu-west1": str(home / ".nebius" / "absent.pem")})
+        rc, out, err = install(w, home, "--profile", "eu-west1", "install-watch")
+        assert rc == (0 if case == "installed" else 1), (case, rc, err)
+        config = home / ".config" / "peacock"
+        copies = {pathlib.Path(c[c.index("--config") + 1]).parent for c in profile_calls(w) if "--config" in c}
+        copies.discard(config)
+        assert copies and all(d.parent == config and d.name.startswith("install-watch.") for d in copies), copies
+        assert sorted(p.name for p in config.iterdir()) == ["nebius.yaml"], (case, list(config.iterdir()))
+        assert not any((w.dir / "tmp").iterdir()), (case, list((w.dir / "tmp").iterdir()))
 
 
 def test_install_watch_refuses_a_key_path_naming_no_file():
