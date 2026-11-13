@@ -22,7 +22,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
-from machine import FAKE_ROOT_ID, NO_HOST, UNPUBLISHED, Machine, git, lib, path_without  # noqa: E402
+from machine import FAKE_ROOT_ID, NO_HOST, NO_SPACE, UNPUBLISHED, Machine, git, lib, path_without  # noqa: E402
 
 FAKE_SUDO = '#!/bin/sh\nprintf "%s\\n" "sudo $*" >> "$FAKE_SUDO_LOG"\nexit "${FAKE_SUDO_STATUS:-1}"\n'
 FAKE_CURL = '#!/bin/sh\nprintf "%s\\n" "curl $*" >> "$FAKE_SUDO_LOG"\nexit 22\n'
@@ -302,6 +302,19 @@ def test_bootstrap_uses_the_image_of_the_clones_inputs():
         assert [c for c in calls if c[0] == "pull"] == [["pull", ref]], calls
         runs = [c for c in calls if c[0] == "run"]
         assert runs and all(ref in c for c in runs), runs
+
+
+def test_bootstrap_names_a_full_disk_on_its_own_machine():
+    # bootstrap-vm.sh runs on the VM itself: the commands are named for this machine, no nebius.sh.
+    with Machine() as m:
+        env = whole_run_env(m)
+        m.world(pull_error=NO_SPACE)
+        r = m.run("bootstrap-vm.sh", env=env)
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        for words in ("this machine's disk is full", "docker system df", "df -h", "df -i"):
+            assert words in r.stderr, (words, r.stderr)
+        assert "try again" not in r.stderr and "nebius.sh" not in r.stderr, r.stderr
+        assert [c for c in m.docker_calls() if c[0] == "run"] == [], m.docker_calls()
 
 
 def test_bootstrap_names_the_publish_of_an_unpublished_image():

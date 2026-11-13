@@ -22,17 +22,33 @@ IMAGE_REGISTRY=/opt/rust/cargo/registry
 MACHINE_TREE=/peacock/tree
 MACHINE_STAGE=/peacock/stage
 
+# How a person reaches the machine docker runs on: empty on that machine itself (bootstrap-vm.sh);
+# scripts/nebius.sh with the call's options where docker is a VM's, set by run-gpu.sh and
+# check-build-image.sh.
+MACHINE_NEBIUS=
+
+# machine_vm_lost [<next>] — what to do once an ssh to the VM dropped or found it stopped: a
+# preemptible VM is stopped under whatever runs. <next> is the step after the start, this one again
+# by default. On stderr.
+machine_vm_lost() {
+  echo "${0##*/}: the VM may have been stopped (a preemptible one is): if $MACHINE_NEBIUS status" \
+    "does not say RUNNING, $MACHINE_NEBIUS start; then ${1:-run this step again}." >&2
+}
+
 # machine_cudf_gitlink <tree> — the third_party/cudf commit <tree>'s index pins.
 machine_cudf_gitlink() { git -C "$1" ls-files -s third_party/cudf | awk '$1 == 160000 { print $2 }'; }
 
 # machine_image_checked <ref> <tree> <cudf> [<kind>] — pulls the image <ref>, of <kind> build (the
-# default) or run, then machine_image_label_checked. A failed pull names the images.yml dispatch
-# that publishes <tree>'s image: return 2 when the registry has no such tag, else docker's status (a
-# network error, or the caller's ssh). docker's stderr goes to a file, not `$(…)`, so a docker
+# default) or run, then machine_image_label_checked. A failed pull says why: no such tag, naming the
+# images.yml dispatch that publishes <tree>'s image, return 2; a full disk (space or inodes), which
+# a retry cannot help, return 2; the caller's ssh dropped (255), its own hint above; the VM not
+# RUNNING, nebius.sh's refusal, 1; else docker's status, a registry or network error. docker's
+# stderr goes to a file, not `$(…)`, so a docker
 # wrapper's own exit still ends the script; an EXIT trap, ahead of the caller's own, then prints
 # the file and removes it. The trap runs inside the pull's `2>`, so it writes to a copy of stderr.
 machine_image_checked() {
-  local ref=$1 tree=$2 cudf=$3 kind=${4:-build} err rc=0 unpublished=0 branch publish caller_trap=() stderr
+  local ref=$1 tree=$2 cudf=$3 kind=${4:-build} err rc=0 unpublished=0 full=0 stopped=0
+  local branch publish caller_trap=() stderr
   err=$(mktemp)
   exec {stderr}>&2
   eval "caller_trap=($(trap -p EXIT))"  # trap -- '<command>' EXIT, or nothing
@@ -42,9 +58,32 @@ machine_image_checked() {
   docker pull "$ref" 2> "$err" || rc=$?
   cat "$err" >&2
   grep -qE ': not found$|manifest unknown' "$err" && unpublished=1
+  grep -q 'no space left on device' "$err" && full=1
+  grep -q 'is not RUNNING; refusing to ssh' "$err" && stopped=1
   rm -f "$err"
   if [ "${#caller_trap[@]}" -gt 0 ]; then trap -- "${caller_trap[2]}" EXIT; else trap - EXIT; fi
   exec {stderr}>&-
+  if [ "$rc" -ne 0 ] && [ "$full" = 1 ] && [ -n "$MACHINE_NEBIUS" ]; then
+    echo "${0##*/}: cannot pull $ref: the VM's disk is full (above), its space or its inodes, and" \
+      "a retry fails the same way. Free space on the VM first: $MACHINE_NEBIUS ssh" \
+      "'docker system df; df -h; df -i' shows what docker holds, the disk and its inodes." >&2
+    return 2
+  fi
+  if [ "$rc" -ne 0 ] && [ "$full" = 1 ]; then
+    echo "${0##*/}: cannot pull $ref: this machine's disk is full (above), its space or its" \
+      "inodes, and a retry fails the same way. Free space first: docker system df shows what" \
+      "docker holds, df -h the disk and df -i its inodes." >&2
+    return 2
+  fi
+  if [ "$rc" -eq 255 ]; then
+    echo "${0##*/}: cannot pull $ref: the ssh to the VM dropped (above)." >&2
+    return 255
+  fi
+  if [ "$rc" -ne 0 ] && [ "$stopped" = 1 ]; then
+    echo "${0##*/}: cannot pull $ref: the VM is not RUNNING (above)." >&2
+    machine_vm_lost
+    return "$rc"
+  fi
   if [ "$rc" -ne 0 ]; then
     branch=$(git -C "$tree" rev-parse --abbrev-ref HEAD 2> /dev/null || true)
     [ -n "$branch" ] && [ "$branch" != HEAD ] || branch="<this tree's branch>"

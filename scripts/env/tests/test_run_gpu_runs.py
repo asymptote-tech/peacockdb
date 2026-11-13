@@ -6,6 +6,7 @@ gpu_host.py has the fakes: a device run holds while `h.hold` exists. test_run_gp
 import fcntl
 import os
 import pathlib
+import re
 import signal
 import subprocess
 import sys
@@ -137,7 +138,10 @@ def test_a_dropped_ssh_names_follow():
         shipped(h)
         held(h, "list")
         r = h.gpu("follow", env={"FAKE_NEBIUS_RC": "255", "FAKE_NEBIUS_RC_ON": "vm_follow"})
-        refused(r, 1, "follow")
+        refused(r, 1, "follow", "may have been stopped")
+        # Running the step again is refused while the run goes on: the next step is follow.
+        assert "run this step again" not in r.stderr, r.stderr
+        assert re.search(r"start; then follow it again: scripts/env/run-gpu\.sh .* --dir \S+ follow", r.stderr), r.stderr
 
 
 def test_every_run_has_an_init():

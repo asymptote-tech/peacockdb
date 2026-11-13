@@ -140,6 +140,18 @@ def test_a_driver_answer_that_is_no_version_is_refused():
         assert h.docker_runs() == []
 
 
+def test_a_driver_query_that_exits_255_is_not_a_dropped_ssh():
+    # nvidia-smi's 255 is "other error"; ssh passes a remote status through, and 255 is its own.
+    with Host() as h:
+        shipped(h)
+        text = "Unable to determine the device handle for GPU0000:01:00.0: Unknown Error"
+        h.world(smi_fails=[255, text])
+        r = h.gpu("run", "list")
+        refused(r, 2, "driver query", text, "exit 254 (255 on the VM)")
+        assert "ssh to the VM dropped" not in r.stderr and "run this step again" not in r.stderr, r.stderr
+        assert h.docker_runs() == []
+
+
 def test_a_failing_nvidia_smi_is_refused_naming_its_answer():
     with Host() as h:
         shipped(h)

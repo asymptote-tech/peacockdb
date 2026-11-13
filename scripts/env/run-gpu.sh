@@ -65,11 +65,13 @@
 # Exit 0; 1 the run failed or ended with no status, a ship stream gave up, ssh dropped while
 # following, or a pull kept a file changed here and on the VM; 2 bad input (nebius.sh's 64 too), a
 # stale image, one not published (the images.yml dispatch named), a run in progress, a step missing
-# (prepare, ship), a driver query that fails or lists no GPU, another tree's dir, or a copied tree's
-# .run-gpu-tree; a pull that failed otherwise, docker's; 3 a card below compute capability 8.0, or
-# one whose driver is older than the run image needs; 4 restart the VM (nebius.sh stop --force,
-# start), then prepare again; 5 status: the run goes on; 130 or 143 a run or follow interrupted, the
-# run going on; else nebius.sh's (75, 69).
+# (prepare, ship), a driver query that fails or lists no GPU, another tree's dir, a copied tree's
+# .run-gpu-tree, or an image pull that filled the VM's disk; a pull that failed otherwise, docker's;
+# 3 a card below compute capability 8.0, or one whose driver is older than the run image needs; 4
+# restart the VM (nebius.sh stop --force, start), then prepare again; 5 status: the run goes on; 130
+# or 143 a run or follow interrupted, the run going on; 254 a step whose command exited 255 on the
+# VM; 255 an ssh to the VM dropped, the VM perhaps stopped (nebius.sh status, start, then the step
+# again); else nebius.sh's (75, 69).
 # status: 0 exited 0, 1 exited non-zero or ended without a status, 2 none. follow: as run, 2 no run.
 # cancel: 0, or 1 when the run ended with no status or its container stays.
 set -euo pipefail
@@ -172,6 +174,7 @@ tree_id_read
 . "$root/scripts/lib/image-inputs.sh"
 . "$root/scripts/lib/data-inputs.sh"
 . "$root/scripts/lib/machine.sh"
+MACHINE_NEBIUS="scripts/nebius.sh ${NEBIUS[*]:1}"
 . "$root/scripts/lib/ssh-retry.sh"
 BUILD_REF=${PEACOCK_BUILD_IMAGE:-$MACHINE_IMAGE:$(image_inputs_tag "$root" build "$cudf")}
 RUN_REF=${PEACOCK_RUN_IMAGE:-ghcr.io/asymptote-tech/peacockdb-run:$(image_inputs_tag "$root" run "$cudf")}
@@ -186,11 +189,20 @@ KIT=(scripts/env/fetch-sf40.sh scripts/env/sf40.sha256 scripts/lib/peacock-confi
 
 # --- dev's side: every call reaches the VM through nebius.sh -------------------------------------
 
-# vm <command> [<stdin file>]: <command> on the VM; stdin is /dev/null unless named.
+# vm <command> [<stdin file>]: <command> on the VM; stdin is /dev/null unless named. 255 is ssh's
+# own, a dropped connection, so the command's own 255 (nvidia-smi's "other error") arrives as 254.
+# The trailer that does it follows on a new line, so <command> must be complete: a trailing
+# backslash, an open quote or an unterminated heredoc would swallow it.
+# VM_NEXT names the step after a dropped ssh's VM start, when it is not this one again.
 vm() {
-  local rc=0
-  "${NEBIUS[@]}" ssh "$1" < "${2:-/dev/null}" || rc=$?
+  # shellcheck disable=SC2016  # expanded on the VM, after the command
+  local rc=0 own='s=$?; [ "$s" -ne 255 ] || s=254; exit "$s"'
+  "${NEBIUS[@]}" ssh "$1"$'\n'"$own" < "${2:-/dev/null}" || rc=$?
   [ "$rc" -ne 64 ] || die "${NEBIUS[0]} refused its options: ${NEBIUS[*]:1}"
+  if [ "$rc" -eq 255 ]; then
+    echo "run-gpu.sh: the ssh to the VM dropped." >&2
+    machine_vm_lost "${VM_NEXT:-}"
+  fi
   return "$rc"
 }
 
@@ -247,11 +259,12 @@ from_vm() {  # from_vm <source under ~> <local dest> [<rsync arguments…>]
 # script alone. It runs in a process group of its own (set -m), which the trap kills whole, a process
 # it forks meanwhile included.
 following() {
-  local rc=0
+  local rc=0 next="follow it again: scripts/env/run-gpu.sh ${NEBIUS[*]:1} --dir $dir follow"
   trap 'followed_no_more 130' INT
   trap 'followed_no_more 143' TERM
   set -m
-  on_vm "$@" &
+  # A run in progress refuses this step again: after a dropped ssh, the next step is follow.
+  { VM_NEXT=$next; on_vm "$@"; } &
   follower=$!
   set +m
   wait "$follower" || rc=$?
@@ -303,6 +316,7 @@ cards_checked() {
   case $rc in
     0) ;;
     69|75) exit "$rc" ;;  # nebius.sh's: the VM, not its card
+    254) die "the driver query on the VM failed (exit 254 (255 on the VM)): ${answer:-no output}" ;;
     *) die "the driver query on the VM failed (exit $rc): ${answer:-no output}" ;;
   esac
   [ -n "$answer" ] || die "nvidia-smi on the VM lists no GPU"

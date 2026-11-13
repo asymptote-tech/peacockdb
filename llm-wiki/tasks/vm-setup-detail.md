@@ -15,6 +15,7 @@ Branch `ENS-vm-setup`, forked from `ENS-containers-only` at `7aeec989`; its PR t
 - Task 14: one table of build and test lines, each run as written; below.
 - Task 14a: a missing `nebius.yaml` is cut on first use; below.
 - Task 15: the branch's five images published; the table's 26.02 row run; below.
+- Task 16: nebius-gpu by hand, steps 1 to 3; image pulls name a full disk and a lost VM; below.
 
 ## Plain builds
 
@@ -885,3 +886,112 @@ image is pushed under its inputs tag and the commit's tag:
   it traced eu-west1's key path, endpoint and ids. `test_no_cli_answer_is_traced_under_bash_x`
   now holds the trace to none of those answers, not only to no key material: red before (the key
   path in the trace), green after.
+
+## nebius-gpu by hand
+
+### The run
+
+On dev, 2026-11-13, from this worktree at `8c1bf1b8`, against nebius-gpu
+(`computeinstance-e00tnrse7ayntnzcyt`, L40S, driver 580.173.02), with
+`G="scripts/env/run-gpu.sh --instance-id computeinstance-e00tnrse7ayntnzcyt"`. Wall times in
+seconds.
+
+| step | command | exit, wall |
+|---|---|---|
+| 1 | `scripts/nebius.sh status` | 0, 3: `STOPPED`; it cut `~/.config/peacock/nebius.yaml`, editor-eu (active) and eu-west1, 0 other profiles left out, mode 600 |
+| 1 | `scripts/build-test.sh --gpu --build --no-release-bench` | 0, 39 (warm target dir and ccache) |
+| 2 | `scripts/nebius.sh start` | 75, 996: the start operation failed `NotEnoughResources` after 318 s; `nebius.sh` waited out its 900 s |
+| 2 | `scripts/nebius.sh start`, again | 0, 304 |
+| 2 | `$G prepare --no-sf40` | 1, 245: the VM's disk full (below) |
+| 2 | `$G prepare --no-sf40` | 255, 193: the VM preempted (below) |
+| 2 | `scripts/nebius.sh start` | 0, 62 |
+| 2 | `$G prepare --no-sf40` | 0, 535: both images pulled, sf1 generated |
+| 2 | `$G ship` | 0, 27: four streams |
+| 2 | `$G run list`, its local process killed 25 s in | the run went on, on the VM |
+| 2 | `$G status` | 5: `running` and the log's tail |
+| 2 | `$G follow`, ended by `timeout 30` | the log from its first line, `==> peacock_cpu_tests` |
+| 2 | `$G cancel` | 0: `cancelled the list run of vmspec started 20261112T231038.910Z (exit 143)` |
+| 2 | `$G status` | 1: `exited 143`, `run-gpu.sh: cancelled` last in the log |
+| 3 | `PCK_TEST_FILTER=tpch_q6_ $G run filter` | 0, 38: `run-tests.sh filter: green`, `test_gpu_corpus` 5 passed |
+| 3 | `$G pull --clear` | 0, 26: two logs home, the VM's `logs/` empty after |
+| 3 | `scripts/nebius.sh stop` | 0, 44: `STOPPED` |
+
+- The disk: 12 GB of 96 GB free, and the build image is 10 GB unpacked. An exited container of
+  another dir and three images of older inputs, nothing else, were removed: 31 GB free after.
+- The preemption: nebius-gpu is preemptible, stopped on preemption. The VM's journal has `Power
+  key pressed short` mid-pull, and the API a `Stop Instance` operation a minute later; the idle
+  watcher's last tick said `keep`.
+- Both failures were named "a registry or network error … so try again"; the findings below fixed
+  that.
+- VM time: 01:28 to 01:48 MSK (preempted) and 01:59 to 02:14 MSK.
+- No `.tree` was in `~/peacock/ci/` or the other dirs on the VM.
+- Step 4: `gh workflow run pipeline.yml --ref ENS-vm-setup`, run `43330240922` on `8c1bf1b8`:
+  every job green but `gpu-tests`, whose start found no L40S in its 30 minutes (two starts of 900
+  s, exit 75); prepare, ship and the list were skipped, and the cleanup's `cancel` met the stopped
+  VM (`not RUNNING; refusing to ssh`, `cancel failed (rc=1)`) as written. To be run again.
+
+### Findings fixed in the scripts
+
+- Two pull failures on nebius-gpu were both named "a registry or network error (above), so try
+  again", from `machine_image_checked` in `scripts/lib/machine.sh`, which every image pull goes
+  through: `run-gpu.sh prepare`'s build and run images, `check-build-image.sh` and
+  `bootstrap-vm.sh`. One fix covers all of them.
+- A full disk: docker said `failed to register layer: write …: no space left on device`, exit 1.
+  Now refused, exit 2, as the disk being full, its space or its inodes (the same error), naming
+  `scripts/nebius.sh <options> ssh 'docker system df; df -h; df -i'` where docker is a VM's, and
+  the three commands alone in bootstrap-vm.sh, which runs on the machine itself: 2 is run-gpu.sh's
+  code for a step refused until something is fixed, as an unpublished image is, and a retry fails
+  the same way. `machine.py`'s `NO_SPACE` is that message.
+- The VM lost mid-pull: nebius-gpu is preemptible, and the ssh carrying the pull ended `Connection
+  to <ip> closed by remote host.`, exit 255. Any ssh can drop so, not only a pull's: sf1's
+  generation in `prepare` runs for minutes. So the hint is given once, in the VM-call path:
+  run-gpu.sh's `vm()`, which every `on_vm` call goes through, and check-build-image.sh's
+  `docker()`. On 255 each says the ssh dropped, then `machine_vm_lost`: the VM may have been
+  stopped; if `scripts/nebius.sh <options> status` does not say RUNNING, `start`, then the step
+  again. The pull adds only "cannot pull <ref>: the ssh to the VM dropped (above)". The exit stays
+  255, ssh's own, which both exit tables list as an ssh to the VM that dropped. Neither script
+  starts or stops a VM. Not covered: ship's and pull's rsyncs, whose transport is retried by
+  `sync_retry` and reports on its own.
+- A VM stopped before the pull's ssh begins: `nebius.sh ssh` refuses, exit 1, `<id> is not RUNNING;
+  refusing to ssh`, which also read as a registry error. Its exit cannot be told from a remote
+  command's 1, but the pull's stderr is captured, so `machine_image_checked` finds that line there
+  and names the VM not RUNNING with the same hint; the exit stays 1. Elsewhere nebius.sh's own line
+  is the whole message, and nothing follows it that misreads it.
+- Red before, each with the old message: `test_prepare_names_a_full_disk_on_the_vm` (exit 1, not 2)
+  and `test_prepare_names_a_vm_lost_mid_pull` (`test_run_gpu.py`, each over the build image's
+  pull, then the run image's; red at the first),
+  `test_check_build_image_names_a_full_disk_on_the_vm` and
+  `test_check_build_image_names_a_vm_lost_mid_pull` (`test_check_build_image.py`). The dropped ssh
+  is the fake nebius.sh's `FAKE_NEBIUS_RC=255` on the pull's call alone. Green after, with the
+  unpublished and other-failure cases unchanged.
+- Then, red before the shared hint: `test_a_dropped_ssh_at_any_step_names_the_stopped_vm` (255 on
+  `vm_data_set`, sf1's step: only "refused by the test"),
+  `test_prepare_names_a_vm_stopped_before_the_pull` (the not-RUNNING line, then "a registry or
+  network error"), and in `test_check_build_image.py`
+  `test_check_build_image_names_a_stopped_vm_at_the_label_read_and_before_the_pull` (255 at the
+  label's `docker image inspect`, then not RUNNING at the pull); the disk tests also failed on the
+  `nebius.sh … ssh 'docker system df; df -h; df -i'` line. The fake nebius.sh's
+  `FAKE_NEBIUS_RC_TEXT` gives its refusal nebius.sh's not-RUNNING line. Green after.
+- A remote 255 read as a dropped ssh: ssh passes the command's status through, and nvidia-smi's
+  "other error" is 255, so the driver query on every `prepare` and `run` would print the VM hint
+  before its own failure. `vm()` now sends its command with a trailer, `s=$?; [ "$s" -ne 255 ] ||
+  s=254; exit "$s"`, after a newline so a trailing comment cannot swallow it; `on_vm` goes through
+  `vm()`, so 255 from `vm()` is ssh's alone. The driver query names nvidia-smi's 255 as
+  `exit 254 (255 on the VM)`, and run-gpu.sh's exit table lists 254. Nothing read a remote 255:
+  `vm_follow` maps a run's exit to 0, 2 or 1, and `following()`'s 255 means the ssh.
+  check-build-image.sh's `docker()` is left as it is: it runs `docker pull` and
+  `docker image inspect` alone, whose failures are 1 or 125, never 255.
+  `test_a_driver_query_that_exits_255_is_not_a_dropped_ssh` (`test_run_gpu_vm.py`): red before
+  (`the ssh to the VM dropped` first), green after.
+- bootstrap-vm.sh's full-disk branch had no test:
+  `test_bootstrap_names_a_full_disk_on_its_own_machine` asserts exit 2, "this machine's disk is
+  full", `df -i` and no nebius.sh. Red with the branch
+  removed (exit 1, "so try again"), green with it.
+- machine.sh reads nebius.sh's exact words, "is not RUNNING; refusing to ssh". `test_nebius.py`'s
+  `test_ssh_refused_when_api_does_not_vouch` now asserts them, naming machine.sh as their reader:
+  red with the words changed in nebius.sh, green as they are.
+- A dropped ssh while following said "run this step again", which an attached `run` refuses while
+  its run goes on. `machine_vm_lost` takes the next step; `following()` sets `VM_NEXT` for its own
+  call alone, in the background group it starts, to `follow it again: scripts/env/run-gpu.sh …
+  --dir <i> follow`. `test_a_dropped_ssh_names_follow` asserts it and no "run this step again": red
+  before, green after.

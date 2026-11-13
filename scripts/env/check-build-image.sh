@@ -12,8 +12,9 @@
 # `scripts/env/image-ref.sh build <v>` prints. Prints the ref alone, for the build's docker run.
 #
 # Exit 0 the VM's image is this tree's; 2 bad input (nebius.sh's 64 too), or an image without a
-# label, built from other inputs, or not published (the images.yml dispatch named); else nebius.sh's
-# (75, 69, 1), or a failed pull's.
+# label, built from other inputs, not published (the images.yml dispatch named), or whose pull
+# filled the VM's disk; 255 an ssh to the VM dropped, the VM perhaps stopped (nebius.sh status,
+# start, then this again); else nebius.sh's (75, 69, 1), or a failed pull's.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -39,12 +40,17 @@ done
 . "$root/scripts/lib/image-inputs.sh"
 . "$root/scripts/lib/data-inputs.sh"
 . "$root/scripts/lib/machine.sh"
+MACHINE_NEBIUS="scripts/nebius.sh ${NEBIUS[*]:1}"
 
 # docker, for machine_image_checked: the VM's.
 docker() {
   local rc=0
   "${NEBIUS[@]}" ssh "$(printf '%q ' docker "$@")" < /dev/null || rc=$?
   [ "$rc" -ne 64 ] || die "${NEBIUS[0]} refused its options: ${NEBIUS[*]:1}"
+  if [ "$rc" -eq 255 ]; then
+    echo "check-build-image.sh: the ssh to the VM dropped." >&2
+    machine_vm_lost
+  fi
   return "$rc"
 }
 

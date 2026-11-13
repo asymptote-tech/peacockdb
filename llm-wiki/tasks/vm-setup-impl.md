@@ -895,14 +895,14 @@ login user accepting dev's `~/.config/peacock/gpu_ed25519.pub`, the key
 `nebius.sh` offers from this branch on, in place of ssh's default ones; nebius-gpu, the L40S; the
 sandbox off; an actor in `GPU_ALLOWED_ACTORS`.
 
-- [ ] **Step 1:** `scripts/nebius.sh status` → exit 0, then `test -f ~/.config/peacock/nebius.yaml`
+- [x] **Step 1:** `scripts/nebius.sh status` → exit 0, then `test -f ~/.config/peacock/nebius.yaml`
   (the cut that call made). In the `/build` tree:
   `scripts/build-test.sh --gpu --build --no-release-bench`.
-- [ ] **Step 2:** `scripts/nebius.sh start`; with `G="scripts/env/run-gpu.sh --instance-id
+- [x] **Step 2:** `scripts/nebius.sh start`; with `G="scripts/env/run-gpu.sh --instance-id
   computeinstance-e00tnrse7ayntnzcyt"`: `$G prepare --no-sf40`; `$G ship`; `$G run list`, its local
   process killed once the log runs; `$G status` → `running`; `$G follow` → the log from its first
   line; `$G cancel` → `cancelled …`; `$G status` → `exited …`.
-- [ ] **Step 3:** `PCK_TEST_FILTER=<one corpus query> $G run filter` → exit 0;
+- [x] **Step 3:** `PCK_TEST_FILTER=<one corpus query> $G run filter` → exit 0;
   `$G pull --clear` → the run's log and record home, gone from the VM
   (`scripts/nebius.sh ssh 'ls ~/peacock/<dir>/logs'`); `scripts/nebius.sh stop`.
 - [ ] **Step 4:** `gh workflow run pipeline.yml --ref ENS-vm-setup` → `gpu-tests` green: its log

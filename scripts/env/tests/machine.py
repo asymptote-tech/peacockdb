@@ -32,6 +32,9 @@ GITCONFIG = ("[user]\n\tname = Machine User\n\temail = machine@example.test\n"
 UNPUBLISHED = ['Error response from daemon: failed to resolve reference "{ref}": {ref}: not found',
                "Error response from daemon: manifest for {ref} not found: manifest unknown: manifest unknown"]
 NO_HOST = 'Error response from daemon: Get "https://ghcr.io/v2/": dial tcp: lookup ghcr.io: no such host'
+# What it said on nebius-gpu when the VM's disk filled during the 10 GB build image's pull.
+NO_SPACE = ("failed to register layer: write /opt/cudf/targets/x86_64-linux/lib/libcusolver.so.11.5.2.141: "
+            "no space left on device")
 
 # A fake docker's reading of a `docker run`'s options, shared by the fakes here and in gpu_host.py.
 RUN_OPTIONS = r'''

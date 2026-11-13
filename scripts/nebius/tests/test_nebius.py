@@ -202,7 +202,8 @@ def test_an_unknown_verb_prints_the_whole_usage():
 def test_ssh_refused_when_api_does_not_vouch():
     w = World(state="STOPPED")
     rc, _, err = run(w, "ssh", "true")
-    assert rc == 1 and "not RUNNING" in err
+    # These exact words are read: scripts/lib/machine.sh tells a stopped VM from a failed pull by them.
+    assert rc == 1 and "is not RUNNING; refusing to ssh" in err, (rc, err)
     assert not any(c[0] == "ssh-keyscan" for c in w.read()["calls"])
 
 

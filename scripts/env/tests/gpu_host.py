@@ -60,9 +60,10 @@ import json, os, subprocess, sys
 a = sys.argv[1:]
 with open(os.environ["FAKE_NEBIUS_LOG"], "a") as f:
     f.write(json.dumps(a) + "\n")
-# FAKE_NEBIUS_RC_ON narrows the refusal to the calls whose argv holds that text.
+# FAKE_NEBIUS_RC_ON narrows the refusal to the calls whose argv holds that text; FAKE_NEBIUS_RC_TEXT
+# is what it says, such as nebius.sh's refusal of a VM that is not RUNNING.
 if os.environ.get("FAKE_NEBIUS_RC") and os.environ.get("FAKE_NEBIUS_RC_ON", "") in " ".join(a):
-    print("nebius: refused by the test", file=sys.stderr)
+    print(os.environ.get("FAKE_NEBIUS_RC_TEXT", "nebius: refused by the test"), file=sys.stderr)
     sys.exit(int(os.environ["FAKE_NEBIUS_RC"]))
 
 def verb_of(argv):

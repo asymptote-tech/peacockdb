@@ -16,7 +16,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2] / "exec_model" / "tests"))
 from harness import main  # noqa: E402
 from gpu_host import DRIVER_MINIMUM, H100, HOSTNAME, L40S, Host, label, log_lines, until  # noqa: E402
-from machine import KEYS, NO_HOST, REPO, UNPUBLISHED, lib  # noqa: E402
+from machine import KEYS, NO_HOST, NO_SPACE, REPO, UNPUBLISHED, lib  # noqa: E402
 
 VERBS = [("prepare",), ("ship",), ("run", "list"), ("pull",)]
 SECRETS = [KEYS["AWS_ACCESS_KEY_ID"], KEYS["AWS_SECRET_ACCESS_KEY"]]
@@ -287,6 +287,51 @@ def test_prepare_names_a_pull_that_failed_otherwise():
         h.world(images=images, pull_error=NO_HOST)
         refused(h.gpu("prepare", "--no-sf40"), 1, f"cannot pull {h.run_ref}", NO_HOST,
                 "gh workflow run images.yml --ref master -f kind=run -f cudf=25.02")
+
+
+def test_prepare_names_a_full_disk_on_the_vm():
+    # A retry cannot help: the VM's disk must be freed first.
+    for kind in ("build", "run"):
+        with Host() as h:
+            ref = h.run_ref if kind == "run" else h.build_ref
+            images = h.world()["images"]
+            images.pop(ref)
+            h.world(images=images, pull_error=NO_SPACE)
+            r = h.gpu("prepare", "--no-sf40")
+            refused(r, 2, f"cannot pull {ref}", "disk is full", NO_SPACE,
+                    f"scripts/nebius.sh {' '.join(H100)} ssh 'docker system df; df -h; df -i'")
+            assert "try again" not in r.stderr and "images.yml" not in r.stderr, r.stderr
+            assert h.docker_runs() == [] and not any(h.data.iterdir())
+
+
+def test_prepare_names_a_vm_lost_mid_pull():
+    # nebius-gpu is preemptible: stopped under a pull, its ssh ends 255.
+    for kind in ("build", "run"):
+        with Host() as h:
+            ref = h.run_ref if kind == "run" else h.build_ref
+            r = h.gpu("prepare", "--no-sf40", env={"FAKE_NEBIUS_RC": "255", "FAKE_NEBIUS_RC_ON": f" pull {ref}"})
+            refused(r, 255, f"cannot pull {ref}", "the ssh to the VM dropped",
+                    f"scripts/nebius.sh {' '.join(H100)} status", "run this step again")
+            assert "registry or network" not in r.stderr and "images.yml" not in r.stderr, r.stderr
+            assert h.docker_runs() == []
+
+
+def test_a_dropped_ssh_at_any_step_names_the_stopped_vm():
+    # sf1's generation, minutes long, is not a pull: every ssh that drops gets the same hint.
+    with Host() as h:
+        r = h.gpu("prepare", "--no-sf40", env={"FAKE_NEBIUS_RC": "255", "FAKE_NEBIUS_RC_ON": "vm_data_set"})
+        refused(r, 255, "the ssh to the VM dropped", "may have been stopped",
+                f"scripts/nebius.sh {' '.join(H100)} status", f"scripts/nebius.sh {' '.join(H100)} start",
+                "run this step again")
+
+
+def test_prepare_names_a_vm_stopped_before_the_pull():
+    with Host() as h:
+        r = h.gpu("prepare", "--no-sf40", env={"FAKE_NEBIUS_RC": "1", "FAKE_NEBIUS_RC_ON": f" pull {h.build_ref}",
+                                                "FAKE_NEBIUS_RC_TEXT": f"nebius: {H100[1]} is not RUNNING; refusing to ssh"})
+        refused(r, 1, f"cannot pull {h.build_ref}", "is not RUNNING", f"scripts/nebius.sh {' '.join(H100)} start",
+                "run this step again")
+        assert "registry or network" not in r.stderr and "images.yml" not in r.stderr, r.stderr
 
 
 def test_prepare_refuses_old_driver():
