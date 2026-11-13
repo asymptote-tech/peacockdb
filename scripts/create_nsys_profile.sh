@@ -36,6 +36,10 @@
 # where `fetch_record.sh <slug>/<dataset>.sf<sf>` puts a device's:
 #   ./scripts/create_nsys_profile.sh --cases <the H100's cases.csv, one dataset's rows> \
 #       --device h100-80gb-hbm3 <the H100 arguments above>
+# A list written at two modes makes a case per mode. --mode <mode> (a list's ident, tp4_sized)
+# keeps that mode's cases alone, for both passes, and the counters merge is held to that mode's
+# calls of the record, which holds both:
+#   ./scripts/create_nsys_profile.sh --cases <…> --mode tp4_sized --device h100-80gb-hbm3 <…>
 # --fused <dataset>.sf<sf> profiles query-fuser's four batches of that dataset instead
 # (first3, first10, first20, all): the staged rust-benchmarks/prototype_fused_benchmarks, one
 # capture per batch by --exact, each case range `<dataset>.sf<sf> <batch> tp1-single`. The trace
@@ -101,6 +105,7 @@ REMOTE_CUDF_ROOT=""
 HOST_OVERRIDDEN=0
 DEVICE_CASES=""
 DEVICE=""
+CASES_MODE=""
 FUSED=""
 need_value() { [ -n "${2:-}" ] || die "$1 requires a value"; }
 while [ $# -gt 0 ]; do
@@ -113,6 +118,7 @@ while [ $# -gt 0 ]; do
     --ssh)              need_value "$1" "${2:-}"; REMOTE_SSH="$2"; shift ;;
     --cases)            need_value "$1" "${2:-}"; DEVICE_CASES="$2"; shift ;;
     --device)           need_value "$1" "${2:-}"; DEVICE="$2"; shift ;;
+    --mode)             need_value "$1" "${2:-}"; CASES_MODE="$2"; shift ;;
     --fused)            need_value "$1" "${2:-}"; FUSED="$2"; shift ;;
     -h|--help) usage 0 ;;
     *) echo "unknown argument: $1" >&2; usage 1 ;;
@@ -295,6 +301,7 @@ if [ -n "$FUSED" ]; then
     || die "--fused runs its dataset's four batches, and PCK_TEST_FILTER=$PCK_TEST_FILTER narrows the tests: give one"
   [ -z "$DEVICE_CASES" ] || die "--fused takes its batches from the fused binary, not --cases: give one"
   [ -z "$DEVICE" ] || die "--fused reads each batch's record on the host, not --device's: give one"
+  [ -z "$CASES_MODE" ] || die "--fused profiles its batches at tp1_single, and --mode $CASES_MODE picks a list's mode: give one"
   BENCH_TARGET=$FUSED_TARGET
   remote_ssh test -x "$REMOTE_REPO/$BENCH_STAGING/$BENCH_TARGET" \
     || die "$BENCH_TARGET is not on $REMOTE: stage it (scripts/env/stage-install.sh) and ship it first."
@@ -306,14 +313,24 @@ fi
 # capture and an export. The local checks first, then the one question for the host.
 [ -z "$DEVICE" ] || [[ "$DEVICE" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
   || die "--device $DEVICE is not a device slug, e.g. h100-80gb-hbm3"
+[ -z "$CASES_MODE" ] || [ -n "$DEVICE_CASES" ] \
+  || die "--mode $CASES_MODE picks one mode of a device list: give --cases <cases.csv> with it"
 if [ -n "$DEVICE_CASES" ]; then
   [ -f "$DEVICE_CASES" ] || die "--cases $DEVICE_CASES: no such file"
   BENCH_CASES=$DEVICE_CASES
-  # A device list's `ok` and `wrong` rows, a line per mode, as bench_cases prints the main list.
+  # A device list's `ok` and `wrong` rows, a line per mode, as bench_cases prints the main list;
+  # with --mode, that mode's lines alone (device_cases.py refuses a mode it does not know).
   bench_cases() {
-    python3 scripts/calibration/device_cases.py "$DEVICE_CASES" \
-      | awk -F'\t' '{ n = split($4, modes, "|"); for (i = 1; i <= n; i++) print $1, $2, $3, modes[i] }'
+    local rows
+    rows=$(python3 scripts/calibration/device_cases.py "$DEVICE_CASES" ${CASES_MODE:+--mode "$CASES_MODE"}) \
+      || return 1
+    awk -F'\t' -v only="$CASES_MODE" '{ n = split($4, modes, "|")
+      for (i = 1; i <= n; i++) if (only == "" || modes[i] == only) print $1, $2, $3, modes[i] }' <<< "$rows"
   }
+  if [ -n "$CASES_MODE" ]; then
+    mode_cases=$(bench_cases) || die "cannot read the cases from $DEVICE_CASES (the reason is above)"
+    [ -n "$mode_cases" ] || die "$DEVICE_CASES has no ok or wrong row at --mode $CASES_MODE"
+  fi
   bench_datasets() {
     local cases
     cases=$(bench_cases) || return 1
@@ -409,6 +426,8 @@ if [ "$METRICS" -eq 1 ]; then
     part_args+=(--parts "testdata/$parts_rel/$bench.tsv")
   done
   # The merge is where the parts are held to the whole record, so a filtered pass stops here.
+  # A pass over one mode is held to that mode's calls, as the record spells it.
+  [ -z "$CASES_MODE" ] || part_args+=(--mode "${CASES_MODE//_/-}")
   remote_ssh "$reader $(printf '%q ' "${part_args[@]}") --out testdata/$HBM_REL" \
     || die "merging the counters parts on $REMOTE failed (above)."
   pull_one "$HBM_REL" "HBM traffic" || die "bringing testdata/$HBM_REL home from $REMOTE failed."

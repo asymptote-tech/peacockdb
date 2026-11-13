@@ -3,13 +3,14 @@
 A batch is the first 3, 10 or 20 queries of a dataset's list, or all of its counted queries
 (the line under each table says which), fused into one plan by query-fuser: one shared load per
 file, plus a load per re-read the hold rule chooses, then run under the cap rule. The unfused
-side is the same queries run one at a time (sf40-baseline). DuckDB is the same queries on 128
-cores.
+side is the same queries run one at a time (sf40-baseline). The tp4_sized columns are the same
+queries one at a time in the engine's multi-lane mode, four lanes with sized batches (tp4-sized),
+from the same build as the unfused side. DuckDB is the same queries on 128 cores.
 
 ## Reading the comparison honestly
 
 - Every peacockdb total is **device-side**: `load + execute`, the summed node times of the run's
-  tree (`device_us`). Load is included on both GPU sides. DuckDB's time is the query's wall time
+  tree (`device_us`). Load is included on every GPU side. DuckDB's time is the query's wall time
   over its warm native storage, so the `DuckDB / fused` ratio compares two different clocks.
 - Each peacockdb run reads its files from the pinned host cache, filled before any run; the
   prefill's disk read is in no total. DuckDB reads its buffer manager over a warm page cache.
@@ -28,12 +29,12 @@ from the committed results; rerun it rather than editing them.
 
 | key | values (sections) |
 |---|---|
-| device | NVIDIA H100 80GB HBM3 (134) |
-| driver | 580.173.02 (134) |
-| cuda | 12.2 (134) |
-| cudf | 25.02.02 (134) |
-| host | computeinstance-e00e6yena4nzjgaym0 (134) |
-| pinned host cache | on cap=147.4GiB source=default (134); resident ≤ 39.5GiB; largest prefill 42442683465 B in 20432996-460368515 µs (tpch first3 fused, tpch first10 fused, tpch first20 fused, tpch all fused); cache not on: none; tree sections not prefilled: none; fell back, evicted or reloaded: none |
+| device | NVIDIA H100 80GB HBM3 (255) |
+| driver | 580.173.02 (255) |
+| cuda | 12.2 (255) |
+| cudf | 25.02.02 (255) |
+| host | computeinstance-e00e6yena4nzjgaym0 (255) |
+| pinned host cache | on cap=147.4GiB source=default (255); resident ≤ 39.5GiB; largest prefill 42442683465 B in 20432996-460368515 µs (tpch first3 fused, tpch first10 fused, tpch first20 fused, tpch all fused); cache not on: none; tree sections not prefilled: none; fell back, evicted or reloaded: none |
 
 ### Provenance: DuckDB
 
@@ -48,7 +49,7 @@ from the committed results; rerun it rather than editing them.
 
 ### Provenance: protocol
 
-Each reported time is the 2nd-minimum of its runs. Runs: peacockdb unfused 10 runs (126); fused, per batch: tpch first3 10, first10 10, first20 10, all 3; tpcds first3 10, first10 10, first20 10, all 3; DuckDB 6 runs (126).
+Each reported time is the 2nd-minimum of its runs. Runs: peacockdb unfused 10 runs (247); fused, per batch: tpch first3 10, first10 10, first20 10, all 3; tpcds first3 10, first10 10, first20 10, all 3; DuckDB 6 runs (126).
 
 Before any run, each query process (each fused batch, its union) prefilled its files once into the pinned host cache, then ran 1 warm-up: every peacockdb run reads files resident in pinned host memory, DuckDB's its buffer manager over a warm page cache. The prefill's disk read is reported apart (the cache row above).
 
@@ -65,15 +66,17 @@ Before any run, each query process (each fused batch, its union) prefilled its f
 
 ### TPC-H sf40: fused against unfused and DuckDB
 
-| batch | queries | fused load (ms) | fused execute (ms) | unfused load (ms) | unfused execute (ms) | DuckDB warm (ms) | unfused / fused | DuckDB / fused | DuckDB / fused, floors out |
-|---|---|--:|--:|--:|--:|--:|--:|--:|--:|
-| first3 | 3 | 585.5 | 335.3 | 666.7 | 334.1 | 1473.0 | 1.09× | 1.60× | 1.50× |
-| first10 | 10 | 2105.4 | 802.3 | 2709.1 | 782.1 | 6307.0 | 1.20× | 2.17× | 2.07× |
-| first20 | 20 | 3418.2 | 1481.6 | 4917.4 | 1418.9 | 12147.0 | 1.29× | 2.48× | 2.36× |
-| all | 22 | 3702.9 | 1820.9 | 5706.9 | 1760.2 | 13401.0 | 1.35× | 2.43× | 2.31× |
+| batch | queries | fused load (ms) | fused execute (ms) | unfused load (ms) | unfused execute (ms) | tp4_sized load (ms) | tp4_sized execute (ms) | DuckDB warm (ms) | unfused / fused | DuckDB / fused | DuckDB / fused, floors out |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| first3 | 3 | 585.5 | 335.3 | 666.7 | 334.1 | 3924.0 | 5363.3 | 1473.0 | 1.09× | 1.60× | 1.50× |
+| first10 | 10 | 2105.4 | 802.3 | 2709.1 | 782.1 | 17312.6 (8/10) | 9431.9 (8/10) | 6307.0 | 1.20× | 2.17× | 2.07× |
+| first20 | 20 | 3418.2 | 1481.6 | 4917.4 | 1418.9 | 36341.1 (18/20) | 11815.2 (18/20) | 12147.0 | 1.29× | 2.48× | 2.36× |
+| all | 22 | 3702.9 | 1820.9 | 5706.9 | 1760.2 | 47815.1 (20/22) | 14206.3 (20/22) | 13401.0 | 1.35× | 2.43× | 2.31× |
 
 Totals are `load + execute` per side; ratios above 1 mean fused is faster. `(n/N)`: the sum covers n of the batch's N queries. One DuckDB time is one CLI process's wall time: it starts, opens the database and runs the query. `SELECT 1` timed the same way took 30 ms (`floor_ms`), what each time holds besides its query; `floors out` takes it off once per query.
 `all` is the list's 22 `ok` and `wrong` queries at tp1_single, of its 48 tpch lines: 1 skipped, 25 micro queries not batched.
+- tp4_sized: q8 status=failed reason=tpch/q8 at tp4-sized on a device: protocol violation: no termination after 1000000 steps; counted out of first10, first20, all.
+- tp4_sized: q9 status=failed reason=timeout: the case ran past 1800 s; counted out of first10, first20, all.
 
 ### TPC-H sf40: the two hints
 
@@ -109,17 +112,20 @@ ms, from one profiled run per query process (per fused batch) under Nsight: each
 
 ### TPC-DS sf40: fused against unfused and DuckDB
 
-| batch | queries | fused load (ms) | fused execute (ms) | unfused load (ms) | unfused execute (ms) | DuckDB warm (ms) | unfused / fused | DuckDB / fused | DuckDB / fused, floors out |
-|---|---|--:|--:|--:|--:|--:|--:|--:|--:|
-| first3 | 3 | 280.8 | 304.8 | 406.9 | 308.0 | 586.0 | 1.22× | 1.00× | 0.82× |
-| first10 | 10 | 1488.8 | 2758.9 | 3458.0 | 2757.5 | 3355.0 | 1.46× | 0.79× | 0.71× |
-| first20 | 20 | 5296.6 | 5757.5 | 8167.8 | 5748.0 | 8084.0 | 1.26× | 0.73× | 0.67× |
-| all | 79 | 17196.0 | 14529.9 | 24066.1 | 14454.6 | 25602.0 | 1.21× | 0.81× | 0.72× |
+| batch | queries | fused load (ms) | fused execute (ms) | unfused load (ms) | unfused execute (ms) | tp4_sized load (ms) | tp4_sized execute (ms) | DuckDB warm (ms) | unfused / fused | DuckDB / fused | DuckDB / fused, floors out |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| first3 | 3 | 280.8 | 304.8 | 406.9 | 308.0 | 2002.4 | 1649.0 | 586.0 | 1.22× | 1.00× | 0.82× |
+| first10 | 10 | 1488.8 | 2758.9 | 3458.0 | 2757.5 | 36295.0 | 36545.0 | 3355.0 | 1.46× | 0.79× | 0.71× |
+| first20 | 20 | 5296.6 | 5757.5 | 8167.8 | 5748.0 | 104472.2 (19/20) | 81365.1 (19/20) | 8084.0 | 1.26× | 0.73× | 0.67× |
+| all | 79 | 17196.0 | 14529.9 | 24066.1 | 14454.6 | 252640.7 (76/79) | 217384.5 (76/79) | 25602.0 | 1.21× | 0.81× | 0.72× |
 
 Totals are `load + execute` per side; ratios above 1 mean fused is faster. `(n/N)`: the sum covers n of the batch's N queries. One DuckDB time is one CLI process's wall time: it starts, opens the database and runs the query. `SELECT 1` timed the same way took 36 ms (`floor_ms`), what each time holds besides its query; `floors out` takes it off once per query.
 `all` is the list's 79 `ok` and `wrong` queries at tp1_single, of its 82 tpcds lines: 3 skipped.
 - q18: counted, though its answer is wrong (#306); in first20, all.
 - q73: counted, though its answer is wrong (#306); in all.
+- tp4_sized: q18 status=failed reason=timeout: the case ran past 1800 s; counted out of first20, all.
+- tp4_sized: q24 status=failed reason=timeout: the case ran past 1800 s; counted out of all.
+- tp4_sized: q64 status=failed reason=timeout: the case ran past 1800 s; counted out of all.
 
 ### TPC-DS sf40: the two hints
 
@@ -175,6 +181,17 @@ ms, from one profiled run per query process (per fused batch) under Nsight: each
   batch: 11.1 s against 92.8 ms in TPC-DS all, 1.7 s against 0.0 ms in TPC-H all. Both are
   estimates, and the pipelining model has no memory term; merging identical subtrees across
   queries has little to save.
+- **Against the engine's own multi-lane mode.** tp4_sized is far slower than tp1_single, unfused
+  or fused. TPC-H all at tp4_sized is 47.8 s of load and 14.2 s of execute over 20 of its 22
+  queries, against 5.7 s and 1.8 s unfused and 3.7 s and 1.8 s fused over all 22. TPC-DS all is
+  252.6 s and 217.4 s over 76 of 79, against 24.1 s and 14.5 s unfused and 17.2 s and 14.5 s
+  fused. Even first3 is 9.3 s against 1.0 s on TPC-H and 3.7 s against 0.7 s on TPC-DS. Five
+  queries do not finish at tp4_sized at all (the lines under the tables): TPC-H q8 exceeds the
+  driver's step cap ([#238](../tickets/system-hardening.md#t238)), and four time out at 1800 s
+  ([#308](../tickets/system-hardening.md#t308)); at tp1_single those four take under 5 s.
+  These are summed node times, and at tp4_sized they track the runs' wall time as at tp1_single
+  (over every timed TPC-H section, micro queries included: 93.0 of 97.6 s, against 21.7 of
+  25.0 s), so the four lanes are not counted twice.
 - **Against DuckDB** (different clocks, see above). On TPC-H fused is faster: DuckDB's warm sum
   is 1.60× to 2.48× fused's, 1.50× to 2.36× with DuckDB's `SELECT 1` floor taken off each
   query. On TPC-DS DuckDB is faster with the floors out in every batch: its time is 0.67× to

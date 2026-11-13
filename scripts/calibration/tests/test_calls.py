@@ -260,5 +260,59 @@ def test_regions_that_ran_different_numbers_of_times_are_refused():
         assert not (tmp / "calls.tsv").exists(), "the refused capture left a calls.tsv"
 
 
+class CountedCalls(list):
+    """A thread's calls that count every element read: one by index, each of a slice, and each
+    an iterator yields, so `islice(rows, lo, None)` counts the `lo` it skips as well."""
+
+    read = 0
+
+    def __getitem__(self, at):
+        got = super().__getitem__(at)
+        type(self).read += len(got) if isinstance(at, slice) else 1
+        return got
+
+    def __iter__(self):
+        for call in super().__iter__():
+            type(self).read += 1
+            yield call
+
+
+def test_a_region_reads_its_own_calls_and_not_the_rest_of_its_thread():
+    """A tp4_sized tpch capture holds 5.8 M calls and 350 k regions on one thread. A region
+    that copies the rest of its thread's calls to walk them (`rows[lo:]`) makes the reader
+    quadratic, and then it never finishes. One that skips to its start by iterating
+    (`islice`) is quadratic the other way. The region lies deep in the thread, so either
+    reads tens of thousands of calls here."""
+    rows = CountedCalls((10 * i, 10 * i + 5, f"call{i}", 1) for i in range(100_000))
+    index = ([r[0] for r in rows], rows)
+    CountedCalls.read = 0
+    inside = list(nsys_calls.calls_in(index, 500_000, 500_020))
+    assert [c[2] for c in inside] == ["call50000", "call50001"], inside
+    # The two inside, and call50002, whose start at 500_020 ends the walk.
+    assert CountedCalls.read <= 3, CountedCalls.read
+
+
+def test_the_reader_walks_every_region_through_calls_in():
+    """The bound above holds for `calls_in` alone, so the reader must walk each region with it,
+    not with a slice or an `islice` of its own. The capture has three regions: q6's scan and
+    filter, and q19's scan."""
+    walked = []
+    real = nsys_calls.calls_in
+
+    def walk(index, start, end):
+        walked.append((start, end))
+        return real(index, start, end)
+
+    nsys_calls.calls_in = walk
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = pathlib.Path(tmp)
+            rows = calls_of(two_case_capture(tmp), tmp / "calls.tsv")
+    finally:
+        nsys_calls.calls_in = real
+    assert len(walked) == 3, walked
+    assert {"read_parquet", "cast", "apply_boolean_mask"} <= {r["call"] for r in rows}, rows
+
+
 if __name__ == "__main__":
     raise SystemExit(main(globals()))
