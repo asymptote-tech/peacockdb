@@ -64,3 +64,13 @@ directly (new-hosts has not landed), stops only VMs it started, and keeps to its
 Prototype with a PR against master, no reviewer. `llm-wiki/reports/comet-gpu.md`: go, conditional
 go or no-go against 2× lower cost per query than Comet on CPU, from desk research, S3 throughput on
 three VMs, Comet on 128 cores (1 × 128 and 8 × 16) and a cost model; on a go, the alpha design.
+
+## Chain O (base: master)
+
+The Sirius sf40 comparison on the H100, made like for like.
+
+### 1. [`sirius-timing.md`](sirius-timing.md) — closes [#311](../tickets/benchmarks.md#t311) — state: new
+
+Sirius timed by its execution window, planning out, beside peacockdb's `run_us`; why its GPU part
+is slow, from Nsight and one-setting experiments; the harness fixed where it is at fault, Sirius
+rerun once at sf40, the page and `benchmarks.csv` with both clocks. H100 at most 3 hours.
