@@ -893,8 +893,8 @@ fn the_sirius_paragraph_names_its_run_total_and_provenance() {
         "the wall time around the statement and an Arrow fetch of its result, planning included",
         "A row whose plan was rebuilt inside its window says so beside its run.",
         "the second-smallest of the timed runs after one warm-up",
-        "parquet bytes pinned in Sirius's host cache",
-        "reads outside the pin (likely bloom filters) inside the timed runs",
+        "pinned in Sirius's host cache. Its config departs from Sirius's defaults in three",
+        "reads outside the pin (likely bloom filters) inside the timed runs; served from tmpfs",
         "h100-80gb-hbm3, tpch sf40: Sirius 8d17afe, DuckDB 1.5.6, libcudf 26.08.01, driver 580.173, \
          device NVIDIA H100 80GB HBM3",
     ] {

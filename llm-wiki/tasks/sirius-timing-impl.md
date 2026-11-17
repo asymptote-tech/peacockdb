@@ -266,6 +266,8 @@ verbatim, with its time.
 
 ### Task 5: the decided departures in the harness
 
+Skipped: no departure is kept (`sirius-timing-detail.md`, "Configuration").
+
 **Files:** only those a kept departure needs:
 - `docker/sirius-config.yaml` (settings);
 - `docker/sirius-bench.py` (statements; the residency flag);
@@ -302,21 +304,21 @@ verbatim, with its time.
   `testdata/benchmarks.csv`, the Sirius paragraph's text in `benchmark_report/sirius.rs`
 - Modify: `llm-wiki/tasks/sirius-timing-detail.md`
 
-- [ ] **Step 1: Check the budget.** Only if the detail file's running total plus ~60 minutes
+- [x] **Step 1: Check the budget.** Only if the detail file's running total plus ~60 minutes
   stays within 3 hours: start the H100, `prepare` both scripts. Make the layout if one is kept.
-- [ ] **Step 2: Run** `bench-sirius.sh … --dataset all`, no `--resume`, under the kept
+- [x] **Step 2: Run** `bench-sirius.sh … --dataset all`, no `--resume`, under the kept
   configuration (the residency flag off). Then stop the H100.
-- [ ] **Step 3: Set the statuses.**
+- [x] **Step 3: Set the statuses.**
   - Run `UPDATE_CANONICAL=1 … every_sf40_sirius_status_meets_its_answer`.
   - List each status change against today's files in the detail file, with its reason.
   - A row `ok` today that is now `wrong` because of a kept departure: drop that departure,
     re-publish, rerun that dataset (back to Step 1's budget check), and record it.
-- [ ] **Step 4: Finish the page.**
+- [x] **Step 4: Finish the page.**
   - The Sirius paragraph gains the departures and what is still read outside the pin.
   - If Sirius reads files laid out unlike peacockdb's, the paragraph says so.
   - If residency could not be turned off, the paragraph says so too.
   - Regenerate the page and the CSV. All the Task 3 tests stay green.
-- [ ] **Step 5: Commit** the results, the page, the CSV and the detail file.
+- [x] **Step 5: Commit** the results, the page, the CSV and the detail file.
 
 ### Task 7: the wiki and the tickets
 

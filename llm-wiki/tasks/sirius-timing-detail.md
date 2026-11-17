@@ -11,11 +11,19 @@
   `run-gpu.sh … prepare` was stopped during its 10 GB build-image pull after 30 min: Sirius needs
   neither the build nor the run image, and the VM had Docker, the toolkit, nsys and sf40 already.
 
+- 2026-11-17, session 2: the rerun, `bench-sirius.sh … --dataset all` with the image of
+  `ffbe6b1f`, no `--resume`. tpch whole (pin 460.8 s), then tpcds (pin 163.3 s) to q96, where
+  the VM was stopped from outside the run (the ssh dropped; `nebius.sh status` said `STOPPING`
+  before any stop of the run's). Started again, `bench-sirius.sh … --dataset tpcds --resume` kept
+  the 80 rows on the VM, pinned again (163.9 s), ran q97 and q99, pulled and rendered.
+
 ## H100 time
 
 | session | start (UTC) | stop (UTC) | minutes | running total |
 |---|---|---|---|---|
 | 1 | 2026-11-17 19:38 | 20:52 | 74 | 74 |
+| 2 | 2026-11-17 20:58 | 21:50, stopped from outside the run | 52 | 126 |
+| 2, resumed | 2026-11-17 21:51 | 21:57 | 6 | 132 |
 
 ## How the experiments ran
 
@@ -221,3 +229,25 @@ The keep rule (spec, Done when 2) over each finding:
 
 So no harness change follows, the image of `ffbe6b1f` is the rerun's, and the rerun goes as
 `build-test.md` gives it.
+
+## The rerun
+
+Both datasets, every row of the H100's `cases.csv`, Sirius `8d17afe`, driver 580.173.02. Every
+timed row has ten windows, each ended `ok`; no row's plan was rebuilt inside a window.
+
+Statuses after `UPDATE_CANONICAL=1 … every_sf40_sirius_status_meets_its_answer`, against the
+files before:
+
+| dataset | ok | unverified | wrong | failed |
+|---|---|---|---|---|
+| tpch | 35 (35) | 1 (1) | 2 (2) | 10 (10) |
+| tpcds | 42 (42) | 2 (2) | 2 (2) | 36 (36) |
+
+No row changed status; every `failed` row fails as before. The runner writes each row's note as
+it ran (`-` on a timed row), so the four `wrong` rows' notes (tpch nested-loop-left-join and
+scan-limit, tpcds q31 and q73) were put back as they were. tpcds's rendered answers are the same
+bytes; tpch's differ in scan-limit alone, a `LIMIT 10` without `ORDER BY`.
+
+The ratios on the page: Σ run Sirius / Σ run peacockdb = 0.68 over 35 of 48 tpch queries and
+0.61 over 42 of 82 tpcds queries; Σ total Sirius / Σ total DuckDB = 1.28 and 1.29 (1.29 and 1.32
+before).

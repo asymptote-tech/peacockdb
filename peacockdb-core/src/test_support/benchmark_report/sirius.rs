@@ -92,8 +92,11 @@ pub(crate) fn sirius_intro(siriuses: &[Sirius]) -> String {
          conversion not. A row whose plan was rebuilt inside its window says so beside its run. \
          Its total is the wall time around the statement and an Arrow fetch of its result, \
          planning included. Each is in ms, the second-smallest of the timed runs after one \
-         warm-up, from the parquet bytes pinned in Sirius's host cache. On some rows Sirius's log \
-         counts reads outside the pin (likely bloom filters) inside the timed runs. {}.</p>\n",
+         warm-up, from the parquet bytes pinned in Sirius's host cache. Its config departs from \
+         Sirius's defaults in three settings: the sirius cache mode and an eviction threshold of \
+         1.0, which pinning needs, and Quent telemetry off. On some rows Sirius's log counts reads \
+         outside the pin (likely bloom filters) inside the timed runs; served from tmpfs rather \
+         than the VM's disk, they change no run beyond its spread. {}.</p>\n",
         escape(&named.join("; "))
     )
 }
