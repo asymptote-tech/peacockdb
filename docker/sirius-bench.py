@@ -61,7 +61,7 @@ CONFIG_SETTINGS = {
 DEVICE_TREE = "h100-80gb-hbm3"
 # sirius.tsv's preamble keys and column line (peacockdb-core's test_support/sirius_results.rs).
 PREAMBLE_KEYS = ["sirius", "duckdb", "libcudf", "cuda", "driver", "device", "host"]
-COLUMNS = "query\tms_2nd_min\truns_ms\tstatus\tnote"
+COLUMNS = "query\tms_2nd_min\truns_ms\trun_ms_2nd_min\trun_runs_ms\tstatus\tnote"
 # DuckDB's sf40 answers were taken under these: benchmarks/duckdb_minimal.sh's ORACLE, the answers
 # pass's session. integer_division is a parser setting, so each runs before the query is parsed.
 ORACLE_SETTINGS = ["SET default_null_order='nulls_last_on_asc_first_on_desc'", "SET integer_division=true"]
@@ -237,13 +237,19 @@ def write_results(path, preamble, rows):
     os.replace(staged, path)
 
 
-def ok_row(stem, runs):
-    measured = ",".join(f"{ms:.1f}" for ms in runs)
-    return f"{stem}\t{sorted(runs)[1]:.1f}\t{measured}\tok\t-"
+def timed_fields(runs):
+    """A clock's two fields: the second-smallest run and every run, or `-` `-` where it has none."""
+    if runs is None:
+        return "-\t-"
+    return f"{sorted(runs)[1]:.1f}\t" + ",".join(f"{ms:.1f}" for ms in runs)
+
+
+def ok_row(stem, walls, windows=None, note=""):
+    return f"{stem}\t{timed_fields(walls)}\t{timed_fields(windows)}\tok\t{note or '-'}"
 
 
 def failed_row(stem, why):
-    return f"{stem}\t-\t-\tfailed\t{why}"
+    return f"{stem}\t-\t-\t-\t-\tfailed\t{why}"
 
 
 def log_sizes(log_dir):

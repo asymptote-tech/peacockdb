@@ -64,7 +64,7 @@ Rules the reader holds a row to:
 - `ok`, `wrong`, `unverified`: the wall fields set. The run fields are either both set, with as
   many runs as `runs_ms`, or both `-`: a row timed before windows were recorded.
 
-- [ ] **Step 1: Write the failing tests.** In `sirius_results/tests.rs`:
+- [x] **Step 1: Write the failing tests.** In `sirius_results/tests.rs`:
   - `the_fixture_reads_its_run_columns`: the fixture's `q1` has `run_ms_2nd_min == Some(301.0)`
     and `run_runs_ms` `305.0,301.0,299.0,303.0,308.0,302.0,306.0,304.0,307.0,309.0`.
   - `a_timed_row_without_run_times_reads_as_none`: `run_ms_2nd_min == None` and an empty
@@ -76,17 +76,17 @@ Rules the reader holds a row to:
 
   In `test_sirius_bench.py`, `test_an_ok_row_has_seven_fields`: a scripted query's row is
   seven tab-separated fields, its run fields `-` `-`.
-- [ ] **Step 2: Run them; they fail** on the five-field rule.
-- [ ] **Step 3: Implement.**
+- [x] **Step 2: Run them; they fail** on the five-field rule.
+- [x] **Step 3: Implement.**
   - The reader and writer take seven fields.
   - The fixture's `q1` gains the run times above.
   - Both committed `sirius.tsv` files get the new column line, and `-` `-` in the run fields of
     every row; nothing else in them changes.
   - The runner's `COLUMNS` and row writers follow.
-- [ ] **Step 4: Run them; they pass.** Also `every_sf40_sirius_status_meets_its_answer` and
+- [x] **Step 4: Run them; they pass.** Also `every_sf40_sirius_status_meets_its_answer` and
   `the_benchmark_report_matches_the_trees`, unchanged and green (the page does not read the run
   columns yet).
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ### Task 2: the runner records each timed run's window
 

@@ -18,7 +18,7 @@ const KEYS: [&str; 7] = [
 ];
 
 /// The column line, in the order the runner writes the columns.
-const COLUMNS: &str = "query\tms_2nd_min\truns_ms\tstatus\tnote";
+const COLUMNS: &str = "query\tms_2nd_min\truns_ms\trun_ms_2nd_min\trun_runs_ms\tstatus\tnote";
 
 /// What a row writes for a value it has none of.
 const NONE: &str = "-";
@@ -65,20 +65,30 @@ pub(crate) fn write(results: &SiriusResults) -> String {
         .collect();
     let mut text = format!("# {}\n{COLUMNS}\n", preamble.join(" "));
     for row in &results.rows {
-        let ms = row
-            .ms_2nd_min
-            .map_or_else(|| NONE.to_string(), |ms| format!("{ms:.1}"));
-        let runs = if row.runs_ms.is_empty() {
-            NONE.to_string()
-        } else {
-            let runs: Vec<String> = row.runs_ms.iter().map(|ms| format!("{ms:.1}")).collect();
-            runs.join(",")
-        };
+        let ms = written_ms(row.ms_2nd_min);
+        let runs = written_runs(&row.runs_ms);
+        let run_ms = written_ms(row.run_ms_2nd_min);
+        let run_runs = written_runs(&row.run_runs_ms);
         let note = if row.note.is_empty() { NONE } else { &row.note };
         let status = status_name(row.status);
-        text.push_str(&format!("{}\t{ms}\t{runs}\t{status}\t{note}\n", row.query));
+        text.push_str(&format!(
+            "{}\t{ms}\t{runs}\t{run_ms}\t{run_runs}\t{status}\t{note}\n",
+            row.query
+        ));
     }
     text
+}
+
+fn written_ms(ms: Option<f64>) -> String {
+    ms.map_or_else(|| NONE.to_string(), |ms| format!("{ms:.1}"))
+}
+
+fn written_runs(runs: &[f64]) -> String {
+    if runs.is_empty() {
+        return NONE.to_string();
+    }
+    let runs: Vec<String> = runs.iter().map(|ms| format!("{ms:.1}")).collect();
+    runs.join(",")
 }
 
 pub(crate) fn path(device: &str, dataset: &str, sf: &str) -> PathBuf {
@@ -126,8 +136,8 @@ pub(crate) fn status_name(status: SiriusStatus) -> &'static str {
 /// One row, or why the format refuses it.
 fn row(line: &str) -> Result<SiriusRow, String> {
     let fields: Vec<&str> = line.split('\t').collect();
-    let [query, ms, runs, status, note] = fields[..] else {
-        return Err(format!("not five fields: {COLUMNS:?}"));
+    let [query, ms, runs, run_ms, run_runs, status, note] = fields[..] else {
+        return Err(format!("not seven fields: {COLUMNS:?}"));
     };
     let status = match status {
         "ok" => SiriusStatus::Ok,
@@ -151,12 +161,7 @@ fn row(line: &str) -> Result<SiriusRow, String> {
                 "an ok, wrong or unverified row has a time: ms_2nd_min and runs_ms are not {NONE:?}"
             ));
         }
-        (true, ms, runs) => (
-            Some(number(ms, "ms_2nd_min")?),
-            runs.split(',')
-                .map(|run| number(run, "runs_ms"))
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
+        (true, ms, runs) => (Some(number(ms, "ms_2nd_min")?), numbers(runs, "runs_ms")?),
         (false, NONE, NONE) => (None, Vec::new()),
         (false, _, _) => {
             return Err(format!(
@@ -164,10 +169,36 @@ fn row(line: &str) -> Result<SiriusRow, String> {
             ));
         }
     };
+    let (run_ms_2nd_min, run_runs_ms) = match (timed, run_ms, run_runs) {
+        (_, NONE, NONE) => (None, Vec::new()),
+        (false, _, _) => {
+            return Err(format!(
+                "a failed or skipped row has no run time: run_ms_2nd_min and run_runs_ms are {NONE:?}"
+            ));
+        }
+        (true, NONE, _) | (true, _, NONE) => {
+            return Err(format!(
+                "run_ms_2nd_min and run_runs_ms are both set or both {NONE:?}"
+            ));
+        }
+        (true, run_ms, run_runs) => {
+            let run_runs_ms = numbers(run_runs, "run_runs_ms")?;
+            if run_runs_ms.len() != runs_ms.len() {
+                return Err(format!(
+                    "{} run_runs_ms for {} runs_ms",
+                    run_runs_ms.len(),
+                    runs_ms.len()
+                ));
+            }
+            (Some(number(run_ms, "run_ms_2nd_min")?), run_runs_ms)
+        }
+    };
     Ok(SiriusRow {
         query: query.to_string(),
         ms_2nd_min,
         runs_ms,
+        run_ms_2nd_min,
+        run_runs_ms,
         status,
         note: if note == NONE {
             String::new()
@@ -175,6 +206,10 @@ fn row(line: &str) -> Result<SiriusRow, String> {
             note.to_string()
         },
     })
+}
+
+fn numbers(text: &str, column: &str) -> Result<Vec<f64>, String> {
+    text.split(',').map(|run| number(run, column)).collect()
 }
 
 fn number(text: &str, column: &str) -> Result<f64, String> {

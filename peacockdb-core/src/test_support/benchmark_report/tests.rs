@@ -650,7 +650,7 @@ fn sirius(root: &Path, device: &str, dataset: &str, rows: &str) {
         format!(
             "# sirius=8d17afe duckdb=1.5.6 libcudf=26.08.01 cuda=13.0 driver=580.173 \
              device=NVIDIA_H100_80GB_HBM3 host=nebius-h100\n\
-             query\tms_2nd_min\truns_ms\tstatus\tnote\n{rows}"
+             query\tms_2nd_min\truns_ms\trun_ms_2nd_min\trun_runs_ms\tstatus\tnote\n{rows}"
         ),
     )
     .unwrap();
@@ -668,7 +668,7 @@ fn a_sirius_file_adds_a_group_before_duckdb() {
         &root,
         "h100-80gb-hbm3",
         "tpch",
-        "q3\t300.0\t300.0,301.0\tok\t-\n",
+        "q3\t300.0\t300.0,301.0\t-\t-\tok\t-\n",
     );
     duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
     let html = page(root, &[("tpch", "q3")]);
@@ -721,7 +721,7 @@ fn a_failed_sirius_row_shows_its_reason() {
         &root,
         "h100-80gb-hbm3",
         "tpch",
-        "q3\t-\t-\tfailed\tNotImplemented: INTERSECT\nq6\t-\t-\tskipped\tnot run\n",
+        "q3\t-\t-\t-\t-\tfailed\tNotImplemented: INTERSECT\nq6\t-\t-\t-\t-\tskipped\tnot run\n",
     );
     let html = page(root, &[("tpch", "q3"), ("tpch", "q6")]);
     assert_eq!(row(&html, "q3")[7], "failed: NotImplemented: INTERSECT");
@@ -750,7 +750,7 @@ fn a_wrong_sirius_row_shows_its_note() {
         &root,
         "h100-80gb-hbm3",
         "tpch",
-        "q3\t300.0\t300.0\twrong\t#306 <ties>\nq6\t100.0\t100.0\twrong\t-\n",
+        "q3\t300.0\t300.0\t-\t-\twrong\t#306 <ties>\nq6\t100.0\t100.0\t-\t-\twrong\t-\n",
     );
     let html = page(root, &[("tpch", "q3"), ("tpch", "q6")]);
     // `row` strips the tags and leaves the escapes.
@@ -779,8 +779,8 @@ fn the_ratio_counts_rows_both_ok() {
         &root,
         "h100-80gb-hbm3",
         "tpch",
-        "q3\t300.0\t300.0\tok\t-\nq6\t100.0\t100.0\twrong\t-\nq9\t-\t-\tfailed\tboom\n\
-         q11\t50.0\t50.0\tunverified\t-\n",
+        "q3\t300.0\t300.0\t-\t-\tok\t-\nq6\t100.0\t100.0\t-\t-\twrong\t-\nq9\t-\t-\t-\t-\tfailed\tboom\n\
+         q11\t50.0\t50.0\t-\t-\tunverified\t-\n",
     );
     let dir = root.join("duckdb-cpu128/tpch.sf40");
     std::fs::create_dir_all(&dir).unwrap();
@@ -833,7 +833,12 @@ fn no_sirius_file_no_line_and_dashes() {
         "h100-80gb-hbm3/tpcds.sf40/tp1_single.benchmark.txt",
         &[("q1", TIMED)],
     );
-    sirius(&root, "h100-80gb-hbm3", "tpcds", "q1\t10.0\t10.0\tok\t-\n");
+    sirius(
+        &root,
+        "h100-80gb-hbm3",
+        "tpcds",
+        "q1\t10.0\t10.0\t-\t-\tok\t-\n",
+    );
     duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
     let html = page(root, &[("tpch", "q3"), ("tpcds", "q1")]);
     assert_eq!(
@@ -877,7 +882,7 @@ fn the_sirius_paragraph_names_its_total_and_provenance() {
         &root,
         "h100-80gb-hbm3",
         "tpch",
-        "q3\t300.0\t300.0,301.0\tok\t-\n",
+        "q3\t300.0\t300.0,301.0\t-\t-\tok\t-\n",
     );
     duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
     let html = page(root, &[("tpch", "q3")]);
@@ -930,7 +935,7 @@ fn the_csv_holds_every_result_in_the_pages_order() {
         &root,
         "h100-80gb-hbm3",
         "tpch",
-        "q6\t-\t-\tfailed\tboom\nq3\t300.0\t300.0\tok\t-\n",
+        "q6\t-\t-\t-\t-\tfailed\tboom\nq3\t300.0\t300.0\t-\t-\tok\t-\n",
     );
     duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
     let csv = render_benchmarks_csv(&root, &order(&[("tpch", "q3"), ("tpch", "q6")]));
@@ -998,7 +1003,7 @@ fn a_status_flip_moves_page_ratio_and_csv_together() {
             &root,
             "h100-80gb-hbm3",
             "tpch",
-            &format!("q3\t300.0\t300.0\tok\t-\nq6\t100.0\t100.0\t{status}\t-\n"),
+            &format!("q3\t300.0\t300.0\t-\t-\tok\t-\nq6\t100.0\t100.0\t-\t-\t{status}\t-\n"),
         );
         let html = render_benchmark_report(&root, &pairs, &[]);
         let csv = render_benchmarks_csv(&root, &pairs);

@@ -7,6 +7,7 @@ It runs over a copy of the script beside fake image files, with fake `ldd`, `nvi
 and `pyarrow` first on the paths, so nothing here needs the image or a GPU.
 """
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -313,7 +314,7 @@ class Run:
         self.answers_kept = answers_kept
 
     def rows(self):
-        """`sirius.tsv`'s rows as {query: (ms_2nd_min, runs_ms, status, note)}."""
+        """`sirius.tsv`'s rows as {query: (ms_2nd_min, runs_ms, run_ms_2nd_min, run_runs_ms, status, note)}."""
         lines = self.tsv.splitlines()[2:]
         return {f[0]: tuple(f[1:]) for f in (line.split("\t") for line in lines)}
 
@@ -407,7 +408,7 @@ def test_times_ten_runs_and_reports_the_second_smallest():
     run = run_queries(["q6"], script={"queries": {"q6": {"warmup_ms": 5, "runs_ms": timed}}})
     assert run.proc.returncode == 0, run.proc.stderr
     assert len(run.executed(r"/\* q6 \*/")) == 1 + 10
-    ms, runs, status, note = run.rows()["q6"]
+    ms, runs, _, _, status, note = run.rows()["q6"]
     assert status == "ok" and note == "-", run.rows()
     assert runs == ",".join(f"{t:.1f}" for t in timed), runs
     assert ms == "10.0", (ms, runs)
@@ -426,23 +427,24 @@ def test_the_answer_is_the_sirius_select_s_arrow_result():
 def test_an_error_is_a_failed_row_with_its_first_line():
     run = run_queries(["q8", "q6"], script={"queries": {"q8": {"error": "NotImplemented: INTERSECT\nat line 4"}}})
     assert run.proc.returncode == 0, run.proc.stderr
-    assert run.rows()["q8"] == ("-", "-", "failed", "NotImplemented: INTERSECT"), run.rows()
-    assert run.rows()["q6"][2] == "ok", run.rows()
+    assert run.rows()["q8"] == ("-", "-", "-", "-", "failed", "NotImplemented: INTERSECT"), run.rows()
+    assert run.rows()["q6"][4] == "ok", run.rows()
     assert len(run.executed(r"pin_table")) == len(TABLES), "an error is not a crash: no re-pin"
 
 
 def test_an_answer_write_error_after_good_runs_is_failed():
     run = run_queries(["q6"], script={"queries": {"q6": {"answer_error": "IO Error: disk full"}}})
     assert run.proc.returncode == 0, run.proc.stderr
-    ms, runs, status, note = run.rows()["q6"]
-    assert (ms, runs, status) == ("-", "-", "failed") and "IO Error: disk full" in note, run.rows()
+    ms, runs, run_ms, run_runs, status, note = run.rows()["q6"]
+    assert (ms, runs, run_ms, run_runs, status) == ("-", "-", "-", "-", "failed"), run.rows()
+    assert "IO Error: disk full" in note, run.rows()
 
 
 def test_a_hang_is_killed_repinned_and_the_next_query_runs():
     run = run_queries(["q9", "q6"], script={"queries": {"q9": {"hang": True}}}, timeout=2)
     assert run.proc.returncode == 0, run.proc.stderr
-    assert run.rows()["q9"] == ("-", "-", "failed", "timeout after 2 s"), run.rows()
-    assert run.rows()["q6"][2] == "ok", run.rows()
+    assert run.rows()["q9"] == ("-", "-", "-", "-", "failed", "timeout after 2 s"), run.rows()
+    assert run.rows()["q6"][4] == "ok", run.rows()
     pins = run.executed(r"pin_table")
     assert len(pins) == 2 * len(TABLES) and len({p["pid"] for p in pins}) == 2, pins
 
@@ -450,33 +452,34 @@ def test_a_hang_is_killed_repinned_and_the_next_query_runs():
 def test_a_crash_is_repinned_and_the_next_query_runs():
     run = run_queries(["q9", "q6"], script={"queries": {"q9": {"crash": "SIGSEGV"}}})
     assert run.proc.returncode == 0, run.proc.stderr
-    assert run.rows()["q9"] == ("-", "-", "failed", "crashed (SIGSEGV)"), run.rows()
-    assert run.rows()["q6"][2] == "ok", run.rows()
+    assert run.rows()["q9"] == ("-", "-", "-", "-", "failed", "crashed (SIGSEGV)"), run.rows()
+    assert run.rows()["q6"][4] == "ok", run.rows()
     assert len({p["pid"] for p in run.executed(r"pin_table")}) == 2
 
 
 def test_the_pin_is_outside_the_timeout():
     run = run_queries(["q1", "q6"], script={"pin_s": 3}, timeout=1)
     assert run.proc.returncode == 0, run.proc.stderr
-    assert [row[2] for row in run.rows().values()] == ["ok", "ok"], run.rows()
+    assert [row[4] for row in run.rows().values()] == ["ok", "ok"], run.rows()
 
 
-def existing(sirius=PIN_COMMIT, host=None, rows="q1\t5.0\t5.0,6.0\tok\t-\n"):
+def existing(sirius=PIN_COMMIT, host=None, rows="q1\t5.0\t5.0,6.0\t-\t-\tok\t-\n"):
     host = host or socket.gethostname()
     return (f"# sirius={sirius} duckdb=1.5.6 libcudf=26.08.01 cuda=13.0 driver=580.173 "
-            f"device=NVIDIA_H100_80GB_HBM3 host={host}\nquery\tms_2nd_min\truns_ms\tstatus\tnote\n{rows}")
+            f"device=NVIDIA_H100_80GB_HBM3 host={host}\n"
+            f"query\tms_2nd_min\truns_ms\trun_ms_2nd_min\trun_runs_ms\tstatus\tnote\n{rows}")
 
 
 def test_resume_keeps_rows_of_this_commit_and_host_only():
     run = run_queries(["q1", "q6"], extra=["--resume"], existing=existing(), answers=["q1"])
     assert run.proc.returncode == 0, run.proc.stderr
     assert not run.executed(r"/\* q1 \*/") and run.executed(r"/\* q6 \*/"), run.calls
-    assert run.rows()["q1"] == ("5.0", "5.0,6.0", "ok", "-") and run.rows()["q6"][2] == "ok", run.rows()
+    assert run.rows()["q1"] == ("5.0", "5.0,6.0", "-", "-", "ok", "-") and run.rows()["q6"][4] == "ok", run.rows()
     for other in [existing(sirius="0" * 40), existing(host="another-host")]:
         run = run_queries(["q1", "q6"], extra=["--resume"], existing=other)
         assert run.proc.returncode == 0, run.proc.stderr
         assert run.executed(r"/\* q1 \*/"), "a row of another commit or host was kept"
-        assert run.rows()["q1"] != ("5.0", "5.0,6.0", "ok", "-"), run.rows()
+        assert run.rows()["q1"] != ("5.0", "5.0,6.0", "-", "-", "ok", "-"), run.rows()
     # Without --resume or --list the file and the answers are this run's alone.
     run = run_queries(["q6"], existing=existing(), answers=["q1"])
     assert set(run.rows()) == {"q6"}, run.rows()
@@ -484,10 +487,10 @@ def test_resume_keeps_rows_of_this_commit_and_host_only():
     # A narrowed run with --resume keeps its own query's row too.
     run = run_queries(["q1"], extra=["--resume", "--list", "q1,q6"], existing=existing(), answers=["q1"])
     assert run.proc.returncode == 0, run.proc.stderr
-    assert not run.executed(r"/\* q1 \*/") and run.rows() == {"q1": ("5.0", "5.0,6.0", "ok", "-")}, run.rows()
+    assert not run.executed(r"/\* q1 \*/") and run.rows() == {"q1": ("5.0", "5.0,6.0", "-", "-", "ok", "-")}, run.rows()
 
 
-THREE = "q1\t5.0\t5.0,6.0\tok\t-\nq3\t7.0\t7.0,8.0\twrong\t#306\nq6\t-\t-\tfailed\tboom\n"
+THREE = "q1\t5.0\t5.0,6.0\t-\t-\tok\t-\nq3\t7.0\t7.0,8.0\t-\t-\twrong\t#306\nq6\t-\t-\t-\t-\tfailed\tboom\n"
 
 
 def test_a_narrowed_run_replaces_its_own_rows_and_answers_alone():
@@ -496,8 +499,9 @@ def test_a_narrowed_run_replaces_its_own_rows_and_answers_alone():
     run = run_queries(["q3"], extra=["--list", "q1,q3,q6"], existing=existing(rows=THREE), answers=["q1", "q3"])
     assert run.proc.returncode == 0, run.proc.stderr
     assert list(run.rows()) == ["q1", "q3", "q6"], run.tsv
-    assert run.rows()["q1"] == ("5.0", "5.0,6.0", "ok", "-") and run.rows()["q6"] == ("-", "-", "failed", "boom")
-    assert run.rows()["q3"][2:] == ("ok", "-") and run.rows()["q3"][0] != "7.0", run.rows()
+    assert run.rows()["q1"] == ("5.0", "5.0,6.0", "-", "-", "ok", "-"), run.rows()
+    assert run.rows()["q6"] == ("-", "-", "-", "-", "failed", "boom"), run.rows()
+    assert run.rows()["q3"][4:] == ("ok", "-") and run.rows()["q3"][0] != "7.0", run.rows()
     assert not run.executed(r"/\* q[16] \*/"), "a query outside the narrowed run ran"
     assert run.answers_kept, "a narrowed run removed the answers of the queries it did not run"
     # The worker's, past the parent's check of which answers the database holds.
@@ -506,7 +510,7 @@ def test_a_narrowed_run_replaces_its_own_rows_and_answers_alone():
     assert [c["sql"] for c in answers][0] == 'DROP TABLE IF EXISTS "q3"', answers
     # A query the file has no row for goes where the list puts it.
     run = run_queries(["q3"], extra=["--list", "q1,q3,q6"], existing=existing(rows=THREE.replace(
-        "q3\t7.0\t7.0,8.0\twrong\t#306\n", "")), answers=["q1"])
+        "q3\t7.0\t7.0,8.0\t-\t-\twrong\t#306\n", "")), answers=["q1"])
     assert run.proc.returncode == 0, run.proc.stderr
     assert list(run.rows()) == ["q1", "q3", "q6"], run.tsv
 
@@ -516,7 +520,7 @@ def test_a_narrowed_run_drops_its_own_answer_before_it_runs():
     run = run_queries(["q3"], extra=["--list", "q1,q3"], script={"queries": {"q3": {"error": "boom"}}},
                       existing=existing(), answers=["q1", "q3"])
     assert run.proc.returncode == 0, run.proc.stderr
-    assert run.rows()["q3"][2] == "failed" and run.rows()["q1"][2] == "ok", run.rows()
+    assert run.rows()["q3"][4] == "failed" and run.rows()["q1"][4] == "ok", run.rows()
     drop = [i for i, c in enumerate(run.calls) if c["event"] == "execute" and c["sql"] == 'DROP TABLE IF EXISTS "q3"']
     [warm_up] = [i for i, c in enumerate(run.calls) if c["event"] == "execute" and "/* q3 */" in c["sql"]]
     assert drop and drop[0] < warm_up, run.calls
@@ -569,11 +573,29 @@ def test_the_file_parses_as_the_rust_fixture_does():
     assert preamble(run) == {"sirius": PIN_COMMIT, "duckdb": "1.5.6", "libcudf": "26.08.01", "cuda": "13.0",
                              "driver": "580.173", "device": "NVIDIA_H100_80GB_HBM3", "host": socket.gethostname()}
     for line in lines[2:]:
-        query, ms, runs, status, note = line.split("\t")
+        query, ms, runs, run_ms, run_runs, status, note = line.split("\t")
         if status == "ok":
             assert re.fullmatch(r"\d+\.\d", ms) and re.fullmatch(r"\d+\.\d(,\d+\.\d)*", runs), line
+            assert (run_ms, run_runs) == ("-", "-"), line
         else:
-            assert (ms, runs, status) == ("-", "-", "failed") and note, line
+            assert (ms, runs, run_ms, run_runs, status) == ("-", "-", "-", "-", "failed") and note, line
+
+
+def test_an_ok_row_has_seven_fields():
+    """A row timed without its execution windows: the wall's two fields, then `-` `-` for the run's."""
+    run = run_queries(["q6"], script={"queries": {"q6": {"runs_ms": [30, 10, 20]}}}, runs=3)
+    assert run.proc.returncode == 0, run.proc.stderr
+    [line] = run.tsv.splitlines()[2:]
+    assert line.split("\t") == ["q6", "20.0", "30.0,10.0,20.0", "-", "-", "ok", "-"], line
+
+
+def test_ok_row_writes_the_windows_beside_the_walls():
+    spec = importlib.util.spec_from_file_location("sirius_bench", SCRIPT)
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    assert (runner.ok_row("q1", [420, 400, 410], [305, 300, 302], note="plan rebuilt in 1 of 3 runs")
+            == "q1\t410.0\t420.0,400.0,410.0\t302.0\t305.0,300.0,302.0\tok\tplan rebuilt in 1 of 3 runs")
+    assert runner.failed_row("q2", "boom") == "q2\t-\t-\t-\t-\tfailed\tboom"
 
 
 # --- the GPU evidence --------------------------------------------------------------------------
@@ -581,8 +603,8 @@ def test_the_file_parses_as_the_rust_fixture_does():
 def not_on_gpu(run, stem, *shown):
     """The row is `failed: not run on the GPU (…)` naming what the log showed, and the query ran only
     its warm-up: no timed run, no answer."""
-    ms, runs, status, note = run.rows()[stem]
-    assert (ms, runs, status) == ("-", "-", "failed"), run.rows()
+    ms, runs, run_ms, run_runs, status, note = run.rows()[stem]
+    assert (ms, runs, run_ms, run_runs, status) == ("-", "-", "-", "-", "failed"), run.rows()
     assert note.startswith("not run on the GPU (") and note.endswith(")"), note
     assert all(word in note for word in shown), (shown, note)
     assert "\t" not in note and "\n" not in note and len(note) <= 160, note
@@ -604,7 +626,7 @@ def test_sirius_s_log_is_on_at_info_beside_the_answers():
 def test_a_query_with_gpu_evidence_is_ok_and_its_warm_up_is_labelled():
     run = run_queries(["q6"], runs=2)
     assert run.proc.returncode == 0, run.proc.stderr
-    assert run.rows()["q6"][2:] == ("ok", "-"), run.rows()
+    assert run.rows()["q6"][4:] == ("ok", "-"), run.rows()
     sirius = [c["sql"] for c in run.calls if c["event"] == "execute" and c["database"] == ":memory:"
               and re.search(r"sirius_set_query_label|/\* q6 \*/", c["sql"])]
     assert sirius[:3] == ["CALL sirius_set_query_label('q6')", "/* q6 */ SELECT 1;\n",
@@ -616,7 +638,7 @@ def test_a_query_without_gpu_evidence_is_not_run_on_the_gpu():
         run = run_queries(["q6", "q1"], script={"queries": {"q6": {"log": log}}})
         assert run.proc.returncode == 0, run.proc.stderr
         not_on_gpu(run, "q6", shown)
-        assert run.rows()["q1"][2] == "ok", run.rows()
+        assert run.rows()["q1"][4] == "ok", run.rows()
 
 
 def test_a_fallback_line_is_not_run_on_the_gpu():
@@ -632,7 +654,7 @@ def test_each_query_is_judged_by_its_own_warm_up():
     after the next query starts: they must not count for it."""
     run = run_queries(["q1", "q6", "q3"], script={"log_flush_s": 1, "queries": {"q6": {"log": "cpu"}}}, runs=2)
     assert run.proc.returncode == 0, run.proc.stderr
-    assert run.rows()["q1"][2] == "ok" and run.rows()["q3"][2] == "ok", run.rows()
+    assert run.rows()["q1"][4] == "ok" and run.rows()["q3"][4] == "ok", run.rows()
     not_on_gpu(run, "q6", "no Transparent GPU execution")
 
 
@@ -655,15 +677,15 @@ def test_a_log_rotated_at_midnight_is_read_across_both_files():
     assert run.proc.returncode == 0, run.proc.stderr
     assert list(run.logs) == ["sirius_2026-11-10.log", "sirius_2026-11-11.log"], list(run.logs)
     assert "GPU_SCAN" in run.logs["sirius_2026-11-11.log"]
-    assert [row[2] for row in run.rows().values()] == ["ok", "ok"], run.rows()
+    assert [row[4] for row in run.rows().values()] == ["ok", "ok"], run.rows()
 
 
 def test_after_a_crash_the_new_worker_s_log_judges_the_next_query():
     run = run_queries(["q9", "q6", "q1"], script={"queries": {"q9": {"crash": "SIGSEGV"}, "q6": {"log": "cpu"}}})
     assert run.proc.returncode == 0, run.proc.stderr
-    assert run.rows()["q9"] == ("-", "-", "failed", "crashed (SIGSEGV)"), run.rows()
+    assert run.rows()["q9"] == ("-", "-", "-", "-", "failed", "crashed (SIGSEGV)"), run.rows()
     not_on_gpu(run, "q6", "no Transparent GPU execution")
-    assert run.rows()["q1"][2] == "ok", run.rows()
+    assert run.rows()["q1"][4] == "ok", run.rows()
 
 
 def test_a_warm_up_the_log_never_shows_is_not_run_on_the_gpu():
