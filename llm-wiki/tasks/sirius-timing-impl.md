@@ -224,45 +224,45 @@ ignores: an experiment never writes into `testdata/benchmark-results/`, whose `#
 name the config. Every command that is not a committed script goes into the detail file
 verbatim, with its time.
 
-- [ ] **Step 1: Publish** the image of Tasks 1–2 (`images.yml`, Global Constraints). Wait for
+- [x] **Step 1: Publish** the image of Tasks 1–2 (`images.yml`, Global Constraints). Wait for
   green, and note the inputs tag in the detail file.
-- [ ] **Step 2: Start the H100** (`build-test.md`, "Sirius on the H100", for the instance and
+- [x] **Step 2: Start the H100** (`build-test.md`, "Sirius on the H100", for the instance and
   profile). Then `run-gpu.sh … prepare` and `run-sirius.sh … prepare`. Log each start, stop and
   running total in the detail file.
-- [ ] **Step 3: The first real check of the windows.**
+- [x] **Step 3: The first real check of the windows.**
   - Run tpch q6 alone, the image's config, `--runs 10`.
   - Expected: `ok`, ten windows, no rebuild note, the wall near 339 ms.
   - Check that no label `CALL` opens a window of its own. If one does, stop: Task 2's count
     rule is wrong.
-- [ ] **Step 4: Nsight.**
+- [x] **Step 4: Nsight.**
   - Capture q6, q9 and q19 inside the Sirius container under its three options. nsys is the
     VM's (`run-gpu-vm.sh`'s `vm_nsight` installs it), mounted read-only into the container.
   - Record per query: the bytes and rate of each host-to-device copy from the pinned cache, the
     decode and kernel time, and the idle gaps between chunks.
   - Record whether every timed run copies the pinned bytes, and what `h2d=0` counts.
-- [ ] **Step 5: The settings.** q6 and q9: `scan_manager` chunk size, task size and
+- [x] **Step 5: The settings.** q6 and q9: `scan_manager` chunk size, task size and
   `executor.pipeline.num_threads`, one at a time, two values each beside the default.
-- [ ] **Step 6: The reads outside the pin.**
+- [x] **Step 6: The reads outside the pin.**
   - q19 and q10: as today, then from the same files on tmpfs, then from parquet without bloom
     filters (made on the VM, the metadata checked as Task 5 states).
   - Record the bytes a miss reads.
-- [ ] **Step 7: The footer.** q6's planning span (wall minus window) as today, with
+- [x] **Step 7: The footer.** q6's planning span (wall minus window) as today, with
   `parquet_metadata_cache` on, and with tables registered other than as `read_parquet` views,
   if `pin_table` accepts it.
-- [ ] **Step 8: The log.** q6's wall at `info` and at `warn` (`SET sirius_log_level`). At `warn`
+- [x] **Step 8: The log.** q6's wall at `info` and at `warn` (`SET sirius_log_level`). At `warn`
   Sirius logs neither the GPU evidence nor the windows, so the runner fails the row: both walls
   come from a short timing script in the container, written into the detail file.
-- [ ] **Step 9: Device residency.** Only if Step 4 shows timed runs not copying from the host:
+- [x] **Step 9: Device residency.** Only if Step 4 shows timed runs not copying from the host:
   find the setting that makes every run copy, then time q6 and tpcds q64 both ways.
-- [ ] **Step 10: Stop the H100.** Write each finding into the detail file under "Findings",
+- [x] **Step 10: Stop the H100.** Write each finding into the detail file under "Findings",
   numbers and commands with it.
-- [ ] **Step 11: Decide the configuration.**
+- [x] **Step 11: Decide the configuration.**
   - Apply the spec's keep rule (Done when 2) to every finding.
   - Under "Configuration" in the detail file, list each kept departure with its reason and its
     measured effect, and the departures rejected.
   - If nothing is kept and residency needs nothing, Task 5 is skipped, and Task 6 runs the image
     as it is.
-- [ ] **Step 12: Commit the detail file.**
+- [x] **Step 12: Commit the detail file.**
 
 ### Task 5: the decided departures in the harness
 
@@ -286,14 +286,14 @@ verbatim, with its time.
   - Refused on any other difference, exit 3.
   - The sha256 of each file goes into `prepare`'s output.
 
-- [ ] **Step 1: Write the failing tests** for each kept departure:
+- [x] **Step 1: Write the failing tests** for each kept departure:
   - the config's settings in `test_the_config_file_is_*` (the self-test's expected set grows);
   - the flag's pass-through and refusal in `test_bench_sirius.py` and `test_sirius_bench.py`;
   - the layout step against a fake VM in `test_run_sirius.py`, a metadata difference refused.
-- [ ] **Step 2: Run them; they fail.**
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run them; they pass.** Rebuild the image locally; self-test green.
-- [ ] **Step 5: Commit, then publish the image** (Global Constraints) and wait for green.
+- [x] **Step 2: Run them; they fail.**
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run them; they pass.** Rebuild the image locally; self-test green.
+- [x] **Step 5: Commit, then publish the image** (Global Constraints) and wait for green.
 
 ### Task 6: the rerun at sf40
 
