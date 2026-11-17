@@ -146,18 +146,20 @@ def test_the_config_file_is_the_three_settings():
 
 # A DuckDB that logs every connection, statement and registration as a JSON line, and answers a
 # query (named by its `/* <stem> */` comment) as FAKE_DUCKDB_SCRIPT scripts it: a warm-up and
-# per-run latency in ms, an error, a hang, a crash by signal, or an error writing its answer. The
-# latency also moves the runner's `time.perf_counter_ns`, which reads the fake's clock alone.
-# After LOAD it also writes Sirius's own log as Sirius 8d17afe does under SIRIUS_LOG_BACKEND=spdlog:
-# `<SIRIUS_LOG_DIR>/sirius_<day>.log`, a QueryBegin line per statement, buffered and flushed every
-# `log_flush_s`. A query's `log` says what its executions write: `gpu` (the default), `cpu` (a
-# silent decline), `no_scan`, `fallback` (a runtime fallback) or `plan_fallback`; `rotate` starts a
-# new day's file at its warm-up. A database file's tables are the stems after ": " in its text.
-FAKE_RUNNER_DUCKDB = r'''import json, os, re, signal, threading, time
+# per-run latency in ms, an error (`error_on_run`: on that timed run alone), a hang, a crash by
+# signal, or an error writing its answer. The latency also moves the runner's `time.perf_counter_ns`,
+# which reads the fake's clock alone. After LOAD it writes Sirius's log as Sirius 8d17afe does under
+# SIRIUS_LOG_BACKEND=spdlog: `<SIRIUS_LOG_DIR>/sirius_<day>.log`, a QueryBegin line per statement,
+# buffered and flushed every `log_flush_s`, stamped by a log clock whose day names the file. A
+# query's `log` says what its executions write: `gpu` (the default), `cpu` (a silent decline),
+# `no_scan`, `fallback` (a runtime fallback) or `plan_fallback`; `rotate` moves the clock to that
+# day's midnight at its warm-up. Nothing is logged after the label `silent_after` names.
+FAKE_RUNNER_DUCKDB = r'''import datetime, json, os, re, signal, threading, time
 __version__ = "1.5.6"
 _SCRIPT = json.load(open(os.environ["FAKE_DUCKDB_SCRIPT"]))
 _counts = {}
-_sirius = {"dir": None, "day": "2026-11-10", "pending": [], "ordinal": 0}
+_sirius = {"dir": None, "clock": datetime.datetime(2026, 11, 10, 2, 21), "pending": [], "ordinal": 0,
+           "window": 0, "silent": False}
 _lock = threading.Lock()
 # The runner's clock: it moves by each query's scripted latency alone, so what the runner measures
 # around a statement is that latency exactly, whatever else the host is doing.
@@ -186,10 +188,29 @@ def _log(**entry):
 
 
 def _sirius_log(message):
-    if _sirius["dir"] is None:
+    if _sirius["dir"] is None or _sirius["silent"]:
         return
     with _lock:
-        _sirius["pending"].append((_sirius["day"], f"[2026-11-10 02:21:00.000] [info] [fake.cpp:1] {message}\n"))
+        at = _sirius["clock"]
+        stamp = at.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        _sirius["pending"].append((at.strftime("%Y-%m-%d"), f"[{stamp}] [info] [fake.cpp:1] {message}\n"))
+
+
+# A pin and each execution that reaches the GPU log a window, the clock advanced by `window_ms` (per
+# timed run; default the run's latency). Timed runs count from 1: `window_outcome` maps one to its
+# end's outcome, `rebuild` lists those that rebuild the plan, `windows_missing` those that log no
+# window, and `midnight` names the one whose window crosses into the next day.
+def _window(ms, lines=(), outcome="ok", rebuild=False):
+    """One execution window as Sirius 8d17afe logs it (src/sirius_context.cpp, log_window_event)."""
+    _sirius["window"] += 1
+    tags = f"instance=0x1 connection=1 window={_sirius['window']} query={_sirius['ordinal']}"
+    _sirius_log(f"[window] begin {tags} outcome=-")
+    _sirius_log("Transparent execution: rebuilding Sirius plan at execute (from SQL replan)" if rebuild
+                else "Transparent execution: reusing finalize-validated Sirius plan")
+    for line in lines:
+        _sirius_log(line)
+    _sirius["clock"] += datetime.timedelta(milliseconds=ms)
+    _sirius_log(f"[window] end {tags} outcome={outcome}")
 
 
 def _flush_every(seconds):
@@ -203,7 +224,8 @@ def _flush_every(seconds):
 
 
 def _load():
-    _log(event="load", log={k: os.environ.get(k) for k in ("SIRIUS_LOG_BACKEND", "SIRIUS_LOG_LEVEL", "SIRIUS_LOG_DIR")})
+    _log(event="load", log={k: os.environ.get(k) for k in ("SIRIUS_LOG_BACKEND", "SIRIUS_LOG_LEVEL", "SIRIUS_LOG_DIR",
+                                                          "SIRIUS_CONFIG_FILE")})
     if os.environ.get("SIRIUS_LOG_BACKEND", "spdlog") == "spdlog":
         _sirius["dir"] = os.environ.get("SIRIUS_LOG_DIR", "log")
         os.makedirs(_sirius["dir"], exist_ok=True)
@@ -240,10 +262,14 @@ class _Connection:
                 _sirius["ordinal"] += 1
                 _sirius_log(f"QueryBegin: instance=0x1 connection=1 query={_sirius['ordinal']} SQL: "
                             + " ".join(sql.split()))
+                if f"sirius_set_query_label('{_SCRIPT.get('silent_after')}')" in sql:
+                    _sirius["silent"] = True
         if "pin_table" in sql:
             time.sleep(_SCRIPT.get("pin_s", 0))
+            _window(0)
             return _Result(None)
         if self.database != ":memory:":
+            # A database file's tables are the stems after ": " in its text.
             if "duckdb_tables()" in sql:
                 stems = open(self.database).read().partition(": ")[2]
                 return _Result(None, [(stem,) for stem in stems.split(",") if stem])
@@ -261,9 +287,11 @@ class _Connection:
         q = _SCRIPT.get("queries", {}).get(stem, {})
         n = _counts[stem] = _counts.get(stem, 0) + 1
         if n == 1 and q.get("rotate"):
-            _sirius["day"] = q["rotate"]
+            _sirius["clock"] = datetime.datetime.fromisoformat(q["rotate"])
         if q.get("error"):
             raise RuntimeError(q["error"])
+        if q.get("error_on_run") == n - 1:
+            raise RuntimeError(f"failed on timed run {n - 1}")
         if q.get("crash"):
             _sirius_log("Transparent GPU execution: executing query")
             os.kill(os.getpid(), getattr(signal, q["crash"]))
@@ -272,8 +300,17 @@ class _Connection:
         ms = q.get("warmup_ms", 1) if n == 1 else q.get("runs_ms", [1] * 100)[n - 2]
         time.sleep(ms / 1000)
         _clock["ns"] += round(ms * 1e6)
-        for line in _LINES[q.get("log", "gpu")]:
-            _sirius_log(line)
+        lines, run = _LINES[q.get("log", "gpu")], n - 1
+        if "Transparent GPU execution: executing query" not in lines or run in q.get("windows_missing", []):
+            for line in lines:
+                _sirius_log(line)
+            return _Result(_Table(f"{stem}#{n}"))
+        window_ms = q["window_ms"][run - 1] if run and "window_ms" in q else ms
+        if run and run == q.get("midnight"):
+            midnight = datetime.datetime.combine(_sirius["clock"].date() + datetime.timedelta(days=1),
+                                                 datetime.time())
+            _sirius["clock"] = midnight - datetime.timedelta(milliseconds=window_ms / 2)
+        _window(window_ms, lines, q.get("window_outcome", {}).get(str(run), "ok"), run in q.get("rebuild", []))
         return _Result(_Table(f"{stem}#{n}"))
 
     def register(self, name, table):
@@ -575,24 +612,23 @@ def test_the_file_parses_as_the_rust_fixture_does():
     for line in lines[2:]:
         query, ms, runs, run_ms, run_runs, status, note = line.split("\t")
         if status == "ok":
-            assert re.fullmatch(r"\d+\.\d", ms) and re.fullmatch(r"\d+\.\d(,\d+\.\d)*", runs), line
-            assert (run_ms, run_runs) == ("-", "-"), line
+            for second, every in [(ms, runs), (run_ms, run_runs)]:
+                assert re.fullmatch(r"\d+\.\d", second) and re.fullmatch(r"\d+\.\d(,\d+\.\d)*", every), line
+            assert len(runs.split(",")) == len(run_runs.split(",")), line
         else:
             assert (ms, runs, run_ms, run_runs, status) == ("-", "-", "-", "-", "failed") and note, line
 
 
-def test_an_ok_row_has_seven_fields():
-    """A row timed without its execution windows: the wall's two fields, then `-` `-` for the run's."""
-    run = run_queries(["q6"], script={"queries": {"q6": {"runs_ms": [30, 10, 20]}}}, runs=3)
-    assert run.proc.returncode == 0, run.proc.stderr
-    [line] = run.tsv.splitlines()[2:]
-    assert line.split("\t") == ["q6", "20.0", "30.0,10.0,20.0", "-", "-", "ok", "-"], line
-
-
-def test_ok_row_writes_the_windows_beside_the_walls():
+def runner_module():
+    """The runner imported in this process, for its pure functions."""
     spec = importlib.util.spec_from_file_location("sirius_bench", SCRIPT)
     runner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runner)
+    return runner
+
+
+def test_ok_row_writes_the_windows_beside_the_walls():
+    runner = runner_module()
     assert (runner.ok_row("q1", [420, 400, 410], [305, 300, 302], note="plan rebuilt in 1 of 3 runs")
             == "q1\t410.0\t420.0,400.0,410.0\t302.0\t305.0,300.0,302.0\tok\tplan rebuilt in 1 of 3 runs")
     assert runner.failed_row("q2", "boom") == "q2\t-\t-\t-\t-\tfailed\tboom"
@@ -651,10 +687,12 @@ def test_a_fallback_line_is_not_run_on_the_gpu():
 
 def test_each_query_is_judged_by_its_own_warm_up():
     """Sirius flushes its log every few seconds, so the lines of one query's timed runs can land
-    after the next query starts: they must not count for it."""
-    run = run_queries(["q1", "q6", "q3"], script={"log_flush_s": 1, "queries": {"q6": {"log": "cpu"}}}, runs=2)
+    after the next query starts: q1 fails on its second timed run, with its first still unflushed
+    when q6 starts, and q1's GPU lines must not count for q6."""
+    script = {"log_flush_s": 1, "queries": {"q1": {"error_on_run": 2}, "q6": {"log": "cpu"}}}
+    run = run_queries(["q1", "q6", "q3"], script=script, runs=2)
     assert run.proc.returncode == 0, run.proc.stderr
-    assert run.rows()["q1"][4] == "ok" and run.rows()["q3"][4] == "ok", run.rows()
+    assert run.rows()["q1"][4:] == ("failed", "failed on timed run 2") and run.rows()["q3"][4] == "ok", run.rows()
     not_on_gpu(run, "q6", "no Transparent GPU execution")
 
 
@@ -692,6 +730,145 @@ def test_a_warm_up_the_log_never_shows_is_not_run_on_the_gpu():
     run = run_queries(["q6"], script={"log_flush_s": 3600})
     assert run.proc.returncode == 0, run.proc.stderr
     not_on_gpu(run, "q6", "no log of its warm-up")
+
+
+# --- the execution windows ----------------------------------------------------------------------
+
+def labels(run):
+    return [c["sql"] for c in run.executed(r"sirius_set_query_label")]
+
+
+def test_records_each_timed_run_s_window_and_the_second_smallest():
+    script = {"queries": {"q1": {"runs_ms": [420, 400, 410], "window_ms": [305, 300, 302]}}}
+    run = run_queries(["q1"], script=script, runs=3)
+    assert run.proc.returncode == 0, run.proc.stderr
+    assert run.tsv.splitlines()[2:] == ["q1\t410.0\t420.0,400.0,410.0\t302.0\t305.0,300.0,302.0\tok\t-"], run.tsv
+    assert labels(run) == ["CALL sirius_set_query_label('q1')", "CALL sirius_set_query_label('q1 timed')",
+                           "CALL sirius_set_query_label('q1 done')"], labels(run)
+    sirius = [c["sql"] for c in run.executed(r"sirius_set_query_label|/\* q1 \*/")]
+    assert sirius[-1] == "CALL sirius_set_query_label('q1 done')" and len(sirius) == 3 + 1 + 3, sirius
+
+
+def test_a_window_ended_unwind_fails_the_row():
+    for outcome in ["unwind", "cleanup_failed"]:
+        run = run_queries(["q1", "q6"], script={"queries": {"q1": {"window_outcome": {"2": outcome}}}}, runs=3)
+        assert run.proc.returncode == 0, run.proc.stderr
+        assert run.rows()["q1"] == ("-", "-", "-", "-", "failed", f"a window ended {outcome}"), run.rows()
+        assert "q1" not in [c["stem"] for c in run.calls if c["event"] == "answer"], "a failed row kept its answer"
+        assert run.rows()["q6"][4] == "ok", run.rows()
+
+
+def test_a_missing_window_fails_the_row_naming_the_counts():
+    run = run_queries(["q1"], script={"queries": {"q1": {"windows_missing": [2]}}}, runs=3)
+    assert run.proc.returncode == 0, run.proc.stderr
+    assert run.rows()["q1"] == ("-", "-", "-", "-", "failed", "2 execution windows logged for 3 timed runs"), run.rows()
+
+
+def test_a_rebuilt_plan_keeps_the_time_and_says_so():
+    script = {"queries": {"q1": {"runs_ms": [420, 400, 410], "window_ms": [305, 300, 302], "rebuild": [1, 3]}}}
+    run = run_queries(["q1"], script=script, runs=3)
+    assert run.proc.returncode == 0, run.proc.stderr
+    assert run.rows()["q1"] == ("410.0", "420.0,400.0,410.0", "302.0", "305.0,300.0,302.0", "ok",
+                                "plan rebuilt in 2 of 3 runs"), run.rows()
+
+
+def test_a_window_across_midnight_spans_both_files():
+    """The span is taken from the full timestamp: by the time of day alone it would be negative."""
+    script = {"queries": {"q1": {"window_ms": [305, 300, 302], "midnight": 2}}}
+    run = run_queries(["q1"], script=script, runs=3)
+    assert run.proc.returncode == 0, run.proc.stderr
+    assert list(run.logs) == ["sirius_2026-11-10.log", "sirius_2026-11-11.log"], list(run.logs)
+    windows = [line for line in run.logs["sirius_2026-11-10.log"].splitlines() if "[window]" in line]
+    assert "[window] begin" in windows[-1] and "23:59:59.850" in windows[-1], windows[-1]
+    assert run.logs["sirius_2026-11-11.log"].startswith("[2026-11-11 00:00:00.150]"), run.logs
+    assert run.rows()["q1"][2:] == ("302.0", "305.0,300.0,302.0", "ok", "-"), run.rows()
+
+
+OLD_Q1_TIMED_LOG = "".join(f"[2026-11-09 23:00:00.000] [info] [fake.cpp:1] {line}\n" for line in [
+    "QueryBegin: instance=0x1 connection=1 query=9 SQL: CALL sirius_set_query_label('q1 timed')",
+    "[window] begin instance=0x1 connection=1 window=90 query=9 outcome=-",
+    "[window] end instance=0x1 connection=1 window=90 query=9 outcome=ok",
+    "QueryBegin: instance=0x1 connection=1 query=10 SQL: CALL sirius_set_query_label('q1 done')"])
+
+
+def test_another_query_s_late_lines_do_not_count():
+    """Each row takes the windows between its own `timed` and `done` labels alone: not an earlier
+    run's, not its warm-up's, and not the query before it, which failed on its second timed run with
+    its first run's window still unflushed when q1 started."""
+    script = {"log_flush_s": 1, "queries": {"q3": {"window_ms": [10, 11], "error_on_run": 2},
+                                            "q1": {"window_ms": [20, 21]}, "q6": {"window_ms": [30, 31]}}}
+    run = run_queries(["q3", "q1", "q6"], script=script, runs=2, old_log=OLD_Q1_TIMED_LOG)
+    assert run.proc.returncode == 0, run.proc.stderr
+    assert run.rows()["q3"][4:] == ("failed", "failed on timed run 2"), run.rows()
+    assert {stem: run.rows()[stem][2:4] for stem in ["q1", "q6"]} == {
+        "q1": ("21.0", "20.0,21.0"), "q6": ("31.0", "30.0,31.0")}, run.rows()
+
+
+def test_an_unpaired_window_is_refused():
+    runner = runner_module()
+    begin = ("[2026-11-10 02:21:00.000] [info] [fake.cpp:1] [window] begin instance=0x1 connection=1 window=7 "
+             "query=3 outcome=-")
+    end = begin.replace("begin", "end").replace("outcome=-", "outcome=ok").replace("00.000", "00.300")
+    assert runner.window_spans(f"{begin}\n{end}\n") == ([300.0], 0)
+    for log, said in [(begin, "window 7 began and never ended"), (end, "window 7 ended without a begin")]:
+        try:
+            runner.window_spans(log + "\n")
+        except ValueError as e:
+            assert str(e) == said, (str(e), said)
+        else:
+            raise AssertionError(f"{log!r} was not refused")
+
+
+def test_timed_runs_the_log_never_shows_fail_the_row():
+    run = run_queries(["q1"], script={"silent_after": "q1 timed"}, runs=2)
+    assert run.proc.returncode == 0, run.proc.stderr
+    assert run.rows()["q1"] == ("-", "-", "-", "-", "failed", "no log of its timed runs in 10 s"), run.rows()
+
+
+OLD_COLUMNS = "query\tms_2nd_min\truns_ms\tstatus\tnote"
+
+
+def test_resume_and_list_refuse_an_old_column_line():
+    old = existing().replace("run_ms_2nd_min\trun_runs_ms\t", "").replace("5.0,6.0\t-\t-\t", "5.0,6.0\t")
+    assert old.splitlines()[1] == OLD_COLUMNS and old.splitlines()[2] == "q1\t5.0\t5.0,6.0\tok\t-", old
+    run = run_queries(["q1"], extra=["--list", "q1,q6"], existing=old, answers=["q1", "q6"])
+    assert run.proc.returncode == 2, (run.proc.returncode, run.proc.stderr)
+    assert "column line" in run.proc.stderr and "--list" in run.proc.stderr, run.proc.stderr
+    assert run.calls == [] and run.tsv == old and run.answers_kept, "a refused run changed something"
+    run = run_queries(["q1", "q6"], extra=["--resume"], existing=old, answers=["q1"])
+    assert run.proc.returncode == 0, run.proc.stderr
+    assert run.executed(r"/\* q1 \*/"), "a row of the old column line was kept"
+    assert run.tsv.splitlines()[1] == existing().splitlines()[1] and run.rows()["q1"][4] == "ok", run.tsv
+
+
+def test_config_is_refused_beside_resume_or_list():
+    """Rows timed under another config are not this run's to keep, nor this run's to join."""
+    for extra, pair in [(["--resume"], "--config and --resume"), (["--list", "q1,q6"], "--config and --list")]:
+        run = run_queries(["q1"], extra=["--config", str(CONFIG), *extra], existing=existing(), answers=["q1"])
+        assert run.proc.returncode == 2 and pair in run.proc.stderr, (extra, run.proc.returncode, run.proc.stderr)
+        assert run.calls == [] and run.tsv == existing() and run.answers_kept, "a refused run changed something"
+
+
+def test_the_self_test_takes_no_config():
+    proc = subprocess.run([sys.executable, str(SCRIPT), "--self-test", "--config", str(CONFIG)],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 2 and "runs alone" in proc.stderr, (proc.returncode, proc.stderr)
+
+
+def test_config_flag_reaches_sirius_config_file():
+    run = run_queries(["q6"], runs=2)
+    [load] = [c for c in run.calls if c["event"] == "load"]
+    assert load["log"]["SIRIUS_CONFIG_FILE"].endswith("/opt-sirius/sirius-config.yaml"), load
+    with tempfile.TemporaryDirectory() as tmp:
+        config = pathlib.Path(tmp) / "sirius-departure.yaml"
+        config.write_text(CONFIG.read_text())
+        run = run_queries(["q6"], runs=2, extra=["--config", str(config)])
+        assert run.proc.returncode == 0, run.proc.stderr
+        [load] = [c for c in run.calls if c["event"] == "load"]
+        assert load["log"]["SIRIUS_CONFIG_FILE"] == str(config), load
+        run = run_queries(["q6"], runs=2, extra=["--config", str(config) + ".missing"])
+        assert run.proc.returncode == 2 and "--config" in run.proc.stderr, (run.proc.returncode, run.proc.stderr)
+        assert run.calls == [] and run.tsv == "", "a refused --config ran something"
 
 
 def test_bad_input_is_refused_before_any_query():

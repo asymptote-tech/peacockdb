@@ -121,13 +121,13 @@ How a query runs, and what Sirius logs at `8d17afe` (`src/sirius_context.cpp:551
   - an outcome other than `ok` → `failed: a window ended <outcome>`;
   - no `done` line in `LOG_WAIT_S` → `failed: no log of its timed runs in 10 s`.
 
-- [ ] **Step 1: Teach the fake to log windows.**
+- [x] **Step 1: Teach the fake to log windows.**
   - Each scripted execution writes `[window] begin` and `[window] end` with a fresh window id.
   - The timestamps come from a log clock the fake advances by the query's scripted `window_ms`
     (default: the run's latency).
   - Script keys: `window_outcome`, `rebuild` (runs that log a rebuild), `windows_missing` (runs
     that log none), `midnight` (the window crosses into the next day's file).
-- [ ] **Step 2: Write the failing tests.**
+- [x] **Step 2: Write the failing tests.**
   - `test_records_each_timed_run_s_window_and_the_second_smallest`: `--runs 3`, walls
     `420, 400, 410`, windows `305, 300, 302` → the row
     `q1\t410.0\t420.0,400.0,410.0\t302.0\t305.0,300.0,302.0\tok\t-`.
@@ -139,19 +139,18 @@ How a query runs, and what Sirius logs at `8d17afe` (`src/sirius_context.cpp:551
   - `test_resume_and_list_refuse_an_old_column_line` (Review Focus 4): `--list` exit 2 naming
     the column line, `--resume` keeps no row.
   - `test_config_flag_reaches_sirius_config_file`.
-- [ ] **Step 3: Run them; they fail.**
-- [ ] **Step 4: Implement** `between_labels`, `window_spans`, the `done` label, the row rules
+- [x] **Step 3: Run them; they fail.**
+- [x] **Step 4: Implement** `between_labels`, `window_spans`, the `done` label, the row rules
   above, the column-line check in `read_results`'s callers, and `--config`. The timestamps are
   parsed with `datetime.strptime(…, "%Y-%m-%d %H:%M:%S.%f")`.
-- [ ] **Step 5: Run the whole file and the image's self-test test; they pass.** Mutations to
+- [x] **Step 5: Run the whole file and the image's self-test test; they pass.** Mutations to
   try:
   - drop the `outcome` check;
   - count windows outside the labels;
   - take the time of day only.
 
   Each must fail a test.
-- [ ] **Step 6: Rebuild the image locally** (`image.sh build sirius 26.08`), self-test green.
-  Then commit.
+- [x] **Step 6: Commit.** The image's self-test runs where it is published (Task 4 Step 1).
 
 ### Task 3: the page and `benchmarks.csv` show both clocks
 
@@ -216,10 +215,13 @@ The page:
 **Files:**
 - Modify: `llm-wiki/tasks/sirius-timing-detail.md` (create on first write)
 
-Each experiment is a `run-sirius.sh … run` over a data directory holding only the tables its
-queries read: symlinks to the VM's sf40 files, made by hand. It runs with an experiment's config
-passed by `--config`. The config sits under the shipped `testdata/calibration/sirius/experiments/`,
-which git ignores. Every command that is not a committed script goes into the detail file
+Each experiment runs the runner in the Sirius container as `vm_sirius` (`run-sirius-vm.sh`)
+starts it, over a data directory holding only the tables its queries read: symlinks to the VM's
+sf40 files, made by hand. `run-sirius.sh run` takes neither `--data` nor `--out`, so the
+experiment's `docker run` is written out. It passes the experiment's config by `--config` and
+its own `--out`, both under the shipped `testdata/calibration/sirius/experiments/`, which git
+ignores: an experiment never writes into `testdata/benchmark-results/`, whose `# ` line does not
+name the config. Every command that is not a committed script goes into the detail file
 verbatim, with its time.
 
 - [ ] **Step 1: Publish** the image of Tasks 1–2 (`images.yml`, Global Constraints). Wait for
@@ -247,7 +249,9 @@ verbatim, with its time.
 - [ ] **Step 7: The footer.** q6's planning span (wall minus window) as today, with
   `parquet_metadata_cache` on, and with tables registered other than as `read_parquet` views,
   if `pin_table` accepts it.
-- [ ] **Step 8: The log.** q6's wall at `info` and at `warn` (`SET sirius_log_level`).
+- [ ] **Step 8: The log.** q6's wall at `info` and at `warn` (`SET sirius_log_level`). At `warn`
+  Sirius logs neither the GPU evidence nor the windows, so the runner fails the row: both walls
+  come from a short timing script in the container, written into the detail file.
 - [ ] **Step 9: Device residency.** Only if Step 4 shows timed runs not copying from the host:
   find the setting that makes every run copy, then time q6 and tpcds q64 both ways.
 - [ ] **Step 10: Stop the H100.** Write each finding into the detail file under "Findings",

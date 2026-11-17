@@ -3,7 +3,7 @@
 its PIN and its config.
 
   sirius-bench.py --dataset tpch|tpcds --sf <n> --data <dir> --queries <stem>,… --runs <n>
-                  --timeout <s> --out <testdata> [--list <stem>,…] [--resume]
+                  --timeout <s> --out <testdata> [--list <stem>,…] [--resume] [--config <yaml>]
   sirius-bench.py --self-test
 
 A run times each query, by stem, from <out>/<ds>-queries/<stem>.sql over <data>/<table>.parquet,
@@ -12,17 +12,21 @@ view per table, and every table pinned once (`tier = 'parquet'`), untimed and ou
 timeout. Sirius logs at info into <out>/calibration/sirius/<ds>.sf<sf>/log/, and each query's
 warm-up must show there that it ran on the GPU, with no fallback, or its row is `failed: not run
 on the GPU (<what the log showed>)` and it is not timed. Otherwise --runs runs are timed around the
-statement and its Arrow fetch, and the last run's Arrow result is stored as table "<stem>" of
+statement and its Arrow fetch, and each run's execution window is read from the log between the
+labels `<stem> timed` and `<stem> done`: one window per run, each ended `ok`, or the row is
+failed naming what the log showed. The last run's Arrow result is stored as table "<stem>" of
 <out>/calibration/sirius/<ds>.sf<sf>/answers.duckdb through a plain DuckDB connection. Each row
-goes into <out>/benchmark-results/h100-80gb-hbm3/<ds>.sf<sf>/sirius.tsv as it comes:
-`ok` with the second-smallest run, else `failed: <first line>`. A query past --timeout (from its
+goes into <out>/benchmark-results/h100-80gb-hbm3/<ds>.sf<sf>/sirius.tsv as it comes: `ok` with
+the second-smallest of the walls and of the windows, else `failed: <first line>`. A query past --timeout (from its
 warm-up) or a worker that dies is `failed: timeout after <s> s` or `failed: crashed (<signal>)`,
 and a fresh worker pins again for the next query. --resume keeps the file's rows where its
 `sirius` and `host` are this run's. --list names the whole list --queries narrows: the file's
 other rows and the answers' other tables stay as they are, and a query's own answer is dropped
 before it runs; a file of another `sirius` or `host` is refused. A timed row either keeps is
 refused where the answers lack its table. Without either, or with no row kept, the file and the
-answers are this run's alone. Rows go in the list's order (--list, else --queries).
+answers are this run's alone. A file of another column line is never kept, and --list refuses it.
+Rows go in the list's order (--list, else --queries). --config names the Sirius config for the
+run, by default the image's, and is refused beside --resume or --list.
 Exit 0; 1 a worker could not pin; 2 bad input, refused before any query.
 
 --self-test checks the image where no GPU is: the extension's sha256 against the PIN, Sirius's
@@ -32,6 +36,7 @@ loads the extension: a GPU-less host has no libcuda to load it with. Exit 0, or 
 check that failed.
 """
 import argparse
+import datetime
 import hashlib
 import multiprocessing
 import os
@@ -78,8 +83,14 @@ GPU_OPERATOR = "GPU_SCAN"
 FALLBACK = re.compile(r"Transparent execution fallback|falling back to DuckDB CPU|fallback to DuckDB")
 # spdlog's "[time] [level] [file:line] " before each message.
 LOG_PREFIX = re.compile(r"^(\[[^\]]*\] ){3}")
-# Sirius flushes its log every 3 s (sirius_log_flush_seconds); a warm-up's lines are awaited this long.
+# Sirius flushes its log every 3 s (sirius_log_flush_seconds); each label that ends a query's part
+# of the log, its warm-up's and its timed runs', is awaited this long.
 LOG_WAIT_S = 10
+# An execution window's line (src/sirius_context.cpp, log_window_event) under spdlog's
+# `[%Y-%m-%d %T.%e]` stamp: milliseconds, so a span has 1 ms resolution.
+WINDOW = re.compile(r"^\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3})\] .*?\[window\] (begin|end) .*?\bwindow=(\S+) "
+                    r".*?\boutcome=(\S+)")
+REBUILD = "Transparent execution: rebuilding Sirius plan at execute"
 STEM = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 # The driver's libraries, not found where no GPU is mounted, and the runtime every image has.
@@ -222,10 +233,11 @@ def provenance():
 
 
 def read_results(path):
-    """An existing sirius.tsv: its `# ` values and its rows by query, each row's line as written."""
+    """An existing sirius.tsv: its `# ` values, its column line, and its rows by query, each row's
+    line as written."""
     lines = path.read_text().splitlines()
     preamble = dict(word.split("=", 1) for word in lines[0][2:].split(" ") if "=" in word)
-    return preamble, {line.split("\t", 1)[0]: line for line in lines[2:] if line}
+    return preamble, lines[1], {line.split("\t", 1)[0]: line for line in lines[2:] if line}
 
 
 def write_results(path, preamble, rows):
@@ -238,13 +250,11 @@ def write_results(path, preamble, rows):
 
 
 def timed_fields(runs):
-    """A clock's two fields: the second-smallest run and every run, or `-` `-` where it has none."""
-    if runs is None:
-        return "-\t-"
+    """A clock's two fields: the second-smallest run and every run."""
     return f"{sorted(runs)[1]:.1f}\t" + ",".join(f"{ms:.1f}" for ms in runs)
 
 
-def ok_row(stem, walls, windows=None, note=""):
+def ok_row(stem, walls, windows, note=""):
     return f"{stem}\t{timed_fields(walls)}\t{timed_fields(windows)}\tok\t{note or '-'}"
 
 
@@ -272,10 +282,11 @@ def label_line(label):
     return f"SQL: CALL sirius_set_query_label('{label}')"
 
 
-def warm_up_log(log_dir, sizes, stem):
-    """The warm-up's lines: from its label's statement to the timed runs' label's, which bound it
-    in a log that other queries' late-flushed lines share. None if the log shows no end in time."""
-    start, end = label_line(stem), label_line(f"{stem} timed")
+def between_labels(log_dir, sizes, start, end):
+    """The log from the label `start`'s statement to `end`'s, which bound a part of one query in a
+    log that other queries' late-flushed lines share. Each label is logged once past `sizes`, so
+    the first of each is the query's. None if the log shows no `end` in time."""
+    start, end = label_line(start), label_line(end)
     deadline = time.monotonic() + LOG_WAIT_S
     while True:
         text = log_since(log_dir, sizes)
@@ -303,10 +314,49 @@ def off_the_gpu(log):
     return None
 
 
+def window_spans(log):
+    """Each execution window's span in ms, in the order they began, and how many rebuilt their plan.
+    Raises ValueError naming a window that is unpaired or ended other than `ok`."""
+    began, spans, rebuilt = {}, {}, set()
+    for line in log.splitlines():
+        window = WINDOW.match(line)
+        if window is None:
+            if REBUILD in line:
+                rebuilt.update(began)
+            continue
+        stamp, event, ident, outcome = window.groups()
+        at = datetime.datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S.%f")
+        if event == "begin":
+            began[ident], spans[ident] = at, None
+            continue
+        if ident not in began:
+            raise ValueError(f"window {ident} ended without a begin")
+        if outcome != "ok":
+            raise ValueError(f"a window ended {outcome}")
+        spans[ident] = (at - began.pop(ident)).total_seconds() * 1000
+    if began:
+        raise ValueError(f"window {next(iter(began))} began and never ended")
+    return list(spans.values()), len(rebuilt)
+
+
+def timed_windows(log_dir, sizes, stem, runs):
+    """(windows, note) of the timed runs, or the reason the row fails as a str."""
+    log = between_labels(log_dir, sizes, f"{stem} timed", f"{stem} done")
+    if log is None:
+        return f"no log of its timed runs in {LOG_WAIT_S} s"
+    try:
+        windows, rebuilt = window_spans(log)
+    except ValueError as e:
+        return str(e)
+    if len(windows) != runs:
+        return f"{len(windows)} execution windows logged for {runs} timed runs"
+    return windows, f"plan rebuilt in {rebuilt} of {runs} runs" if rebuilt else ""
+
+
 def answer(con, answers, log_dir, runs, stem, sql):
-    """One query's message to the parent: a labelled warm-up, its GPU evidence, the timed runs and
-    the stored answer, or the step that failed. An earlier run's answer goes first, so a query that
-    fails now leaves none."""
+    """One query's message to the parent: a labelled warm-up, its GPU evidence, the labelled timed
+    runs and their windows, and the stored answer, or the step that failed. An earlier run's answer
+    goes first, so a query that fails now leaves none."""
     try:
         answers.execute(f'DROP TABLE IF EXISTS "{stem}"')
     except Exception as e:
@@ -316,7 +366,7 @@ def answer(con, answers, log_dir, runs, stem, sql):
         con.execute(f"CALL sirius_set_query_label('{stem}')")
         con.execute(sql).to_arrow_table()
         con.execute(f"CALL sirius_set_query_label('{stem} timed')")
-        shown = off_the_gpu(warm_up_log(log_dir, sizes, stem))
+        shown = off_the_gpu(between_labels(log_dir, sizes, stem, f"{stem} timed"))
         if shown:
             return "failed", f"not run on the GPU ({shown})"
         timed, table = [], None
@@ -325,8 +375,12 @@ def answer(con, answers, log_dir, runs, stem, sql):
             start = time.perf_counter_ns()
             table = con.execute(sql).to_arrow_table()
             timed.append((time.perf_counter_ns() - start) / 1e6)
+        con.execute(f"CALL sirius_set_query_label('{stem} done')")
     except Exception as e:
         return "failed", first_line(e)
+    windows = timed_windows(log_dir, sizes, stem, runs)
+    if isinstance(windows, str):
+        return "failed", windows
     try:
         answers.register(ANSWER, table)
         try:
@@ -335,7 +389,7 @@ def answer(con, answers, log_dir, runs, stem, sql):
             answers.unregister(ANSWER)
     except Exception as e:
         return "failed", f"the answer was not stored: {first_line(e)}"
-    return "ok", timed
+    return "ok", (timed, *windows)
 
 
 def worker(conn, config, log_dir, tables, answers_path, runs):
@@ -407,7 +461,7 @@ def run_query(work, stem, sql, timeout):
     except EOFError:
         return failed_row(stem, f"crashed ({work.ended()})"), False
     if kind == "ok":
-        return ok_row(stem, value), True
+        return ok_row(stem, *value), True
     return failed_row(stem, value), True
 
 
@@ -421,6 +475,11 @@ def checked(args):
         raise Refused(f"--runs {args.runs}: the second-smallest of at least two runs is reported")
     if args.timeout < 1:
         raise Refused(f"--timeout {args.timeout}: seconds, at least 1")
+    if args.config is not None and (args.resume or args.list is not None):
+        raise Refused(f"--config and {'--resume' if args.resume else '--list'}: rows timed under another "
+                      f"config are not this run's to keep; run the whole list")
+    if args.config is not None and not pathlib.Path(args.config).is_file():
+        raise Refused(f"--config {args.config}: no such file")
     data, out = pathlib.Path(args.data), pathlib.Path(args.out)
     parquet = sorted(data.glob("*.parquet")) if data.is_dir() else []
     if not parquet:
@@ -479,14 +538,18 @@ def run(args):
     preamble = provenance()
     tsv = pathlib.Path(args.out) / "benchmark-results" / DEVICE_TREE / f"{args.dataset}.sf{args.sf}" / "sirius.tsv"
     answers = pathlib.Path(args.out) / "calibration" / "sirius" / f"{args.dataset}.sf{args.sf}" / "answers.duckdb"
-    # Kept across runs: each warm-up is found by its own label lines, past the sizes it started at.
+    # Kept across runs: a query's warm-up and timed runs are found by its own label lines, past the
+    # sizes it started at.
     log_dir = answers.with_name("log")
     stems = [stem for stem, _ in queries]
     order = args.list.split(",") if args.list is not None else stems
     rows = {}
     if (args.resume or args.list is not None) and tsv.is_file():
-        theirs, kept = read_results(tsv)
-        ours = all(theirs.get(key) == preamble[key] for key in ("sirius", "host"))
+        theirs, columns, kept = read_results(tsv)
+        if args.list is not None and columns != COLUMNS:
+            raise Refused(f"--list: {tsv} has the column line {columns!r}, not this runner's {COLUMNS!r}: "
+                          f"run the whole list, or remove the file")
+        ours = columns == COLUMNS and all(theirs.get(key) == preamble[key] for key in ("sirius", "host"))
         if args.list is not None and not ours:
             mine = " ".join(f"{key}={preamble[key]}" for key in ("sirius", "host"))
             raise Refused(f"--list: {tsv} is of sirius={theirs.get('sirius')} host={theirs.get('host')}, "
@@ -513,7 +576,7 @@ def run(args):
             print(f"{stem}: kept", flush=True)
             continue
         if work is None:
-            work = Worker(context, CONFIG, log_dir, tables, answers, args.runs)
+            work = Worker(context, args.config or CONFIG, log_dir, tables, answers, args.runs)
             try:
                 kind, value = work.conn.recv()
             except EOFError:
@@ -545,10 +608,11 @@ def main():
     parser.add_argument("--out")
     parser.add_argument("--list")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--config", help="the Sirius config for the run; the image's by default")
     args = parser.parse_args()
     run_flags = ["dataset", "sf", "data", "queries", "runs", "timeout", "out"]
     if args.self_test:
-        if any(getattr(args, flag) is not None for flag in run_flags + ["list"]) or args.resume:
+        if any(getattr(args, flag) is not None for flag in run_flags + ["list", "config"]) or args.resume:
             parser.error("--self-test runs alone")
         return self_test()
     missing = [f"--{flag}" for flag in run_flags if getattr(args, flag) is None]
