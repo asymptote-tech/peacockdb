@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 8615 test cases — Rust 6356, C++ 286, Python 1973.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes two sets run by hand: the external-embeddings sidecar recount and the 35 tests under `scripts/env/tests/` that need the images built. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 8624 test cases — Rust 6365, C++ 286, Python 1973.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes two sets run by hand: the external-embeddings sidecar recount and the 35 tests under `scripts/env/tests/` that need the images built. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -25,7 +25,7 @@ are grouped by tier: crate integration external (a `--test` binary), crate integ
 (`src/tests/`), component (`<component>/tests/`), subcomponent (`<component>/<sub>/tests/`), module
 unit (`foo.rs` beside `foo/tests.rs`).
 
-#### cpu — `--features rust-only`: no FFI, no device. 3770 cases: `--lib` 1246, `test_cpu_corpus` 2455, `test_corpus_goldens` 66, `test_cost_model` 3
+#### cpu — `--features rust-only`: no FFI, no device. 3779 cases: `--lib` 1255, `test_cpu_corpus` 2455, `test_corpus_goldens` 66, `test_cost_model` 3
 
 *crate integration, external*
 
@@ -641,14 +641,24 @@ twice refused, naming both lines; a temp tree's name taken once per process, so 
 never share one; `section_href`'s line; a DuckDB tree a column of its own after the devices, last in each Modes
 table too, its time linked to its line, a time not warm saying its verdict, `failed` and `—`,
 and its version, threads, host and `SELECT 1` floor named in the intro, with what one time holds.
-A `sirius.tsv` adds its group before DuckDB, its total alone, a failed row showing its reason, a
-`wrong` row its note as a device's does; the
-ratio line counts only rows `ok` on both sides; a dataset without the file has dashes and no line,
-and no file anywhere no group. The intro calls the device-side times PeacockDB's; a `sirius.tsv`
-adds a paragraph before DuckDB's: what Sirius's total is, the reads outside the pin, and each file's
-commit, DuckDB, libcudf, driver and device. `benchmarks.csv` holds every result in the page's order, takes the
-list's `skipped` over a failed section, and one status flip moves the page, the ratio and the CSV
-together
+A `sirius.tsv` adds its group before DuckDB, a failed row showing its reason, a `wrong` row its note
+as a device's does; the total ratio line counts only rows `ok` on both sides; a dataset without the
+file has dashes and no line, and no file anywhere no group. The intro says which of PeacockDB's
+times are device-side and what its run is; a `sirius.tsv` adds a paragraph before DuckDB's: what
+Sirius's run and total are, the reads outside the pin, and each file's commit, DuckDB, libcudf,
+driver and device. `benchmarks.csv` holds every result in the page's order, takes the list's
+`skipped` over a failed section, and one status flip moves the page, the ratio and the CSV together
+
+| Benchmark report page, run | [test_support::benchmark_report::run_tests](../peacockdb-core/src/test_support/benchmark_report/run_tests.rs) | 9 |
+|---|---|--:|
+
+the run beside the total: PeacockDB's `run (ms)` after its total, linked as the total is, an untimed
+cell across five; Sirius's group `run (ms)` then `total (ms)`, the `wrong` or `unverified` mark on
+the run, a failed or skipped row one cell across both; the run ratio line over rows Sirius ran `ok`
+with a window and PeacockDB timed, not `wrong`, with `run_us`, before the total line; a section
+without `run_us` and a Sirius row without run times each a `—` and out of the ratio, a `wrong` row's
+mark kept on the `—`; an `ok` or `unverified` row's note, a rebuilt plan, on its run; `run_ms` after
+`total_ms` in the CSV; the Modes tables without a run
 
 | DuckDB results reader | [test_support::duckdb_results::tests](../peacockdb-core/src/test_support/duckdb_results/tests.rs) | 9 |
 |---|---|--:|
@@ -3526,7 +3536,7 @@ a derived value, and `tree_load_us()` gives an old section's load. A failed case
 record instead (above).
 
 **The page**, `testdata/benchmark-report.html`, is committed. Per (dataset, sf), a main table at
-tp1_single: one row per query in the main list's order, four columns per device by name, every
+tp1_single: one row per query in the main list's order, five columns per device by name, every
 device but `MODES_ONLY` (h200, whose tree predates the pinned cache and the peak), then Sirius, then
 DuckDB; a query no such device has a cell for is left out. Below it, a collapsed `<details>` "Modes, <ds>
 sf<sf>": one table per device with a section in the group, each measure (load, execute, total,
@@ -3535,30 +3545,37 @@ A Modes table leaves out a query whose every cell is `—`, the peak group where
 peak, and, where every load in it is unpinned, the per-cell `unpinned` marks, saying so once above
 the table instead; a failure or marker stands in the total, the other measures `—`. Each table
 scrolls sideways rather than widening the page. The test takes the row order from the registry,
-which writes the list; it never reads the list's text. A timed section shows load, execute, total
-(each in ms, the total `device_us` linked to the section) and `peak_bytes` in GiB, labelled the
-accountant's peak, a lower bound on device memory. An `h200/` section's load is `tree_load_us()`
-and its peak `—`. A load is marked `unpinned` when its section's `pinned_cache` is not `on`, or
-is absent: its rounds did not read pinned memory. Every `h200/` load is, since that tree predates
-the cache. A failure shows `failed: <reason>`, a marker `skipped: <reason>`; where the
-device's `cases.csv` has a `skipped` row for the query, its note is shown instead, and a `wrong`
-row adds `wrong answer #NN`. Any other cell is `—`. After the devices, one column per DuckDB tree
-(below), `warm (ms)`: on every row of a query its file holds, `ms_2nd_min` with one decimal,
-linked to its line, or `failed`; else `—`. A time whose `warm` verdict is not `yes` adds
-`not warm: <verdict>`. The intro says the device-side times, load plus execute, are PeacockDB's. It says what one DuckDB
-time is, a CLI process's wall time, and names each DuckDB file's `duckdb`, `threads`, `host` and
-floor (`floor_ms`). Before that, where some `sirius.tsv` exists, a paragraph says what one Sirius
-total is (*Sirius on the H100*, the protocol's step 3, from the pin of step 2), that on some rows
+which writes the list; it never reads the list's text. A timed section shows load, execute, total,
+run (each in ms, the total `device_us` and the run `run_us` linked to the section) and `peak_bytes`
+in GiB, labelled the accountant's peak, a lower bound on device memory. A section without `run_us`
+has `—` for its run. The run is the main table's only: the Modes tables do not show it. An `h200/`
+section's load is `tree_load_us()` and its peak `—`. A load is marked `unpinned` when its section's
+`pinned_cache` is not `on`, or is absent: its rounds did not read pinned memory. Every `h200/` load
+is, since that tree predates the cache. A failure shows `failed: <reason>`, a marker `skipped:
+<reason>`; where the device's `cases.csv` has a `skipped` row for the query, its note is shown
+instead, and a `wrong` row adds `wrong answer #NN`. Any other cell is `—`. After the devices, one
+column per DuckDB tree (below), `warm (ms)`: on every row of a query its file holds, `ms_2nd_min`
+with one decimal, linked to its line, or `failed`; else `—`. A time whose `warm` verdict is not
+`yes` adds `not warm: <verdict>`. The intro says PeacockDB's times are one run's, the
+second-smallest by wall time of its timed runs after one warm-up: load, execute and total
+device-side, the total load plus execute, and the run that run's wall time end to end. It says what
+one DuckDB time is, a CLI process's wall time, and names each DuckDB file's `duckdb`, `threads`,
+`host` and floor (`floor_ms`). Before that, where some `sirius.tsv` exists, a paragraph says what
+one Sirius run and total are (*Sirius on the H100*, the protocol's step 3, from the pin of step 2),
+that a row whose plan was rebuilt inside its window says so beside its run, that on some rows
 Sirius's log counts reads outside the pin, likely bloom filters, inside the timed runs, and each
-file's `sirius`, `duckdb`, `libcudf`, `driver` and `device`. Before DuckDB, a
-device tree with a `<ds>.sf<sf>/sirius.tsv` adds the group `sirius · <device>` (*Sirius on the
-H100*): `load (ms)` and `execute (ms)` always `—`, and `total (ms)`, `ms_2nd_min` with one decimal,
-linked to its line. A `wrong` row adds `wrong answer` and its note, as a device's row does, an
-`unverified` row `unverified`; a `failed`
-or `skipped` row shows its reason as a device's does; a query with no row is `—`. A dataset with a
-`sirius.tsv` has one line between its heading and its table:
-`Σ total Sirius / Σ total DuckDB = <r> over <n> of <m> queries`, where `<n>` counts the rows `ok`
-on both sides and `<m>` the table's rows. The Modes and fused tables have no Sirius column. Last, one
+file's `sirius`, `duckdb`, `libcudf`, `driver` and `device`. Before DuckDB, a device tree with a
+`<ds>.sf<sf>/sirius.tsv` adds the group `sirius · <device>` (*Sirius on the H100*): `run (ms)`,
+`run_ms_2nd_min`, and `total (ms)`, `ms_2nd_min`, each with one decimal, linked to its line. A row
+without run times has `—` for its run. A `wrong` row adds `wrong answer` and its note to the run, as
+a device's row does, an `unverified` row `unverified`; another timed row's note, a rebuilt plan,
+follows on the run too. The total has no mark. A `failed` or `skipped` row shows its reason as a
+device's does, in one cell across both; a query with no row is `—` under each. A dataset with a
+`sirius.tsv` has two lines between its heading and its table:
+`Σ run Sirius / Σ run peacockdb = <r> over <n> of <m> queries`, where `<n>` counts the rows Sirius
+ran `ok` with a run and the device timed, not `wrong`, with `run_us`; then
+`Σ total Sirius / Σ total DuckDB = <r> over <n> of <m> queries`, where `<n>` counts the rows `ok` on
+both sides. `<m>` is the table's rows. The Modes and fused tables have no Sirius column. Last, one
 fused-batches table per `<device>/fused/<ds>.sf<sf>/tp1_single.fused.txt` (*Fused batches*,
 below), read through the fused format's own reader: per batch its queries (ten to a line),
 outcome, nonfused total load, fused load, nonfused total execute and fused execute (ms), the
@@ -3569,10 +3586,12 @@ table's `GpuLoadParquet` nodes across them. A cell's `\n` renders as `<br>`. An 
 all`. No fused file, no table. `render_benchmark_report` in `test_support` writes it through `parse_benchmark_section`
 and `parse_duckdb_results`, with no time and no absolute path, in `testdata/report.html`'s look.
 **`testdata/benchmarks.csv`** holds every result the page holds but the fused batches, one row
-each, under the header `dataset,sf,query,engine,device,mode,load_ms,exec_ms,total_ms,peak_gib,status`.
+each, under the header `dataset,sf,query,engine,device,mode,load_ms,exec_ms,total_ms,run_ms,peak_gib,status`.
 `engine` is `peacockdb`, `sirius` or `duckdb`, and `device` the tree's directory. Every device and
 mode peacockdb has a section for is there, h200 included. Sirius's `mode` is `tp1_single`;
 DuckDB's is empty and its warm time is `total_ms`. Neither has `load_ms`, `exec_ms` or `peak_gib`.
+`run_ms` is PeacockDB's `run_us` and Sirius's `run_ms_2nd_min`, empty where there is none, and
+DuckDB's is empty.
 `status` is the page's, so a list's `skipped` stands over a failed section. A `failed` or `skipped`
 row has no times. Rows go by dataset, sf, the page's query order, engine, device, then mode.
 **A commit that changes a results tree, a fused file or the registry's device cells regenerates

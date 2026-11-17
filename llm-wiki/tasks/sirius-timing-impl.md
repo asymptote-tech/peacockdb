@@ -190,7 +190,7 @@ The page:
   - Sirius: `run_ms_2nd_min`, or empty;
   - DuckDB: empty.
 
-- [ ] **Step 1: Write the failing tests** in `run_tests.rs`:
+- [x] **Step 1: Write the failing tests** in `run_tests.rs`:
   - `the_main_table_shows_peacockdb_s_run_after_its_total`;
   - `a_sirius_group_shows_run_then_total`;
   - `a_failed_sirius_row_spans_both_cells`;
@@ -201,14 +201,14 @@ The page:
   - `the_modes_tables_do_not_change`.
 
   Build each over the existing test trees in `tests.rs`, with `run_us` added where needed.
-- [ ] **Step 2: Run them; they fail.**
-- [ ] **Step 3: Implement.** If `benchmark_report.rs` would pass 1000 lines, move the main table
+- [x] **Step 2: Run them; they fail.**
+- [x] **Step 3: Implement.** If `benchmark_report.rs` would pass 1000 lines, move the main table
   (`dataset_table` and its helpers) into `benchmark_report/main_table.rs`.
-- [ ] **Step 4: Regenerate** with `UPDATE_CANONICAL=1 … the_benchmark_report_matches_the_trees`.
+- [x] **Step 4: Regenerate** with `UPDATE_CANONICAL=1 … the_benchmark_report_matches_the_trees`.
   Then run `test_corpus_goldens`, `test_cpu_corpus`'s `sirius` tests and the lib's
   `benchmark_report` and `sirius_results` tests without the variable: all green. Today's
   `sirius.tsv` has no run times, so the run ratio reads `— over 0 of <m>`.
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ### Task 4: publish the image, then the measuring session on the H100
 

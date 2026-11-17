@@ -1525,8 +1525,8 @@ pub fn write_benchmarks_csv(text: &str) {
 }
 
 /// Every result of the trees under `root` the page shows but the fused batches, one CSV row each
-/// (`dataset,sf,query,engine,device,mode,load_ms,exec_ms,total_ms,peak_gib,status`), in the page's
-/// order: `order` as [`render_benchmark_report`] takes it.
+/// (`dataset,sf,query,engine,device,mode,load_ms,exec_ms,total_ms,run_ms,peak_gib,status`), in the
+/// page's order: `order` as [`render_benchmark_report`] takes it.
 pub fn render_benchmarks_csv(root: &Path, order: &[(String, String)]) -> String {
     benchmark_report::render_csv(root, order)
 }
