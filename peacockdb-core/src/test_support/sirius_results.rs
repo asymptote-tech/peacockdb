@@ -170,7 +170,7 @@ fn row(line: &str) -> Result<SiriusRow, String> {
         }
     };
     let (run_ms_2nd_min, run_runs_ms) = match (timed, run_ms, run_runs) {
-        (_, NONE, NONE) => (None, Vec::new()),
+        (false, NONE, NONE) => (None, Vec::new()),
         (false, _, _) => {
             return Err(format!(
                 "a failed or skipped row has no run time: run_ms_2nd_min and run_runs_ms are {NONE:?}"
@@ -178,7 +178,8 @@ fn row(line: &str) -> Result<SiriusRow, String> {
         }
         (true, NONE, _) | (true, _, NONE) => {
             return Err(format!(
-                "run_ms_2nd_min and run_runs_ms are both set or both {NONE:?}"
+                "an ok, wrong or unverified row has run times: run_ms_2nd_min and run_runs_ms are \
+                 not {NONE:?}"
             ));
         }
         (true, run_ms, run_runs) => {

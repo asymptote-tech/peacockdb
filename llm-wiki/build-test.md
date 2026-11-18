@@ -4,7 +4,7 @@ Code and tests are authoritative; this page maps them.
 
 ## Test categories
 
-**Grand total: 8624 test cases — Rust 6365, C++ 286, Python 1973.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes two sets run by hand: the external-embeddings sidecar recount and the 35 tests under `scripts/env/tests/` that need the images built. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
+**Grand total: 8644 test cases — Rust 6372, C++ 286, Python 1986.** The Python figure includes the 425 runs of the engine's own plans and the per-call model's check on the measured record, which only a manual dispatch runs. It also includes two sets run by hand: the external-embeddings sidecar recount and the 35 tests under `scripts/env/tests/` that need the images built. The header is the sum of the N columns of the two tables below, and the rows count cases: a target's own `--list` total is larger, because its registry test is counted once in Registry ↔ CSV rather than again in each tier it belongs to. Comparing a row against a target total is how this page gets mistakenly reported as drifting.
 
 **Runs** — `dataset-matrix` = pipeline.yml's job with the generated dataset and the cuDF
 matrix, both legs unless a step says one · `cost-report` = the cost-report job · `shad-gpu` =
@@ -624,7 +624,7 @@ peak, provenance last; an `h200/` section reads with no batches and no `load_us`
 its load the loaders' totals; a tree with no loader loads `0`; a marker and a failed case's
 record are not timed; an unknown key beneath a node and a trailer key held twice are refused
 
-| Benchmark report page | [test_support::benchmark_report::tests](../peacockdb-core/src/test_support/benchmark_report/tests.rs) | 28 |
+| Benchmark report page | [test_support::benchmark_report::tests](../peacockdb-core/src/test_support/benchmark_report/tests.rs) | 27 |
 |---|---|--:|
 
 the page over temp trees: a timed section's load, execute, total and peak, the total linked to its
@@ -643,22 +643,23 @@ table too, its time linked to its line, a time not warm saying its verdict, `fai
 and its version, threads, host and `SELECT 1` floor named in the intro, with what one time holds.
 A `sirius.tsv` adds its group before DuckDB, a failed row showing its reason, a `wrong` row its note
 as a device's does; the total ratio line counts only rows `ok` on both sides; a dataset without the
-file has dashes and no line, and no file anywhere no group. The intro says which of PeacockDB's
-times are device-side and what its run is; a `sirius.tsv` adds a paragraph before DuckDB's: what
-Sirius's run and total are, the reads outside the pin, and each file's commit, DuckDB, libcudf,
-driver and device. `benchmarks.csv` holds every result in the page's order, takes the list's
-`skipped` over a failed section, and one status flip moves the page, the ratio and the CSV together
+file has dashes and no line, and no file anywhere no group. `benchmarks.csv` holds every result
+in the page's order, takes the list's `skipped` over a failed section, and one status flip moves
+the page, the ratio and the CSV together
 
-| Benchmark report page, run | [test_support::benchmark_report::run_tests](../peacockdb-core/src/test_support/benchmark_report/run_tests.rs) | 9 |
+| Benchmark report page, run | [test_support::benchmark_report::run_tests](../peacockdb-core/src/test_support/benchmark_report/run_tests.rs) | 10 |
 |---|---|--:|
 
 the run beside the total: PeacockDB's `run (ms)` after its total, linked as the total is, an untimed
 cell across five; Sirius's group `run (ms)` then `total (ms)`, the `wrong` or `unverified` mark on
 the run, a failed or skipped row one cell across both; the run ratio line over rows Sirius ran `ok`
 with a window and PeacockDB timed, not `wrong`, with `run_us`, before the total line; a section
-without `run_us` and a Sirius row without run times each a `—` and out of the ratio, a `wrong` row's
-mark kept on the `—`; an `ok` or `unverified` row's note, a rebuilt plan, on its run; `run_ms` after
-`total_ms` in the CSV; the Modes tables without a run
+without `run_us` a `—` and out of the ratio; a Sirius row without run times failing the page,
+naming its line; an `ok` or `unverified` row's note, a rebuilt plan, on its run; `run_ms` after
+`total_ms` in the CSV; the Modes tables without a run. The intro says which of PeacockDB's times
+are device-side and what its run is; a `sirius.tsv` adds a paragraph before DuckDB's: what
+Sirius's run and total are, its config's three departures, the reads outside the pin and their
+cost from tmpfs, and each file's commit, DuckDB, libcudf, driver and device
 
 | DuckDB results reader | [test_support::duckdb_results::tests](../peacockdb-core/src/test_support/duckdb_results/tests.rs) | 9 |
 |---|---|--:|
@@ -674,11 +675,11 @@ one, a missing preamble, a column line out of order and a query listed twice ref
 
 `sirius.tsv`'s reader and Rust writer, each the other's inverse: the shared fixture
 `testdata/fixtures/sirius-results.tsv` read to a literal and written back, its run columns
-included; a `wrong` and an `unverified` row keep their times; a timed row without run times reads
-as none. Refused, naming the line: a missing preamble or one out of order, a wrong column line,
-eight fields, a query listed twice, an `ok`, `wrong` or `unverified` row without a time, a
-`failed` or `skipped` row with one or with a run time, a run time without its runs or runs
-without their run time, a run count unlike the wall's, and an unknown status. A timed row's status
+included; a `wrong` and an `unverified` row keep their times. Refused, naming the line: a missing
+preamble or one out of order, a wrong column line, eight fields, a query listed twice, an `ok`,
+`wrong` or `unverified` row without a time or without its run times (both, or either of them), a
+`failed` or `skipped` row with one or with a run time, a run count unlike the wall's, and an
+unknown status. A timed row's status
 comes from its answer's verdict; `failed` and `skipped` keep theirs; a timed row whose answer is
 missing is refused, saying why
 
@@ -3562,12 +3563,14 @@ device-side, the total load plus execute, and the run that run's wall time end t
 one DuckDB time is, a CLI process's wall time, and names each DuckDB file's `duckdb`, `threads`,
 `host` and floor (`floor_ms`). Before that, where some `sirius.tsv` exists, a paragraph says what
 one Sirius run and total are (*Sirius on the H100*, the protocol's step 3, from the pin of step 2),
-that a row whose plan was rebuilt inside its window says so beside its run, that on some rows
-Sirius's log counts reads outside the pin, likely bloom filters, inside the timed runs, and each
-file's `sirius`, `duckdb`, `libcudf`, `driver` and `device`. Before DuckDB, a device tree with a
+that a row whose plan was rebuilt inside its window says so beside its run, its config's three
+departures (the cache mode and eviction threshold pinning needs, Quent telemetry off), that on
+some rows Sirius's log counts reads outside the pin, likely bloom filters, inside the timed runs,
+and that served from tmpfs they move no run beyond its spread, and each file's `sirius`,
+`duckdb`, `libcudf`, `driver` and `device`. Before DuckDB, a device tree with a
 `<ds>.sf<sf>/sirius.tsv` adds the group `sirius · <device>` (*Sirius on the H100*): `run (ms)`,
-`run_ms_2nd_min`, and `total (ms)`, `ms_2nd_min`, each with one decimal, linked to its line. A row
-without run times has `—` for its run. A `wrong` row adds `wrong answer` and its note to the run, as
+`run_ms_2nd_min`, and `total (ms)`, `ms_2nd_min`, each with one decimal, linked to its line. A
+`wrong` row adds `wrong answer` and its note to the run, as
 a device's row does, an `unverified` row `unverified`; another timed row's note, a rebuilt plan,
 follows on the run too. The total has no mark. A `failed` or `skipped` row shows its reason as a
 device's does, in one cell across both; a query with no row is `—` under each. A dataset with a
@@ -3836,7 +3839,15 @@ driver must be 580.65.06 or later (`peacockdb.driver-minimum`).
 **The config**, `docker/sirius-config.yaml`, read through `SIRIUS_CONFIG_FILE`, departs from
 Sirius's defaults in three settings. `scan_manager.cache.mode: sirius` and
 `eviction_threshold_fraction: 1.0` are what pinning needs. Quent telemetry is off. Sirius's memory
-is its own: its GPU pool and its pinned host cache, not peacockdb's.
+is its own: its GPU pool and its pinned host cache, not peacockdb's. No other departure is kept
+(`llm-wiki/tasks/sirius-timing-detail.md`, "Configuration"):
+
+- No setting shortens the run beyond its spread. One pipeline thread, 512 MiB scan tasks or 16
+  scan_manager threads are slower; 8 pipeline threads, 8 GiB tasks or 3 scan_manager threads stay
+  within it (`executor.pipeline.num_threads`, `operator_params.scan_task_batch_size`,
+  `executor.scan_manager.num_threads`). So does the log at warn.
+- `parquet_metadata_cache` shortens only the total's planning, which DuckDB's timed runs do not
+  get.
 
 **The container** needs three things the run image's does not, each confirmed on the H100:
 
@@ -3913,6 +3924,9 @@ scripts/env/bench-sirius.sh $H --dataset all
 - Then, at home: `UPDATE_CANONICAL=1 … every_sf40_sirius_status_meets_its_answer` (in
   `test_cpu_corpus`) sets each timed row's status from its answer, and
   `the_benchmark_report_matches_the_trees` regenerates the page and the CSV (*The page*).
+- A rerun writes `-` as every timed row's note. So once the statuses are set, the hand notes on
+  the `wrong` rows are put back before the page is regenerated: #306 (tpcds q73), #316 (tpch
+  scan-limit), and the two that explain an answer (tpcds q31, tpch nested-loop-left-join).
 
 **The protocol** is peacockdb's. The queries are every row of the H100's `cases.csv` at sf40,
 `skipped` rows too, each named by its stem. One worker process per dataset:
@@ -3925,12 +3939,14 @@ scripts/env/bench-sirius.sh $H --dataset all
    `round(x // y, 2)` in a projection, while a bare `//` runs (q59); whether the setting costs them
    is unmeasured.
 2. It pins every table once, `CALL pin_table(…, tier = 'parquet')`: the raw parquet bytes go into
-   Sirius's pinned host cache. The pin is untimed and outside any timeout. It holds the column
-   chunks alone. Sirius's log counts cache misses on every run of 34 of the 84 timed sf40 rows
-   (listed in `git show d290698f:llm-wiki/tasks/sirius-bench-detail.md`), most in tpch q19 and q10: reads from disk
-   (`O_DIRECT`) inside the timed run. The likely cause is the bloom filters after the column
-   chunks, which the pin leaves out; the logs give counts, not bytes, and some queries with equality
-   or `IN` filters (tpch q5, q12) read none. Kept as measured; the cost is unmeasured.
+   Sirius's pinned host cache. The pin is untimed and outside any timeout. From the VM's disk it
+   reads at about 90 MB/s: 461 s for tpch, 163 s for tpcds. It holds the column chunks alone.
+   Sirius's log counts cache misses on every run of 34 of the 84 timed sf40 rows, most in tpch q19
+   (2081 a run) and q10 (972): reads from disk (`O_DIRECT`) inside the timed run. The likely cause
+   is the bloom filters after the column chunks, which the pin leaves out; the logs give counts,
+   not bytes, and some queries with equality or `IN` filters (tpch q5, q12) read none. Served from
+   tmpfs, q10 and q19 miss the same and move no run beyond its spread, so the misses read little
+   and are kept (`llm-wiki/tasks/sirius-timing-detail.md`, finding 4).
 3. Per query: one warm-up, then `--runs` timed runs. Each run has two times: the wall time around
    the statement and an Arrow fetch of its result, and its execution window in Sirius's log
    (*Execution windows*, below). The second-smallest of each is reported. No load, no execute and
@@ -3966,10 +3982,10 @@ unpaired window, or `no log of its timed runs in 10 s`.
 - the column line `query ms_2nd_min runs_ms run_ms_2nd_min run_runs_ms status note`.
 - a row per query. `runs_ms` and `run_runs_ms` are comma-joined, times have one decimal, and a
   missing value is `-`. `ms_2nd_min` and `runs_ms` are the wall; `run_ms_2nd_min` and
-  `run_runs_ms` are Sirius's execution window, as many runs as the wall's, or both `-` in a row
-  timed before the windows were recorded.
+  `run_runs_ms` are Sirius's execution window, as many runs as the wall's.
   `status` is `ok`, `wrong`, `unverified` (timed, with no DuckDB sf40 answer to check it against),
-  `failed` or `skipped`. The first three have times and the last two none. `note` is the reason.
+  `failed` or `skipped`. The first three have both times and the last two none; the reader refuses
+  a row that breaks this, naming its line. `note` is the reason.
 
 `parse_sirius_results` and `write_sirius_results` in `test_support` are its reader and its Rust
 writer. Both are held to `testdata/fixtures/sirius-results.tsv`, and so is the runner. `--resume`

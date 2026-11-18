@@ -1419,10 +1419,9 @@ pub struct SiriusRow {
     pub ms_2nd_min: Option<f64>,
     /// Every timed run, in order; empty when failed or skipped.
     pub runs_ms: Vec<f64>,
-    /// The second-smallest execution window; `None` when failed, skipped, or timed before the
-    /// windows were recorded (`-`).
+    /// The second-smallest execution window; `None` when failed or skipped (`-`).
     pub run_ms_2nd_min: Option<f64>,
-    /// Every timed run's execution window, in order; empty where `run_ms_2nd_min` is `None`.
+    /// Every timed run's execution window, in order; empty when failed or skipped.
     pub run_runs_ms: Vec<f64>,
     pub status: SiriusStatus,
     /// Why the row is not `ok`, free text; empty when there is nothing to say (`-`).
@@ -1439,8 +1438,8 @@ pub struct SiriusResults {
 
 /// The file the Sirius runner writes. Panics naming the line on a preamble that is missing or not
 /// the seven keys in order, a wrong column line, a row not of seven fields, a timed status without
-/// its time, a failed or skipped row with a time or a run time, a run time without its runs or
-/// with a run count unlike the wall's, an unknown status, and a query listed twice.
+/// its time or its run times, a failed or skipped row with a time or a run time, a run count unlike
+/// the wall's, an unknown status, and a query listed twice.
 pub fn parse_sirius_results(text: &str) -> SiriusResults {
     sirius_results::parse(text)
 }

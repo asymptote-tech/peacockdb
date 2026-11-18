@@ -87,15 +87,13 @@ fn the_fixture_reads_its_run_columns() {
     );
 }
 
-/// A row timed before the execution windows were recorded.
 #[test]
-fn a_timed_row_without_run_times_reads_as_none() {
-    let text = format!("{HEAD}q6\t17.0\t17.0,16.0\t-\t-\tok\t-\n");
-    let results = parse_sirius_results(&text);
-    assert_eq!(results.rows[0].ms_2nd_min, Some(17.0));
-    assert_eq!(results.rows[0].run_ms_2nd_min, None);
-    assert!(results.rows[0].run_runs_ms.is_empty());
-    assert_eq!(write_sirius_results(&results), text);
+#[should_panic(
+    expected = "line 3 \"q6\\t17.0\\t17.0,16.0\\t-\\t-\\tok\\t-\": an ok, wrong or \
+                unverified row has run times: run_ms_2nd_min and run_runs_ms are not"
+)]
+fn a_timed_row_without_run_times_is_refused() {
+    parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\t-\t-\tok\t-\n"));
 }
 
 #[test]
@@ -105,13 +103,13 @@ fn a_run_count_unlike_the_wall_count_is_refused() {
 }
 
 #[test]
-#[should_panic(expected = "both set or both")]
+#[should_panic(expected = "an ok, wrong or unverified row has run times")]
 fn a_run_time_without_its_runs_is_refused() {
     parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\t15.0\t-\tok\t-\n"));
 }
 
 #[test]
-#[should_panic(expected = "both set or both")]
+#[should_panic(expected = "an ok, wrong or unverified row has run times")]
 fn runs_without_their_run_time_are_refused() {
     parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\t-\t15.0,16.0\tok\t-\n"));
 }
@@ -139,7 +137,7 @@ fn writes_what_it_reads() {
 #[test]
 fn a_wrong_and_an_unverified_row_keep_their_times() {
     let text = format!(
-        "{HEAD}q6\t100.0\t101.5,100.0,99.0\t-\t-\twrong\t-\n\
+        "{HEAD}q6\t100.0\t101.5,100.0,99.0\t90.0\t91.5,90.0,89.0\twrong\t-\n\
          aggregate-groupby\t50.0\t50.0,49.0\t48.0\t48.0,47.0\tunverified\t-\n"
     );
     let results = parse_sirius_results(&text);
@@ -192,7 +190,8 @@ fn eight_fields_are_refused() {
 #[should_panic(expected = "sirius results line 4")]
 fn a_query_listed_twice_is_refused() {
     parse_sirius_results(&format!(
-        "{HEAD}q6\t17.0\t17.0,16.0\t-\t-\tok\t-\nq6\t18.0\t18.0,19.0\t-\t-\tok\t-\n"
+        "{HEAD}q6\t17.0\t17.0,16.0\t15.0\t15.0,14.0\tok\t-\n\
+         q6\t18.0\t18.0,19.0\t16.0\t16.0,17.0\tok\t-\n"
     ));
 }
 

@@ -40,7 +40,7 @@ nested-loop-left-join	12.0	13.5,12.4,12.1,14.4,12.1,12.2,12.1,12.0,12.0,12.0	10.
 rollup-distinct	-	-	-	-	failed	Not implemented Error: GPU plan generation failed: ROLLUP, CUBE, GROUPING SETS and GROUPING() are not supported in GPU aggregates
 rollup-grouping	-	-	-	-	failed	Not implemented Error: GPU plan generation failed: ROLLUP, CUBE, GROUPING SETS and GROUPING() are not supported in GPU aggregates
 rollup-over-join	-	-	-	-	failed	Not implemented Error: GPU plan generation failed: ROLLUP, CUBE, GROUPING SETS and GROUPING() are not supported in GPU aggregates
-scan-limit	1661.0	1680.9,1661.0,1645.1,1704.4,1673.7,1765.7,1692.3,1737.7,1713.2,1761.0	1521.0	1521.0,1533.0,1504.0,1550.0,1529.0,1615.0,1537.0,1592.0,1574.0,1623.0	wrong	#311
+scan-limit	1661.0	1680.9,1661.0,1645.1,1704.4,1673.7,1765.7,1692.3,1737.7,1713.2,1761.0	1521.0	1521.0,1533.0,1504.0,1550.0,1529.0,1615.0,1537.0,1592.0,1574.0,1623.0	wrong	#316
 semi-join	4346.3	4368.6,4563.9,4545.2,4279.5,4518.2,4468.3,4346.3,4567.6,4383.3,4375.7	1465.0	1549.0,1760.0,1743.0,1465.0,1763.0,1468.0,1528.0,1776.0,1582.0,1409.0	ok	-
 semi-join-reorder	144.0	160.3,155.4,147.4,148.5,144.0,149.6,142.9,144.9,145.5,150.2	110.0	119.0,124.0,114.0,116.0,112.0,118.0,110.0,112.0,110.0,114.0	ok	-
 shuffle-additive	580.1	558.2,629.2,580.1,638.9,580.4,609.2,632.4,593.6,603.9,609.7	430.0	415.0,483.0,430.0,495.0,448.0,479.0,482.0,442.0,457.0,473.0	ok	-

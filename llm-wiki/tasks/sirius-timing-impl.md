@@ -329,11 +329,11 @@ Skipped: no departure is kept (`sirius-timing-detail.md`, "Configuration").
 - Modify: `llm-wiki/tickets/benchmarks.md`, `llm-wiki/tickets.md`,
   `llm-wiki/archive/archived-tickets.md`
 
-- [ ] **Step 1: Close #311 (Sirius planning time).** Move it to the archive with a "**Done.**"
+- [x] **Step 1: Close #311 (Sirius planning time).** Move it to the archive with a "**Done.**"
   paragraph: what the window is, the run ratio, the findings in one line each.
-- [ ] **Step 2: File a ticket for each finding left unfixed** (one needing a Sirius change,
+- [x] **Step 2: File a ticket for each finding left unfixed** (one needing a Sirius change,
   residency that no setting turns off). Use the next free number in `tickets.md`.
-- [ ] **Step 3: Update the counts.** Take them from runs on this tree: the lib's
+- [x] **Step 3: Update the counts.** Take them from runs on this tree: the lib's
   `benchmark_report` and `sirius_results`, `test_cpu_corpus`, `test_corpus_goldens`,
   `scripts/env/tests`. Then `cost-report --test test_source_formatting` stays green.
-- [ ] **Step 4: Commit; push; open the PR against master.**
+- [x] **Step 4: Commit; push; open the PR against master.**

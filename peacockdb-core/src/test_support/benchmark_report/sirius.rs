@@ -102,9 +102,9 @@ pub(crate) fn sirius_intro(siriuses: &[Sirius]) -> String {
 }
 
 /// A Sirius group's two cells for a row: the run, with what a `wrong` (and its note) or
-/// `unverified` row is and any other timed row's note, and the total; each linked to its line, a
-/// run the row lacks `—`. Or one cell across both with the reason it has no time; `—` under each
-/// without a row. `rel` is the file's path under `testdata/`.
+/// `unverified` row is and any other timed row's note, and the total; each linked to its line. Or
+/// one cell across both with the reason it has no time; `—` under each without a row. `rel` is the
+/// file's path under `testdata/`.
 pub(crate) fn sirius_cells(place: &Place, results: Option<&SiriusResults>, rel: &str) -> String {
     let na = "<td class=\"na\">—</td>";
     let Some((index, row)) = results.and_then(|results| sirius_row(results, &place.query.1)) else {
@@ -131,12 +131,12 @@ pub(crate) fn sirius_cells(place: &Place, results: Option<&SiriusResults>, rel: 
         SiriusStatus::Skipped => return untimed("skip", format!("skipped: {}", row.note)),
     };
     let total = row.ms_2nd_min.expect("a timed row has a time");
-    let run = match row.run_ms_2nd_min {
-        Some(ms) => format!("<td class=\"n\">{}{mark}</td>", link(&format!("{ms:.1}"))),
-        // Timed before the windows were recorded: the mark still says what the row is.
-        None => format!("<td class=\"na\">—{mark}</td>"),
-    };
-    format!("{run}<td class=\"n\">{}</td>", link(&format!("{total:.1}")))
+    let run = row.run_ms_2nd_min.expect("a timed row has a run time");
+    format!(
+        "<td class=\"n\">{}{mark}</td><td class=\"n\">{}</td>",
+        link(&format!("{run:.1}")),
+        link(&format!("{total:.1}"))
+    )
 }
 
 /// `query`'s row in a Sirius file, with its index among the rows. The first is the only one:

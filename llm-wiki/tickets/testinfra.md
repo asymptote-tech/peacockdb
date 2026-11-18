@@ -10,7 +10,7 @@ Tests, CI, hosts, testdata etc
 - [#306 (no_sort ties by position) a `no_sort` comparison pairs rows by position, so tied rows in another order fail](#t306)
 - [#309 (no en_US in build image) the build image has no en_US.UTF-8 locale and no name for a foreign uid, so five script test files cannot run in it](#t309)
 - [#310 (nebius-gpu fills with images) `gpu-tests` keeps every image and sf1 set it pulls, so nebius-gpu's disk runs out](#t310)
-- [#311 (LIMIT without ORDER BY) a `LIMIT` with no `ORDER BY` is checked against DuckDB's own rows, so another engine's right rows fail](#t311)
+- [#316 (LIMIT without ORDER BY) a `LIMIT` with no `ORDER BY` is checked against DuckDB's own rows, so another engine's right rows fail](#t316)
 - [#312 (start waits out a refusal) `nebius.sh start` waits its full 900 s after the API has already refused the start](#t312)
 - [#314 (bootstrap skips the clone) `bootstrap-vm.sh` never updates an existing clone, so a pin or script bumped in git reaches a VM only by hand](#t314)
 - [#315 (no free-space check) neither `bootstrap-vm.sh` nor `build-test.sh` checks free space first, so a small disk fails mid-build](#t315)
@@ -99,12 +99,12 @@ The fix: `prepare` removes the VM's peacockdb images of the same kind and versio
 `peacockdb.inputs` label is not this tree's and that no container uses, and sf1 sets older than the
 one it generates; or a prune step in `gpu-tests`'s cleanup.
 
-<a id="t311"></a>
-### #311 (LIMIT without ORDER BY) a `LIMIT` with no `ORDER BY` is checked against DuckDB's own rows, so another engine's right rows fail
+<a id="t316"></a>
+### #316 (LIMIT without ORDER BY) a `LIMIT` with no `ORDER BY` is checked against DuckDB's own rows, so another engine's right rows fail
 tpch `scan-limit` is a `LIMIT 10` with no `ORDER BY`, so any ten rows of the scan are a right
 answer. Its oracle is `duckdb(sort, exact)` (`corpus_cases.inc`), and DuckDB's stored answer holds
 only the ten DuckDB returned. Sirius's sf40 answer (sirius-bench, 2026-11-10) shares none of them
-and is `wrong #311` in its `sirius.tsv`. peacockdb passes only because its scan returns the same ten.
+and is `wrong #316` in its `sirius.tsv`. peacockdb passes only because its scan returns the same ten.
 
 The fix: an oracle for a bare `LIMIT` that checks the row count and that each row is in the
 unlimited result, as `data_fusion_subset` does on the CPU side.

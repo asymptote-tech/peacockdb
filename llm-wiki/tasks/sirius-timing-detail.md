@@ -17,6 +17,9 @@
   before any stop of the run's). Started again, `bench-sirius.sh … --dataset tpcds --resume` kept
   the 80 rows on the VM, pinned again (163.9 s), ran q97 and q99, pulled and rendered.
 
+- 2026-11-18, session 3: `executor.scan_manager.num_threads` at its default, 3 and 16, on q6 and
+  q9 (finding 3).
+
 ## H100 time
 
 | session | start (UTC) | stop (UTC) | minutes | running total |
@@ -24,6 +27,7 @@
 | 1 | 2026-11-17 19:38 | 20:52 | 74 | 74 |
 | 2 | 2026-11-17 20:58 | 21:50, stopped from outside the run | 52 | 126 |
 | 2, resumed | 2026-11-17 21:51 | 21:57 | 6 | 132 |
+| 3 | 2026-11-18 00:25 | 00:38 | 13 | 145 |
 
 ## How the experiments ran
 
@@ -73,8 +77,8 @@ The Nsight runs set `SX_DOCKER_EXTRA="-v /mnt/sx:/mnt/sx:ro -v
 /opt/nvidia/nsight-systems:/opt/nvidia/nsight-systems:ro --cap-add SYS_ADMIN"` and
 `SX_PREFIX="/opt/nvidia/nsight-systems/2025.3.2/target-linux-x64/nsys profile -t cuda,nvtx,osrt
 --sample=process-tree --backtrace=fp --cpuctxsw=process-tree -o /exp/<q> --force-overwrite true"`
-(the first q6 capture: `-t cuda,nvtx --sample=none --cpuctxsw=none`), with 3 timed runs; each
-report was exported with `nsys export -t sqlite`.
+(the first q6 capture: `-t cuda,nvtx --sample=none --cpuctxsw=none`), with 3 timed runs (the
+sampled q6 capture, 2); each report was exported with `nsys export -t sqlite`.
 
 Every Sirius process ends with two Rust panics, `cannot access a Thread Local Storage value during
 or after destruction: AccessError`, after its rows are written. They change no row.
@@ -108,21 +112,26 @@ Per timed run, from the captures (`lineitem` and the query's other tables on tmp
   in every run, the warm-up's included. Nothing stays on the device between runs, so the two
   engines start each run from the same place, and no device-resident way exists to switch off
   (Done when 2's residency case does not arise).
-- **`h2d=0`** in the cache summary counts no copy the trace sees: the copies are
-  `cudaMemcpyBatchAsync` from the pinned cache, issued by the parquet reader
-  (`fetch_byte_ranges_to_device_async`), and the counter stays 0 beside them.
-- **The copy is not slow.** The 10 GB/s estimate in #311 divided the bytes by the whole GPU part.
-  The copies themselves run at 34–49 GB/s, as peacockdb's (41–49 GB/s).
+- **`h2d=0`** in the cache summary counts no copy the trace sees. Per Sirius
+  (`prefetching_cache.hpp:487`), `h2d` counts chunks the cache (re)loads by host-to-device IO
+  (`mark_loading`). So `h2d=0` means the pin held and no chunk was reloaded. The copies the trace
+  sees are `cudaMemcpyBatchAsync` from the pinned cache, issued by the parquet reader
+  (`fetch_byte_ranges_to_device_async`).
+- **The copy is not slow.** The 10 GB/s estimate in #311 guessed the bytes (q6 copies 237 MB) and
+  divided them by the whole GPU part. The copies themselves run at 34–49 GB/s: q9's 49 within
+  peacockdb's 41–49 GB/s, q6's 34 and q19's 37 near it.
 - **The GPU is idle most of the window.** In q6's second run (222 ms) the kernels and copies take
   20.7 ms. For 148 ms the window shows no GPU work and no range but row-group filtering (1 ms at
   74 ms). The scan task then takes 72 ms: 32 ms fetching byte ranges, 8.6 ms decompressing
   (`unsnap_kernel`, snappy, 8.2 ms of kernel), decode and the aggregate.
-- **The CPU spends the window copying parquet metadata.** CPU samples inside the window (q6: 580,
-  q19: 2632, q9: 3185) put `std::__do_uninit_copy<cudf::io::parquet::RowGroup…>` on the stack of
-  288, 586 and 976 of them, with `operator new`, `malloc`, `free` and `~vector<RowGroup>` beside
-  it, under `hybrid_scan_reader::hybrid_scan_reader(FileMetaData const&)`. Each scan task copies
-  the file's whole row-group metadata. This is in Sirius's scan path; no setting below changes
-  it.
+- **The CPU spends the window copying parquet metadata.** CPU samples inside the window of each
+  capture's last timed run alone (q6: 580, q19: 2632, q9: 3185) put
+  `std::__do_uninit_copy<cudf::io::parquet::RowGroup…>` on the stack of 288, 586 and 976 of them,
+  with `operator new`, `malloc`, `free` and `~vector<RowGroup>` beside it, under
+  `hybrid_scan_reader::hybrid_scan_reader(FileMetaData const&)`. Each scan task copies the file's
+  whole row-group metadata. Most of these samples are on scan_manager threads: 248 of q6's 288,
+  472 of q19's 586, 654 of q9's 976. This is in Sirius's scan path; no setting measured in
+  findings 3, 5 and 6 removes it.
 - `cudaHostRegister` (68 calls, 35 ms each) runs at pin time only, none inside a window.
 
 ### 3. The settings
@@ -139,6 +148,18 @@ Tables on tmpfs, one setting at a time, each config the image's plus the one key
 smaller batches are slower; more threads change nothing; 8 GiB batches are 3–6% faster, inside
 both queries' spread.
 
+Session 3, the same way, `executor.scan_manager.num_threads` alone:
+
+| `executor.scan_manager.num_threads` | q6 run | q9 run |
+|---|---|---|
+| default (all cores left after the other pools, at least 4; 16 cores here) | 188.0 (179–216) | 664.0 (643–732) |
+| 3 (the minimum Sirius accepts) | 192.0 (183–231) | 687.0 (677–761) |
+| 16 | 214.0 (208–238) | 757.0 (728–858) |
+
+3 threads stay within the default's spread; 16 are slower. `8d17afe`'s scan_manager has no
+chunk-size key: `src/sirius_config.cpp` reads `num_threads`, `cpu_affinity`, `backend`,
+`reactors`, readahead and the cache. So no chunk size was tried.
+
 ### 4. The reads outside the pin
 
 q10 and q19 over the same five tables (lineitem, part, customer, orders, nation), from the VM's
@@ -150,9 +171,9 @@ disk and from tmpfs:
 | q19 | 2081 | 659.0 (628–790) | 646.0 (644–689) |
 
 The misses are the same on both, every run (`last_cycle[… miss=972 …]`, `miss=2081`), and their
-cost is inside the spread even from a 90 MB/s disk. So they read little; the log gives no bytes,
-and the difference bounds them at a few MB a run. The parquet without bloom filters was not made:
-the misses cost nothing measurable to remove.
+cost is inside the spread even from a 90 MB/s disk. The bytes they read were not measured; the log
+gives counts alone. The parquet without bloom filters was not made: the misses cost nothing
+measurable to remove.
 
 ### 5. The footer
 
@@ -170,9 +191,10 @@ takes the parquet path and a name, and the view is what DuckDB binds the query a
 
 ### 6. The log
 
-The same script at `SIRIUS_LOG_LEVEL=warn`: wall 313.9 with the cache off, 216.4 and 239.0 with it
-on, against 327.7 and 224.1, 224.9 at info. The difference is 8–14 ms, inside the spread. The
-windows need info, so the timed runs log at info.
+The same script at `SIRIUS_LOG_LEVEL=warn`, wall, in the order the four settings ran (cache off,
+on, off, on): 313.9, 216.4, 309.2, 239.0 against 327.7, 224.1, 313.5, 224.9 at info. Warn minus
+info: −13.8, −7.7, −4.3, +14.1 ms, each inside its spread. The windows need info, so the timed runs
+log at info.
 
 The wall script, `/exp/sx-wall.py`, run as `docker run … -e SIRIUS_LOG_LEVEL=<level> <image> python3
 /exp/sx-wall.py /mnt/sx/sub-l /exp/q6.sql 10 - "SET parquet_metadata_cache=true" "SET
@@ -216,12 +238,18 @@ The keep rule (spec, Done when 2) over each finding:
 
 - **Kept: none.** Sirius runs as the image runs it today: its config's three departures, the
   `read_parquet` views, the tables pinned from the VM's disk, its log at info.
+The rule's "shortens" is read as: a setting shortens a clock when its runs' range lies below the
+default's.
+
 - **`parquet_metadata_cache = true`**: shortens Sirius's total by 90–100 ms on q6, its run not at
-  all, and is a setting any DuckDB user has. Not kept: DuckDB's timed runs on the page do not set
-  it, so it would tilt the one total comparison the page makes (`Σ total Sirius / Σ total
-  DuckDB`), and it leaves the run, the comparison with peacockdb, as it is.
-- **`scan_task_batch_size` 8 GiB**: 3–6% off the run of q6 and q9, inside both spreads. Not kept.
+  all, and is a setting any DuckDB user has. It meets the rule's three conditions. It is not kept,
+  a deliberate departure from the rule: DuckDB's timed runs on the page do not set it, so it would
+  tilt the one total comparison the page makes (`Σ total Sirius / Σ total DuckDB`), and it leaves
+  the run, the comparison with peacockdb, as it is.
+- **`operator_params.scan_task_batch_size` 8 GiB**: q9's range (636–712) overlaps the default's
+  (670–812), and q6 is unchanged. Not kept.
 - **`executor.pipeline.num_threads`**: 1 is slower, 8 the same. Not kept.
+- **`executor.scan_manager.num_threads`**: 16 is slower, 3 the same. Not kept.
 - **Parquet without bloom filters, or tmpfs**: the reads outside the pin cost nothing measurable.
   Not kept; no layout is made.
 - **The log at warn**: inside the spread, and the windows need info.

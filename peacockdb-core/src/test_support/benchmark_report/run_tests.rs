@@ -1,5 +1,6 @@
 //! The run clock beside the total: peacockdb's `run_us` and Sirius's execution window in the main
-//! table, the run ratio, and `run_ms` in the CSV. The trees and readers are `tests.rs`'s.
+//! table, the run ratio, `run_ms` in the CSV, and the intro's and Sirius's paragraph saying what
+//! each run and total is. The trees and readers are `tests.rs`'s.
 
 use super::tests::{
     CSV_HEADER, TIMED, duckdb, failed, list, main_part, modes_row, order, page, put, row, sirius,
@@ -184,35 +185,19 @@ fn a_section_without_run_us_shows_a_dash_and_stays_out_of_the_ratio() {
     );
 }
 
-/// A row timed before the windows were recorded: no run, and a `wrong` row's mark stays on the page.
+/// A timed row without run times fails the page, naming its line: every run records its windows.
 #[test]
-fn a_sirius_row_without_run_times_shows_a_dash_and_stays_out_of_the_ratio() {
+#[should_panic(expected = "sirius results line 3")]
+fn a_sirius_row_without_run_times_fails_the_page() {
     let root = tree("run-sirius-no-run");
-    put(
-        &root,
-        SINGLE,
-        &[("q3", TIMED), ("q6", TIMED), ("q9", TIMED)],
-    );
+    put(&root, SINGLE, &[("q3", TIMED)]);
     sirius(
         &root,
         "h100-80gb-hbm3",
         "tpch",
-        "q3\t300.0\t300.0\t-\t-\tok\t-\nq6\t9.0\t9.0\t3.4\t3.4\tok\t-\n\
-         q9\t100.0\t100.0\t-\t-\twrong\t#7\n",
+        "q3\t300.0\t300.0\t-\t-\tok\t-\n",
     );
-    let pairs = [("tpch", "q3"), ("tpch", "q6"), ("tpch", "q9")];
-    let csv = render_benchmarks_csv(&root, &order(&pairs));
-    let html = page(root, &pairs);
-    assert_eq!(row(&html, "q3")[6..8], ["—", "300.0"]);
-    assert_eq!(row(&html, "q9")[6..8], ["— wrong answer #7", "100.0"]);
-    assert!(
-        html.contains("<p>Σ run Sirius / Σ run peacockdb = 2.00 over 1 of 3 queries</p>"),
-        "{html}"
-    );
-    assert!(
-        csv.contains("\ntpch,40,q3,sirius,h100-80gb-hbm3,tp1_single,,,300.0,,,ok\n"),
-        "{csv}"
-    );
+    page(root, &[("tpch", "q3")]);
 }
 
 #[test]
@@ -281,7 +266,7 @@ fn a_sirius_row_s_note_shows_on_its_run() {
         "h100-80gb-hbm3",
         "tpch",
         "q3\t300.0\t300.0,301.0\t180.0\t180.0,181.0\tok\tplan rebuilt in 1 of 2 runs\n\
-         q6\t100.0\t100.0\t-\t-\tunverified\tplan rebuilt in 1 of 1 runs\n",
+         q6\t100.0\t100.0\t40.0\t40.0\tunverified\tplan rebuilt in 1 of 1 runs\n",
     );
     let html = page(root, &[("tpch", "q3"), ("tpch", "q6")]);
     assert_eq!(
@@ -290,10 +275,52 @@ fn a_sirius_row_s_note_shows_on_its_run() {
     );
     assert_eq!(
         row(&html, "q6")[6..8],
-        ["— unverified plan rebuilt in 1 of 1 runs", "100.0"]
+        ["40.0 unverified plan rebuilt in 1 of 1 runs", "100.0"]
     );
     assert!(
         html.contains("</a> <span class=\"source\">plan rebuilt in 1 of 2 runs</span></td>"),
         "{html}"
     );
+}
+
+/// The intro and Sirius's paragraph say what each engine's run and total are; Sirius's where it read
+/// from, what each file was measured with, and that some rows read outside the pin.
+#[test]
+fn the_sirius_paragraph_names_its_run_total_and_provenance() {
+    let root = tree("sirius-intro");
+    put(
+        &root,
+        "h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
+        &[("q3", TIMED)],
+    );
+    sirius(
+        &root,
+        "h100-80gb-hbm3",
+        "tpch",
+        "q3\t300.0\t300.0,301.0\t180.0\t180.0,181.0\tok\t-\n",
+    );
+    duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
+    let html = page(root, &[("tpch", "q3")]);
+    let peacockdb = "PeacockDB's times are one run's, the second-smallest by wall time of its timed \
+                     runs after one warm-up. Its load, execute and total are device-side, in ms: \
+                     the total is load plus execute. Its run is that run's wall time end to end: \
+                     after planning, the copy of its result to the host included.";
+    assert!(html.contains(peacockdb), "{html}");
+    let at = html.find("<p>Sirius's run is").expect("a Sirius paragraph");
+    let paragraph = &html[at..at + html[at..].find("</p>").unwrap()];
+    for said in [
+        "its execution window after planning, from its log's [window] begin to [window] end",
+        "its result materialized on the host included, its Arrow conversion not",
+        "the wall time around the statement and an Arrow fetch of its result, planning included",
+        "A row whose plan was rebuilt inside its window says so beside its run.",
+        "the second-smallest of the timed runs after one warm-up",
+        "pinned in Sirius's host cache. Its config departs from Sirius's defaults in three",
+        "reads outside the pin (likely bloom filters) inside the timed runs; served from tmpfs",
+        "h100-80gb-hbm3, tpch sf40: Sirius 8d17afe, DuckDB 1.5.6, libcudf 26.08.01, driver 580.173, \
+         device NVIDIA H100 80GB HBM3",
+    ] {
+        assert!(paragraph.contains(said), "{said:?} not in {paragraph}");
+    }
+    // Beside DuckDB's, before it, as the groups stand in the table.
+    assert!(at < html.find("<p>DuckDB's time is").unwrap(), "{html}");
 }
