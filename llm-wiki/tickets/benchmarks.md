@@ -14,6 +14,7 @@ copies the whole `vector<RowGroup>`. Meanwhile the GPU idles for most of the exe
 
 From Nsight captures at sf40 on the H100 (Sirius `8d17afe`, tables on tmpfs):
 - q6, a 222 ms run: kernels and copies take about 21 ms; the first ~148 ms show no GPU work.
+  The captures are in the calibration bucket (`sirius-timing-detail.md`, "How the experiments ran").
 - In each capture's last timed run the copy is on the stack of 288 of q6's 580 CPU samples, 586
   of q19's 2632 and 976 of q9's 3185, on scan_manager threads in 248, 472 and 654 of them.
 - No setting removes it. Measured: `executor.pipeline.num_threads`,

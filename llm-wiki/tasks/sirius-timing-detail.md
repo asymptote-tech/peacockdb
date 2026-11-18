@@ -80,6 +80,11 @@ The Nsight runs set `SX_DOCKER_EXTRA="-v /mnt/sx:/mnt/sx:ro -v
 (the first q6 capture: `-t cuda,nvtx --sample=none --cpuctxsw=none`), with 3 timed runs (the
 sampled q6 capture, 2); each report was exported with `nsys export -t sqlite`.
 
+The raw evidence is in the calibration bucket, `s3://calibration/sirius/sirius-timing/<sha256>.tar.zst`,
+sha256 `bd08da89b5f70ca1928245d64fd2406e4efa1b9be09a6088d3d1d298e2459e99` (43 MB): the q6, q9 and
+q19 captures exported to sqlite, the tables read from them, every experiment's `sirius.tsv`, Sirius
+log and config, the experiment scripts, and the rerun's logs.
+
 Every Sirius process ends with two Rust panics, `cannot access a Thread Local Storage value during
 or after destruction: AccessError`, after its rows are written. They change no row.
 
