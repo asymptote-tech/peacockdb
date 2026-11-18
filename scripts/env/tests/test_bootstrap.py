@@ -649,10 +649,10 @@ def waits_on(pid, lock):
     return False
 
 
-def test_the_cudf_checkout_waits_for_the_clone_s_lock():
+def test_the_links_and_the_cudf_checkout_wait_for_the_clone_s_lock():
     with Machine() as m:
         lock = pathlib.Path(git(m.clone, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-        lock = lock / "peacock-submodule.lock"
+        lock = lock / "peacock-clone.lock"
         env = {**m.env, **whole_run_env(m)}
         script = str(m.clone / "scripts" / "env" / "bootstrap-vm.sh")
         own = m.clone / "third_party" / "cudf"
@@ -665,6 +665,7 @@ def test_the_cudf_checkout_waits_for_the_clone_s_lock():
                 assert run.poll() is None and time.monotonic() < deadline, run.communicate()
                 time.sleep(0.05)
             assert list(own.iterdir()) == [], list(own.iterdir())
+            assert not os.path.lexists(m.clone / "testdata" / "tpch.sf1")
         out, err = run.communicate(timeout=120)
         assert run.returncode == 0, (out, err)
         assert (own / "cmake" / "rapids_config.cmake").is_file()

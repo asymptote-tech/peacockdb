@@ -1419,6 +1419,10 @@ pub struct SiriusRow {
     pub ms_2nd_min: Option<f64>,
     /// Every timed run, in order; empty when failed or skipped.
     pub runs_ms: Vec<f64>,
+    /// The second-smallest execution window; `None` when failed or skipped (`-`).
+    pub run_ms_2nd_min: Option<f64>,
+    /// Every timed run's execution window, in order; empty when failed or skipped.
+    pub run_runs_ms: Vec<f64>,
     pub status: SiriusStatus,
     /// Why the row is not `ok`, free text; empty when there is nothing to say (`-`).
     pub note: String,
@@ -1433,8 +1437,9 @@ pub struct SiriusResults {
 }
 
 /// The file the Sirius runner writes. Panics naming the line on a preamble that is missing or not
-/// the seven keys in order, a wrong column line, a row not of five fields, a timed status without
-/// its time, a failed or skipped row with one, an unknown status, and a query listed twice.
+/// the seven keys in order, a wrong column line, a row not of seven fields, a timed status without
+/// its time or its run times, a failed or skipped row with a time or a run time, a run count unlike
+/// the wall's, an unknown status, and a query listed twice.
 pub fn parse_sirius_results(text: &str) -> SiriusResults {
     sirius_results::parse(text)
 }
@@ -1519,8 +1524,8 @@ pub fn write_benchmarks_csv(text: &str) {
 }
 
 /// Every result of the trees under `root` the page shows but the fused batches, one CSV row each
-/// (`dataset,sf,query,engine,device,mode,load_ms,exec_ms,total_ms,peak_gib,status`), in the page's
-/// order: `order` as [`render_benchmark_report`] takes it.
+/// (`dataset,sf,query,engine,device,mode,load_ms,exec_ms,total_ms,run_ms,peak_gib,status`), in the
+/// page's order: `order` as [`render_benchmark_report`] takes it.
 pub fn render_benchmarks_csv(root: &Path, order: &[(String, String)]) -> String {
     benchmark_report::render_csv(root, order)
 }

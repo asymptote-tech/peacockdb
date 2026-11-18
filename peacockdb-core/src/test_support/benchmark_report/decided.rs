@@ -13,6 +13,8 @@ pub(crate) enum Decided<'f> {
         load_us: u64,
         execute_us: u64,
         total_us: u64,
+        /// The run end to end; `None` where the section has no `run_us`.
+        run_us: Option<u64>,
         peak_bytes: Option<u64>,
         pinned: bool,
         /// The list's note where it marks this mode `wrong`.
@@ -77,6 +79,7 @@ pub(crate) fn decided<'f>(place: &Place, device: &Device, found: Option<&'f Foun
             load_us,
             execute_us: section.count("execute_us").unwrap_or(total_us - load_us),
             total_us,
+            run_us: section.count("run_us"),
             peak_bytes: section.count("peak_bytes"),
             pinned: section
                 .field("pinned_cache")

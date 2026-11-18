@@ -4,13 +4,15 @@
 //!
 //! - Per dataset, a main table at tp1_single for every device but `MODES_ONLY`, then a collapsed
 //!   Modes section with a table per device, its modes side by side under each measure.
-//! - A device's `sirius.tsv` is a Sirius group after the devices, with a ratio line above the
+//! - A device's `sirius.tsv` is a Sirius group after the devices, with two ratio lines above the
 //!   table; a DuckDB tree's `duckdb.tsv` is one column after that.
 //! - No time, no absolute path, and no host but a DuckDB file's own: the same trees, same bytes.
 //! - The CSV is every result of the same trees, its statuses decided where the page's are.
 
 mod csv;
 mod decided;
+#[cfg(test)]
+mod run_tests;
 mod sirius;
 #[cfg(test)]
 mod tests;
@@ -24,7 +26,7 @@ use super::{
     duckdb_results, ordered_sections, parse_device_cases, testdata_root,
 };
 use decided::{Decided, decided};
-use sirius::{Sirius, ratio_line, sirius_cells, sirius_intro, siriuses};
+use sirius::{Sirius, ratio_line, run_ratio_line, sirius_cells, sirius_intro, siriuses};
 
 /// What the peak column claims, and no more.
 const PEAK_MEANS: &str = "the accountant's peak, a lower bound on device memory";
@@ -303,9 +305,11 @@ fn page(
          test_corpus_goldens from testdata/benchmark-results/ · section links @ master</p>\n\
          <p><b>PeacockDB benchmark results</b> — per dataset, a table at {MAIN_MODE}, one row \
          per query, with every device but {} beside DuckDB. Below it, collapsed, the Modes: a \
-         table per device, its modes side by side under each measure. PeacockDB's times are \
-         device-side, in ms: the total is load plus execute. The peak is {PEAK_MEANS}, in GiB. A load marked \
-         unpinned was {UNPINNED_MEANS}.</p>\n",
+         table per device, its modes side by side under each measure. PeacockDB's times are one \
+         run's, the second-smallest by wall time of its timed runs after one warm-up. Its load, \
+         execute and total are device-side, in ms: the total is load plus execute. Its run is that \
+         run's wall time end to end: after planning, the copy of its result to the host included. \
+         The peak is {PEAK_MEANS}, in GiB. A load marked unpinned was {UNPINNED_MEANS}.</p>\n",
         MODES_ONLY.join(", ")
     );
     html.push_str(&sirius_intro(siriuses));
@@ -424,14 +428,14 @@ fn dataset_table(
     for (_, device) in &shown {
         let _ = write!(
             html,
-            "<th colspan=\"4\">{} · {MAIN_MODE}</th>",
+            "<th colspan=\"5\">{} · {MAIN_MODE}</th>",
             escape(&device.name)
         );
     }
     for sirius in siriuses {
         let _ = write!(
             html,
-            "<th colspan=\"3\">sirius · {}</th>",
+            "<th colspan=\"2\">sirius · {}</th>",
             escape(&sirius.device)
         );
     }
@@ -442,19 +446,19 @@ fn dataset_table(
     for _ in &shown {
         let _ = write!(
             html,
-            "<th>load (ms)</th><th>execute (ms)</th><th>total (ms)</th><th title=\"{}\">peak \
-             ≥ (GiB)</th>",
+            "<th>load (ms)</th><th>execute (ms)</th><th>total (ms)</th><th>run (ms)</th><th \
+             title=\"{}\">peak ≥ (GiB)</th>",
             escape(PEAK_MEANS)
         );
     }
     for _ in siriuses {
-        html.push_str("<th>load (ms)</th><th>execute (ms)</th><th>total (ms)</th>");
+        html.push_str("<th>run (ms)</th><th>total (ms)</th>");
     }
     for _ in duckdbs {
         html.push_str("<th>warm (ms)</th>");
     }
     html.push_str("</tr>\n");
-    let mut main_queries = Vec::new();
+    let mut main_places = Vec::new();
     for query in queries_of(places) {
         let place = at_mode(query, main);
         let cells: Vec<Shown> = shown
@@ -464,7 +468,6 @@ fn dataset_table(
         if cells.iter().all(Shown::is_empty) {
             continue;
         }
-        main_queries.push(query.query.1.as_str());
         let _ = write!(html, "<tr><td>{}</td>", escape(&place.query.1));
         for cell in &cells {
             html.push_str(&cell.spanned());
@@ -480,8 +483,10 @@ fn dataset_table(
             html.push_str(&duckdb_cell(&place, duckdb, ""));
         }
         html.push_str("</tr>\n");
+        main_places.push(place);
     }
     html.push_str("</table>\n");
+    let main_queries: Vec<&str> = main_places.iter().map(|p| p.query.1.as_str()).collect();
     let mut head = format!(
         "<h2 id=\"{}\">{}</h2>\n",
         escape(&format!("{dataset}-sf{sf}")),
@@ -496,6 +501,10 @@ fn dataset_table(
             .collect(),
     };
     for sirius in siriuses {
+        let runs = peacockdb_runs(&main_places, devices, &sirius.device, rows);
+        if let Some(line) = run_ratio_line(&main_queries, sirius.files.get(&key), &runs) {
+            head.push_str(&line);
+        }
         for duckdb in &duckdb_files {
             if let Some(line) = ratio_line(&main_queries, sirius.files.get(&key), *duckdb) {
                 head.push_str(&line);
@@ -503,6 +512,34 @@ fn dataset_table(
         }
     }
     head + &html
+}
+
+/// `device`'s `run_us` by query over `places`, where it is timed, not `wrong`, and has one.
+fn peacockdb_runs<'p>(
+    places: &'p [Place],
+    devices: &[Device],
+    device: &str,
+    rows: &BTreeMap<Place, BTreeMap<usize, Found>>,
+) -> BTreeMap<&'p str, u64> {
+    let (at, device) = devices
+        .iter()
+        .enumerate()
+        .find(|(_, of)| of.name == device)
+        .expect("a Sirius group is a device's");
+    places
+        .iter()
+        .filter_map(|place| {
+            let found = rows.get(place).and_then(|f| f.get(&at));
+            match decided(place, device, found) {
+                Decided::Timed {
+                    run_us: Some(us),
+                    wrong: None,
+                    ..
+                } => Some((place.query.1.as_str(), us)),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 /// The collapsed Modes section: per device with a section in the group, a table whose measures
@@ -654,14 +691,15 @@ impl Measure {
     }
 }
 
-/// One device's cell for a row, as HTML: a timed section's four measures, or one text standing
-/// for them all (failed, skipped, or `—`).
+/// One device's cell for a row, as HTML: a timed section's measures, or one text standing for them
+/// all (failed, skipped, or `—`). The run is the main table's alone.
 enum Shown {
     Timed {
         load: String,
         unpinned: bool,
         execute: String,
         total: String,
+        run: String,
         peak: Option<String>,
     },
     Other {
@@ -676,7 +714,7 @@ impl Shown {
         matches!(self, Shown::Other { class: "na", .. })
     }
 
-    /// The main table's four cells, or one across them.
+    /// The main table's five cells, or one across them.
     fn spanned(&self) -> String {
         match self {
             Shown::Timed {
@@ -684,15 +722,16 @@ impl Shown {
                 unpinned,
                 execute,
                 total,
+                run,
                 peak,
             } => format!(
                 "<td class=\"n\">{load}{}</td><td class=\"n\">{execute}</td><td \
-                 class=\"n\">{total}</td><td class=\"n\">{}</td>",
+                 class=\"n\">{total}</td><td class=\"n\">{run}</td><td class=\"n\">{}</td>",
                 unpinned_mark(*unpinned),
                 peak.as_deref().unwrap_or("—")
             ),
             Shown::Other { text, class } => {
-                format!("<td colspan=\"4\" class=\"{class}\">{text}</td>")
+                format!("<td colspan=\"5\" class=\"{class}\">{text}</td>")
             }
         }
     }
@@ -708,6 +747,7 @@ impl Shown {
                 execute,
                 total,
                 peak,
+                ..
             } => match measure {
                 Measure::Load => {
                     marked = format!("{load}{}", unpinned_mark(mark && *unpinned));
@@ -752,6 +792,7 @@ fn shown_of(place: &Place, device: &Device, found: Option<&Found>) -> Shown {
             load_us,
             execute_us,
             total_us,
+            run_us,
             peak_bytes,
             pinned,
             wrong,
@@ -762,6 +803,7 @@ fn shown_of(place: &Place, device: &Device, found: Option<&Found>) -> Shown {
                 unpinned: !pinned,
                 execute: ms(execute_us),
                 total: format!("{}{wrong}", linked(&ms(total_us), found)),
+                run: run_us.map_or("—".to_string(), |us| linked(&ms(us), found)),
                 peak: peak_bytes.map(|bytes| escape(&gib(bytes))),
             }
         }
