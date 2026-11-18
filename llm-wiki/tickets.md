@@ -12,7 +12,7 @@ most 25 characters and is what `scripts/ticket_widget.py` shows beside the numbe
 standard=12GiB).
 
 A ticket carries a **Priority** line only when it is not medium; medium is the default.
-New tickets take the next free number (currently 318), one ID space across every file. 264–279
+New tickets take the next free number (currently 319), one ID space across every file. 264–279
 are reserved for chain J, whose next number is 268.
 Finished and lapsed tickets move to `archive/archived-tickets.md` (Done / Stale). Numbers
 are never reused, so an old reference still resolves there.

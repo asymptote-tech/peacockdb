@@ -196,6 +196,18 @@ keeps the plan's order, 3.6–6.5 % cheaper than with the defect; q69's anti joi
 `test_an_anti_join_keeps_the_unmatched_share_where_the_domain_is_wider_than_both_keys` and
 `test_a_right_anti_join_keeps_the_probe_s_unmatched_share_where_the_domain_is_wider`.
 
+<a id="t318"></a>
+### #318 — two `bootstrap-vm.sh` runs at once can both make the sf1 link, and the second fails
+`bootstrap-vm.sh` linked each `testdata/<ds>.sf1` with `ln -sfn` after a check that the link was
+missing or pointed into the machine's data dir, under no lock. Two runs at once could both pass
+the check, and the second `ln` then failed with `Already exists`. CI's cost-report job failed
+`test_two_bootstraps_at_once_generate_once_and_fetch_in_turn` this way on every run from master's
+`653def3d`; on a laptop with GNU coreutils 9.4 it passed.
+
+**Done.** The links and the `third_party/cudf` checkout are made under one lock in the clone's git
+dir, `peacock-clone.lock`; `test_the_links_and_the_cudf_checkout_wait_for_the_clone_s_lock` holds
+it.
+
 <a id="t313"></a>
 ### #313 — the results line's `tr -s` squeezes `__` in a value, so `test_results_name_version_threads_host` fails at random
 `duckdb_minimal.sh`'s `word()` writes each value of the `# ` line of `--results` with
