@@ -132,6 +132,11 @@ Per timed run, from the captures (`lineitem` and the query's other tables on tmp
   whole row-group metadata. Most of these samples are on scan_manager threads: 248 of q6's 288,
   472 of q19's 586, 654 of q9's 976. This is in Sirius's scan path; no setting measured in
   findings 3, 5 and 6 removes it.
+- Who builds the readers: over each whole capture, of the samples whose stack unwinds above the
+  constructor, `column_chunk_ranges` (`src/op/scan/parquet_materialize.cpp:38`, a reader per
+  slice of every split) in 60 of q6's 100, 171 of q9's 232 and 134 of q19's 190, and
+  `build_file_scan_info` (`src/op/scan/parquet_gpu_ingestible.cpp:874`) in the rest. The footer
+  itself is parsed once per file and shared (`src/scan_manager/sirius_scan_manager.cpp:1404`).
 - `cudaHostRegister` (68 calls, 35 ms each) runs at pin time only, none inside a window.
 
 ### 3. The settings

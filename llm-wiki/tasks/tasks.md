@@ -69,7 +69,7 @@ three VMs, Comet on 128 cores (1 × 128 and 8 × 16) and a cost model; on a go, 
 
 The Sirius sf40 comparison on the H100, made like for like.
 
-### 1. [`sirius-timing.md`](sirius-timing.md) — closes [#311](../archive/archived-tickets.md#t311) — state: reviewing
+### 1. [`sirius-timing.md`](sirius-timing.md) — closes [#311](../archive/archived-tickets.md#t311) — state: done
 
 Sirius timed by its execution window, planning out, beside peacockdb's `run_us`; why its GPU part
 is slow, from Nsight and one-setting experiments; the harness fixed where it is at fault, Sirius

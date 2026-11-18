@@ -20,9 +20,23 @@ From Nsight captures at sf40 on the H100 (Sirius `8d17afe`, tables on tmpfs):
   `executor.scan_manager.num_threads`, `operator_params.scan_task_batch_size`, the log level and
   `parquet_metadata_cache` (`llm-wiki/tasks/sirius-timing-detail.md`, findings 2, 3, 5 and 6).
 
-The fix is in Sirius's scan path. Closed by a Sirius commit whose scan copies no row-group metadata
-per task, shown by capturing q6 and q9 again as finding 2 did: the copy gone from their windows,
-and their runs on this page rerun at that commit.
+Where, in Sirius `8d17afe`: the footer is parsed once per file and shared as a
+`shared_ptr<FileMetaData const>` (`src/scan_manager/sirius_scan_manager.cpp:1404`), but every
+`hybrid_scan_reader` built from it copies it. Two scan-path callers build one:
+- `column_chunk_ranges` (`src/op/scan/parquet_materialize.cpp:38`), once per slice of every
+  split, for one call of `all_column_chunks_byte_ranges`
+  (`parquet_batch_coalescer::emit_current`, `src/op/scan/parquet_gpu_ingestible.cpp:399`);
+- `parquet_gpu_ingestible::build_file_scan_info` (`parquet_gpu_ingestible.cpp:874`), for its
+  row-group filtering.
+
+Over each whole capture, of the samples whose stack unwinds above the constructor,
+`column_chunk_ranges` is the caller in 60 of q6's 100, 171 of q9's 232 and 134 of q19's 190, and
+`build_file_scan_info` in the rest.
+
+The fix is in Sirius's scan path, or in a libcudf reader that takes the metadata without a copy.
+Closed by a Sirius commit whose scan copies no row-group metadata per task, shown by capturing q6
+and q9 again as finding 2 did: the copy gone from their windows, and their runs on this page rerun
+at that commit.
 
 <a id="t226"></a>
 ### #226 (benchmark provenance) a benchmark tree does not say which device, driver, CUDA or cuDF produced it
