@@ -3,8 +3,8 @@
 The fake `ssh` answers each call from a JSON list of attempts: the lines it writes to its `-E` log
 (appending, ending each in CR LF, as ssh does), its exit, its stdout, and whether it echoes its
 stdin. Its `-G` prints the first `-o LogLevel=` it is given, INFO by default, and is not an attempt.
-A last test runs the real ssh at a local port nothing listens on, its config and known hosts in a
-temp dir.
+Without `-E` (a master's `-O exit`) it writes no log. The last tests run the real ssh at a local port
+nothing listens on, its config and known hosts in a temp dir.
 """
 import json
 import os
@@ -37,8 +37,9 @@ with open(os.environ["FAKE_SSH_CALLS"], "a") as f:
 with open(os.environ["FAKE_SSH_CALLS"]) as f:
     n = len(f.readlines())
 attempt = json.load(open(os.environ["FAKE_SSH_ATTEMPTS"]))[n - 1]
-with open(a[a.index("-E") + 1], "a", newline="") as log:
-    log.write("".join(line + "\r\n" for line in attempt.get("log", [])))
+if "-E" in a:
+    with open(a[a.index("-E") + 1], "a", newline="") as log:
+        log.write("".join(line + "\r\n" for line in attempt.get("log", [])))
 if attempt.get("read_stdin"):
     sys.stdout.buffer.write(sys.stdin.buffer.read())
 sys.stdout.write(attempt.get("stdout", ""))
@@ -76,9 +77,10 @@ class Box:
         else:
             self.env["PEACOCK_SSH_PAUSES"] = pauses
 
-    def call(self, function, *args, stdin=b"", env=None):
+    def call(self, function, *args, stdin=b"", env=None, pre=""):
+        """<function> <args>, after the library is sourced and then <pre>, a caller's own settings."""
         return subprocess.run(
-            ["bash", "-c", f'set -euo pipefail; . "$0"; {function} "$@"', str(LIB), *args],
+            ["bash", "-c", f'set -euo pipefail; . "$0"; {pre} {function} "$@"', str(LIB), *args],
             input=stdin, capture_output=True, env=dict(self.env, **(env or {})), timeout=60)
 
     def ssh(self, *args, stdin=b""):
@@ -101,8 +103,8 @@ def own_lines(stderr):
     return [line for line in stderr.splitlines() if not line.startswith("ssh: attempt ")]
 
 
-def retry_line(n, failure, pause=0):
-    return f"ssh: attempt {n} of 4 failed before authenticating ({failure}); again in {pause} s"
+def retry_line(n, failure, pause=0, attempts=4):
+    return f"ssh: attempt {n} of {attempts} failed before authenticating ({failure}); again in {pause} s"
 
 
 def refusal(**more):
@@ -267,6 +269,83 @@ def test_the_pauses_are_5_10_and_20_seconds():
             retry_line(n, REFUSED, pause) for n, pause in ((1, 5), (2, 10), (3, 20))], r.stderr
 
 
+def test_a_caller_sets_the_attempts_and_pauses_and_the_last_pause_repeats():
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Box(tmp, [refusal()] * 6, pauses=None)
+        r = box.call("ssh_retry", "ssh", "vm", "true", pre='SSH_RETRY_ATTEMPTS=6 SSH_RETRY_PAUSES="5 10";')
+        assert r.returncode == 255, (r.returncode, r.stderr)
+        assert len(box.calls()) == 6, box.calls()
+        assert (box.tmp / "sleep.log").read_text().split() == ["5", "10", "10", "10", "10"]
+        assert retry_lines(r.stderr.decode()) == [
+            retry_line(n, REFUSED, pause, 6) for n, pause in ((1, 5), (2, 10), (3, 10), (4, 10), (5, 10))]
+
+
+def test_peacock_ssh_pauses_overrides_the_caller_s_pauses():
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Box(tmp, [refusal()] * 4, pauses="1 2")
+        r = box.call("ssh_retry", "ssh", "vm", "true", pre='SSH_RETRY_PAUSES="5 10 20";')
+        assert r.returncode == 255, (r.returncode, r.stderr)
+        assert (box.tmp / "sleep.log").read_text().split() == ["1", "2", "2"]
+
+
+SHARED = 'SSH_RETRY_CONTROL_PATH=/run/ctl/%C;'
+
+
+def test_with_a_control_path_each_attempt_goes_through_the_master():
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Box(tmp, [refusal(), {"log": [], "rc": 0, "read_stdin": True}])
+        r = box.call("ssh_retry", "ssh", "-p", "2222", "vm", "cat", stdin=b"payload", pre=SHARED)
+        assert r.returncode == 0, (r.returncode, r.stderr)
+        assert r.stdout == b"payload", r.stdout
+        for argv in box.calls():
+            assert argv[2:] == ["-o", "LogLevel=VERBOSE", "-o", "ControlPath=/run/ctl/%C", "-o", "ControlMaster=no",
+                                "-p", "2222", "vm", "cat"], argv
+
+
+def test_a_session_through_the_master_that_ends_in_255_is_not_retried():
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Box(tmp, [{"log": [], "rc": 255}] * 2)
+        r = box.call("ssh_retry", "ssh", "vm", "make", pre=SHARED)
+        assert (r.returncode, len(box.calls())) == (255, 1), (r.returncode, box.calls())
+
+
+def test_share_opens_a_master_retried_and_leaves_stdin():
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Box(tmp, [refusal(), {"log": [AUTHENTICATED], "rc": 0}])
+        r = box.call('f() { ssh_retry_share "$@"; cat; }; f', "ssh", "-p", "2222", "--", "vm",
+                     stdin=b"payload", pre='SSH_RETRY_ATTEMPTS=6;' + SHARED)
+        err = r.stderr.decode()
+        assert r.returncode == 0, (r.returncode, err)
+        assert r.stdout == b"payload", r.stdout
+        assert retry_lines(err) == [retry_line(1, REFUSED, attempts=6)], err
+        calls = box.calls()
+        assert len(calls) == 2, calls
+        for argv in calls:
+            assert argv[2:] == ["-o", "LogLevel=VERBOSE", "-o", "ControlPath=/run/ctl/%C", "-o", "ControlMaster=yes",
+                                "-f", "-N", "-o", "ControlPersist=300", "-p", "2222", "--", "vm"], argv
+
+
+def test_share_needs_a_control_path():
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Box(tmp, [{"log": [AUTHENTICATED], "rc": 0}])
+        r = box.call("ssh_retry_share", "ssh", "vm")
+        assert r.returncode == 2, (r.returncode, r.stderr)
+        assert box.calls() == []
+        assert r.stderr.decode() == "ssh_retry_share: SSH_RETRY_CONTROL_PATH is not set\n", r.stderr
+
+
+def test_unshare_closes_the_master_and_never_fails():
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Box(tmp, [{"rc": 255}])
+        r = box.call("ssh_retry_unshare", "ssh", "-p", "2222", "--", "vm", pre=SHARED)
+        assert (r.returncode, r.stderr) == (0, b""), (r.returncode, r.stderr)
+        assert box.calls() == [["-o", "ControlPath=/run/ctl/%C", "-O", "exit", "-p", "2222", "--", "vm"]]
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Box(tmp, [{"rc": 0}])
+        r = box.call("ssh_retry_unshare", "ssh", "vm")
+        assert (r.returncode, box.calls()) == (0, []), (r.returncode, box.calls())
+
+
 def test_verbose_only_lines_stay_off_stderr():
     with tempfile.TemporaryDirectory() as tmp:
         box = Box(tmp, [{"log": SESSION, "rc": 0}])
@@ -308,6 +387,25 @@ def test_the_real_ssh_at_a_closed_port_is_tried_four_times_and_leaves_stdin():
         assert own_lines(err) == [refused], err
         assert r.stdout == b"payload\n", r.stdout
         assert not (tmp / "known_hosts").exists()
+
+
+def test_the_real_ssh_takes_share_s_options_and_retries_a_closed_port():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        (tmp / "config").write_text("")
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        script = ('. "$0"; SSH_RETRY_CONTROL_PATH="$4/%C"; ssh_retry_share ssh -F "$1" '
+                  '-o UserKnownHostsFile="$2" -o BatchMode=yes -p "$3" -- 127.0.0.1')
+        r = subprocess.run(
+            ["bash", "-c", script, str(LIB), str(tmp / "config"), str(tmp / "known_hosts"), str(port), str(tmp)],
+            capture_output=True, timeout=60, env=dict(os.environ, PEACOCK_SSH_PAUSES="0"))
+        err = r.stderr.decode()
+        refused = f"ssh: connect to host 127.0.0.1 port {port}: Connection refused"
+        assert r.returncode == 255, (r.returncode, err)
+        assert retry_lines(err) == [retry_line(n, refused) for n in (1, 2, 3)], err
+        assert own_lines(err) == [refused], err
 
 
 def test_sync_retry_reruns_a_command_that_exits_255_or_30():

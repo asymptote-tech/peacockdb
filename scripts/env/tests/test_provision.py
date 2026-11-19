@@ -93,10 +93,17 @@ def test_provision_readies_a_vm():
             assert words in gitconfig, (words, gitconfig)
         assert (lap.config / "vm").read_text() == "first dev1@vm1.test\n"
 
+        # One connection per user, opened at its first ssh; every session goes through it, and both are
+        # closed at the end.
         calls = lap.ssh_calls()
-        assert TARGET in calls[0]["argv"], calls[0]
-        assert all("dev1@vm1.test" in c["argv"] for c in calls[1:]), [c["argv"] for c in calls]
-        last = calls[-1]["argv"]
+        assert [(c["kind"], c["argv"][-1]) for c in calls if c["kind"] != "session"] == [
+            ("master", TARGET), ("master", "dev1@vm1.test"), ("exit", TARGET), ("exit", "dev1@vm1.test")], \
+            [c["argv"] for c in calls]
+        sessions = [c for c in calls if c["kind"] == "session"]
+        assert all(c["shared"] for c in sessions), [c["argv"] for c in sessions]
+        assert TARGET in sessions[0]["argv"], sessions[0]
+        assert all("dev1@vm1.test" in c["argv"] for c in sessions[1:]), [c["argv"] for c in sessions]
+        last = sessions[-1]["argv"]
         assert "-t" in last and "claude auth login" in last[-1], last
         logins = [c for c in map(json.loads, (vm / "claude.log").read_text().splitlines()) if "login" in c["argv"]]
         assert [c["config"] for c in logins] == [None], logins
@@ -355,7 +362,7 @@ def test_provision_retries_a_refused_connection():
         r = ok(lap.provision(TARGET, "--env", lap.received, "--user", "dev1", stdin=PAT + "\n",
                              env={"FAKE_SSH_REFUSALS": "2"}))
         assert (lap.ssh_log.parent / "ssh.log.refused").read_text() == "2"
-        assert "attempt 2 of 4 failed before authenticating" in r.stderr, r.stderr
+        assert "attempt 2 of 6 failed before authenticating" in r.stderr, r.stderr
         # The root step's heredoc arrived whole after two refusals.
         assert lap.vm_home("vm1.test", "dev1").is_dir()
         assert "dev1" in lap.group_members("vm1.test", "docker")

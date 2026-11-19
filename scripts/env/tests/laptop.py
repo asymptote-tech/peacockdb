@@ -6,8 +6,12 @@ fake VM: a directory per address holding passwd, group, the users' homes, and `r
 written under /etc and /var. A user is reached only with an authorized_keys. As ssh does, `-t` gives
 the far end a terminal only when the laptop's stdin is one, and otherwise says so. Its own lines go
 to its `-E` log when it has one, with `Authenticated to` once a user is reached; `-G` prints the
-`loglevel` and is not a call. FAKE_SSH_REFUSALS=<n> refuses the first n calls before authenticating,
-reading none of stdin and recording no call, and counts them in <ssh log>.refused. On a VM, sudo
+`loglevel` and is not a call. FAKE_SSH_REFUSALS=<n> refuses the first n connections before
+authenticating, reading none of stdin and recording no call, and counts them in <ssh log>.refused.
+Each call is recorded with its `kind`: `master`, `-N` with ControlMaster=yes, authenticates and leaves
+a file at its ControlPath, `%C` a hash of <user>@<address>, running nothing; `exit`, `-O exit`,
+removes that file; a `session` with ControlMaster=no and that file present is `shared`: no refusal,
+no authentication and nothing logged, as through a real master. On a VM, sudo
 runs its command as the caller; getent, groupadd, useradd, usermod and install act on that
 directory, install refusing a source that is not a regular file onto a file that exists, as uutils'
 does, and each VM's commands get a TMPDIR of its own, <vm>/tmp; gh keeps its login in
@@ -37,9 +41,9 @@ PAT = "github_pat_11FAKETOKEN0value_Zq81"
 LAPTOP_GITCONFIG = "[user]\n\tname = Ada Laptop\n\temail = ada@example.test\n"
 
 FAKE_SSH = r'''#!/usr/bin/env python3
-import json, os, pathlib, subprocess, sys
+import hashlib, json, os, pathlib, subprocess, sys
 args = sys.argv[1:]
-WITH_VALUE = {"-o", "-i", "-p", "-l", "-F", "-E", "-J", "-b", "-c", "-D", "-L", "-R", "-W", "-w", "-e", "-m"}
+WITH_VALUE = {"-o", "-i", "-p", "-l", "-F", "-E", "-J", "-b", "-c", "-D", "-L", "-R", "-W", "-w", "-e", "-m", "-O"}
 i, opts = 0, []
 while i < len(args) and args[i].startswith("-"):
     if args[i] == "--":
@@ -55,18 +59,41 @@ if "-G" in opts:
 log = open(opts[opts.index("-E") + 1], "a") if "-E" in opts else sys.stderr
 target, command = args[i], " ".join(args[i + 1:])
 user, _, address = target.rpartition("@")
+
+
+def option(name):
+    found = [o.split("=", 1)[1] for o in opts if o.startswith(name + "=")]
+    return found[0] if found else None
+
+
+def record(kind, stdin=b"", **more):
+    with open(os.environ["FAKE_SSH_LOG"], "a") as f:
+        f.write(json.dumps(dict({"argv": args, "stdin": stdin.decode(errors="replace"), "kind": kind}, **more)) + "\n")
+
+
+control = option("ControlPath")
+master = None
+if control not in (None, "none"):
+    master = pathlib.Path(control.replace("%C", hashlib.sha1(target.encode()).hexdigest()))
+if "-O" in opts:
+    record(opts[opts.index("-O") + 1])
+    if opts[opts.index("-O") + 1] == "exit" and master is not None and master.exists():
+        master.unlink()
+        sys.exit(0)
+    sys.exit(255)
+opening = "-N" in opts and option("ControlMaster") == "yes"
+shared = not opening and option("ControlMaster") == "no" and master is not None and master.exists()
 refused = pathlib.Path(os.environ["FAKE_SSH_LOG"] + ".refused")
 n = int(refused.read_text()) if refused.exists() else 0
-if n < int(os.environ.get("FAKE_SSH_REFUSALS", "0")):
+if not shared and n < int(os.environ.get("FAKE_SSH_REFUSALS", "0")):
     refused.write_text(str(n + 1))
     print(f"ssh: connect to host {address} port 22: Connection refused", file=log)
     sys.exit(255)
 tty = "-t" in opts and sys.stdin.isatty()
 if "-t" in opts and not tty:
     print("Pseudo-terminal will not be allocated because stdin is not a terminal.", file=log)
-stdin = b"" if "-n" in opts or tty else sys.stdin.buffer.read()
-with open(os.environ["FAKE_SSH_LOG"], "a") as f:
-    f.write(json.dumps({"argv": args, "stdin": stdin.decode(errors="replace")}) + "\n")
+stdin = b"" if "-n" in opts or "-N" in opts or "-f" in opts or tty else sys.stdin.buffer.read()
+record("master" if opening else "session", stdin, **({} if opening else {"shared": shared}))
 vm = pathlib.Path(os.environ["FAKE_VMS"]) / address
 if not vm.is_dir() or address in os.environ.get("FAKE_SSH_DOWN", "").split():
     print(f"ssh: connect to host {address} port 22: No route to host", file=log)
@@ -76,9 +103,12 @@ home = homes.get(user)
 if home is None or not (pathlib.Path(home) / ".ssh" / "authorized_keys").is_file():
     print(f"{target}: Permission denied (publickey).", file=log)
     sys.exit(255)
-if log is not sys.stderr:
+if log is not sys.stderr and not shared:
     print(f'Authenticated to {address} ([{address}]:22) using "publickey".', file=log)
     log.close()
+if opening:
+    master.write_text(target)
+    sys.exit(0)
 env = {k: v for k, v in os.environ.items() if k.startswith("FAKE_")}
 (vm / "tmp").mkdir(exist_ok=True)
 env.update(HOME=home, USER=user, LOGNAME=user, FAKE_VM=str(vm), FAKE_USER_NAME=user, LANG="C.UTF-8",

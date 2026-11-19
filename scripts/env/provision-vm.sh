@@ -113,8 +113,31 @@ if [ -n "${token:-}" ]; then
   unset token
 fi
 
+# One connection per <user>@<host>, opened at its first ssh and shared by the rest: a link that drops
+# packets fails a new connection now and then, so a run makes as few as it can, and gives each of
+# them six attempts over two and a half minutes of pauses.
+SSH_RETRY_ATTEMPTS=6
+SSH_RETRY_PAUSES="5 10 20 40 60"
 ssh_opts=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20)
-on() { local who=$1; shift; ssh_retry ssh "${ssh_opts[@]}" -- "$who" "$@"; }
+masters=$(mktemp -d)
+SSH_RETRY_CONTROL_PATH=$masters/%C
+shared=()
+stage=""
+cleanup() {
+  local who
+  for who in "${shared[@]}"; do ssh_retry_unshare ssh "${ssh_opts[@]}" -- "$who"; done
+  rm -rf "$masters" ${stage:+"$stage"}
+}
+trap cleanup EXIT
+on() {
+  local who=$1
+  shift
+  if [[ " ${shared[*]} " != *" $who "* ]]; then
+    ssh_retry_share ssh "${ssh_opts[@]}" -- "$who" || return
+    shared+=("$who")
+  fi
+  ssh_retry ssh "${ssh_opts[@]}" -- "$who" "$@"
+}
 # remote_test <command> — <command>'s status as the developer on the VM; an ssh failure stops the run.
 remote_test() {
   local rc=0
@@ -160,7 +183,6 @@ ROOT
   # read: only the CLI reads it.
   # Staged in ~/.config/peacock, as every secret stays: a killed run leaves nothing in /tmp.
   stage=$(mktemp -d "$PEACOCK_CONFIG/provision.XXXXXX")
-  trap 'rm -rf "$stage"' EXIT
   cp "$PEACOCK_ENV" "$stage/peacock.env"
   cp "$gpu_key" "$stage/gpu_ed25519"
   cp "$gpu_key.pub" "$stage/gpu_ed25519.pub"

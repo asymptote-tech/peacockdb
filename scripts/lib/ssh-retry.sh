@@ -8,18 +8,31 @@
 # argument>… is four attempts. Each has its own log (-E; VERBOSE writes that line) and connection;
 # ssh takes an -o option's first value, so ours come first, and flags that would override them are
 # refused. stderr gets what plain ssh would print. sync_retry <command>… runs a sync, safe to repeat
-# whole, again on 255 or rsync's I/O timeout, 30, four times. Pauses: PEACOCK_SSH_PAUSES (5 10 20).
+# whole, again on 255 or rsync's I/O timeout, 30, four times. A caller may set SSH_RETRY_ATTEMPTS
+# and SSH_RETRY_PAUSES after sourcing this; PEACOCK_SSH_PAUSES, from the environment, overrides the
+# pauses, and an attempt past the last pause waits the last pause again.
+#
+# A shared connection is opt-in: with SSH_RETRY_CONTROL_PATH set to an ssh ControlPath (a %C under a
+# directory of the caller's), ssh_retry_share <ssh> <ssh argument>… <destination> opens a master to
+# <destination>, retried as above, and every attempt after it goes through that master, or connects
+# alone, as without one, when the master is gone. A session through a master logs nothing, so its 255
+# is the one with nothing logged: returned, never retried, as a session that may have run must be.
+# ssh_retry_unshare <ssh> <ssh argument>… <destination> closes the master. A master left by a killed
+# caller closes itself after five idle minutes.
 
 SSH_RETRY_ATTEMPTS=4
+SSH_RETRY_PAUSES="5 10 20"
+SSH_RETRY_CONTROL_PATH=none
 
 # ssh_retry_pause <n> <attempts> <name> <failure> — names failed attempt <n> of <attempts> on stderr
 # and sleeps its pause; false after the last attempt.
 ssh_retry_pause() {
-  local pauses
-  read -ra pauses <<<"${PEACOCK_SSH_PAUSES:-5 10 20}"
+  local pauses pause
+  read -ra pauses <<<"${PEACOCK_SSH_PAUSES:-$SSH_RETRY_PAUSES}"
   [ "$1" -lt "$2" ] || return 1
-  echo "$3: attempt $1 of $2 $4; again in ${pauses[$1 - 1]} s" >&2
-  sleep "${pauses[$1 - 1]}"
+  pause=${pauses[$1 - 1]:-${pauses[-1]}}
+  echo "$3: attempt $1 of $2 $4; again in $pause s" >&2
+  sleep "$pause"
 }
 
 # ssh_retry_clash <ssh argument>… — prints the first -E, -q, -S or -y among the options, read as ssh
@@ -62,12 +75,21 @@ ssh_retry_shown() {
   esac
 }
 
-# The locals carry a prefix: a caller's <var> named like one would resolve to the local, and named
-# like the nameref itself would be circular.
-ssh_retry_up_to() {
-  local -n _sru_authenticated=$2
-  local _sru_max=$1 _sru_ssh=$3 _sru_clash _sru_level _sru_log _sru_rc _sru_n=1
-  shift 3
+ssh_retry_up_to() { ssh_retry_run no "$@"; }
+
+# ssh_retry_run <ControlMaster> <attempts> <var> <ssh> <ssh argument>… — ssh_retry_up_to, each
+# attempt with <ControlMaster> (no, or yes to open one) when SSH_RETRY_CONTROL_PATH is set. The
+# locals carry a prefix: a caller's <var> named like one would resolve to the local, and named like
+# the nameref itself would be circular.
+ssh_retry_run() {
+  local -n _sru_authenticated=$3
+  local _sru_max=$2 _sru_ssh=$4 _sru_clash _sru_level _sru_log _sru_rc _sru_n=1 _sru_control
+  if [ "$SSH_RETRY_CONTROL_PATH" = none ]; then
+    _sru_control=(-o ControlPath=none)
+  else
+    _sru_control=(-o "ControlPath=$SSH_RETRY_CONTROL_PATH" -o "ControlMaster=$1")
+  fi
+  shift 4
   _sru_authenticated=0
   _sru_clash=$(ssh_retry_clash "$@")
   if [ -n "$_sru_clash" ]; then
@@ -81,7 +103,7 @@ ssh_retry_up_to() {
   while :; do
     : >"$_sru_log"
     _sru_rc=0
-    "$_sru_ssh" -E "$_sru_log" -o LogLevel=VERBOSE -o ControlPath=none "$@" || _sru_rc=$?
+    "$_sru_ssh" -E "$_sru_log" -o LogLevel=VERBOSE "${_sru_control[@]}" "$@" || _sru_rc=$?
     if [ "$_sru_rc" != 255 ] || [ ! -s "$_sru_log" ] \
       || grep -qE '^Authenticated to |Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED' "$_sru_log" \
       || ! ssh_retry_pause "$_sru_n" "$_sru_max" ssh \
@@ -100,6 +122,25 @@ ssh_retry() {
   # shellcheck disable=SC2034  # set through ssh_retry_up_to's nameref, read by nobody
   local unread
   ssh_retry_up_to "$SSH_RETRY_ATTEMPTS" unread "$@"
+}
+
+# Its stdin is its own: -f implies -n, but a fake ssh need not know that.
+ssh_retry_share() {
+  # shellcheck disable=SC2034  # set through ssh_retry_run's nameref, read by nobody
+  local unread ssh=$1
+  if [ "$SSH_RETRY_CONTROL_PATH" = none ]; then
+    echo "ssh_retry_share: SSH_RETRY_CONTROL_PATH is not set" >&2
+    return 2
+  fi
+  shift
+  ssh_retry_run yes "$SSH_RETRY_ATTEMPTS" unread "$ssh" -f -N -o ControlPersist=300 "$@" </dev/null
+}
+
+ssh_retry_unshare() {
+  local ssh=$1
+  shift
+  [ "$SSH_RETRY_CONTROL_PATH" = none ] \
+    || "$ssh" -o "ControlPath=$SSH_RETRY_CONTROL_PATH" -O exit "$@" </dev/null >/dev/null 2>&1 || true
 }
 
 sync_retry() {
