@@ -13,6 +13,7 @@ These issues should be fixed on a pre-prod performance path.
 - [#286 (offset row-group skip) an OFFSET that reaches a scan still reads every row group it skips](#t286)
 - [#290 (stacked limits) a limit DataFusion pushed down and kept above becomes two adjacent `GpuLimit`s](#t290)
 - [#305 (snappy batch floor) a parquet load's Snappy decompression takes about 29 ms however few bytes it holds](#t305)
+- [#319 (result export copies) a large answer is copied about five times on the host on its way out, and the copies cost several times the transfer](#t319)
 
 <a id="t150"></a>
 ### #150 (uncompressed embeddings) store the embedding columns uncompressed; Snappy costs a third of a vector query to save 3%
@@ -190,3 +191,40 @@ not its bytes. Next: the page sizes per column chunk from the footers, and the l
 time. If one large page sets it, it is a writer setting in `testdata/generate_testdata.sh`, as
 #150 is. The numbers are a `create_nsys_profile.sh --trace` capture's kernels inside each load's
 window, as `nsys_loads.py` draws it; the loads' times are in [#149](../archive/archived-tickets.md#t149).
+
+<a id="t319"></a>
+### #319 (result export copies) a large answer is copied about five times on the host on its way out, and the copies cost several times the transfer
+On the H100 (tpch sf40, tp1_single), getting a large answer from the device to the caller costs
+seconds, and the copy over PCIe is the least of it:
+
+| query | answer | `GpuUnload` | of it `to_arrow_host` | run − total |
+|---|---|--:|--:|--:|
+| filter-project | 96 M rows, 2.33 GB | 4622 ms | 690 ms | 2036 ms |
+| semi-join | 12 M rows, 1.56 GB (all of `orders`) | 3545 ms | 462 ms | 1204 ms |
+
+`GpuUnload` and run − total (`run_us − device_us`) are the reported run's, from
+`testdata/benchmark-results/h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt`; `to_arrow_host`
+is the `result_from_handle` rows of `testdata/calibration/h100-80gb-hbm3/tpch.sf40/calls.tsv`,
+where everything else in the region is `(unattributed)`: 3975 ms and 3045 ms. Small answers pay
+none of it (q18: run − total 1 ms).
+
+The path from code, not yet profiled. Inside the timed region, `export_table_to_ipc`
+(`cpp/src/gpu_executor.cpp`):
+1. `cudf::to_arrow_host` copies the table into pageable memory, at about 3.4 GB/s; a pinned
+   destination runs at 40+ GB/s on this host.
+2. The IPC stream writer copies every buffer into a `BufferOutputStream` that grows by
+   reallocation, so part of it is copied more than once.
+3. `hand_over` `malloc`s and `memcpy`s the whole stream again, for Rust to own.
+
+After the region closes, so in run but not in total, `GpuExport::unload`
+(`peacockdb-core/src/executor/gpu_backend/mod.rs`):
+4. `decode`'s `StreamReader` copies the message bodies out of the stream into new buffers.
+5. `concat_batches` copies everything once more, a single batch included; then the frees.
+
+Each copy goes into memory touched for the first time, so the kernel faults in and zeroes every
+4 KiB page; for 2.33 GB that is over half a million faults per copy. The suspicion is that the
+faults, more than the `memcpy`s, make up the 3–4 s inside the region and the 1–2 s after it.
+First, a `perf record` of one filter-project run, to split page faults (`clear_page`, the fault
+path) from `memcpy` and IPC framing. The likely fix: hand Rust the `to_arrow_host` buffers
+through the Arrow C data interface rather than an IPC stream, into pinned or reused memory,
+with no concat for one batch. The answer is then copied once.
