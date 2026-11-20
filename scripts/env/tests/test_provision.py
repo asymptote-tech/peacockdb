@@ -379,6 +379,66 @@ def test_provision_never_retries_a_session_that_authenticated():
         assert "attempt" not in r.stderr, r.stderr
 
 
+RK = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIRkKey rk00@rk00-M1010"
+BO = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBoKey= bo@desk"
+
+
+def shell(lap, user):
+    return next(ln.split(":")[6] for ln in (lap.vms / "vm1.test" / "passwd").read_text().splitlines()
+                if ln.split(":")[0] == user)
+
+
+def test_each_key_in_authorized_keys_is_a_user_with_bash_sudo_and_its_key():
+    with Laptop() as lap:
+        (lap.config / "authorized_keys").write_text(f"# the team\n{RK}\n\n  {BO.replace(' ', '   ')}  \n")
+        readied(lap)
+        vm = lap.vms / "vm1.test"
+        for user, key in (("rk00", RK), ("bo", BO)):
+            home = lap.vm_home("vm1.test", user)
+            assert (home / ".ssh" / "authorized_keys").read_text() == key + "\n", user
+            assert mode(home / ".ssh" / "authorized_keys") == 0o600 and mode(home / ".ssh") == 0o700, user
+            assert shell(lap, user) == "/bin/bash", user
+            sudoers = vm / "root" / "etc" / "sudoers.d" / f"peacock-{user}"
+            assert sudoers.read_text() == f"{user} ALL=(ALL) NOPASSWD:ALL\n" and mode(sudoers) == 0o440, user
+            assert user not in lap.group_members("vm1.test", "docker"), user
+
+
+def test_a_key_user_that_exists_keeps_its_keys_gets_bash_and_no_duplicate():
+    with Laptop() as lap:
+        vm = lap.add_vm("vm1.test")
+        home = vm / "home" / "rk00"
+        (home / ".ssh").mkdir(parents=True)
+        (home / ".ssh" / "authorized_keys").write_text("ssh-ed25519 AAAAown rk00@other")  # no newline
+        with open(vm / "passwd", "a") as f:
+            f.write(f"rk00:x:1001:1001::{home}:/bin/sh\n")
+        (lap.config / "authorized_keys").write_text(RK + "\n")
+        for _ in range(2):
+            ok(lap.provision(TARGET, "--env", lap.received, "--user", "dev1", stdin=PAT + "\n"))
+        assert (home / ".ssh" / "authorized_keys").read_text() == f"ssh-ed25519 AAAAown rk00@other\n{RK}\n"
+        assert shell(lap, "rk00") == "/bin/bash"
+        assert "rk00" not in (vm / "useradd.log").read_text()
+
+
+def test_a_key_named_for_the_developer_joins_the_login_s_keys():
+    with Laptop() as lap:
+        (lap.config / "authorized_keys").write_text("ssh-ed25519 AAAAdevkey dev1@laptop\n")
+        readied(lap)
+        assert (lap.vm_home("vm1.test", "dev1") / ".ssh" / "authorized_keys").read_text() == \
+            "ssh-ed25519 AAAAfakelaptopkey ada@laptop\nssh-ed25519 AAAAdevkey dev1@laptop\n"
+
+
+def test_provision_refuses_a_key_it_cannot_name_a_user_for():
+    for line, words in (("ssh-ed25519 AAAAkey", ["line 2", "<user>@<host>"]),
+                        ("ssh-ed25519 AAAAkey Rk@host", ["line 2"]),
+                        ('from="10.0.0.1" ssh-ed25519 AAAAkey rk00@host', ["line 2"]),
+                        ("ssh-ed25519 AAAAkey root@host", ["line 2", "root"])):
+        with Laptop() as lap:
+            lap.add_vm("vm1.test")
+            (lap.config / "authorized_keys").write_text(f"{RK}\n{line}\n")
+            r = lap.provision(TARGET, "--env", lap.received, "--user", "dev1", stdin=PAT + "\n")
+            refused(r, lap, str(lap.config / "authorized_keys"), *words)
+
+
 def test_provision_copies_the_named_gpu_key():
     with Laptop() as lap:
         key = lap.home / "keys" / "dev_ed25519"

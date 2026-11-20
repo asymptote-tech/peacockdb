@@ -12,7 +12,9 @@
 # profiles nebius-profiles.sh cuts, and nothing else; a missing one is cut first, from
 # ~/.nebius/config.yaml. The PAT, asked for once, the GPU key and nebius.yaml reach the VM on ssh's
 # stdin alone. The VM is recorded as --name, its address by default. --new-pat replaces the PAT here
-# and on every recorded VM it reaches. A rerun skips what is done.
+# and on every recorded VM it reaches. A rerun skips what is done. When ~/.config/peacock/authorized_keys
+# exists, each key in it is a user on the VM named as its comment's <user>@<host>, with bash,
+# passwordless sudo and that key; a key gone from the file stays on the VM.
 [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 4 ]; } || {
   echo "${0##*/}: this machine's bash is $BASH_VERSION, older than 4.4: install a current one (on macOS, brew install bash)" >&2; exit 2; }
 # Above, in bash 3.2's syntax and before any source: macOS ships 3.2, and what follows needs 4.4.
@@ -78,6 +80,20 @@ if [ -n "$target" ]; then
   peacock_nebius_cli
   peacock_nebius_config_cut
   peacock_nebius_config_checked "$PEACOCK_NEBIUS" "$PEACOCK_NEBIUS_CONFIG"
+  # Each key as <name> <key line>, quoted for the remote shell: ssh joins its arguments with spaces.
+  key_users=()
+  if [ -f "$PEACOCK_AUTHORIZED_KEYS" ]; then
+    n=0
+    while IFS= read -r line || [ -n "$line" ]; do
+      n=$((n + 1))
+      [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+      [[ "$line" =~ ^[[:space:]]*((ssh|ecdsa|sk)-[A-Za-z0-9@.-]+)[[:space:]]+([A-Za-z0-9+/]+=*)[[:space:]]+(([a-z_][a-z0-9_-]{0,31})@[^[:space:]]+)[[:space:]]*$ ]] \
+        || die "$PEACOCK_AUTHORIZED_KEYS line $n: not <type> <key> <user>@<host>, the user the VM's account is named for"
+      [ "${BASH_REMATCH[5]}" != root ] || die "$PEACOCK_AUTHORIZED_KEYS line $n: root is no developer's account"
+      key_users+=("$(printf %q "${BASH_REMATCH[5]}")" \
+        "$(printf %q "${BASH_REMATCH[1]} ${BASH_REMATCH[3]} ${BASH_REMATCH[4]}")")
+    done < "$PEACOCK_AUTHORIZED_KEYS"
+  fi
 fi
 
 # The token is read and checked before anything is kept, so a wrong one leaves nothing behind but a
@@ -150,10 +166,19 @@ if [ -n "$target" ]; then
   if [ -n "$env_in" ]; then peacock_env_normalised "$env_in" "$PEACOCK_ENV"; fi
 
   # The developer's own Linux user, reached with <login>'s keys. Its sudo widens nothing: the docker
-  # group is root already. Joining the groups before its first login makes them its session's.
-  on "$target" sudo bash -s -- "$user" "$login" << 'ROOT'
+  # group is root already. Joining the groups before its first login makes them its session's. Then
+  # a user per key in authorized_keys, its key added to what its authorized_keys holds.
+  on "$target" sudo bash -s -- "$user" "$login" "${key_users[@]}" << 'ROOT'
 set -euo pipefail
 user=$1 login=$2
+shift 2
+# From a file: uutils' install (Ubuntu 26.04) refuses /dev/stdin onto a file that exists.
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+sudoer() {
+  echo "$1 ALL=(ALL) NOPASSWD:ALL" > "$work/sudoers"
+  install -m 440 "$work/sudoers" "/etc/sudoers.d/peacock-$1"
+}
 getent group docker > /dev/null || groupadd --system docker
 getent group peacock > /dev/null || groupadd peacock
 getent passwd "$user" > /dev/null || useradd --create-home --shell /bin/bash "$user"
@@ -166,12 +191,25 @@ if [ "$user" != "$login" ]; then
     install -m 600 -o "$user" -g "$gid" "$(getent passwd "$login" | cut -d: -f6)/.ssh/authorized_keys" \
       "$home/.ssh/authorized_keys"
   fi
-  # From a file: uutils' install (Ubuntu 26.04) refuses /dev/stdin onto a file that exists.
-  sudoers=$(mktemp)
-  trap 'rm -f "$sudoers"' EXIT
-  echo "$user ALL=(ALL) NOPASSWD:ALL" > "$sudoers"
-  install -m 440 "$sudoers" "/etc/sudoers.d/peacock-$user"
+  sudoer "$user"
 fi
+while [ $# -gt 0 ]; do
+  name=$1 key=$2
+  shift 2
+  getent passwd "$name" > /dev/null || useradd --create-home --shell /bin/bash "$name"
+  usermod --shell /bin/bash "$name"
+  home=$(getent passwd "$name" | cut -d: -f6)
+  gid=$(getent passwd "$name" | cut -d: -f4)
+  : > "$work/keys"
+  if [ -f "$home/.ssh/authorized_keys" ]; then
+    cat "$home/.ssh/authorized_keys" > "$work/keys"
+    [ ! -s "$work/keys" ] || [ -z "$(tail -c 1 "$work/keys")" ] || echo >> "$work/keys"
+  fi
+  grep -qxF -- "$key" "$work/keys" || printf '%s\n' "$key" >> "$work/keys"
+  install -d -m 700 -o "$name" -g "$gid" "$home/.ssh"
+  install -m 600 -o "$name" -g "$gid" "$work/keys" "$home/.ssh/authorized_keys"
+  [ "$name" = "$login" ] || sudoer "$name"
+done
 ROOT
 
   # Every run: bootstrap-vm.sh skips what is done, and refuses a --ref the clone is not on.

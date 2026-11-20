@@ -12,6 +12,7 @@ PEACOCK_PAT=$PEACOCK_CONFIG/github-pat
 PEACOCK_GPU_KEY=$PEACOCK_CONFIG/gpu_ed25519
 PEACOCK_VMS=$PEACOCK_CONFIG/vm
 PEACOCK_NEBIUS_CONFIG=$PEACOCK_CONFIG/nebius.yaml
+PEACOCK_AUTHORIZED_KEYS=$PEACOCK_CONFIG/authorized_keys
 # The profiles nebius.yaml holds, and nothing else; the first is the active one.
 PEACOCK_NEBIUS_PROFILES=(editor-eu eu-west1)
 # What peacock.env holds on a laptop, and must hold on a VM.

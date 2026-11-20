@@ -13,7 +13,7 @@ a file at its ControlPath, `%C` a hash of <user>@<address>, running nothing; `ex
 removes that file; a `session` with ControlMaster=no and that file present is `shared`: no refusal,
 no authentication and nothing logged, as through a real master. On a VM, sudo
 runs its command as the caller; getent, groupadd, useradd, usermod and install act on that
-directory, install refusing a source that is not a regular file onto a file that exists, as uutils'
+directory, useradd giving /bin/sh unless --shell names another, as Ubuntu's does, install refusing a source that is not a regular file onto a file that exists, as uutils'
 does, and each VM's commands get a TMPDIR of its own, <vm>/tmp; gh keeps its login in
 ~/.config/gh/hosts.yml on the laptop and on a VM alike. The clone's bootstrap-vm.sh is a stub that
 records its user and arguments, exits FAKE_BOOTSTRAP_RC when it is set, installs a fake claude,
@@ -179,7 +179,7 @@ if [ "${1:-}" = --ref ]; then ref=$2; fi
 FAKE_SSH_KEYGEN = '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_SSH_KEYGEN_LOG"\nexit 1\n'
 GPU_KEY_NAMES = {"gpu_ed25519", "gpu_ed25519.pub"}
 # What every laptop holds in ~/.config/peacock before provision-vm.sh runs.
-HELD_NAMES = GPU_KEY_NAMES | {"nebius.yaml"}
+HELD_NAMES = GPU_KEY_NAMES | {"nebius.yaml", "authorized_keys"}
 EMBEDDED = {"key_path": None}
 
 
@@ -228,13 +228,22 @@ home = vm / "home" / name
 if "--create-home" in sys.argv or "-m" in sys.argv:
     home.mkdir(parents=True)
 uid = 3000 + len(lines)
-open(vm / "passwd", "a").write(f"{name}:x:{uid}:{uid}::{home}:/bin/bash\n")
+shell = sys.argv[sys.argv.index("--shell") + 1] if "--shell" in sys.argv else "/bin/sh"
+open(vm / "passwd", "a").write(f"{name}:x:{uid}:{uid}::{home}:{shell}\n")
 open(vm / "group", "a").write(f"{name}:x:{uid}:\n")
 ''',
     "usermod": r'''#!/usr/bin/env python3
 import os, sys
-path = os.path.join(os.environ["FAKE_VM"], "group")
 a = sys.argv[1:]
+if a[0] == "--shell":
+    path = os.path.join(os.environ["FAKE_VM"], "passwd")
+    lines = open(path).read().splitlines()
+    if not any(ln.split(":")[0] == a[2] for ln in lines):
+        sys.exit(f"usermod: user '{a[2]}' does not exist")
+    out = [":".join(f[:6] + [a[1]]) if f[0] == a[2] else ":".join(f) for f in (ln.split(":") for ln in lines)]
+    open(path, "w").write("\n".join(out) + "\n")
+    sys.exit(0)
+path = os.path.join(os.environ["FAKE_VM"], "group")
 assert a[0] == "-aG", a
 groups, user = a[1].split(","), a[2]
 out = []
