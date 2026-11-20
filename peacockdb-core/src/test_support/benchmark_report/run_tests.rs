@@ -1,10 +1,15 @@
-//! The run clock beside the total: peacockdb's `run_us` and Sirius's execution window in the main
-//! table, the run ratio, `run_ms` in the CSV, and the intro's and Sirius's paragraph saying what
-//! each run and total is. The trees and readers are `tests.rs`'s.
+//! The run clock beside the device time and the wall: peacockdb's `run_us` and Sirius's execution
+//! window in the main table, the run ratio, each engine's times in their own CSV columns, the
+//! headings' titles, and the intro's and Sirius's paragraph saying what each run, device time and
+//! wall is. The trees and readers are `tests.rs`'s.
 
+use super::sirius::{SIRIUS_RUN_MEANS, SIRIUS_WALL_MEANS};
 use super::tests::{
     CSV_HEADER, TIMED, duckdb, failed, list, main_part, modes_row, order, page, put, row, sirius,
     tree,
+};
+use super::{
+    DEVICE_MEANS, DUCKDB_WARM_MEANS, LOAD_MEANS, LOAD_UNPINNED_MEANS, PEAK_MEANS, RUN_MEANS, escape,
 };
 use crate::test_support::{render_benchmarks_csv, section_href};
 
@@ -20,7 +25,7 @@ fn without_run_us() -> String {
 }
 
 #[test]
-fn the_main_table_shows_peacockdb_s_run_after_its_total() {
+fn the_main_table_shows_peacockdb_s_run_after_its_device_time() {
     let root = tree("run-peacockdb");
     put(&root, SINGLE, &[("q3", TIMED), ("q6", &failed("boom"))]);
     let html = page(root, &[("tpch", "q3"), ("tpch", "q6")]);
@@ -30,11 +35,15 @@ fn the_main_table_shows_peacockdb_s_run_after_its_total() {
         main.contains("<th colspan=\"5\">h100-80gb-hbm3 · tp1_single</th>"),
         "{html}"
     );
-    assert!(
-        main.contains("<th>total (ms)</th><th>run (ms)</th><th title="),
-        "{html}"
+    let headings = format!(
+        "<th title=\"{}\">device (ms)</th><th title=\"{}\">run (ms)</th><th title=\"{}\">peak \
+         ≥ (GiB)</th>",
+        escape(DEVICE_MEANS),
+        escape(RUN_MEANS),
+        escape(PEAK_MEANS)
     );
-    // Linked to the section's header, as the total is.
+    assert!(main.contains(&headings), "{html}");
+    // Linked to the section's header, as the device time is.
     let href = section_href(&format!("benchmark-results/{SINGLE}"), 1);
     assert!(
         main.contains(&format!("<td class=\"n\"><a href=\"{href}\">1.7</a></td>")),
@@ -44,7 +53,7 @@ fn the_main_table_shows_peacockdb_s_run_after_its_total() {
 }
 
 #[test]
-fn a_sirius_group_shows_run_then_total() {
+fn a_sirius_group_shows_run_then_wall() {
     let root = tree("run-sirius-group");
     put(
         &root,
@@ -67,7 +76,7 @@ fn a_sirius_group_shows_run_then_total() {
             "q3", "1.0", "0.5", "1.5", "1.7", "2.00", "180.0", "300.0", "412.0"
         ]
     );
-    // The mark follows the run; the total is the wall alone.
+    // The mark follows the run; the wall stands alone.
     assert_eq!(row(&html, "q6")[6..8], ["60.0 wrong answer #7", "100.0"]);
     assert_eq!(row(&html, "q9")[6..8], ["30.0 unverified", "50.0"]);
     let main = main_part(&html);
@@ -75,10 +84,14 @@ fn a_sirius_group_shows_run_then_total() {
         main.contains("<th colspan=\"2\">sirius · h100-80gb-hbm3</th>"),
         "{html}"
     );
-    assert!(
-        main.contains("<th>run (ms)</th><th>total (ms)</th><th>warm (ms)</th>"),
-        "{html}"
+    let headings = format!(
+        "<th title=\"{}\">run (ms)</th><th title=\"{}\">wall (ms)</th><th \
+         title=\"{}\">warm (ms)</th>",
+        escape(SIRIUS_RUN_MEANS),
+        escape(SIRIUS_WALL_MEANS),
+        escape(DUCKDB_WARM_MEANS)
     );
+    assert!(main.contains(&headings), "{html}");
     let href = section_href("benchmark-results/h100-80gb-hbm3/tpch.sf40/sirius.tsv", 3);
     assert!(
         main.contains(&format!(
@@ -121,7 +134,7 @@ fn a_failed_sirius_row_spans_both_cells() {
 
 /// q3 and q15 count. q6 is Sirius's `wrong`, q9 Sirius's `failed`, q11 Sirius's `unverified`, and
 /// q13 peacockdb's `wrong`. The run ratio is (3.4 + 5.1) / (1.7 + 1.7), h100's tp1_single alone:
-/// not another device's, nor another mode's; the total line follows it.
+/// not another device's, nor another mode's; the wall line follows it.
 #[test]
 fn the_run_ratio_counts_only_rows_both_ran() {
     let root = tree("run-ratio");
@@ -153,7 +166,7 @@ fn the_run_ratio_counts_only_rows_both_ran() {
     assert!(
         html.contains(
             "<h2 id=\"tpch-sf40\">tpch sf40</h2>\n<p>Σ run Sirius / Σ run peacockdb = 2.50 over 2 \
-             of 6 queries</p>\n<p>Σ total Sirius / Σ total DuckDB = — over 0 of 6 \
+             of 6 queries</p>\n<p>Σ wall Sirius / Σ warm DuckDB = — over 0 of 6 \
              queries</p>\n<table>"
         ),
         "{html}"
@@ -180,7 +193,7 @@ fn a_section_without_run_us_shows_a_dash_and_stays_out_of_the_ratio() {
         "{html}"
     );
     assert!(
-        csv.contains("\ntpch,40,q6,peacockdb,h100-80gb-hbm3,tp1_single,1.0,0.5,1.5,,2.00,ok\n"),
+        csv.contains("\ntpch,40,q6,peacockdb,h100-80gb-hbm3,tp1_single,1.0,0.5,1.5,,,2.00,ok\n"),
         "{csv}"
     );
 }
@@ -201,7 +214,7 @@ fn a_sirius_row_without_run_times_fails_the_page() {
 }
 
 #[test]
-fn the_csv_has_run_ms_after_total_ms() {
+fn the_csv_puts_device_run_and_wall_in_their_own_columns() {
     let root = tree("run-csv");
     put(&root, SINGLE, &[("q3", TIMED)]);
     sirius(
@@ -217,14 +230,14 @@ fn the_csv_has_run_ms_after_total_ms() {
         csv,
         format!(
             "{CSV_HEADER}\n\
-             tpch,40,q3,peacockdb,h100-80gb-hbm3,tp1_single,1.0,0.5,1.5,1.7,2.00,ok\n\
-             tpch,40,q3,sirius,h100-80gb-hbm3,tp1_single,,,300.0,180.0,,ok\n\
-             tpch,40,q3,duckdb,duckdb-cpu128,,,,412.0,,,ok\n\
-             tpch,40,q6,duckdb,duckdb-cpu128,,,,,,,failed\n"
+             tpch,40,q3,peacockdb,h100-80gb-hbm3,tp1_single,1.0,0.5,1.5,1.7,,2.00,ok\n\
+             tpch,40,q3,sirius,h100-80gb-hbm3,tp1_single,,,,180.0,300.0,,ok\n\
+             tpch,40,q3,duckdb,duckdb-cpu128,,,,,,412.0,,ok\n\
+             tpch,40,q6,duckdb,duckdb-cpu128,,,,,,,,failed\n"
         )
     );
     assert!(
-        CSV_HEADER.ends_with(",total_ms,run_ms,peak_gib,status"),
+        CSV_HEADER.ends_with(",exec_ms,device_ms,run_ms,wall_ms,peak_gib,status"),
         "{CSV_HEADER}"
     );
 }
@@ -283,10 +296,10 @@ fn a_sirius_row_s_note_shows_on_its_run() {
     );
 }
 
-/// The intro and Sirius's paragraph say what each engine's run and total are; Sirius's where it read
-/// from, what each file was measured with, and that some rows read outside the pin.
+/// The intro and Sirius's paragraph say what each engine's run, device time and wall are; Sirius's
+/// where it read from, what each file was measured with, and that some rows read outside the pin.
 #[test]
-fn the_sirius_paragraph_names_its_run_total_and_provenance() {
+fn the_sirius_paragraph_names_its_run_wall_and_provenance() {
     let root = tree("sirius-intro");
     put(
         &root,
@@ -302,16 +315,17 @@ fn the_sirius_paragraph_names_its_run_total_and_provenance() {
     duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
     let html = page(root, &[("tpch", "q3")]);
     let peacockdb = "PeacockDB's times are one run's, the second-smallest by wall time of its timed \
-                     runs after one warm-up. Its load, execute and total are device-side, in ms: \
-                     the total is load plus execute. Its run is that run's wall time end to end: \
-                     after planning, the copy of its result to the host included.";
+                     runs after one warm-up. Its load, execute and device times are device-side, \
+                     in ms: device is load plus execute. Its run is that run's wall time end to \
+                     end: after planning, the copy of its result to the host included.";
     assert!(html.contains(peacockdb), "{html}");
     let at = html.find("<p>Sirius's run is").expect("a Sirius paragraph");
     let paragraph = &html[at..at + html[at..].find("</p>").unwrap()];
     for said in [
         "its execution window after planning, from its log's [window] begin to [window] end",
         "its result materialized on the host included, its Arrow conversion not",
-        "the wall time around the statement and an Arrow fetch of its result, planning included",
+        "Its wall time is taken around the statement and an Arrow fetch of its result, planning \
+         included",
         "A row whose plan was rebuilt inside its window says so beside its run.",
         "the second-smallest of the timed runs after one warm-up",
         "pinned in Sirius's host cache. Its config departs from Sirius's defaults in three",
@@ -323,4 +337,83 @@ fn the_sirius_paragraph_names_its_run_total_and_provenance() {
     }
     // Beside DuckDB's, before it, as the groups stand in the table.
     assert!(at < html.find("<p>DuckDB's time is").unwrap(), "{html}");
+}
+
+/// Each heading of a time, device time or peak says what it measures on hover, in the main table
+/// and in a Modes table, and the page marks such a heading.
+#[test]
+fn every_time_heading_carries_a_title() {
+    let root = tree("titles");
+    put(&root, SINGLE, &[("q3", TIMED)]);
+    put(
+        &root,
+        "h100-80gb-hbm3/tpch.sf40/tp4_sized.benchmark.txt",
+        &[("q3", TIMED)],
+    );
+    sirius(
+        &root,
+        "h100-80gb-hbm3",
+        "tpch",
+        "q3\t300.0\t300.0\t180.0\t180.0\tok\t-\n",
+    );
+    duckdb(&root, "duckdb-cpu128", "tpch", "nebius-cpu128");
+    let html = page(root, &[("tpch", "q3")]);
+    let headings =
+        |row: &str| -> Vec<String> { row.split("<th").skip(1).map(|th| th.to_string()).collect() };
+    let main = main_part(&html);
+    let second = main
+        .lines()
+        .filter(|line| line.starts_with("<tr><th"))
+        .nth(1)
+        .expect("the main table's second heading row");
+    let times = headings(second);
+    // Five for the device, two for Sirius, one for DuckDB.
+    assert_eq!(times.len(), 8, "{second}");
+    for th in &times {
+        assert!(
+            th.starts_with(" title=\"") && !th.starts_with(" title=\"\""),
+            "{th}"
+        );
+    }
+    let modes = &html[html.find("<h3>h100-80gb-hbm3</h3>").expect("a Modes table")..];
+    let mut rows = modes.lines().filter(|line| line.starts_with("<tr><th"));
+    let first = rows.next().expect("the Modes table's first heading row");
+    // The query, the four measures, then DuckDB's tree, whose measure is in the second row.
+    let measures = headings(first);
+    assert_eq!(measures.len(), 6, "{first}");
+    let second = rows.next().expect("the Modes table's second heading row");
+    let wall = headings(second).pop().expect("DuckDB's heading");
+    for th in measures[1..5].iter().chain([&wall]) {
+        assert!(
+            th.contains(" title=\"") && !th.contains(" title=\"\""),
+            "{th}"
+        );
+    }
+    assert!(
+        html.contains("th[title] { text-decoration: underline dotted; cursor: help; }"),
+        "{html}"
+    );
+}
+
+/// A Modes table whose every load is unpinned titles its load heading so, the cells unmarked; a
+/// pinned device's keeps the pinned title.
+#[test]
+fn an_all_unpinned_modes_table_titles_its_load_unpinned() {
+    let root = tree("titles-unpinned");
+    put(&root, SINGLE, &[("q3", TIMED)]);
+    let unpinned = TIMED.replace("pinned_cache=on", "pinned_cache=off");
+    put(
+        &root,
+        "a100/tpch.sf40/tp1_single.benchmark.txt",
+        &[("q3", &unpinned)],
+    );
+    let html = page(root, &[("tpch", "q3")]);
+    let load = |means: &str| format!(" title=\"{}\">load (ms)</th>", escape(means));
+    let a100 = &html[html.find("<h3>a100</h3>").expect("a100's Modes table")..];
+    let a100 = &a100[..a100.find("</table>").unwrap()];
+    assert!(a100.contains(&load(LOAD_UNPINNED_MEANS)), "{html}");
+    let h100 = &html[html
+        .find("<h3>h100-80gb-hbm3</h3>")
+        .expect("h100's Modes table")..];
+    assert!(h100.contains(&load(LOAD_MEANS)), "{html}");
 }

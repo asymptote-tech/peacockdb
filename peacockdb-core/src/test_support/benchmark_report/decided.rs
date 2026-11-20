@@ -12,7 +12,7 @@ pub(crate) enum Decided<'f> {
         found: &'f Found,
         load_us: u64,
         execute_us: u64,
-        total_us: u64,
+        device_us: u64,
         /// The run end to end; `None` where the section has no `run_us`.
         run_us: Option<u64>,
         peak_bytes: Option<u64>,
@@ -63,7 +63,7 @@ pub(crate) fn decided<'f>(place: &Place, device: &Device, found: Option<&'f Foun
     });
     let timed = found.and_then(|found| parse_benchmark_section(&found.body).map(|s| (found, s)));
     if let Some((found, section)) = timed {
-        let total_us = section
+        let device_us = section
             .count("device_us")
             .unwrap_or_else(|| panic!("{}:{}: no device_us", found.rel, found.line));
         let load_us = section
@@ -77,8 +77,8 @@ pub(crate) fn decided<'f>(place: &Place, device: &Device, found: Option<&'f Foun
         return Decided::Timed {
             found,
             load_us,
-            execute_us: section.count("execute_us").unwrap_or(total_us - load_us),
-            total_us,
+            execute_us: section.count("execute_us").unwrap_or(device_us - load_us),
+            device_us,
             run_us: section.count("run_us"),
             peak_bytes: section.count("peak_bytes"),
             pinned: section

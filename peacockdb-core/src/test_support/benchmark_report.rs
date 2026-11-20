@@ -26,10 +26,33 @@ use super::{
     duckdb_results, ordered_sections, parse_device_cases, testdata_root,
 };
 use decided::{Decided, decided};
-use sirius::{Sirius, ratio_line, run_ratio_line, sirius_cells, sirius_intro, siriuses};
+use sirius::{
+    Sirius, ratio_line, run_ratio_line, sirius_cells, sirius_headings, sirius_intro, siriuses,
+};
 
 /// What the peak column claims, and no more.
 const PEAK_MEANS: &str = "the accountant's peak, a lower bound on device memory";
+
+/// The load heading's `title`, where the loads read the pinned host cache.
+const LOAD_MEANS: &str = "Device time of the parquet loads: pinned host cache to GPU, decompress, \
+                          decode. No disk reads: the cache is filled before the runs.";
+/// The load heading's `title` in a Modes table whose every load is unpinned.
+const LOAD_UNPINNED_MEANS: &str = "Device time of the parquet loads, every one read without the \
+                                   pinned host cache: from disk or the page cache, then \
+                                   decompress and decode.";
+/// The execute heading's `title`.
+const EXECUTE_MEANS: &str =
+    "Device time of every other node, the result's copy to the host included.";
+/// The device heading's `title`.
+const DEVICE_MEANS: &str =
+    "load + execute: the plan's device time summed. No planning, no host time between calls.";
+/// peacockdb's run heading's `title`.
+const RUN_MEANS: &str = "Wall clock of one execution after planning, from opening the executor \
+                         to closing it, the result as Arrow on the host included.";
+/// DuckDB's heading's `title`.
+const DUCKDB_WARM_MEANS: &str = "Wall clock of one DuckDB CLI process: its start, the database \
+                                 opened and the query, planning included. Warm: the \
+                                 second-smallest of its runs, the database in the page cache.";
 
 /// What an `unpinned` load is: its rounds read the files from disk or the page cache, so it is
 /// not comparable with a load from pinned memory.
@@ -44,7 +67,7 @@ const MODES_ONLY: &[&str] = &["h200"];
 const MAIN_MODE: &str = "tp1_single";
 
 /// `testdata/report.html`'s rules for the elements this page uses; its `td.g` colours are the
-/// classes `off`, `skip` and `na` here.
+/// classes `off`, `skip` and `na` here. The page's own: a dotted underline on a titled heading.
 const STYLE: &str = r#" body { font: 14px/1.4 -apple-system, "Segoe UI", sans-serif; margin: 1.5em; color: #1f2328; }
  table { border-collapse: collapse; margin: .5em 0 1.5em; }
  th, td { border: 1px solid #6e7781; padding: 3px 8px; vertical-align: top; }
@@ -63,6 +86,7 @@ const STYLE: &str = r#" body { font: 14px/1.4 -apple-system, "Segoe UI", sans-se
  th.g, td.g { border-left: 3px solid #1f2328; }
  summary { cursor: pointer; font-weight: 600; margin: .5em 0; }
  .wide { overflow-x: auto; max-width: 100%; }
+ th[title] { text-decoration: underline dotted; cursor: help; }
 "#;
 
 pub(crate) fn path() -> PathBuf {
@@ -307,8 +331,9 @@ fn page(
          per query, with every device but {} beside DuckDB. Below it, collapsed, the Modes: a \
          table per device, its modes side by side under each measure. PeacockDB's times are one \
          run's, the second-smallest by wall time of its timed runs after one warm-up. Its load, \
-         execute and total are device-side, in ms: the total is load plus execute. Its run is that \
-         run's wall time end to end: after planning, the copy of its result to the host included. \
+         execute and device times are device-side, in ms: device is load plus execute. Its run is \
+         that run's wall time end to end: after planning, the copy of its result to the host \
+         included. \
          The peak is {PEAK_MEANS}, in GiB. A load marked unpinned was {UNPINNED_MEANS}.</p>\n",
         MODES_ONLY.join(", ")
     );
@@ -444,18 +469,17 @@ fn dataset_table(
     }
     html.push_str("</tr>\n<tr>");
     for _ in &shown {
-        let _ = write!(
-            html,
-            "<th>load (ms)</th><th>execute (ms)</th><th>total (ms)</th><th>run (ms)</th><th \
-             title=\"{}\">peak ≥ (GiB)</th>",
-            escape(PEAK_MEANS)
-        );
+        for measure in [Measure::Load, Measure::Execute, Measure::Device] {
+            html.push_str(&titled("", measure.heading(), measure.means()));
+        }
+        html.push_str(&titled("", "run (ms)", RUN_MEANS));
+        html.push_str(&titled("", Measure::Peak.heading(), Measure::Peak.means()));
     }
     for _ in siriuses {
-        html.push_str("<th>run (ms)</th><th>total (ms)</th>");
+        html.push_str(&sirius_headings());
     }
     for _ in duckdbs {
-        html.push_str("<th>warm (ms)</th>");
+        html.push_str(&titled("", "warm (ms)", DUCKDB_WARM_MEANS));
     }
     html.push_str("</tr>\n");
     let mut main_places = Vec::new();
@@ -590,10 +614,10 @@ fn modes_section(
             true => &[
                 Measure::Load,
                 Measure::Execute,
-                Measure::Total,
+                Measure::Device,
                 Measure::Peak,
             ],
-            false => &[Measure::Load, Measure::Execute, Measure::Total],
+            false => &[Measure::Load, Measure::Execute, Measure::Device],
         };
         // Where every load is unpinned the heading says so once, which keeps the cells narrow.
         let timed: Vec<bool> = table
@@ -615,13 +639,12 @@ fn modes_section(
         }
         html.push_str("<div class=\"wide\"><table>\n<tr><th rowspan=\"2\">query</th>");
         for measure in measures {
-            let _ = write!(
-                html,
-                "<th colspan=\"{}\" class=\"g\"{}>{}</th>",
-                modes.len(),
-                measure.title(),
-                measure.heading()
-            );
+            let lead = format!(" colspan=\"{}\" class=\"g\"", modes.len());
+            let means = match measure {
+                Measure::Load if all_unpinned => LOAD_UNPINNED_MEANS,
+                measure => measure.means(),
+            };
+            html.push_str(&titled(&lead, measure.heading(), means));
         }
         for duckdb in duckdbs {
             let _ = write!(html, "<th class=\"g\">{}</th>", escape(&duckdb.name));
@@ -634,7 +657,7 @@ fn modes_section(
             }
         }
         for _ in duckdbs {
-            html.push_str("<th class=\"g\">warm (ms)</th>");
+            html.push_str(&titled(" class=\"g\"", "warm (ms)", DUCKDB_WARM_MEANS));
         }
         html.push_str("</tr>\n");
         for (query, cells) in &table {
@@ -665,11 +688,16 @@ fn group_class(nth: usize, class: &str) -> String {
     }
 }
 
+/// A heading with its `title`, what the column measures; `lead` is its other attributes.
+fn titled(lead: &str, heading: &str, means: &str) -> String {
+    format!("<th{lead} title=\"{}\">{heading}</th>", escape(means))
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Measure {
     Load,
     Execute,
-    Total,
+    Device,
     Peak,
 }
 
@@ -678,15 +706,17 @@ impl Measure {
         match self {
             Measure::Load => "load (ms)",
             Measure::Execute => "execute (ms)",
-            Measure::Total => "total (ms)",
+            Measure::Device => "device (ms)",
             Measure::Peak => "peak ≥ (GiB)",
         }
     }
 
-    fn title(self) -> String {
+    fn means(self) -> &'static str {
         match self {
-            Measure::Peak => format!(" title=\"{}\"", escape(PEAK_MEANS)),
-            _ => String::new(),
+            Measure::Load => LOAD_MEANS,
+            Measure::Execute => EXECUTE_MEANS,
+            Measure::Device => DEVICE_MEANS,
+            Measure::Peak => PEAK_MEANS,
         }
     }
 }
@@ -698,7 +728,7 @@ enum Shown {
         load: String,
         unpinned: bool,
         execute: String,
-        total: String,
+        device: String,
         run: String,
         peak: Option<String>,
     },
@@ -721,12 +751,12 @@ impl Shown {
                 load,
                 unpinned,
                 execute,
-                total,
+                device,
                 run,
                 peak,
             } => format!(
                 "<td class=\"n\">{load}{}</td><td class=\"n\">{execute}</td><td \
-                 class=\"n\">{total}</td><td class=\"n\">{run}</td><td class=\"n\">{}</td>",
+                 class=\"n\">{device}</td><td class=\"n\">{run}</td><td class=\"n\">{}</td>",
                 unpinned_mark(*unpinned),
                 peak.as_deref().unwrap_or("—")
             ),
@@ -737,7 +767,7 @@ impl Shown {
     }
 
     /// A Modes table's cell for `measure`, the `nth` mode under it. Text that is not a time
-    /// stands in the total. `mark` says whether an unpinned load is marked in its cell.
+    /// stands in the device time. `mark` says whether an unpinned load is marked in its cell.
     fn measure(&self, measure: Measure, nth: usize, mark: bool) -> String {
         let marked;
         let (text, class) = match self {
@@ -745,7 +775,7 @@ impl Shown {
                 load,
                 unpinned,
                 execute,
-                total,
+                device,
                 peak,
                 ..
             } => match measure {
@@ -754,10 +784,10 @@ impl Shown {
                     (marked.as_str(), "n")
                 }
                 Measure::Execute => (execute.as_str(), "n"),
-                Measure::Total => (total.as_str(), "n"),
+                Measure::Device => (device.as_str(), "n"),
                 Measure::Peak => (peak.as_deref().unwrap_or("—"), "n"),
             },
-            Shown::Other { text, class } if measure == Measure::Total => (text.as_str(), *class),
+            Shown::Other { text, class } if measure == Measure::Device => (text.as_str(), *class),
             Shown::Other { .. } => ("—", "na"),
         };
         format!("<td{}>{text}</td>", group_class(nth, class))
@@ -791,7 +821,7 @@ fn shown_of(place: &Place, device: &Device, found: Option<&Found>) -> Shown {
             found,
             load_us,
             execute_us,
-            total_us,
+            device_us,
             run_us,
             peak_bytes,
             pinned,
@@ -802,7 +832,7 @@ fn shown_of(place: &Place, device: &Device, found: Option<&Found>) -> Shown {
                 load: ms(load_us),
                 unpinned: !pinned,
                 execute: ms(execute_us),
-                total: format!("{}{wrong}", linked(&ms(total_us), found)),
+                device: format!("{}{wrong}", linked(&ms(device_us), found)),
                 run: run_us.map_or("—".to_string(), |us| linked(&ms(us), found)),
                 peak: peak_bytes.map(|bytes| escape(&gib(bytes))),
             }

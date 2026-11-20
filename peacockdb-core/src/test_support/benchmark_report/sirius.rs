@@ -1,6 +1,6 @@
 //! The main table's Sirius group and its ratio lines: a main-table device's
-//! `<ds>.sf<sf>/sirius.tsv`, its run and its total, Σ run Sirius / Σ run peacockdb over the queries
-//! both ran, and Σ total Sirius / Σ total DuckDB over the queries both answered `ok`. build-test.md,
+//! `<ds>.sf<sf>/sirius.tsv`, its run and its wall, Σ run Sirius / Σ run peacockdb over the queries
+//! both ran, and Σ wall Sirius / Σ warm DuckDB over the queries both answered `ok`. build-test.md,
 //! **The page**.
 
 use std::collections::BTreeMap;
@@ -9,10 +9,18 @@ use std::path::Path;
 use super::super::{
     DuckdbResults, DuckdbStatus, SiriusResults, SiriusRow, SiriusStatus, sirius_results,
 };
-use super::{Device, MODES_ONLY, Place, escape, section_href, wrong_mark};
+use super::{Device, MODES_ONLY, Place, escape, section_href, titled, wrong_mark};
 
 /// Why a timed Sirius row is `unverified`.
 const UNVERIFIED_MEANS: &str = "no DuckDB answer to check it against";
+
+/// The group's run heading's `title`.
+pub(crate) const SIRIUS_RUN_MEANS: &str = "Sirius's execution window, from its log: after \
+                                           planning, until the result is on the host. Its \
+                                           conversion to Arrow is not in it.";
+/// The group's wall heading's `title`.
+pub(crate) const SIRIUS_WALL_MEANS: &str = "Wall clock around the query and its Arrow fetch: \
+                                            parse, bind, plan and execute on every run.";
 
 /// One Sirius group: the device tree it was measured in and its files by (dataset, sf).
 pub(crate) struct Sirius {
@@ -56,7 +64,7 @@ pub(crate) fn siriuses(root: &Path, devices: &[Device]) -> Vec<Sirius> {
     found
 }
 
-/// What one Sirius run and total are, as build-test.md's Sirius protocol states them, and what each
+/// What one Sirius run and wall are, as build-test.md's Sirius protocol states them, and what each
 /// file was measured with, from its `# ` line; nothing without a file.
 pub(crate) fn sirius_intro(siriuses: &[Sirius]) -> String {
     let named: Vec<String> = siriuses
@@ -90,7 +98,7 @@ pub(crate) fn sirius_intro(siriuses: &[Sirius]) -> String {
         "<p>Sirius's run is its execution window after planning, from its log's [window] begin to \
          [window] end, at 1 ms resolution: its result materialized on the host included, its Arrow \
          conversion not. A row whose plan was rebuilt inside its window says so beside its run. \
-         Its total is the wall time around the statement and an Arrow fetch of its result, \
+         Its wall time is taken around the statement and an Arrow fetch of its result, \
          planning included. Each is in ms, the second-smallest of the timed runs after one \
          warm-up, from the parquet bytes pinned in Sirius's host cache. Its config departs from \
          Sirius's defaults in three settings: the sirius cache mode and an eviction threshold of \
@@ -101,8 +109,13 @@ pub(crate) fn sirius_intro(siriuses: &[Sirius]) -> String {
     )
 }
 
+/// The group's two headings, each with its `title`.
+pub(crate) fn sirius_headings() -> String {
+    titled("", "run (ms)", SIRIUS_RUN_MEANS) + &titled("", "wall (ms)", SIRIUS_WALL_MEANS)
+}
+
 /// A Sirius group's two cells for a row: the run, with what a `wrong` (and its note) or
-/// `unverified` row is and any other timed row's note, and the total; each linked to its line. Or
+/// `unverified` row is and any other timed row's note, and the wall; each linked to its line. Or
 /// one cell across both with the reason it has no time; `—` under each without a row. `rel` is the
 /// file's path under `testdata/`.
 pub(crate) fn sirius_cells(place: &Place, results: Option<&SiriusResults>, rel: &str) -> String {
@@ -130,12 +143,12 @@ pub(crate) fn sirius_cells(place: &Place, results: Option<&SiriusResults>, rel: 
         SiriusStatus::Failed => return untimed("off", format!("failed: {}", row.note)),
         SiriusStatus::Skipped => return untimed("skip", format!("skipped: {}", row.note)),
     };
-    let total = row.ms_2nd_min.expect("a timed row has a time");
+    let wall = row.ms_2nd_min.expect("a timed row has a time");
     let run = row.run_ms_2nd_min.expect("a timed row has a run time");
     format!(
         "<td class=\"n\">{}{mark}</td><td class=\"n\">{}</td>",
         link(&format!("{run:.1}")),
-        link(&format!("{total:.1}"))
+        link(&format!("{wall:.1}"))
     )
 }
 
@@ -149,7 +162,7 @@ fn sirius_row<'r>(results: &'r SiriusResults, query: &str) -> Option<(usize, &'r
         .find(|(_, row)| row.query == query)
 }
 
-/// `Σ total Sirius / Σ total DuckDB` over the main table's queries both answered `ok`, `—` where
+/// `Σ wall Sirius / Σ warm DuckDB` over the main table's queries both answered `ok`, `—` where
 /// none did; `None` without a Sirius file for the dataset.
 pub(crate) fn ratio_line(
     queries: &[&str],
@@ -174,7 +187,7 @@ pub(crate) fn ratio_line(
         })
         .collect();
     Some(format!(
-        "<p>Σ total Sirius / Σ total DuckDB = {} over {} of {} queries</p>\n",
+        "<p>Σ wall Sirius / Σ warm DuckDB = {} over {} of {} queries</p>\n",
         ratio_of(&both),
         both.len(),
         queries.len()

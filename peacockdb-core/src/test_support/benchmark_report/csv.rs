@@ -9,7 +9,7 @@ use super::decided::{Decided, decided};
 use super::{MAIN_MODE, Place, Trees, dataset_rank, gib, mode_rank, ms, query_rank};
 
 const HEADER: &str =
-    "dataset,sf,query,engine,device,mode,load_ms,exec_ms,total_ms,run_ms,peak_gib,status";
+    "dataset,sf,query,engine,device,mode,load_ms,exec_ms,device_ms,run_ms,wall_ms,peak_gib,status";
 
 /// The engines, in the order a query's rows list them.
 const ENGINES: [&str; 3] = ["peacockdb", "sirius", "duckdb"];
@@ -35,7 +35,7 @@ pub(crate) fn render(trees: &Trees, order: &[(String, String)]) -> String {
                 Decided::Timed {
                     load_us,
                     execute_us,
-                    total_us,
+                    device_us,
                     run_us,
                     peak_bytes,
                     wrong,
@@ -43,7 +43,8 @@ pub(crate) fn render(trees: &Trees, order: &[(String, String)]) -> String {
                 } => {
                     let run = run_us.map_or(String::new(), ms);
                     let peak = peak_bytes.map_or(String::new(), gib);
-                    let times = [ms(load_us), ms(execute_us), ms(total_us), run, peak];
+                    let wall = String::new();
+                    let times = [ms(load_us), ms(execute_us), ms(device_us), run, wall, peak];
                     (times, if wrong.is_some() { "wrong" } else { "ok" })
                 }
                 Decided::Untimed { outcome, .. } => (Default::default(), outcome.status()),
@@ -60,8 +61,9 @@ pub(crate) fn render(trees: &Trees, order: &[(String, String)]) -> String {
             for row in &results.rows {
                 let mut place = place_of(order, dataset, sf, &row.query);
                 place.mode = mode_rank(MAIN_MODE);
-                let (total, run) = (tenths(row.ms_2nd_min), tenths(row.run_ms_2nd_min));
-                let times = [String::new(), String::new(), total, run, String::new()];
+                let (wall, run) = (tenths(row.ms_2nd_min), tenths(row.run_ms_2nd_min));
+                let none = String::new;
+                let times = [none(), none(), none(), run, wall, none()];
                 let status = sirius_results::status_name(row.status);
                 let at = key(&place, 1, &sirius.device);
                 let device = [&sirius.device, MAIN_MODE];
@@ -73,14 +75,9 @@ pub(crate) fn render(trees: &Trees, order: &[(String, String)]) -> String {
         for ((dataset, sf), results) in &duckdb.files {
             for row in &results.rows {
                 let place = place_of(order, dataset, sf, &row.query.replace('_', "-"));
-                let total = tenths(row.ms_2nd_min);
-                let times = [
-                    String::new(),
-                    String::new(),
-                    total,
-                    String::new(),
-                    String::new(),
-                ];
+                let wall = tenths(row.ms_2nd_min);
+                let none = String::new;
+                let times = [none(), none(), none(), none(), wall, none()];
                 let status = match row.status {
                     DuckdbStatus::Ok => "ok",
                     DuckdbStatus::Failed => "failed",
@@ -117,17 +114,18 @@ fn place_of(order: &[(String, String)], dataset: &str, sf: &str, query: &str) ->
     }
 }
 
-/// One CSV line; `device` is the device and the mode, `times` load, execute, total, run and peak.
+/// One CSV line; `device` is the device and the mode, `times` load, execute, device time, run,
+/// wall and peak.
 fn line(
     place: &Place,
     engine: &str,
     device: [&str; 2],
-    times: [String; 5],
+    times: [String; 6],
     status: &str,
 ) -> String {
-    let [load, execute, total, run, peak] = times;
+    let [load, execute, device_ms, run, wall, peak] = times;
     format!(
-        "{},{},{},{engine},{},{},{load},{execute},{total},{run},{peak},{status}\n",
+        "{},{},{},{engine},{},{},{load},{execute},{device_ms},{run},{wall},{peak},{status}\n",
         place.dataset.1, place.sf.1, place.query.1, device[0], device[1]
     )
 }

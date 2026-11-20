@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use super::{DUCKDB_WARM_MEANS, EXECUTE_MEANS, LOAD_MEANS, escape};
 use crate::test_support::{
     DEVICE_CASES_HEADER, FAILED, ReportCell, ReportTable, SKIPPED, render_benchmark_report,
     render_benchmarks_csv, section_href,
@@ -183,7 +184,7 @@ pub(crate) fn main_part(html: &str) -> &str {
 }
 
 #[test]
-fn a_timed_section_gives_its_load_execute_total_and_peak() {
+fn a_timed_section_gives_its_load_execute_device_and_peak() {
     let root = tree("timed");
     put(
         &root,
@@ -192,7 +193,7 @@ fn a_timed_section_gives_its_load_execute_total_and_peak() {
     );
     let html = page(root, &[("tpch", "q1"), ("tpch", "q3")]);
     assert_eq!(row(&html, "q3"), ["q3", "1.0", "0.5", "1.5", "1.7", "2.00"]);
-    // The total links to the section's header: line 1 is q1's, then UNBATCHED's 14 lines.
+    // The device time links to the section's header: line 1 is q1's, then UNBATCHED's 14 lines.
     let href = section_href(
         "benchmark-results/h100-80gb-hbm3/tpch.sf40/tp1_single.benchmark.txt",
         16,
@@ -264,7 +265,7 @@ fn a_failed_case_shows_its_reason_and_the_list_wins() {
     let html = render_benchmark_report(&root, &order(&[("tpch", "q3")]), &[]);
     assert_eq!(row(&html, "q3"), ["q3", "failed: timeout: x"]);
     assert!(html.contains("<td colspan=\"5\" class=\"off\">"), "{html}");
-    // In a Modes table the reason stands in the total, the other measures `—`.
+    // In a Modes table the reason stands in the device time, the other measures `—`.
     assert_eq!(
         modes_row(&html, "h100-80gb-hbm3", "q3"),
         ["q3", "—", "—", "failed: timeout: x"]
@@ -392,7 +393,8 @@ fn a_duckdb_tree_is_a_column_of_its_own() {
     let h100 = html.find(">h100-80gb-hbm3 · tp1_single</th>").unwrap();
     let duckdb = html.find("<th>duckdb-cpu128</th>").expect("a column");
     assert!(h100 < duckdb, "after the devices: {html}");
-    assert!(html.contains("<th>warm (ms)</th>"), "{html}");
+    let warm = format!("<th title=\"{}\">warm (ms)</th>", escape(DUCKDB_WARM_MEANS));
+    assert!(html.contains(&warm), "{html}");
     assert_eq!(
         row(&html, "q3"),
         ["q3", "1.0", "0.5", "1.5", "1.7", "2.00", "412.0"]
@@ -400,11 +402,15 @@ fn a_duckdb_tree_is_a_column_of_its_own() {
     assert_eq!(row(&html, "q6")[6], "failed");
     assert_eq!(row(&html, "q9")[6], "—");
     // Modes side by side under each measure, DuckDB last.
+    let groups = format!(
+        "<th colspan=\"2\" class=\"g\" title=\"{}\">load (ms)</th><th colspan=\"2\" class=\"g\" \
+         title=\"{}\">execute (ms)</th>",
+        escape(LOAD_MEANS),
+        escape(EXECUTE_MEANS)
+    );
+    assert!(html.contains(&groups), "{html}");
     assert!(
-        html.contains(
-            "<th colspan=\"2\" class=\"g\">load (ms)</th><th colspan=\"2\" \
-             class=\"g\">execute (ms)</th>"
-        ),
+        html.contains(&warm.replace("<th ", "<th class=\"g\" ")),
         "{html}"
     );
     assert!(
@@ -685,10 +691,7 @@ fn a_sirius_file_adds_a_group_before_duckdb() {
         .expect("a Sirius group");
     let duckdb = main.find("<th>duckdb-cpu128</th>").unwrap();
     assert!(h100 < group && group < duckdb, "{html}");
-    assert!(
-        main.contains("≥ (GiB)</th><th>run (ms)</th><th>total (ms)</th><th>warm"),
-        "{html}"
-    );
+    assert!(main.contains("≥ (GiB)</th><th title=\"Sirius"), "{html}");
     let href = section_href("benchmark-results/h100-80gb-hbm3/tpch.sf40/sirius.tsv", 3);
     assert!(
         main.contains(&format!(
@@ -760,7 +763,7 @@ fn a_wrong_sirius_row_shows_its_note() {
 }
 
 /// Only q3 is `ok` on both sides: q6 is Sirius's `wrong`, q9 Sirius's `failed`, and q11 has no
-/// DuckDB row. The total ratio is q3's alone, over the main table's four rows.
+/// DuckDB row. The wall ratio is q3's alone, over the main table's four rows.
 #[test]
 fn the_ratio_counts_rows_both_ok() {
     let root = tree("sirius-ratio");
@@ -799,7 +802,7 @@ fn the_ratio_counts_rows_both_ok() {
     assert!(
         html.contains(
             "<h2 id=\"tpch-sf40\">tpch sf40</h2>\n<p>Σ run Sirius / Σ run peacockdb = 100.00 \
-             over 1 of 4 queries</p>\n<p>Σ total Sirius / Σ total DuckDB = 0.75 over 1 of 4 \
+             over 1 of 4 queries</p>\n<p>Σ wall Sirius / Σ warm DuckDB = 0.75 over 1 of 4 \
              queries</p>\n<table>"
         ),
         "{html}"
@@ -843,7 +846,7 @@ fn no_sirius_file_no_line_and_dashes() {
     assert!(!main_part(&html).contains("Sirius /"), "{html}");
     let tpcds = &html[html.find("<h2 id=\"tpcds-sf40\">").unwrap()..];
     assert!(
-        tpcds.contains("<p>Σ total Sirius / Σ total DuckDB = — over 0 of 1 queries</p>"),
+        tpcds.contains("<p>Σ wall Sirius / Σ warm DuckDB = — over 0 of 1 queries</p>"),
         "{html}"
     );
 }
@@ -864,7 +867,7 @@ fn no_sirius_file_anywhere_no_group() {
 }
 
 pub(crate) const CSV_HEADER: &str =
-    "dataset,sf,query,engine,device,mode,load_ms,exec_ms,total_ms,run_ms,peak_gib,status";
+    "dataset,sf,query,engine,device,mode,load_ms,exec_ms,device_ms,run_ms,wall_ms,peak_gib,status";
 
 /// Every result of every engine, one row each: two modes of one device, the list's `wrong` at one
 /// of them, a device without peaks, a failure on each engine, DuckDB and Sirius without load,
@@ -901,14 +904,14 @@ fn the_csv_holds_every_result_in_the_pages_order() {
         csv,
         format!(
             "{CSV_HEADER}\n\
-             tpch,40,q3,peacockdb,h100-80gb-hbm3,tp1_single,1.0,0.5,1.5,1.7,2.00,wrong\n\
-             tpch,40,q3,peacockdb,h100-80gb-hbm3,tp4_sized,1.0,0.5,1.5,1.7,2.00,ok\n\
-             tpch,40,q3,peacockdb,h200,tp1_single,1.6,0.7,2.3,2.7,,ok\n\
-             tpch,40,q3,sirius,h100-80gb-hbm3,tp1_single,,,300.0,180.0,,ok\n\
-             tpch,40,q3,duckdb,duckdb-cpu128,,,,412.0,,,ok\n\
-             tpch,40,q6,peacockdb,h100-80gb-hbm3,tp1_single,,,,,,failed\n\
-             tpch,40,q6,sirius,h100-80gb-hbm3,tp1_single,,,,,,failed\n\
-             tpch,40,q6,duckdb,duckdb-cpu128,,,,,,,failed\n"
+             tpch,40,q3,peacockdb,h100-80gb-hbm3,tp1_single,1.0,0.5,1.5,1.7,,2.00,wrong\n\
+             tpch,40,q3,peacockdb,h100-80gb-hbm3,tp4_sized,1.0,0.5,1.5,1.7,,2.00,ok\n\
+             tpch,40,q3,peacockdb,h200,tp1_single,1.6,0.7,2.3,2.7,,,ok\n\
+             tpch,40,q3,sirius,h100-80gb-hbm3,tp1_single,,,,180.0,300.0,,ok\n\
+             tpch,40,q3,duckdb,duckdb-cpu128,,,,,,412.0,,ok\n\
+             tpch,40,q6,peacockdb,h100-80gb-hbm3,tp1_single,,,,,,,failed\n\
+             tpch,40,q6,sirius,h100-80gb-hbm3,tp1_single,,,,,,,failed\n\
+             tpch,40,q6,duckdb,duckdb-cpu128,,,,,,,,failed\n"
         )
     );
 }
@@ -927,7 +930,7 @@ fn the_csv_takes_the_lists_skipped_over_the_section() {
     let _ = std::fs::remove_dir_all(&root);
     assert_eq!(
         csv,
-        format!("{CSV_HEADER}\ntpch,40,q3,peacockdb,h100-80gb-hbm3,tp1_single,,,,,,skipped\n")
+        format!("{CSV_HEADER}\ntpch,40,q3,peacockdb,h100-80gb-hbm3,tp1_single,,,,,,,skipped\n")
     );
 }
 
@@ -953,7 +956,7 @@ fn a_status_flip_moves_page_ratio_and_csv_together() {
     .unwrap();
     let pairs = order(&[("tpch", "q3"), ("tpch", "q6")]);
     let q6 = |status: &str| {
-        format!("tpch,40,q6,sirius,h100-80gb-hbm3,tp1_single,,,100.0,60.0,,{status}\n")
+        format!("tpch,40,q6,sirius,h100-80gb-hbm3,tp1_single,,,,60.0,100.0,,{status}\n")
     };
     let mut seen = Vec::new();
     for status in ["ok", "wrong"] {

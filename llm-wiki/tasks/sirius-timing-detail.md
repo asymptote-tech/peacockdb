@@ -251,10 +251,10 @@ The keep rule (spec, Done when 2) over each finding:
 The rule's "shortens" is read as: a setting shortens a clock when its runs' range lies below the
 default's.
 
-- **`parquet_metadata_cache = true`**: shortens Sirius's total by 90–100 ms on q6, its run not at
+- **`parquet_metadata_cache = true`**: shortens Sirius's wall by 90–100 ms on q6, its run not at
   all, and is a setting any DuckDB user has. It meets the rule's three conditions. It is not kept,
   a deliberate departure from the rule: DuckDB's timed runs on the page do not set it, so it would
-  tilt the one total comparison the page makes (`Σ total Sirius / Σ total DuckDB`), and it leaves
+  tilt the one wall comparison the page makes (`Σ wall Sirius / Σ warm DuckDB`), and it leaves
   the run, the comparison with peacockdb, as it is.
 - **`operator_params.scan_task_batch_size` 8 GiB**: q9's range (636–712) overlaps the default's
   (670–812), and q6 is unchanged. Not kept.
@@ -287,5 +287,10 @@ scan-limit, tpcds q31 and q73) were put back as they were. tpcds's rendered answ
 bytes; tpch's differ in scan-limit alone, a `LIMIT 10` without `ORDER BY`.
 
 The ratios on the page: Σ run Sirius / Σ run peacockdb = 0.68 over 35 of 48 tpch queries and
-0.61 over 42 of 82 tpcds queries; Σ total Sirius / Σ total DuckDB = 1.28 and 1.29 (1.29 and 1.32
+0.61 over 42 of 82 tpcds queries; Σ wall Sirius / Σ warm DuckDB = 1.28 and 1.29 (1.29 and 1.32
 before).
+
+The page's time columns are `device (ms)` for peacockdb's device time, `run (ms)` for both
+engines' execution after planning, `wall (ms)` for Sirius's clock with planning in, and DuckDB's
+`warm (ms)`, its CLI process's wall time; each heading has a `title` saying what it measures.
+`benchmarks.csv` has `device_ms`, `run_ms` and `wall_ms`, DuckDB's warm time in `wall_ms`.
