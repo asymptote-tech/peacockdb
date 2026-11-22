@@ -630,7 +630,7 @@ Solved under its constraints: Sirius `stable` from a pinned, licensed image; eve
 - `integer_division = true` (the answers' setting) may cost tpcds q2 and q78, which fail on `round(x // y, 2)`; unmeasured.
 - Timed runs log at info, Sirius's default; logging against no logging was never measured.
 - The committed run used `run-gpu.sh sirius --detach` with a manual pull and render, not `bench-sirius.sh` end to end (same runner arguments).
-- Two oracle defects make right answers `wrong`: q73 (#306) and scan-limit (#311).
+- Two oracle defects make right answers `wrong`: q73 (#306) and scan-limit (#316).
 
 ---
 

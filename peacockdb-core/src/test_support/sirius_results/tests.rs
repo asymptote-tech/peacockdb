@@ -7,7 +7,7 @@ use crate::test_support::{
 
 const HEAD: &str = "# sirius=8d17afe duckdb=1.5.6 libcudf=26.08.01 cuda=13.0 driver=580.173 \
                     device=NVIDIA_H100_80GB_HBM3 host=h\n\
-                    query\tms_2nd_min\truns_ms\tstatus\tnote\n";
+                    query\tms_2nd_min\truns_ms\trun_ms_2nd_min\trun_runs_ms\tstatus\tnote\n";
 
 fn fixture() -> String {
     let path = testdata_root().join("fixtures/sirius-results.tsv");
@@ -43,6 +43,10 @@ fn reads_the_fixture() {
                     runs_ms: vec![
                         431.0, 412.0, 409.0, 415.0, 420.0, 413.0, 418.0, 425.0, 414.0, 416.0,
                     ],
+                    run_ms_2nd_min: Some(301.0),
+                    run_runs_ms: vec![
+                        305.0, 301.0, 299.0, 303.0, 308.0, 302.0, 306.0, 304.0, 307.0, 309.0,
+                    ],
                     status: SiriusStatus::Ok,
                     note: String::new(),
                 },
@@ -50,6 +54,8 @@ fn reads_the_fixture() {
                     query: "q2".to_string(),
                     ms_2nd_min: None,
                     runs_ms: Vec::new(),
+                    run_ms_2nd_min: None,
+                    run_runs_ms: Vec::new(),
                     status: SiriusStatus::Failed,
                     note: "NotImplemented: INTERSECT".to_string(),
                 },
@@ -57,12 +63,69 @@ fn reads_the_fixture() {
                     query: "q3".to_string(),
                     ms_2nd_min: None,
                     runs_ms: Vec::new(),
+                    run_ms_2nd_min: None,
+                    run_runs_ms: Vec::new(),
                     status: SiriusStatus::Skipped,
                     note: "accumulator budget exceeded".to_string(),
                 },
             ],
         }
     );
+}
+
+#[test]
+fn the_fixture_reads_its_run_columns() {
+    let results = parse_sirius_results(&fixture());
+    let q1 = &results.rows[0];
+    assert_eq!(q1.query, "q1");
+    assert_eq!(q1.run_ms_2nd_min, Some(301.0));
+    assert_eq!(
+        q1.run_runs_ms,
+        [
+            305.0, 301.0, 299.0, 303.0, 308.0, 302.0, 306.0, 304.0, 307.0, 309.0
+        ]
+    );
+}
+
+#[test]
+#[should_panic(
+    expected = "line 3 \"q6\\t17.0\\t17.0,16.0\\t-\\t-\\tok\\t-\": an ok, wrong or \
+                unverified row has run times: run_ms_2nd_min and run_runs_ms are not"
+)]
+fn a_timed_row_without_run_times_is_refused() {
+    parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\t-\t-\tok\t-\n"));
+}
+
+#[test]
+#[should_panic(expected = "1 run_runs_ms for 2 runs_ms")]
+fn a_run_count_unlike_the_wall_count_is_refused() {
+    parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\t15.0\t15.0\tok\t-\n"));
+}
+
+#[test]
+#[should_panic(expected = "an ok, wrong or unverified row has run times")]
+fn a_run_time_without_its_runs_is_refused() {
+    parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\t15.0\t-\tok\t-\n"));
+}
+
+#[test]
+#[should_panic(expected = "an ok, wrong or unverified row has run times")]
+fn runs_without_their_run_time_are_refused() {
+    parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\t-\t15.0,16.0\tok\t-\n"));
+}
+
+#[test]
+#[should_panic(expected = "a failed or skipped row has no run time")]
+fn a_failed_row_with_a_run_time_is_refused() {
+    parse_sirius_results(&format!("{HEAD}q6\t-\t-\t15.0\t15.0,16.0\tfailed\tboom\n"));
+}
+
+#[test]
+#[should_panic(expected = "a failed or skipped row has no run time")]
+fn a_skipped_row_with_a_run_time_is_refused() {
+    parse_sirius_results(&format!(
+        "{HEAD}q6\t-\t-\t15.0\t15.0,16.0\tskipped\tbudget\n"
+    ));
 }
 
 #[test]
@@ -74,7 +137,8 @@ fn writes_what_it_reads() {
 #[test]
 fn a_wrong_and_an_unverified_row_keep_their_times() {
     let text = format!(
-        "{HEAD}q6\t100.0\t101.5,100.0,99.0\twrong\t-\naggregate-groupby\t50.0\t50.0,49.0\tunverified\t-\n"
+        "{HEAD}q6\t100.0\t101.5,100.0,99.0\t90.0\t91.5,90.0,89.0\twrong\t-\n\
+         aggregate-groupby\t50.0\t50.0,49.0\t48.0\t48.0,47.0\tunverified\t-\n"
     );
     let results = parse_sirius_results(&text);
     assert_eq!(
@@ -83,6 +147,8 @@ fn a_wrong_and_an_unverified_row_keep_their_times() {
             query: "aggregate-groupby".to_string(),
             ms_2nd_min: Some(50.0),
             runs_ms: vec![50.0, 49.0],
+            run_ms_2nd_min: Some(48.0),
+            run_runs_ms: vec![48.0, 47.0],
             status: SiriusStatus::Unverified,
             note: String::new(),
         }
@@ -102,64 +168,69 @@ fn a_missing_preamble_is_refused() {
 fn a_preamble_out_of_order_is_refused() {
     parse_sirius_results(
         "# duckdb=1.5.6 sirius=8d17afe libcudf=26.08.01 cuda=13.0 driver=580.173 device=d host=h\n\
-         query\tms_2nd_min\truns_ms\tstatus\tnote\n",
+         query\tms_2nd_min\truns_ms\trun_ms_2nd_min\trun_runs_ms\tstatus\tnote\n",
     );
 }
 
 #[test]
 #[should_panic(expected = "sirius results line 2")]
 fn a_wrong_column_line_is_refused() {
-    parse_sirius_results(&HEAD.replace("runs_ms\tstatus", "status\truns_ms"));
+    parse_sirius_results(
+        &HEAD.replace("run_ms_2nd_min\trun_runs_ms", "run_runs_ms\trun_ms_2nd_min"),
+    );
 }
 
 #[test]
 #[should_panic(expected = "sirius results line 3")]
-fn six_fields_are_refused() {
-    parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\tok\t-\textra\n"));
+fn eight_fields_are_refused() {
+    parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\t-\t-\tok\t-\textra\n"));
 }
 
 #[test]
 #[should_panic(expected = "sirius results line 4")]
 fn a_query_listed_twice_is_refused() {
     parse_sirius_results(&format!(
-        "{HEAD}q6\t17.0\t17.0,16.0\tok\t-\nq6\t18.0\t18.0,19.0\tok\t-\n"
+        "{HEAD}q6\t17.0\t17.0,16.0\t15.0\t15.0,14.0\tok\t-\n\
+         q6\t18.0\t18.0,19.0\t16.0\t16.0,17.0\tok\t-\n"
     ));
 }
 
 #[test]
 #[should_panic(expected = "sirius results line 3")]
 fn an_ok_row_without_a_time_is_refused() {
-    parse_sirius_results(&format!("{HEAD}q6\t-\t-\tok\t-\n"));
+    parse_sirius_results(&format!("{HEAD}q6\t-\t-\t-\t-\tok\t-\n"));
 }
 
 #[test]
 #[should_panic(expected = "sirius results line 3")]
 fn a_wrong_row_without_a_time_is_refused() {
-    parse_sirius_results(&format!("{HEAD}q6\t-\t-\twrong\t-\n"));
+    parse_sirius_results(&format!("{HEAD}q6\t-\t-\t-\t-\twrong\t-\n"));
 }
 
 #[test]
 #[should_panic(expected = "sirius results line 3")]
 fn an_unverified_row_without_a_time_is_refused() {
-    parse_sirius_results(&format!("{HEAD}q6\t-\t-\tunverified\t-\n"));
+    parse_sirius_results(&format!("{HEAD}q6\t-\t-\t-\t-\tunverified\t-\n"));
 }
 
 #[test]
 #[should_panic(expected = "sirius results line 3")]
 fn a_failed_row_with_a_time_is_refused() {
-    parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\tfailed\tboom\n"));
+    parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\t-\t-\tfailed\tboom\n"));
 }
 
 #[test]
 #[should_panic(expected = "sirius results line 3")]
 fn a_skipped_row_with_a_time_is_refused() {
-    parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\tskipped\tbudget\n"));
+    parse_sirius_results(&format!(
+        "{HEAD}q6\t17.0\t17.0,16.0\t-\t-\tskipped\tbudget\n"
+    ));
 }
 
 #[test]
 #[should_panic(expected = "sirius results line 3")]
 fn an_unknown_status_is_refused() {
-    parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\tdone\t-\n"));
+    parse_sirius_results(&format!("{HEAD}q6\t17.0\t17.0,16.0\t-\t-\tdone\t-\n"));
 }
 
 #[test]
