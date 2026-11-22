@@ -74,3 +74,14 @@ The Sirius sf40 comparison on the H100, made like for like.
 Sirius timed by its execution window, planning out, beside peacockdb's `run_us`; why its GPU part
 is slow, from Nsight and one-setting experiments; the harness fixed where it is at fault, Sirius
 rerun once at sf40, the page and `benchmarks.csv` with both clocks. H100 at most 3 hours.
+
+## Chain P (base: master)
+
+The prototype's optimizer before its port to Rust.
+
+### 1. [`one-row-cross-join.md`](one-row-cross-join.md) — closes [#320](../tickets/optimizer.md#t320) — state: new
+
+A cross join with a side of at most one row joins the inner-join cluster beside it: the one-row
+relation gets an edge of selectivity 1 to every other, DPhyp places it, and disassembly rebuilds a
+`GpuCrossJoin`. tpcds q23 crosses `max_store_sales` onto `customer` instead of `store_sales ⋈
+customer`. CPU only; the corpus made again at all five modes.

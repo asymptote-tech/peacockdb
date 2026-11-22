@@ -28,6 +28,8 @@
 - [#294 (orientation build term) orientation picks a build by a term that prices nothing the join session does](#t294)
 - [#295 (flat residual estimate) a residual inside a cluster is estimated at a flat 0.2, where the plan's estimator reads its predicate](#t295)
 - [#297 (unpriced null-key filter) a reassembled null-key filter is priced by no order DPhyp compares, so tpcds q24 runs dearer than planned](#t297)
+- [#320 (one-row cross join) a cross join with a one-row side walls the cluster, so tpcds q23 crosses its scalar onto the largest join](#t320)
+- [#321 (one-row nested-loop join) a nested-loop join with a one-row side walls the cluster, so its predicate cannot move](#t321)
 
 <a id="t73"></a>
 ### #73 (CBO umbrella) Cost-based optimizer (CBO) umbrella
@@ -77,7 +79,7 @@ causes outside this ticket remain:
   rows: 88 MB of cross join per copy, 176 MB of `cuda_join_bytes` for the two. DuckDB's join
   order crosses it onto customer, 100k rows (`CROSS_PRODUCT` 2.4 MB), before the hash join with
   store_sales. A cross join is a wall to our multi-join (`optimizer.md`, "Walls"), so DPhyp
-  never places it.
+  never places it (#320).
 - Projections charged as passthrough: 536 MB in q23. DuckDB streams projections at nothing.
 
 tpcds q14 (1.83) and q31 (1.89) also have duplicated CTEs, but reuse alone does not close
@@ -600,3 +602,44 @@ dearer, ratio 1.009. q54 at tp4 pays 10.8 MB more filter than its plan and stays
 
 Fix: price a reassembled filter in DPhyp's cost, the bytes of each side shuffled on a filtered
 key, or keep the filter where the plan had it.
+
+<a id="t320"></a>
+### #320 (one-row cross join) a cross join with a one-row side walls the cluster, so tpcds q23 crosses its scalar onto the largest join
+A `GpuCrossJoin` roots a relation (`optimizer.md`, "Walls"), and DPhyp gets only edges with keys,
+so a relation crossed in above a cluster stays where the plan put it.
+
+tpcds q23: `best_ss_customer` reads `FROM store_sales, customer, max_store_sales` with
+`HAVING sum(...) > 0.5 * max(tpcds_cmax)`, so the one-row `max_store_sales` is crossed in below
+the group-by in both engines. The plan crosses it onto the 2.75M rows of `store_sales ⋈
+customer`: 88 MB of cross join per copy, two copies. DuckDB crosses it onto `customer`, 100k rows
+(`CROSS_PRODUCT` 2.4 MB), before the hash join with store_sales. At tp4 the translator also
+merges the 4-lane join output onto one lane for the cross join (`translator/nodes.rs`, both sides
+of a cross join on one lane). About 60 MB less per copy, q23's ratio from about 2.73 to 2.55.
+
+A relation of at most one row reorders freely among inner joins: crossed in anywhere, it adds
+its columns to every row, or empties the result wherever it is placed. A per-lane partial
+aggregate with no group-by is one row per lane, not one.
+
+Fix: a cross join whose side holds at most one row enters the cluster of inner joins beside it.
+That side becomes a relation with an edge of selectivity 1 to every other relation, priced
+`rows(S) × width(needed(S ∪ {r}))`, and a join whose only edge is that one is rebuilt as a
+`GpuCrossJoin`, the one-row side building.
+
+<a id="t321"></a>
+### #321 (one-row nested-loop join) a nested-loop join with a one-row side walls the cluster, so its predicate cannot move
+DataFusion turns a comparison with a scalar subquery into an inner `GpuNestedLoopJoin` whose
+build is a one-row aggregate. It roots a relation, so its predicate cannot move below the
+cluster beside it. In the corpus a cluster sits beside one only in tpch q22 (tpch q11, tpcds q14
+and q24 join an aggregate).
+
+tpch q22: `c_acctbal > avg(c_acctbal)` sits above `customer ▷ orders` (LeftAnti). At sf1 the anti
+join keeps 14,086 of 42,015 customers and the predicate 6,384 of those (a share of 0.45). Below
+the anti join it would keep about 19k of the 42k and the anti join 6,384: about 25.4k rows of
+join output against 20.5k now, so the plan's order is the cheaper one. A residual in a cluster is
+estimated at a flat 0.2 (#295), and a comparison with a scalar computed at run time is 0.2 even
+when the predicate is read, so DPhyp would move it below.
+
+Fix, after #295 and an estimate of a scalar aggregate's value from statistics: admit an inner
+`GpuNestedLoopJoin` with a one-row side as #320 admits a cross join, its predicate a residual on
+the one-row relation's edge, through conflict detection where the cluster holds a non-inner
+join, and rebuild it as a `GpuNestedLoopJoin`.
