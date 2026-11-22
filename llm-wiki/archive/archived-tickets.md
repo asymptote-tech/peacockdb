@@ -196,6 +196,18 @@ keeps the plan's order, 3.6–6.5 % cheaper than with the defect; q69's anti joi
 `test_an_anti_join_keeps_the_unmatched_share_where_the_domain_is_wider_than_both_keys` and
 `test_a_right_anti_join_keeps_the_probe_s_unmatched_share_where_the_domain_is_wider`.
 
+<a id="t318"></a>
+### #318 — two `bootstrap-vm.sh` runs at once can both make the sf1 link, and the second fails
+`bootstrap-vm.sh` linked each `testdata/<ds>.sf1` with `ln -sfn` after a check that the link was
+missing or pointed into the machine's data dir, under no lock. Two runs at once could both pass
+the check, and the second `ln` then failed with `Already exists`. CI's cost-report job failed
+`test_two_bootstraps_at_once_generate_once_and_fetch_in_turn` this way on every run from master's
+`653def3d`; on a laptop with GNU coreutils 9.4 it passed.
+
+**Done.** The links and the `third_party/cudf` checkout are made under one lock in the clone's git
+dir, `peacock-clone.lock`; `test_the_links_and_the_cudf_checkout_wait_for_the_clone_s_lock` holds
+it.
+
 <a id="t313"></a>
 ### #313 — the results line's `tr -s` squeezes `__` in a value, so `test_results_name_version_threads_host` fails at random
 `duckdb_minimal.sh`'s `word()` writes each value of the `# ` line of `--results` with
@@ -208,6 +220,65 @@ The fix: squeeze whitespace only, `sed 's/[[:space:]]\+/_/g'`.
 
 **Done.** `word()` replaces each run of whitespace with one `_` (`sed -E 's/[[:space:]]+/_/g'`), so
 a `__` in a value stays; `test_a_value_holding_a_double_underscore_comes_through_unchanged` holds it.
+
+<a id="t311"></a>
+### #311 (Sirius planning time) Sirius totals include ~130 ms of planning per run, and its GPU part of q6 is 4× peacockdb's
+Found on sirius-bench's first sf40 measurement (2026-11-10, H100, Sirius `stable` 8d17afe,
+tpch q6, one Sirius process, tables pinned `tier='parquet'`). q6 reports 339.4 ms (runs
+336.5–393.0) against peacockdb's 58.8 ms tp1_single total and DuckDB's 252 ms. Sirius's own log
+(`testdata/calibration/sirius/tpch.sf40/log/`, info level) splits every timed run the same way:
+
+| part of each run (~360 ms) | time | log lines |
+|---|---|---|
+| planning: DuckDB parse and bind, then Sirius's physical plan | ~120–140 ms, on every run | `QueryBegin: … SQL:` → `Sirius physical plan generated successfully` |
+| GPU execution: scan from the pinned cache, decode, filter, aggregate | ~230–245 ms | `[window] begin` → `[window] end` |
+
+1. **The two totals measure different things.** peacockdb's total is `device_us`, device-side load
+   plus execute; planning is outside it. Sirius's total is the harness's wall time around the
+   statement and its Arrow fetch, so about a third of it is planning, re-done on every run (no
+   plan is reused across statements). Part of it is likely DuckDB binding the `read_parquet` view,
+   which reads lineitem's footer: creating that view alone took 40 ms. Unverified.
+2. **The GPU part is still about 4× peacockdb's.** Each run reads 894 chunks from Sirius's pinned
+   cache (`prefetching_cache` `reads=894 hits=1118` per run, `h2d=0` throughout, which is
+   undocumented). If q6's four lineitem columns are a few GB compressed, 235 ms is about 10 GB/s,
+   against the 41–49 GB/s peacockdb's pinned loads copy at (`git show d290698f:llm-wiki/tasks/pinned-loads-detail.md`, "Copy
+   rate"). Small chunks, Sirius's 4 pipeline threads and per-chunk scheduling are suspects, none
+   measured. The readahead manager logs `fell_behind=1` on the warm-up.
+3. Logging is not the cause: q6 was 341.0 ms with Sirius's log off and 339.4 ms with it on.
+
+To do:
+- **Take planning out of Sirius's total.** Report the `[window] begin` → `[window] end` span of
+  each timed run (the log has it for every query) as Sirius's total, keeping the wall time beside
+  it in `sirius.tsv` for reference. Re-render the page, the ratio line and `benchmarks.csv`, and
+  say in build-test.md what Sirius's total now holds and how it compares with peacockdb's
+  `device_us` and DuckDB's CLI wall time.
+- **Investigate the slow GPU part.** One nsys capture of q6 (and of one join-heavy query, q9)
+  under the same container settings: the copy sizes and rate from the pinned cache, decode and
+  kernel time, idle gaps between chunks. Measure what `scan_manager` chunk size, task size and
+  `executor.pipeline.num_threads` change. Confirm, from the trace rather than the counters, that
+  every timed run copies the pinned bytes host to device, since `h2d=0` says otherwise.
+- **Check where planning goes**, if planning stays in any reported number: DuckDB's bind of the
+  `read_parquet` view against Sirius's plan generation, and whether a prepared statement or a
+  table in place of the view removes the footer read.
+
+**Done.** Sirius is timed by its execution window, `[window] begin` → `[window] end` in its log,
+after planning, beside peacockdb's `run_us`. The wall around the statement stays as its total. At
+sf40 on the H100, Σ run Sirius / Σ run peacockdb is 0.68 over 35 of 48 tpch queries and 0.61 over
+42 of 82 tpcds queries. What was found (`llm-wiki/tasks/sirius-timing-detail.md`):
+
+- The copy from the pinned cache runs at 34–49 GB/s, near or within peacockdb's 41–49. The
+  10 GB/s above guessed the bytes (q6 copies 237 MB) and divided them by the whole window.
+- Every timed run copies its column chunks from the host; nothing stays on the device. `h2d`
+  counts chunks the cache reloads, so `h2d=0` means the pin held.
+- The GPU idles for most of the window. The CPU's top frame there is a copy of the parquet file's
+  row-group metadata in every scan task, inside Sirius (#317).
+- The reads outside the pin cost nothing measurable: served from tmpfs, no run moves beyond its
+  spread.
+- No setting shortens the run beyond its spread: `executor.pipeline.num_threads`,
+  `executor.scan_manager.num_threads`, `operator_params.scan_task_batch_size` and the log level
+  were measured. One pipeline thread, 16 scan_manager threads or 512 MiB tasks are slower.
+- `parquet_metadata_cache` takes 90–100 ms off q6's total, all of it planning, and nothing off
+  its run. It meets the keep rule and is not kept, by choice: DuckDB's timed runs do not set it.
 
 <a id="t174"></a>
 ### #174 (two clamps, one rule) — two clamps for one rule, and nothing compares them

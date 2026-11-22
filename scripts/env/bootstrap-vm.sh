@@ -179,6 +179,12 @@ ref=$MACHINE_IMAGE:$(image_inputs_tag "$clone" build "$cudf")
 machine_image_checked "$ref" "$clone" "$cudf"
 machine_cargo_fetch "$ref" "$clone"
 machine_data_set "$ref" "$clone"
+# Two runs at once share the clone, so its links and its cuDF checkout below are made under a lock
+# in the clone's git dir, a linked worktree's common one: unlocked, both can find a link missing,
+# and the second `ln` fails on the first's.
+git_dir=$(git -C "$clone" rev-parse --path-format=absolute --git-common-dir)
+exec {clone_lock}> "$git_dir/peacock-clone.lock"
+flock "$clone_lock"
 # The tests read testdata/<ds>; build-test.sh mounts a link's target where it lies. Nothing there,
 # a link that dangles or one into the machine's data dir is linked to this set, so a rerun after the
 # generator changed repoints it; anything else, a directory, a file or a link elsewhere, is the
@@ -192,14 +198,10 @@ for entry in "${DATA_SETS[@]}"; do
   fi
 done
 # The C++ configure, the FFI's too, reads cuDF's cmake files from the clone's own submodule; no step
-# above reads them, so a failed fetch stops nothing else. Two runs at once each check it out, so
-# the checkout is serialised under a lock in the clone's git dir, a linked worktree's common one.
-git_dir=$(git -C "$clone" rev-parse --path-format=absolute --git-common-dir)
-exec {submodule_lock}> "$git_dir/peacock-submodule.lock"
-flock "$submodule_lock"
+# above reads them, so a failed fetch stops nothing else.
 git -C "$clone" submodule update --init --depth 1 third_party/cudf \
   || die "cannot check out $clone/third_party/cudf at $(machine_cudf_gitlink "$clone")"
-exec {submodule_lock}>&-
+exec {clone_lock}>&-
 
 cat << EOF
 The machine is ready. scripts/env/provision-vm.sh, run on your own machine, does the rest; by
