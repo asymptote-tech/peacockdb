@@ -60,6 +60,11 @@ class Edge:
     #: whether the plan's join built its `left` side, the side a non-inner join keeps
     builds_left: bool = True
 
+    @property
+    def one_row(self) -> bool:
+        """Whether the edge only joins a one-row relation on: no keys, no residual."""
+        return not self.keys and self.residual is None
+
 
 @dataclass(frozen=True)
 class MultiJoin:
@@ -84,6 +89,23 @@ class MultiJoin:
     def holds_non_inner(self) -> bool:
         """Whether a join of the cluster is not inner: then each edge is one join, on its TES."""
         return any(edge.kind is not JoinType.INNER for edge in self.edges)
+
+
+def at_most_one_row(node: EngineNode) -> bool:
+    """Whether `node` yields at most one row. On one lane and one batch: a final aggregate without
+    group-by (a partial one emits a row per input batch) or a `fetch` of 0 or 1 (a sort keeps its
+    `fetch` per lane and per batch). `GpuEmpty`. A cross join, when both its children do; a
+    filter, a project or wiring, when its one child does."""
+    single = node.fields.get("lanes") == "1" and node.fields.get("batches") == "single"
+    if node.kind.startswith("GpuAggregate"):
+        return single and node.fields["group_by"] == "[]" and "final" in node.fields
+    if node.fields.get("fetch") in ("0", "1"):
+        return single
+    if node.kind == "GpuEmpty":
+        return True
+    if node.kind in ("GpuFilter", "GpuProject", "GpuCrossJoin") or node.kind in _WIRING:
+        return all(at_most_one_row(child) for child in node.children)
+    return False
 
 
 def null_key_columns(node: EngineNode) -> list[int] | None:

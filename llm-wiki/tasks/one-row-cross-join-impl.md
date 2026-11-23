@@ -34,7 +34,8 @@ modes.
 1. tpcds q23 at tp4: the plan's cross join runs on one lane and the join below it on four. Once
    the one-row relation moves down, the top hash join must keep the four lanes its relations had,
    and the cluster's root must come back onto the plan root's one lane (tests in Task 4).
-2. A per-lane partial aggregate with no group-by at tp4 is four rows, not one (test in Task 1).
+2. A partial aggregate with no group-by is a row per input batch, not one: four lanes at tp4,
+   or one lane at tp1 below its final aggregate (test in Task 1).
 3. A one-row cross join beside a non-inner join stays a wall, its plan unchanged (test in Task 2).
 4. A replan whose one-row side has become a `GpuMemorySource`: the cross join is a wall again,
    since a memory source is not one row by its form, and the answer is unchanged (test in Task 4).
@@ -57,10 +58,14 @@ modes.
   - `test_a_final_aggregate_without_group_by_is_one_row`: `GpuAggregateBatches` with
     `group_by=[]` and a `final=[...]` field → True; `GpuAggregate` with `group_by=[]` at `lanes=1`
     and a `final=` field (q23 at tp1) → True.
-  - `test_a_per_lane_partial_aggregate_is_not_one_row`: `GpuAggregate`, `group_by=[]`, `lanes=4`,
-    no `final` → False; `GpuMergePartitions` over it → False.
-  - `test_fetch_and_empty_are_at_most_one_row`: `GpuLimit` `fetch=1` and `fetch=0` → True, `fetch=2`
-    → False; `GpuEmpty` → True.
+  - `test_a_partial_aggregate_is_not_one_row`: `GpuAggregate`, `group_by=[]`, no `final`, at
+    `lanes=4` and at `lanes=1` → False (a partial aggregate emits a row per input batch, tpch q22
+    at tp1); `GpuMergePartitions` over the 4-lane one → False.
+  - `test_fetch_and_empty_are_at_most_one_row`: `GpuLimit` `fetch=1` and `fetch=0` at `lanes=1,
+    batches=single` → True, `fetch=2` → False; `GpuEmpty` → True.
+  - `test_a_fetch_per_lane_or_per_batch_is_not_one_row`: `GpuSort` `fetch=1` at `lanes=4,
+    batches=single` → False (a row per lane), at `lanes=1, batches=multiple` → False (a row per
+    batch); a final aggregate with `group_by=[]` at `lanes=4` → False.
   - `test_what_passes_one_row_on_is_one_row`: a `GpuFilter`, a computing `GpuProject`,
     `GpuCoalesceAllBatches` and `GpuMergePartitions` over a final aggregate → True; a
     `GpuCrossJoin` of two final aggregates → True, of a final aggregate and a scan → False.
@@ -71,7 +76,9 @@ modes.
 - [ ] **Step 2: Run** `py scripts/exec_model/tests/optimizer/test_multijoin.py one_row` — FAIL,
   `at_most_one_row` not defined.
 - [ ] **Step 3: Implement** in `multijoin.py`. An aggregate counts when its `group_by` is `[]`
-  and it carries `final` or runs at `lanes=1`. A node counts when its `fetch` is 0 or 1. `GpuEmpty`
+  and it carries `final`, on one lane in one batch. A node counts when its `fetch` is 0 or 1 and
+  it runs on one lane and emits one batch (`lanes=1`, `batches=single`): a `GpuSort` with a `fetch` keeps it
+  per batch and per lane. `GpuEmpty`
   counts. A `GpuFilter`, a `GpuProject` and `_WIRING` count when their child does. A `GpuCrossJoin`
   counts when both children do. Nothing else counts.
 - [ ] **Step 4: Run** the file whole — PASS.

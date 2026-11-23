@@ -12,7 +12,7 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/optimize
 from ..harness import main
 from ...plans.engine_expr import Binary
 from ...plans.engine_plan import parse_plans
-from ...optimizer.multijoin import Edge, RelColumn, assemble, clusters, named
+from ...optimizer.multijoin import Edge, RelColumn, assemble, at_most_one_row, clusters, named
 
 L = "lanes=1, batches=multiple"
 
@@ -241,6 +241,92 @@ def test_a_cross_join_a_nested_loop_join_and_a_mark_join_carry_no_id_and_a_filte
     tree = named(plan(text))
     assert [(n.kind, n.mj) for n in _walk(tree) if "Join" in n.kind] == [
         ("GpuCrossJoin", None), ("GpuNestedLoopJoin", None), ("GpuHashJoin", "MJ1"), ("GpuHashJoin", None)]
+
+
+def _one_row(text):
+    return at_most_one_row(plan(text))
+
+
+def _final_aggregate(kind="GpuAggregateBatches", group_by="[]", indent=0, lanes=1, batches="single"):
+    pad = " " * indent
+    return (f"{pad}{kind}: group_by={group_by}, aggs=[count(1) as n], final=[n@0], lanes={lanes}, "
+            f"batches={batches}, schema=[n:Int64]\n{scan('t', 'a', indent=indent + 2)}")
+
+
+def _partial_aggregate(lanes, indent=0, batches=None):
+    # q23 at tp4 has the four-lane partial aggregate single-batch, tpch q22 at tp1 the one-lane multiple
+    batches = batches or ("single" if lanes > 1 else "multiple")
+    return (f"{' ' * indent}GpuAggregate: group_by=[], aggs=[count(1) as n], lanes={lanes}, "
+            f"batches={batches}, schema=[n:Int64]\n{scan('t', 'a', indent=indent + 2)}")
+
+
+def test_a_final_aggregate_without_group_by_is_one_row():
+    assert _one_row(_final_aggregate())
+    # q23 at tp1 runs the final aggregate itself, on one lane
+    assert _one_row(_final_aggregate("GpuAggregate"))
+
+
+def test_a_partial_aggregate_is_not_one_row():
+    # a partial aggregate emits a row per input batch: tpch q22 at tp1, q23 at tp4 on four lanes
+    assert not _one_row(_partial_aggregate(lanes=4))
+    assert not _one_row(_partial_aggregate(lanes=1))
+    # only the missing `final` rules this one out: one lane, one batch
+    assert not _one_row(_partial_aggregate(lanes=1, batches="single"))
+    merged = f"GpuMergePartitions: lanes=1, batches=single, schema=[n:Int64]\n{_partial_aggregate(4, 2)}"
+    assert not _one_row(merged)
+
+
+def test_fetch_and_empty_are_at_most_one_row():
+    def limit(fetch):
+        return (f"GpuLimit: skip=0, fetch={fetch}, lanes=1, batches=single, schema=[a:Int64]\n"
+                f"{scan('t', 'a', indent=2)}")
+
+    assert _one_row(limit(1)) and _one_row(limit(0))
+    assert not _one_row(limit(2))
+    assert _one_row("GpuEmpty: lanes=1, batches=single, schema=[a:Int64]")
+
+
+def test_a_fetch_per_lane_or_per_batch_is_not_one_row():
+    def sort(layout):
+        return (f"GpuSort: by=[a@0 asc nulls_first], fetch=1, {layout}, schema=[a:Int64]\n"
+                f"{scan('t', 'a', indent=2)}")
+
+    assert not _one_row(sort("lanes=4, batches=single"))
+    assert not _one_row(sort("lanes=1, batches=multiple"))
+    assert _one_row(sort("lanes=1, batches=single"))
+    assert not _one_row(_final_aggregate(lanes=4))
+    assert not _one_row(_final_aggregate(batches="multiple"))
+
+
+def test_what_passes_one_row_on_is_one_row():
+    final = _final_aggregate(indent=2)
+    schema = "lanes=1, batches=single, schema=[n:Int64]"
+    assert _one_row(f"GpuFilter: predicate=n@0 > 1, {schema}\n{final}")
+    assert _one_row(f"GpuProject: exprs=[n@0 + 1 as n], {schema}\n{final}")
+    assert _one_row(f"GpuCoalesceAllBatches: {schema}\n{final}")
+    assert _one_row(f"GpuMergePartitions: {schema}\n{final}")
+    # tpch q15 at tp4 hashes the one row onto four lanes
+    emit = "GpuEmitPartitions: hash=[n@0], lanes=4, batches=multiple, hashed_on=[n@0], schema=[n:Int64]"
+    assert _one_row(f"{emit}\n{final}")
+    scanned = scan("t", "a", indent=2)
+    assert not _one_row(f"GpuFilter: predicate=a@0 > 1, {schema}\n{scanned}")
+    assert not _one_row(f"GpuProject: exprs=[a@0 + 1 as a], {schema}\n{scanned}")
+    cross = f"GpuCrossJoin: lanes=1, batches=single, schema=[n:Int64, a:Int64]\n{final}\n"
+    assert _one_row(cross + _final_aggregate(indent=2))
+    assert not _one_row(cross + scan("t2", "a", indent=2))
+
+
+def test_scans_joins_and_grouped_aggregates_are_not_one_row():
+    assert not _one_row(scan("t", "a", indent=0))
+    assert not _one_row(CHAIN)
+    assert not _one_row(_final_aggregate(group_by="[a@0]"))
+
+
+def test_an_edge_without_keys_or_residual_is_one_row():
+    key = (RelColumn(0, 0), RelColumn(1, 0))
+    assert Edge(0b01, 0b10).one_row
+    assert not Edge(0b01, 0b10, (key,)).one_row
+    assert not Edge(0b01, 0b10, residual=object()).one_row
 
 
 def _walk(node):

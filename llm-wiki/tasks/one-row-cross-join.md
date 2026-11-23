@@ -24,10 +24,11 @@ ones a nested-loop join with a one-row side extends (#321) and the port to Rust 
 
 One predicate over a plan node, `at_most_one_row`, used by every step below:
 
-- an aggregate with no group-by that emits the final result. A per-lane partial aggregate with no
+- an aggregate with no group-by that emits the final result, on one lane in one batch. A per-lane partial aggregate with no
   group-by is one row per lane, not one (tpcds q23 at tp4: `GpuAggregate`, `lanes=4`, below a
   `GpuMergePartitions`);
-- a node with `fetch` 0 or 1; `GpuEmpty`;
+- a node with `fetch` 0 or 1 on one lane that emits one batch: a `GpuSort` keeps its `fetch`
+  per lane and per batch; `GpuEmpty`;
 - a filter, a project, a cross join of two such relations, or wiring (`_WIRING`, a merge) over
   one.
 
