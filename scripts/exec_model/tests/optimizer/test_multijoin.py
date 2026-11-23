@@ -339,6 +339,18 @@ Q23 = f"""GpuCrossJoin: lanes=1, batches=multiple, schema=[m:Int64, q:Int64, c:I
       GpuCoalesceAllBatches: lanes=1, batches=single, schema=[c:Int64]
 {scan("cust", "c", indent=8)}
 {scan("ss", "sc", "q", indent=6)}"""
+# at tp4: the hash join on four lanes, merged onto one for the cross join
+Q23_TP4 = f"""GpuCrossJoin: lanes=1, batches=multiple, schema=[m:Int64, q:Int64, c:Int64]
+{MS}
+  GpuMergePartitions: {L}, schema=[q:Int64, c:Int64]
+    GpuProject: exprs=[q@2, c@0], {F}, hashed_on=[c@1], schema=[q:Int64, c:Int64]
+      GpuHashJoin: join_type=Inner, on=[(c@0, sc@0)], {F}, hashed_on=[c@0], schema=[c:Int64, sc:Int64, q:Int64]
+        GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c@0], schema=[c:Int64]
+          GpuEmitPartitions: hash=[c@0], {F}, hashed_on=[c@0], schema=[c:Int64]
+{scan("cust", "c", indent=12)}
+        GpuEmitPartitions: hash=[sc@0], {F}, hashed_on=[sc@0], schema=[sc:Int64, q:Int64]
+          GpuFilter: predicate=sc@0 IS NOT NULL, {L}, schema=[sc:Int64, q:Int64]
+{scan("ss", "sc", "q", indent=12)}"""
 
 
 def test_a_one_row_cross_join_joins_the_cluster_below_it():

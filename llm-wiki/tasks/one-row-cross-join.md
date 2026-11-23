@@ -47,7 +47,9 @@ estimate of its root, as for any relation.
 - **The edge.** A one-row relation `r` has an edge to every other relation of the cluster: no
   keys, no residual, selectivity 1. Its estimate is `rows(S ∪ {r}) = rows(S) × rows(r)`, and its
   cost is the existing one, `rows(S ∪ {r}) × width(needed(S ∪ {r}))`. C_out then attaches `r`
-  where the rows that carry its columns are fewest. The edge type carries an optional residual
+  where the rows that carry its columns are fewest. A set whose relations other than one-row ones
+  no key edges connect costs infinity, so a one-row edge never makes a cross product of two
+  relations of more than one row. The edge type carries an optional residual
   and stays without one here: #321 fills it.
 - **Orientation.** A join that only one-row edges cross builds its one-row side; between two
   one-row relations DPhyp's left side builds, as on any tie.

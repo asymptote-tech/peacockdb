@@ -17,7 +17,7 @@ import pandas as pd
 
 from ..corpus import execute
 from ..harness import main, raises
-from .test_multijoin import CHAIN, F, L, MS, Q23, SHUFFLED, _final_aggregate, plan, scan
+from .test_multijoin import CHAIN, F, L, Q23, Q23_TP4, SHUFFLED, _final_aggregate, plan, scan
 from ...operators.join_types import NULL_KEY_DROPPABLE, JoinType
 from ...optimizer.disassembly import baseline, disassemble, planned_lanes, reassembled
 from ...plans.engine_nodes import build
@@ -215,19 +215,7 @@ def bug_the_baseline_of_a_one_row_cluster_is_the_plan_order():
 
 
 def test_planned_lanes_leave_one_row_relations_out():
-    # Q23 at tp4: the hash join on four lanes, merged onto one for the cross join
-    tp4 = plan(f"""GpuCrossJoin: lanes=1, batches=multiple, schema=[m:Int64, q:Int64, c:Int64]
-{MS}
-  GpuMergePartitions: {L}, schema=[q:Int64, c:Int64]
-    GpuProject: exprs=[q@2, c@0], {F}, hashed_on=[c@1], schema=[q:Int64, c:Int64]
-      GpuHashJoin: join_type=Inner, on=[(c@0, sc@0)], {F}, hashed_on=[c@0], schema=[c:Int64, sc:Int64, q:Int64]
-        GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c@0], schema=[c:Int64]
-          GpuEmitPartitions: hash=[c@0], {F}, hashed_on=[c@0], schema=[c:Int64]
-{scan("cust", "c", indent=12)}
-        GpuEmitPartitions: hash=[sc@0], {F}, hashed_on=[sc@0], schema=[sc:Int64, q:Int64]
-          GpuFilter: predicate=sc@0 IS NOT NULL, {L}, schema=[sc:Int64, q:Int64]
-{scan("ss", "sc", "q", indent=12)}""")
-    [cluster] = clusters(tp4)
+    [cluster] = clusters(plan(Q23_TP4))
     assert planned_lanes(cluster) == {0b110: 4}
     # crossed in below the hash join: the join keeps its four lanes under the mask without it
     below = plan(f"""GpuHashJoin: join_type=Inner, on=[(a@0, b@1)], {F}, hashed_on=[a@0], schema=[a:Int64, n:Int64, b:Int64]

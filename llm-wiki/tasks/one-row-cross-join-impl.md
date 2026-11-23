@@ -162,12 +162,19 @@ modes.
     one-row relations, DPhyp's left side first.
   - `test_lanes_of_a_join_ignore_its_one_row_relations`: at tp4's layout `orient`'s join over
     `0b111` runs on 4 lanes (`planned.get(mask & ~one_row)`).
+  - `test_one_row_edges_never_cross_two_larger_relations`: a star `a–b`, `c–b` on keys and a
+    one-row `r`, `c` and `a` small → `cost` of `{r, a, c}` is `inf`, and `ordered`'s tree joins
+    no two sets that are both above one row across one-row edges alone.
 - [ ] **Step 2: Run** `py scripts/exec_model/tests/optimizer/test_join_order.py one_row` — FAIL.
-- [ ] **Step 3: Implement.** `SetEstimates._join` and `_applied`: where no pair and no residual
-  cross, `shaped(left.rows * right.rows, left.columns + right.columns)`. `ordered`: edges
+- [ ] **Step 3: Implement.** `SetEstimates._join` and `_applied` estimate one-row edges alone as
+  `equi_join` with no pairs: the product of rows. `SetEstimates.cost(mask)` is `inf` where the
+  relations of `mask` outside `cluster.one_row` are more than one and no key edges inside `mask`
+  connect them. `ordered`: edges
   `if edge.keys or edge.one_row`. `_orient`: a join with only one-row edges across builds the
-  side inside `cluster.one_row`, else DPhyp's left. Every `planned.get(mask, …)` reads `mask &
-  ~cluster.one_row`.
+  side inside `cluster.one_row`, else DPhyp's left, and runs on one lane, its probe merged, as
+  Task 4 rebuilds it. Every other `planned.get(mask, …)` reads `mask & ~cluster.one_row`.
+  `_join` takes a one-row relation off first where the rest stays connected, so `rows(S ∪ {r})
+  == rows(S) × rows(r)` for every key-connected `S`.
 - [ ] **Step 4: Run** `test_join_order.py`, `test_dphyp.py`, `test_optimize.py` — PASS.
 - [ ] **Step 5: Commit.**
 
