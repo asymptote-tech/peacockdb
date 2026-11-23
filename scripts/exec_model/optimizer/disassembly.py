@@ -19,7 +19,7 @@ from ..plans.engine_expr import Binary, ColumnRef, Unary, expr_text, parse_colum
 from ..plans.engine_ir import join_type_name
 from ..plans.engine_plan import EngineNode
 from .conflicts import MIRRORED
-from .multijoin import MultiJoin, RelColumn, SidedColumn, clusters, is_reorderable, replaced, sided_columns
+from .multijoin import MultiJoin, RelColumn, SidedColumn, clusters, replaced, sided_columns
 from .report import mask
 
 JoinTree = int | tuple  # a relation's index, or (build tree, probe tree)
@@ -28,9 +28,10 @@ JoinTree = int | tuple  # a relation's index, or (build tree, probe tree)
 def baseline(cluster: MultiJoin) -> JoinTree:
     """The order the plan already has."""
     roots = {id(r.root): i for i, r in enumerate(cluster.relations)}
+    joins = {id(join) for join in cluster.joins}
 
     def tree(node):
-        while id(node) not in roots and not is_reorderable(node):
+        while id(node) not in roots and id(node) not in joins:
             node = node.children[0]
         if id(node) in roots:
             return roots[id(node)]
@@ -236,18 +237,21 @@ def _across(cluster: MultiJoin, build_mask: int, probe_mask: int):
 
 
 def planned_lanes(cluster: MultiJoin) -> dict[int, int]:
-    """The lanes of each join the plan had, by the mask of the relations below it."""
+    """The lanes of each hash join the plan had, by the mask of the relations below it but the
+    one-row ones: a one-row relation does not change a join's lanes, wherever it is crossed in."""
     found = {}
 
     def walk(tree, node):
-        while not is_reorderable(node) and id(node) not in roots:
+        while id(node) not in joins and id(node) not in roots:
             node = node.children[0]
         if isinstance(tree, tuple):
-            found[mask(tree)] = int(node.fields["lanes"])
+            if node.kind == "GpuHashJoin":
+                found[mask(tree) & ~cluster.one_row] = int(node.fields["lanes"])
             walk(tree[0], node.children[0])
             walk(tree[1], node.children[1])
 
     roots = {id(r.root) for r in cluster.relations}
+    joins = {id(join) for join in cluster.joins}
     walk(baseline(cluster), cluster.root)
     return found
 
