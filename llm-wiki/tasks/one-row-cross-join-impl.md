@@ -205,6 +205,9 @@ modes.
   - In `test_replan.py`, `test_a_replanned_one_row_side_is_a_wall_again`: the reassembled `Q23`
     with the one-row relation replaced by a `GpuMemorySource` assembles with the cross join as a
     relation and runs to the same answer as before the replan.
+  - In `test_multijoin.py`, `test_a_residual_reading_a_one_row_relation_keeps_the_wall`: `Q23`
+    with `filter=c@build:0 > m@probe:0` on the hash join → the cluster is the hash join alone,
+    `one_row == 0`, and `ordered` returns the plan unchanged (`assemble` walls it, Step 3).
 - [ ] **Step 2: Run** both files — FAIL.
 - [ ] **Step 3: Implement.** In `part`: where `_predicates` gives no keys and every edge across is
   one-row, build `_cross(build, probe, need)` instead of raising: the build side merged onto one

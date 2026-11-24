@@ -19,7 +19,6 @@ from ..harness import main
 from .test_multijoin import AB, Q23, Q23_TP4, _final_aggregate, _indented, plan
 from .test_reorder_non_inner import ANTI, LEFT, SEMI, TABLES as NON_INNER_TABLES
 from .test_cardinality import dataset, scan
-from ...optimizer import join_order
 from ...optimizer.cardinality import Column, estimator
 from ...optimizer.conflicts import joining
 from ...optimizer.cost import row_width
@@ -179,19 +178,8 @@ def test_a_one_row_relation_multiplies_the_rows_of_the_set_it_joins():
 
 
 def orders(text, lanes=1):
-    """`ordered`'s DPhyp calls on the plan `text`, the plan kept: disassembly rebuilds no cross join
-    yet, so the stand-in for it only hands `ordered` each cluster."""
-    # The stand-in goes once disassembly rebuilds the cross join, and `ordered` is called directly.
-    def kept(plan, lanes, order):
-        for cluster in clusters(plan):
-            order(cluster)
-        return plan
-
-    rebuilt, join_order.reassembled = join_order.reassembled, kept
-    try:
-        return ordered(plan(text), one_row_dataset(), lanes)[1]
-    finally:
-        join_order.reassembled = rebuilt
+    """`ordered`'s DPhyp calls on the plan `text`."""
+    return ordered(plan(text), one_row_dataset(), lanes)[1]
 
 
 def test_dphyp_crosses_the_one_row_relation_onto_the_smaller_side():

@@ -9,9 +9,13 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/optimize
     _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[4]))
     __package__ = "scripts.exec_model.tests.optimizer"
 
+import pyarrow as pa
+
 from ..harness import main
+from .test_cardinality import dataset
 from ...plans.engine_expr import Binary
-from ...plans.engine_plan import parse_plans
+from ...plans.engine_plan import parse_plans, plan_text
+from ...optimizer.join_order import ordered
 from ...optimizer.multijoin import Edge, RelColumn, assemble, at_most_one_row, clusters, named
 
 L = "lanes=1, batches=multiple"
@@ -330,8 +334,11 @@ def test_an_edge_without_keys_or_residual_is_one_row():
 
 
 # tpcds q23's best_ss_customer at tp1: the one-row max_store_sales crossed onto customer ⋈ store_sales
+# — its final aggregate reads one batch, as q23's does, so the prototype runs it as one
 MS = f"""  GpuProject: exprs=[n@0 as m], lanes=1, batches=single, schema=[m:Int64]
-{_final_aggregate("GpuAggregate", indent=4, table="ms")}"""
+    GpuAggregate: group_by=[], aggs=[count(1) as n], final=[n@0], lanes=1, batches=single, schema=[n:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[a:Int64]
+{scan("ms", "a", indent=8)}"""
 Q23 = f"""GpuCrossJoin: lanes=1, batches=multiple, schema=[m:Int64, q:Int64, c:Int64]
 {MS}
   GpuProject: exprs=[q@2, c@0], {L}, schema=[q:Int64, c:Int64]
@@ -451,6 +458,34 @@ def test_a_one_row_cross_join_beside_a_non_inner_join_stays_a_wall():
     assert [r.root.kind for r in cluster.relations] == ["GpuLoadParquet", "GpuCrossJoin"]
     assert cluster.joins == (above,) and cluster.one_row == 0
     assert cluster.edges[0].keys == ((RelColumn(0, 0), RelColumn(1, 1)),)
+
+
+# q23's shape with a join filter on max_store_sales' m: a cross join carries no residual
+FILTERED = f"""GpuHashJoin: join_type=Inner, on=[(c@0, sc@1)], filter=c@build:0 > m@probe:0, {L}, schema=[c:Int64, m:Int64, sc:Int64, q:Int64]
+  GpuCoalesceAllBatches: lanes=1, batches=single, schema=[c:Int64]
+{scan("cust", "c", indent=4)}
+  GpuCrossJoin: lanes=1, batches=multiple, schema=[m:Int64, sc:Int64, q:Int64]
+{_indented(MS, 2)}
+{scan("ss", "sc", "q", indent=4)}"""
+
+
+def test_a_residual_reading_a_one_row_relation_keeps_the_wall():
+    root = plan(FILTERED)
+    [cluster] = clusters(root)
+    assert cluster.joins == (root,) and cluster.one_row == 0
+    assert [r.root.kind for r in cluster.relations] == ["GpuLoadParquet", "GpuCrossJoin"]
+    stats = dataset(tables={"ms": pa.table({"a": [1, 2, 3]}), "cust": pa.table({"c": [1, 2, 3]}),
+                            "ss": pa.table({"sc": [1, 2, 2, 5], "q": [10, 20, 30, 40]})})
+    assert plan_text(ordered(root, stats, 1)[0]) == plan_text(root)
+
+
+def test_only_the_cross_join_whose_one_row_relation_a_residual_reads_is_a_wall():
+    root = plan(f"""GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, c:Int64, m:Int64, sc:Int64, q:Int64]
+{_final_aggregate(indent=2)}
+{_indented(FILTERED, 2)}""")
+    [cluster] = clusters(root)
+    assert cluster.joins == (root, root.children[1]) and cluster.one_row == 0b001
+    assert [r.root.kind for r in cluster.relations] == ["GpuAggregateBatches", "GpuLoadParquet", "GpuCrossJoin"]
 
 
 def test_named_gives_the_cross_join_its_cluster_id():

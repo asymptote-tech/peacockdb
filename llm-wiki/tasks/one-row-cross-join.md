@@ -43,7 +43,8 @@ estimate of its root, as for any relation.
   relations alone (tpcds q28, q61, q88, q90) form none, and their plans do not change.
 - **Inner joins only.** Where the cluster holds a non-inner join, the cross join stays a wall, as
   today. Inside a non-inner join's kept or preserved side it would turn the unmatched rows'
-  NULLs into its values.
+  NULLs into its values. Where a residual reads a one-row relation, its cross join stays a wall
+  too: a `GpuCrossJoin` carries no residual, and the residual one-row edge is #321's.
 - **The edge.** A one-row relation `r` has an edge to every other relation of the cluster: no
   keys, no residual, selectivity 1. Its estimate is `rows(S ∪ {r}) = rows(S) × rows(r)`, and its
   cost is the existing one, `rows(S ∪ {r}) × width(needed(S ∪ {r}))`. C_out then attaches `r`
