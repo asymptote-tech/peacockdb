@@ -2887,7 +2887,7 @@ MJ1: 5 relations, ordered before the run
   r1 customer#1: rows 100000 exact, 27.9 B/row; NDV c_customer_sk 100000
   r2 catalog_sales: rows 122880 exact, 48.6 B/row; NDV cs_bill_customer_sk 79641, cs_sold_date_sk 1830, cs_item_sk 18000
   r3 agg(MJ2) (f): rows 303615.6 est, 8.1 B/row; NDV i_item_sk 18000
-  r4 agg([agg(MJ3)] cross join MJ4) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
+  r4 agg(MJ3) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
   edge r1-r2: r1.c_customer_sk = r2.cs_bill_customer_sk
   edge r0-r2: r0.d_date_sk = r2.cs_sold_date_sk
   edge r2-r3: r2.cs_item_sk = r3.i_item_sk
@@ -2913,6 +2913,19 @@ MJ2: 3 relations, ordered before the run
   join r0 x r1+r2: 1518078.2 rows x 16.4 B = 24858531 B
   C_out 43454989 B; the plan's order, priced by the same estimates, 43454989 B
 MJ3: 3 relations, ordered before the run
+  r0 agg(MJ4): rows 1 est, 16.1 B/row
+  r1 customer#3: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
+  r2 store_sales#3: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
+  edge r1-r2: r1.c_customer_sk = r2.ss_customer_sk
+  edge r0-r1: one row crossed in, keeps every row
+  edge r0-r2: one row crossed in, keeps every row
+  plan's order (r0 (r1 r2)), build first
+  DPhyp priced 4 sets, chose ((r0 r1) r2)
+  oriented ((r0 r1) r2), build first
+  join r0 x r1: 100000.0 rows x 24.2 B = 2425000 B
+  join r0+r1 x r2: 2880404.0 rows x 48.5 B = 139699594 B
+  C_out 142124594 B; the plan's order, priced by the same estimates, 232952674 B
+MJ4: 3 relations, ordered before the run
   r0 p2: rows 1461 measured, 8.1 B/row; NDV d_date_sk 1461
   r1 customer#2: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
   r2 store_sales#2: rows 1897364 exact, 40.5 B/row; NDV ss_customer_sk 90858, ss_sold_date_sk 1823
@@ -2924,21 +2937,12 @@ MJ3: 3 relations, ordered before the run
   join r0 x r2: 1518078.2 rows x 32.4 B = 49147783 B
   join r1 x r0+r2: 1518078.2 rows x 32.4 B = 49147783 B
   C_out 98295566 B; the plan's order, priced by the same estimates, 125991025 B
-MJ4: 2 relations, ordered before the run
-  r0 customer#3: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
-  r1 store_sales#3: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
-  edge r0-r1: r0.c_customer_sk = r1.ss_customer_sk
-  plan's order (r0 r1), build first
-  DPhyp priced 1 sets, chose (r0 r1): the plan's order
-  oriented (r0 r1), build first
-  join r0 x r1: 2880404.0 rows x 32.4 B = 93253080 B
-  C_out 93253080 B; the plan's order, priced by the same estimates, 93253080 B
 MJ5: 5 relations, ordered before the run
   r0 p3: rows 29 measured, 8.1 B/row; NDV d_date_sk 29
   r1 customer#4: rows 100000 exact, 27.9 B/row; NDV c_customer_sk 100000
   r2 web_sales: rows 122880 exact, 48.6 B/row; NDV ws_bill_customer_sk 45161, ws_sold_date_sk 1823, ws_item_sk 18000
   r3 agg(MJ6) (f): rows 303615.6 est, 8.1 B/row; NDV i_item_sk 18000
-  r4 agg([agg(MJ7)] cross join MJ8) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
+  r4 agg(MJ7) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
   edge r1-r2: r1.c_customer_sk = r2.ws_bill_customer_sk
   edge r0-r2: r0.d_date_sk = r2.ws_sold_date_sk
   edge r2-r3: r2.ws_item_sk = r3.i_item_sk
@@ -2964,6 +2968,19 @@ MJ6: 3 relations, ordered before the run
   join r0 x r1+r2: 1518078.2 rows x 16.4 B = 24858531 B
   C_out 43454989 B; the plan's order, priced by the same estimates, 43454989 B
 MJ7: 3 relations, ordered before the run
+  r0 agg(MJ8): rows 1 est, 16.1 B/row
+  r1 customer#6: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
+  r2 store_sales#6: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
+  edge r1-r2: r1.c_customer_sk = r2.ss_customer_sk
+  edge r0-r1: one row crossed in, keeps every row
+  edge r0-r2: one row crossed in, keeps every row
+  plan's order (r0 (r1 r2)), build first
+  DPhyp priced 4 sets, chose ((r0 r1) r2)
+  oriented ((r0 r1) r2), build first
+  join r0 x r1: 100000.0 rows x 24.2 B = 2425000 B
+  join r0+r1 x r2: 2880404.0 rows x 48.5 B = 139699594 B
+  C_out 142124594 B; the plan's order, priced by the same estimates, 232952674 B
+MJ8: 3 relations, ordered before the run
   r0 p5: rows 1461 measured, 8.1 B/row; NDV d_date_sk 1461
   r1 customer#5: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
   r2 store_sales#5: rows 1897364 exact, 40.5 B/row; NDV ss_customer_sk 90858, ss_sold_date_sk 1823
@@ -2975,20 +2992,11 @@ MJ7: 3 relations, ordered before the run
   join r0 x r2: 1518078.2 rows x 32.4 B = 49147783 B
   join r1 x r0+r2: 1518078.2 rows x 32.4 B = 49147783 B
   C_out 98295566 B; the plan's order, priced by the same estimates, 125991025 B
-MJ8: 2 relations, ordered before the run
-  r0 customer#6: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
-  r1 store_sales#6: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
-  edge r0-r1: r0.c_customer_sk = r1.ss_customer_sk
-  plan's order (r0 r1), build first
-  DPhyp priced 1 sets, chose (r0 r1): the plan's order
-  oriented (r0 r1), build first
-  join r0 x r1: 2880404.0 rows x 32.4 B = 93253080 B
-  C_out 93253080 B; the plan's order, priced by the same estimates, 93253080 B
 replan 1: the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came out 13302 rows, est 1944.1 (q-error 6.84)
   kept as memory sources: m6 (13302 rows) = [p0] join catalog_sales
   MJ1: 4 relations, ordered again
     r0 m6: rows 13302 measured, 40.5 B/row; NDV cs_bill_customer_sk 1469, cs_item_sk 6941
-    r1 agg([agg(MJ3)] cross join MJ4) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
+    r1 agg(MJ3) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
     r2 customer#1: rows 100000 exact, 27.9 B/row; NDV c_customer_sk 100000
     r3 agg(MJ2) (f): rows 303615.6 est, 8.1 B/row; NDV i_item_sk 18000
     edge r0-r1: r0.cs_bill_customer_sk = r1.c_customer_sk
@@ -3003,6 +3011,19 @@ replan 1: the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came ou
     C_out 11115376 B; the previous order, priced by the same estimates, 11115376 B
     flipped: r1 builds, r0 probes
   MJ3: 3 relations, ordered again
+    r0 agg(MJ4): rows 1 est, 16.1 B/row
+    r1 customer#3: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
+    r2 store_sales#3: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
+    edge r1-r2: r1.c_customer_sk = r2.ss_customer_sk
+    edge r0-r1: one row crossed in, keeps every row
+    edge r0-r2: one row crossed in, keeps every row
+    previous order ((r0 r1) r2), build first
+    DPhyp priced 4 sets, chose ((r0 r1) r2): the previous order
+    oriented ((r0 r1) r2), build first
+    join r0 x r1: 100000.0 rows x 24.2 B = 2425000 B
+    join r0+r1 x r2: 2880404.0 rows x 48.5 B = 139699594 B
+    C_out 142124594 B; the previous order, priced by the same estimates, 142124594 B
+  MJ4: 3 relations, ordered again
     r0 customer#2: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
     r1 p2: rows 1461 measured, 8.1 B/row; NDV d_date_sk 1461
     r2 store_sales#2: rows 1897364 exact, 40.5 B/row; NDV ss_sold_date_sk 1823, ss_customer_sk 90858
@@ -3014,15 +3035,6 @@ replan 1: the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came ou
     join r1 x r2: 1518078.2 rows x 32.4 B = 49147783 B
     join r0 x r1+r2: 1518078.2 rows x 32.4 B = 49147783 B
     C_out 98295566 B; the previous order, priced by the same estimates, 98295566 B
-  MJ4: 2 relations, ordered again
-    r0 customer#3: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
-    r1 store_sales#3: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
-    edge r0-r1: r0.c_customer_sk = r1.ss_customer_sk
-    previous order (r0 r1), build first
-    DPhyp priced 1 sets, chose (r0 r1): the previous order
-    oriented (r0 r1), build first
-    join r0 x r1: 2880404.0 rows x 32.4 B = 93253080 B
-    C_out 93253080 B; the previous order, priced by the same estimates, 93253080 B
   MJ2: 3 relations, ordered again
     r0 item#1: rows 18000 exact, 12.2 B/row; NDV i_item_sk 18000
     r1 p1: rows 1461 measured, 12.2 B/row; NDV d_date_sk 1461
@@ -3038,7 +3050,7 @@ replan 1: the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came ou
   MJ5: 5 relations, ordered again
     r0 p3: rows 29 measured, 8.1 B/row; NDV d_date_sk 29
     r1 web_sales: rows 122880 exact, 48.6 B/row; NDV ws_sold_date_sk 1823, ws_bill_customer_sk 45161, ws_item_sk 18000
-    r2 agg([agg(MJ7)] cross join MJ8) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
+    r2 agg(MJ7) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
     r3 customer#4: rows 100000 exact, 27.9 B/row; NDV c_customer_sk 100000
     r4 agg(MJ6) (f): rows 303615.6 est, 8.1 B/row; NDV i_item_sk 18000
     edge r0-r1: r0.d_date_sk = r1.ws_sold_date_sk
@@ -3054,6 +3066,19 @@ replan 1: the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came ou
     join r0+r1+r2+r3 x r4: 32917.3 rows x 44.0 B = 1449872 B
     C_out 1709758 B; the previous order, priced by the same estimates, 1709758 B
   MJ7: 3 relations, ordered again
+    r0 agg(MJ8): rows 1 est, 16.1 B/row
+    r1 customer#6: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
+    r2 store_sales#6: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
+    edge r1-r2: r1.c_customer_sk = r2.ss_customer_sk
+    edge r0-r1: one row crossed in, keeps every row
+    edge r0-r2: one row crossed in, keeps every row
+    previous order ((r0 r1) r2), build first
+    DPhyp priced 4 sets, chose ((r0 r1) r2): the previous order
+    oriented ((r0 r1) r2), build first
+    join r0 x r1: 100000.0 rows x 24.2 B = 2425000 B
+    join r0+r1 x r2: 2880404.0 rows x 48.5 B = 139699594 B
+    C_out 142124594 B; the previous order, priced by the same estimates, 142124594 B
+  MJ8: 3 relations, ordered again
     r0 customer#5: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
     r1 p5: rows 1461 measured, 8.1 B/row; NDV d_date_sk 1461
     r2 store_sales#5: rows 1897364 exact, 40.5 B/row; NDV ss_sold_date_sk 1823, ss_customer_sk 90858
@@ -3065,15 +3090,6 @@ replan 1: the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came ou
     join r1 x r2: 1518078.2 rows x 32.4 B = 49147783 B
     join r0 x r1+r2: 1518078.2 rows x 32.4 B = 49147783 B
     C_out 98295566 B; the previous order, priced by the same estimates, 98295566 B
-  MJ8: 2 relations, ordered again
-    r0 customer#6: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
-    r1 store_sales#6: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
-    edge r0-r1: r0.c_customer_sk = r1.ss_customer_sk
-    previous order (r0 r1), build first
-    DPhyp priced 1 sets, chose (r0 r1): the previous order
-    oriented (r0 r1), build first
-    join r0 x r1: 2880404.0 rows x 32.4 B = 93253080 B
-    C_out 93253080 B; the previous order, priced by the same estimates, 93253080 B
   MJ6: 3 relations, ordered again
     r0 item#2: rows 18000 exact, 12.2 B/row; NDV i_item_sk 18000
     r1 p4: rows 1461 measured, 12.2 B/row; NDV d_date_sk 1461
@@ -3089,7 +3105,7 @@ replan 1: the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came ou
 replan 2: the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came out 6725 rows, est 1951.5 (q-error 3.45)
   kept as memory sources: m7 (6725 rows) = [p3] join web_sales
   MJ1: 4 relations, ordered again
-    r0 agg([agg(MJ3)] cross join MJ4) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
+    r0 agg(MJ3) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
     r1 m6: rows 13302 measured, 40.5 B/row; NDV cs_bill_customer_sk 1469, cs_item_sk 6941
     r2 customer#1: rows 100000 exact, 27.9 B/row; NDV c_customer_sk 100000
     r3 agg(MJ2) (f): rows 303615.6 est, 8.1 B/row; NDV i_item_sk 18000
@@ -3104,6 +3120,19 @@ replan 2: the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came ou
     join r0+r1+r2 x r3: 224372.0 rows x 44.0 B = 9882668 B
     C_out 11115376 B; the previous order, priced by the same estimates, 11115376 B
   MJ3: 3 relations, ordered again
+    r0 agg(MJ4): rows 1 est, 16.1 B/row
+    r1 customer#3: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
+    r2 store_sales#3: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
+    edge r1-r2: r1.c_customer_sk = r2.ss_customer_sk
+    edge r0-r1: one row crossed in, keeps every row
+    edge r0-r2: one row crossed in, keeps every row
+    previous order ((r0 r1) r2), build first
+    DPhyp priced 4 sets, chose ((r0 r1) r2): the previous order
+    oriented ((r0 r1) r2), build first
+    join r0 x r1: 100000.0 rows x 24.2 B = 2425000 B
+    join r0+r1 x r2: 2880404.0 rows x 48.5 B = 139699594 B
+    C_out 142124594 B; the previous order, priced by the same estimates, 142124594 B
+  MJ4: 3 relations, ordered again
     r0 customer#2: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
     r1 p2: rows 1461 measured, 8.1 B/row; NDV d_date_sk 1461
     r2 store_sales#2: rows 1897364 exact, 40.5 B/row; NDV ss_sold_date_sk 1823, ss_customer_sk 90858
@@ -3115,15 +3144,6 @@ replan 2: the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came ou
     join r1 x r2: 1518078.2 rows x 32.4 B = 49147783 B
     join r0 x r1+r2: 1518078.2 rows x 32.4 B = 49147783 B
     C_out 98295566 B; the previous order, priced by the same estimates, 98295566 B
-  MJ4: 2 relations, ordered again
-    r0 customer#3: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
-    r1 store_sales#3: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
-    edge r0-r1: r0.c_customer_sk = r1.ss_customer_sk
-    previous order (r0 r1), build first
-    DPhyp priced 1 sets, chose (r0 r1): the previous order
-    oriented (r0 r1), build first
-    join r0 x r1: 2880404.0 rows x 32.4 B = 93253080 B
-    C_out 93253080 B; the previous order, priced by the same estimates, 93253080 B
   MJ2: 3 relations, ordered again
     r0 item#1: rows 18000 exact, 12.2 B/row; NDV i_item_sk 18000
     r1 p1: rows 1461 measured, 12.2 B/row; NDV d_date_sk 1461
@@ -3138,7 +3158,7 @@ replan 2: the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came ou
     C_out 43454989 B; the previous order, priced by the same estimates, 43454989 B
   MJ5: 4 relations, ordered again
     r0 m7: rows 6725 measured, 40.5 B/row; NDV ws_bill_customer_sk 564, ws_item_sk 4635
-    r1 agg([agg(MJ7)] cross join MJ8) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
+    r1 agg(MJ7) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
     r2 customer#4: rows 100000 exact, 27.9 B/row; NDV c_customer_sk 100000
     r3 agg(MJ6) (f): rows 303615.6 est, 8.1 B/row; NDV i_item_sk 18000
     edge r0-r1: r0.ws_bill_customer_sk = r1.c_customer_sk
@@ -3153,6 +3173,19 @@ replan 2: the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came ou
     C_out 5619524 B; the previous order, priced by the same estimates, 5619524 B
     flipped: r1 builds, r0 probes
   MJ7: 3 relations, ordered again
+    r0 agg(MJ8): rows 1 est, 16.1 B/row
+    r1 customer#6: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
+    r2 store_sales#6: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
+    edge r1-r2: r1.c_customer_sk = r2.ss_customer_sk
+    edge r0-r1: one row crossed in, keeps every row
+    edge r0-r2: one row crossed in, keeps every row
+    previous order ((r0 r1) r2), build first
+    DPhyp priced 4 sets, chose ((r0 r1) r2): the previous order
+    oriented ((r0 r1) r2), build first
+    join r0 x r1: 100000.0 rows x 24.2 B = 2425000 B
+    join r0+r1 x r2: 2880404.0 rows x 48.5 B = 139699594 B
+    C_out 142124594 B; the previous order, priced by the same estimates, 142124594 B
+  MJ8: 3 relations, ordered again
     r0 customer#5: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
     r1 p5: rows 1461 measured, 8.1 B/row; NDV d_date_sk 1461
     r2 store_sales#5: rows 1897364 exact, 40.5 B/row; NDV ss_sold_date_sk 1823, ss_customer_sk 90858
@@ -3164,15 +3197,6 @@ replan 2: the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came ou
     join r1 x r2: 1518078.2 rows x 32.4 B = 49147783 B
     join r0 x r1+r2: 1518078.2 rows x 32.4 B = 49147783 B
     C_out 98295566 B; the previous order, priced by the same estimates, 98295566 B
-  MJ8: 2 relations, ordered again
-    r0 customer#6: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
-    r1 store_sales#6: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
-    edge r0-r1: r0.c_customer_sk = r1.ss_customer_sk
-    previous order (r0 r1), build first
-    DPhyp priced 1 sets, chose (r0 r1): the previous order
-    oriented (r0 r1), build first
-    join r0 x r1: 2880404.0 rows x 32.4 B = 93253080 B
-    C_out 93253080 B; the previous order, priced by the same estimates, 93253080 B
   MJ6: 3 relations, ordered again
     r0 item#2: rows 18000 exact, 12.2 B/row; NDV i_item_sk 18000
     r1 p4: rows 1461 measured, 12.2 B/row; NDV d_date_sk 1461
@@ -3186,7 +3210,7 @@ replan 2: the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came ou
     join r0 x r1+r2: 1518078.2 rows x 16.4 B = 24858531 B
     C_out 43454989 B; the previous order, priced by the same estimates, 43454989 B
 replan 3: the build of MJ1's join on c_customer_sk = cs_bill_customer_sk came out 4703 rows, est 18171.6 (q-error 3.86)
-  kept as memory sources: m8 (4703 rows) = agg([agg(MJ3)] cross join MJ4) (f)
+  kept as memory sources: m8 (4703 rows) = agg(MJ3) (f)
   MJ1: 4 relations, ordered again
     r0 m8: rows 4703 measured, 8.1 B/row; NDV c_customer_sk 4703
     r1 m6: rows 13302 measured, 40.5 B/row; NDV cs_bill_customer_sk 1469, cs_item_sk 6941
@@ -3215,7 +3239,7 @@ replan 3: the build of MJ1's join on c_customer_sk = cs_bill_customer_sk came ou
     join r0 x r1+r2: 1518078.2 rows x 16.4 B = 24858531 B
     C_out 43454989 B; the previous order, priced by the same estimates, 43454989 B
   MJ5: 4 relations, ordered again
-    r0 agg([agg(MJ7)] cross join MJ8) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
+    r0 agg(MJ7) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
     r1 m7: rows 6725 measured, 40.5 B/row; NDV ws_bill_customer_sk 564, ws_item_sk 4635
     r2 customer#4: rows 100000 exact, 27.9 B/row; NDV c_customer_sk 100000
     r3 agg(MJ6) (f): rows 303615.6 est, 8.1 B/row; NDV i_item_sk 18000
@@ -3230,6 +3254,19 @@ replan 3: the build of MJ1's join on c_customer_sk = cs_bill_customer_sk came ou
     join r0+r1+r2 x r3: 113434.2 rows x 44.0 B = 4996312 B
     C_out 5619524 B; the previous order, priced by the same estimates, 5619524 B
   MJ7: 3 relations, ordered again
+    r0 agg(MJ8): rows 1 est, 16.1 B/row
+    r1 customer#6: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
+    r2 store_sales#6: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
+    edge r1-r2: r1.c_customer_sk = r2.ss_customer_sk
+    edge r0-r1: one row crossed in, keeps every row
+    edge r0-r2: one row crossed in, keeps every row
+    previous order ((r0 r1) r2), build first
+    DPhyp priced 4 sets, chose ((r0 r1) r2): the previous order
+    oriented ((r0 r1) r2), build first
+    join r0 x r1: 100000.0 rows x 24.2 B = 2425000 B
+    join r0+r1 x r2: 2880404.0 rows x 48.5 B = 139699594 B
+    C_out 142124594 B; the previous order, priced by the same estimates, 142124594 B
+  MJ8: 3 relations, ordered again
     r0 customer#5: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
     r1 p5: rows 1461 measured, 8.1 B/row; NDV d_date_sk 1461
     r2 store_sales#5: rows 1897364 exact, 40.5 B/row; NDV ss_sold_date_sk 1823, ss_customer_sk 90858
@@ -3241,15 +3278,6 @@ replan 3: the build of MJ1's join on c_customer_sk = cs_bill_customer_sk came ou
     join r1 x r2: 1518078.2 rows x 32.4 B = 49147783 B
     join r0 x r1+r2: 1518078.2 rows x 32.4 B = 49147783 B
     C_out 98295566 B; the previous order, priced by the same estimates, 98295566 B
-  MJ8: 2 relations, ordered again
-    r0 customer#6: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
-    r1 store_sales#6: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
-    edge r0-r1: r0.c_customer_sk = r1.ss_customer_sk
-    previous order (r0 r1), build first
-    DPhyp priced 1 sets, chose (r0 r1): the previous order
-    oriented (r0 r1), build first
-    join r0 x r1: 2880404.0 rows x 32.4 B = 93253080 B
-    C_out 93253080 B; the previous order, priced by the same estimates, 93253080 B
   MJ6: 3 relations, ordered again
     r0 item#2: rows 18000 exact, 12.2 B/row; NDV i_item_sk 18000
     r1 p4: rows 1461 measured, 12.2 B/row; NDV d_date_sk 1461
@@ -3289,7 +3317,7 @@ replan 4: the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came ou
     join r0 x r1+r2: 1518078.2 rows x 16.4 B = 24858531 B
     C_out 43454989 B; the previous order, priced by the same estimates, 43454989 B
   MJ5: 4 relations, ordered again
-    r0 agg([agg(MJ7)] cross join MJ8) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
+    r0 agg(MJ7) (f): rows 18171.6 est, 8.1 B/row; NDV c_customer_sk 18171.6
     r1 m7: rows 6725 measured, 40.5 B/row; NDV ws_bill_customer_sk 564, ws_item_sk 4635
     r2 customer#4: rows 100000 exact, 27.9 B/row; NDV c_customer_sk 100000
     r3 agg(MJ6) (f): rows 303615.6 est, 8.1 B/row; NDV i_item_sk 18000
@@ -3304,6 +3332,19 @@ replan 4: the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came ou
     join r0+r1+r2 x r3: 113434.2 rows x 44.0 B = 4996312 B
     C_out 5619524 B; the previous order, priced by the same estimates, 5619524 B
   MJ7: 3 relations, ordered again
+    r0 agg(MJ8): rows 1 est, 16.1 B/row
+    r1 customer#6: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
+    r2 store_sales#6: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
+    edge r1-r2: r1.c_customer_sk = r2.ss_customer_sk
+    edge r0-r1: one row crossed in, keeps every row
+    edge r0-r2: one row crossed in, keeps every row
+    previous order ((r0 r1) r2), build first
+    DPhyp priced 4 sets, chose ((r0 r1) r2): the previous order
+    oriented ((r0 r1) r2), build first
+    join r0 x r1: 100000.0 rows x 24.2 B = 2425000 B
+    join r0+r1 x r2: 2880404.0 rows x 48.5 B = 139699594 B
+    C_out 142124594 B; the previous order, priced by the same estimates, 142124594 B
+  MJ8: 3 relations, ordered again
     r0 customer#5: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
     r1 p5: rows 1461 measured, 8.1 B/row; NDV d_date_sk 1461
     r2 store_sales#5: rows 1897364 exact, 40.5 B/row; NDV ss_sold_date_sk 1823, ss_customer_sk 90858
@@ -3315,15 +3356,6 @@ replan 4: the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came ou
     join r1 x r2: 1518078.2 rows x 32.4 B = 49147783 B
     join r0 x r1+r2: 1518078.2 rows x 32.4 B = 49147783 B
     C_out 98295566 B; the previous order, priced by the same estimates, 98295566 B
-  MJ8: 2 relations, ordered again
-    r0 customer#6: rows 100000 exact, 8.1 B/row; NDV c_customer_sk 100000
-    r1 store_sales#6: rows 2880404 exact, 32.4 B/row; NDV ss_customer_sk 90858
-    edge r0-r1: r0.c_customer_sk = r1.ss_customer_sk
-    previous order (r0 r1), build first
-    DPhyp priced 1 sets, chose (r0 r1): the previous order
-    oriented (r0 r1), build first
-    join r0 x r1: 2880404.0 rows x 32.4 B = 93253080 B
-    C_out 93253080 B; the previous order, priced by the same estimates, 93253080 B
   MJ6: 3 relations, ordered again
     r0 item#2: rows 18000 exact, 12.2 B/row; NDV i_item_sk 18000
     r1 p4: rows 1461 measured, 12.2 B/row; NDV d_date_sk 1461
@@ -3651,7 +3683,7 @@ plan diff: this query's section of <mode>.plandiff.txt
 == q27
 skipped: refused by datafusion: SanityCheckPlan
 == q28
-skipped: refused: unsupported: DISTINCT inside count(DISTINCT store_sales.ss_list_price) (#62)
+nothing fired
 == q29
 estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
 names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory

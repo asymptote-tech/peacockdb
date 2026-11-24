@@ -700,11 +700,7 @@ p0 = `date_dim (f)`, 366 rows.
 
 MJ2 kept the plan's order: `[item#1] join ([p1] join store_sales#1)`.
 
-MJ4 kept the plan's order: `[customer#3] join store_sales#3`.
-
 MJ6 kept the plan's order: `[item#2] join ([p4] join store_sales#4)`.
-
-MJ8 kept the plan's order: `[customer#6] join store_sales#6`.
 
 A replan was refused, work outside its builds having started: the build of MJ5's join on c_customer_sk = ws_bill_customer_sk came out 4703 rows, est 18171.6 (q-error 3.86).
 
@@ -716,8 +712,8 @@ A replan was refused, work outside its builds having started: the build of MJ5's
 
 | | plan | DPhyp before the run | replan 1 |
 |---|---|---|---|
-| join tree | `[[[p0] join ([customer#1] join catalog_sales)] join agg(MJ2) (f)] join agg([agg(MJ3)] cross join MJ4) (f)` | `[[[[p0] join catalog_sales] join agg([agg(MJ3)] cross join MJ4) (f)] join customer#1] join agg(MJ2) (f)` | `[[[agg([agg(MJ3)] cross join MJ4) (f)] join m6] join customer#1] join agg(MJ2) (f)` |
-| changed by | | reordered by DPhyp | the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came out 13302 rows, est 1944.1 (q-error 6.84); flip: `agg([agg(MJ3)] cross join MJ4) (f)` now builds |
+| join tree | `[[[p0] join ([customer#1] join catalog_sales)] join agg(MJ2) (f)] join agg(MJ3) (f)` | `[[[[p0] join catalog_sales] join agg(MJ3) (f)] join customer#1] join agg(MJ2) (f)` | `[[[agg(MJ3) (f)] join m6] join customer#1] join agg(MJ2) (f)` |
+| changed by | | reordered by DPhyp | the build of MJ1's join on cs_bill_customer_sk = c_customer_sk came out 13302 rows, est 1944.1 (q-error 6.84); flip: `agg(MJ3) (f)` now builds |
 | C_out | 11,679,883 B | 1,703,228 B (plan's order 11,679,883 B) | 11,115,376 B (previous order 11,115,376 B) |
 
 Calls that left the order unchanged: replan 2; replan 3 (MJ1's missed build came out 4703 rows, est 18171.6); replan 4 (MJ1's missed build came out 667 rows, est 13302.0).
@@ -725,6 +721,16 @@ Calls that left the order unchanged: replan 2; replan 3 (MJ1's missed build came
 m6 = `[p0] join catalog_sales`, 13,302 rows. p0 = `date_dim#1 (f)`, 29 rows.
 
 ### q23 MJ3
+
+| | plan | DPhyp before the run |
+|---|---|---|
+| join tree | `[agg(MJ4)] cross join ([customer#3] join store_sales#3)` | `[[agg(MJ4)] cross join customer#3] join store_sales#3` |
+| changed by | | reordered by DPhyp |
+| C_out | 232,952,674 B | 142,124,594 B (plan's order 232,952,674 B) |
+
+Calls that left the order unchanged: replan 1; replan 2.
+
+### q23 MJ4
 
 | | plan | DPhyp before the run |
 |---|---|---|
@@ -740,8 +746,8 @@ p2 = `date_dim#3 (f)`, 1,461 rows.
 
 | | plan | DPhyp before the run | replan 2 |
 |---|---|---|---|
-| join tree | `[[[p3] join ([customer#4] join web_sales)] join agg(MJ6) (f)] join agg([agg(MJ7)] cross join MJ8) (f)` | `[[[[p3] join web_sales] join agg([agg(MJ7)] cross join MJ8) (f)] join customer#4] join agg(MJ6) (f)` | `[[[agg([agg(MJ7)] cross join MJ8) (f)] join m7] join customer#4] join agg(MJ6) (f)` |
-| changed by | | reordered by DPhyp | the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came out 6725 rows, est 1951.5 (q-error 3.45); flip: `agg([agg(MJ7)] cross join MJ8) (f)` now builds |
+| join tree | `[[[p3] join ([customer#4] join web_sales)] join agg(MJ6) (f)] join agg(MJ7) (f)` | `[[[[p3] join web_sales] join agg(MJ7) (f)] join customer#4] join agg(MJ6) (f)` | `[[[agg(MJ7) (f)] join m7] join customer#4] join agg(MJ6) (f)` |
+| changed by | | reordered by DPhyp | the build of MJ5's join on ws_bill_customer_sk = c_customer_sk came out 6725 rows, est 1951.5 (q-error 3.45); flip: `agg(MJ7) (f)` now builds |
 | C_out | 11,692,427 B | 1,709,758 B (plan's order 11,692,427 B) | 5,619,524 B (previous order 5,619,524 B) |
 
 Calls that left the order unchanged: replan 1; replan 3; replan 4.
@@ -749,6 +755,16 @@ Calls that left the order unchanged: replan 1; replan 3; replan 4.
 m7 = `[p3] join web_sales`, 6,725 rows. p3 = `date_dim#4 (f)`, 29 rows.
 
 ### q23 MJ7
+
+| | plan | DPhyp before the run |
+|---|---|---|
+| join tree | `[agg(MJ8)] cross join ([customer#6] join store_sales#6)` | `[[agg(MJ8)] cross join customer#6] join store_sales#6` |
+| changed by | | reordered by DPhyp |
+| C_out | 232,952,674 B | 142,124,594 B (plan's order 232,952,674 B) |
+
+Calls that left the order unchanged: replan 1; replan 2; replan 3; replan 4.
+
+### q23 MJ8
 
 | | plan | DPhyp before the run |
 |---|---|---|
@@ -848,7 +864,7 @@ skipped: refused by datafusion: SanityCheckPlan
 
 ## q28
 
-skipped: refused: unsupported: DISTINCT inside count(DISTINCT store_sales.ss_list_price) (#62)
+Nothing fired.
 
 ## q29
 

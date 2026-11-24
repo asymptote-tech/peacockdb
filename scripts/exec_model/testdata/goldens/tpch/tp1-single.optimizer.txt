@@ -585,6 +585,8 @@ MJ1: 3 relations, ordered before the run
 plan diff: this query's section of <mode>.plandiff.txt
 == cross-join
 nothing fired
+== distinct-functions
+nothing fired
 == filter-project
 nothing fired
 == hash-join
@@ -692,6 +694,10 @@ nothing fired
 nothing fired
 == nested-loop-left-join
 nothing fired
+== rollup-distinct
+nothing fired
+== rollup-grouping
+nothing fired
 == rollup-over-join
 estimates: a filtered relation's rows by its predicate's selectivity; a join's |L| x |R| / max(key NDVs, the key domain both share), x 0.2 per residual, a non-inner join by its type; C_out = each join's rows x the bytes per row of the columns read above it, summed, in bytes; a relation's B/row is its whole row
 names: (f) a filtered relation, agg(X) an aggregate over X, t#2 the plan's second read of table t, p0 a build a dynamic filter ran first and m0 one a replan kept, both read back from memory
@@ -741,4 +747,8 @@ nothing fired
 == shuffle-additive-avg
 nothing fired
 == shuffle-stddev
+nothing fired
+== rollup-stddev
+nothing fired
+== global-stddev
 nothing fired

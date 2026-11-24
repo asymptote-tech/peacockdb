@@ -292,6 +292,10 @@ MJ1 kept the plan's order: `orders anti join [customer (f)]`.
 
 Nothing fired.
 
+## distinct-functions
+
+Nothing fired.
+
 ## filter-project
 
 Nothing fired.
@@ -338,6 +342,14 @@ Nothing fired.
 
 Nothing fired.
 
+## rollup-distinct
+
+Nothing fired.
+
+## rollup-grouping
+
+Nothing fired.
+
 ## rollup-over-join
 
 MJ1 kept the plan's order: `[nation] join customer`.
@@ -369,6 +381,14 @@ Nothing fired.
 Nothing fired.
 
 ## shuffle-stddev
+
+Nothing fired.
+
+## rollup-stddev
+
+Nothing fired.
+
+## global-stddev
 
 Nothing fired.
 
