@@ -125,6 +125,8 @@ def _orders(orders: tuple[JoinOrder, ...], indent: str, planned: str) -> list[st
 
 def _edge(edge: EdgeReport) -> str:
     sides = f"{_set(edge.left)}-{_set(edge.right)}"
+    if edge.one_row:
+        return f"  edge {sides}: one row crossed in, keeps every row"
     if not edge.keys:
         return (f"  residual {sides} on {', '.join(_marked(c) for c in edge.residual)}: keeps {DEFAULT} of the "
                 "matches, not a DPhyp edge")

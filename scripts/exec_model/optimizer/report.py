@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from ..operators.join_types import JoinType
 from .cardinality import Certainty
+from .conflicts import joining
 from .dynamic_filters import Pruned
 from .fired import Fired
 
@@ -117,8 +118,8 @@ class EdgeColumn:
 @dataclass(frozen=True)
 class EdgeReport:
     """A predicate between the relations in `left` and those in `right`: its key pairs, the
-    columns of its residual, and its join's logical type, the side it keeps on the left. Only an
-    edge with keys is DPhyp's."""
+    columns of its residual, and its join's logical type, the side it keeps on the left. DPhyp's
+    are the edges with keys and the one-row edges; an edge with a residual and no keys is not."""
 
     left: int
     right: int
@@ -126,12 +127,17 @@ class EdgeReport:
     residual: tuple[EdgeColumn, ...] = ()
     kind: JoinType = JoinType.INNER
 
+    @property
+    def one_row(self) -> bool:
+        """Whether the edge only crosses a one-row relation in: no keys, no residual."""
+        return not self.keys and not self.residual
+
 
 @dataclass(frozen=True)
 class JoinOrder:
-    """One DPhyp call over the cluster `mj` names. `edges` are the cluster's predicates, those
-    with keys DPhyp's input, and `priced` every set it asked, in the order asked, within
-    `max_pairs`. `tree` is the order it returned, or the plan's own where it ran out of pairs
+    """One DPhyp call over the cluster `mj` names. `edges` are the cluster's predicates, those with
+    keys and the one-row ones DPhyp's input, and `priced` every set it asked, in the order asked,
+    within `max_pairs`. `tree` is the order it returned, or the plan's own where it ran out of pairs
     (`unsolved`); `planned` is the plan's own order and `oriented` the tree with each join's build
     first, `joins` its joins bottom up, and `plan_cost` the plan's order's C_out. `flipped` is the
     (build, probe) of each join whose build is the other side from the plan's join over the same
@@ -154,6 +160,11 @@ class JoinOrder:
 
     def join_type(self, build: int, probe: int) -> JoinType:
         return next((t for b, p, t in self.types if (b, p) == (build, probe)), JoinType.INNER)
+
+    def is_cross_join(self, build: int, probe: int) -> bool:
+        """Whether the join of `build` and `probe` is crossed by one-row edges alone."""
+        applied = joining(self.edges, build, probe)
+        return applied is not None and all(edge.one_row for edge in applied)
 
     @property
     def changed(self) -> bool:

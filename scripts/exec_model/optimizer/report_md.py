@@ -224,7 +224,9 @@ def _words(order: JoinOrder, tree: JoinTree) -> Words:
     if isinstance(tree, int):
         return Words(order.relations[tree].name)
     build, probe = tree
-    return joined(order.join_type(mask(build), mask(probe)), _words(order, build), _words(order, probe))
+    build_set, probe_set = mask(build), mask(probe)
+    join_type = None if order.is_cross_join(build_set, probe_set) else order.join_type(build_set, probe_set)
+    return joined(join_type, _words(order, build), _words(order, probe))
 
 
 def _natural(name: str):

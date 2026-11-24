@@ -18,7 +18,8 @@ from ...operators.join_types import JoinType
 from ...optimizer.cardinality import Certainty
 from ...optimizer.dynamic_filters import KeySummary, Pruned, PrunedBy
 from ...optimizer.report import (
-    BuildMiss, ChosenJoin, FilterPass, JoinOrder, Kept, OptimizerReport, Probed, RelationEstimate, Replan,
+    BuildMiss, ChosenJoin, EdgeColumn, EdgeReport, FilterPass, JoinOrder, Kept, OptimizerReport, Probed,
+    RelationEstimate, Replan,
 )
 from ...optimizer.report_md import cluster_heading, filters_heading, note, preamble, section
 from ...plans.goldens import anchor
@@ -116,6 +117,21 @@ def test_a_tree_writes_the_build_in_brackets_and_the_kind_sql_gives_it():
     page = section("left-join-reorder", OptimizerReport(FilterPass(), (left,), FilterPass(), (), (), "a\n", "b\n"))
     assert "| join tree | `[nation (f)] join ([customer] left join orders)` | " \
            "`([nation (f)] join customer) left join [orders]` |" in page, page
+
+
+def test_a_cross_join_in_a_tree_reads_cross_join():
+    # ms is one row: the plan joins customer to sales and crosses ms in last; DPhyp crosses it in first.
+    def page(between):
+        edges = (EdgeReport(0b001, 0b010), EdgeReport(0b001, 0b100), between)
+        crossed = order("MJ1", ("ms", "cust", "ss"), ((1, 2), 0), ((0, 1), 2), 1.0, 2.0)
+        crossed = JoinOrder(**{**crossed.__dict__, "edges": edges})
+        return section("q", OptimizerReport(FilterPass(), (crossed,), FilterPass(), (), (), "a\n", "b\n"))
+
+    keyed = page(EdgeReport(0b010, 0b100, ((EdgeColumn(1, "ck"), EdgeColumn(2, "ck")),)))
+    assert "| join tree | `[[cust] join ss] cross join ms` | `[[ms] cross join cust] join ss` |" in keyed, keyed
+    # A residual beside the one-row edges is no key and no one-row edge: that join is not a cross join.
+    residual = page(EdgeReport(0b010, 0b100, (), (EdgeColumn(1, "x"), EdgeColumn(2, "y"))))
+    assert "| join tree | `[[cust] join ss] cross join ms` | `[[ms] cross join cust] join ss` |" in residual, residual
 
 
 def test_a_memory_source_a_relation_reads_under_its_aggregate_is_in_the_legend():
