@@ -154,7 +154,7 @@ def test_a_replanned_one_row_side_is_a_wall_again():
     after = replaced(before, one_row, sourced("m0", one_row))
     [cluster] = clusters(after)
     assert [r.root.kind for r in cluster.relations] == ["GpuCrossJoin", "GpuLoadParquet"]
-    assert cluster.one_row == 0
+    assert cluster.one_row_relations == 0
     replanned, _ = ordered(after, stats, 1, known=kept_estimates({"m0": (one_row, frames)}, stats))
     want, _ = execute(build(before, tables))
     got, _ = execute(build(replanned, WithMaterialized(tables, {"m0": frames})))

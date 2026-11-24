@@ -5,9 +5,10 @@ each join in its tree builds, and `optimize`, which does both for every cluster 
 so a set has one estimate however DPhyp reached it; a non-inner join is estimated by its type, as
 `cardinality.typed` does a plan's. A residual edge keeps DuckDB's default share of the rows; a
 one-row relation, split off first, multiplies the rest's. A set's cost is its C_out term: its rows
-times the width of what the joins above and the cluster's output need of it, infinite where no key
-edges connect its relations but the one-row ones, so in a key-connected cluster DPhyp crosses no
-two larger relations. `design.md`, "DPhyp on C_out" and "Orientation after DPhyp".
+times the width of what the joins above and the cluster's output need of it, infinite where the
+key edges among its relations but the one-row ones do not connect them. No key reads a one-row
+relation, so the plan's order is finite and DPhyp crosses no two larger relations. `design.md`,
+"DPhyp on C_out" and "Orientation after DPhyp".
 """
 
 from __future__ import annotations
@@ -47,8 +48,9 @@ class SetEstimates:
 
     def cost(self, mask: int) -> float:
         """C_out in bytes of the join producing `mask`; infinite where its relations but the one-row
-        ones are more than one and no key edges connect them, a cross product of larger relations."""
-        larger = mask & ~self.cluster.one_row
+        ones are more than one and the key edges among them do not connect them, a cross product of
+        larger relations."""
+        larger = mask & ~self.cluster.one_row_relations
         if larger & (larger - 1) and not self._connected(larger, keyed=True):
             return math.inf
         estimate, at = self._estimate(mask)
@@ -138,7 +140,7 @@ class SetEstimates:
         # A one-row relation first: peeling a larger one could leave the rest a cross product that
         # the peeled one's keys, of one class, then join back as one key.
         held = [r for r in reversed(range(mask.bit_length())) if mask >> r & 1]
-        one_row = [r for r in held if self.cluster.one_row >> r & 1]
+        one_row = [r for r in held if self.cluster.one_row_relations >> r & 1]
         last = next(r for r in one_row + held if self._connected(mask & ~(1 << r)))
         rest, alone = mask & ~(1 << last), 1 << last
         (left, left_at), (right, right_at) = self._estimate(rest), self._estimate(alone)
@@ -197,7 +199,7 @@ def _orient(tree, sets, copies, lanes, planned):
     a, b = _orient(tree[0], sets, copies, lanes, planned), _orient(tree[1], sets, copies, lanes, planned)
     mask = a[1] | b[1]
     crossed = _one_row_builder(sets.cluster, a[1], b[1])
-    width = 1 if crossed is not None else planned.get(mask & ~sets.cluster.one_row, lanes)
+    width = 1 if crossed is not None else planned.get(mask & ~sets.cluster.one_row_relations, lanes)
     fed = {a[1]: _fed(a, b[1], width, sets), b[1]: _fed(b, a[1], width, sets)}
     builder = crossed if crossed is not None else _plan_builder(sets.cluster, a[1], b[1])
     if builder is None:
@@ -225,7 +227,7 @@ def _one_row_builder(cluster: MultiJoin, left: int, right: int) -> int | None:
     of one-row relations alone, `left` where both or neither are; else None."""
     if not all(edge.one_row for edge in joining(cluster.edges, left, right)):
         return None
-    return right if right & ~cluster.one_row == 0 and left & ~cluster.one_row else left
+    return right if right & ~cluster.one_row_relations == 0 and left & ~cluster.one_row_relations else left
 
 
 def _fed(side, other: int, lanes: int, sets: SetEstimates) -> float:

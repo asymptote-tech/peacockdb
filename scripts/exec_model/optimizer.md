@@ -120,13 +120,13 @@ It holds one hash join at least: one-row cross joins alone form none (tpcds q28,
   final aggregate with no group-by (a partial one emits a row per input batch) or a `fetch` of 0 or
   1 (a sort keeps it per lane and batch); `GpuEmpty`; a filter, project or `_WIRING` node over one;
   a cross join of two. Never a memory source: a replan keeping a one-row side walls its cross join.
-  Each one-row side is a relation (`MultiJoin.one_row`), the other read as a join side (`_crossed`).
+  One-row sides are relations (`MultiJoin.one_row_relations`); `_crossed` reads the other side.
 - **Walls.** Anything else roots a relation, a leaf of DPhyp's hypergraph: a mark join (its mark
   column is no relation's); any other `GpuFilter`, even between joins (an `IS NULL` there makes a
   left join an anti join); a computing project, nested-loop and other cross joins, scans,
   aggregates, unions, sorts, limits and memory sources; a one-row cross join in a cluster with a
-  non-inner join (its row would fill a kept side's unmatched NULLs) or whose one-row relation a
-  residual reads (`assemble`). `clusters` finds the clusters inside relations too, outermost first.
+  non-inner join (its row would fill a kept side's unmatched NULLs) or whose one-row relation a key
+  or a residual reads (`assemble`). `clusters` finds clusters inside relations too, outermost first.
 - **Columns** are `(relation, ordinal)` identities (`RelColumn`), never positions.
 - **Edges, inner joins only** (`_Assembly._edges`): one per relation pair a join's keys connect,
   one hyperedge per residual, over the relations it reads on each side, and a one-row edge (no
@@ -161,8 +161,9 @@ connected set, never for one relation (which costs 0), and a tree costs the sum 
   share). A string the plan computed has no known length and counts its offset alone.
 - **Units** are bytes, with no calibration: every term is a join's output, so per-kind weights
   would cancel between two orders.
-- **No cross product of larger relations**: `cost(S)` is infinite where S's relations other than
-  the one-row ones are more than one and no key edges connect them (`_connected(…, keyed=True)`).
+- **No cross product of larger relations**: `cost(S)` is infinite where S's key edges do not connect
+  its relations but the one-row ones (`_connected(…, keyed=True)`). No key reads a one-row relation
+  (`assemble`), so the plan's own order is finite: DPhyp picks no infinite one.
 
 ### Where rows come from
 
@@ -243,8 +244,7 @@ oriented again. There is no greedy fallback. Any other refusal raises.
   tested (`MultiJoin.nullable_keys`) goes through that filter again, on the sides
   `NULL_KEY_DROPPABLE` names for the join type. Past one lane the output is hashed per
   `_HASHED_BY`, each only where those keys are output: `Inner` on its build keys, else its probe
-  keys; `Left`, `LeftSemi`, `LeftAnti` on the build keys; `Right`, `RightSemi`, `RightAnti` on the
-  probe keys; `Full` on neither.
+  keys; `Left…` on the build keys, `Right…` on the probe keys; `Full` on neither.
 - **The root** keeps the plan root's schema, names included, and one lane where the plan root had
   one (a `GpuMergePartitions`; tpcds q23 at tp4). Else, where a node above reads its hash before the
   next exchange (`_EXCHANGES`) — a hash join, a final aggregate, an enclosing cluster's join whose

@@ -622,11 +622,10 @@ Fix, after #295 and an estimate of a scalar aggregate's value from statistics: a
 `GpuNestedLoopJoin` with a one-row side as #320 admits a cross join, its predicate a residual on
 the one-row relation's edge, through conflict detection where the cluster holds a non-inner
 join, and rebuild it as a `GpuNestedLoopJoin`. In `scripts/exec_model/optimizer/` the fix also:
-- lifts the wall where a residual reads a one-row relation (`multijoin.assemble`): the nested-loop
-  join carries that residual, which a `GpuCrossJoin` cannot;
-- prices and rebuilds a key or residual edge that reads a relation in `cluster.one_row`; the cost,
-  the estimate and orientation now take such a relation as joined by one-row edges alone (no
-  corpus plan has one);
+- lifts the wall where a key or a residual reads a one-row relation (`multijoin.assemble`), and
+  prices and rebuilds such an edge: the nested-loop join carries a residual, which a `GpuCrossJoin`
+  cannot, and the cost, the estimate and orientation take the relation as joined by one-row edges
+  alone (no corpus plan has one);
 - makes one rule of "only one-row edges cross this join", now written three times:
   `join_order._one_row_builder`, `disassembly._one_row_edges_alone`, `JoinOrder.is_cross_join`;
 - settles `conflicts.joining`, which the first and third read edges by, against

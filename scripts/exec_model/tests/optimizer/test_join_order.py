@@ -204,7 +204,7 @@ def test_the_one_row_side_builds():
     # Where it costs more: t1's 16 bytes build before t2's 8 as DPhyp's left, the one-row pair's 24
     # over the 16 of ta ⋈ tb, and t2 over ta, as wide.
     cluster, sets = one_row_sets(TWO_ONE_ROW)
-    assert cluster.one_row == 0b0011
+    assert cluster.one_row_relations == 0b0011
     assert orient((0, 1), sets) == (0, 1) and orient((1, 0), sets) == (1, 0)
     assert orient(((2, 3), (0, 1)), sets) == ((0, 1), (2, 3))
     assert orient((2, 1), sets) == (1, 2)
@@ -240,7 +240,7 @@ def test_a_one_row_relation_multiplies_every_key_connected_set():
     # Split off last, c would leave r crossing xa with xb, 10,000 rows c's two keys of one class
     # would join back as one.
     cluster, sets = one_row_sets(ONE_ROW_CHAIN)
-    assert cluster.one_row == 0b0001
+    assert cluster.one_row_relations == 0b0001
     for joined in (0b0010, 0b0100, 0b1000, 0b0110, 0b1010, 0b1100, 0b1110):
         assert sets.rows(joined | 1) == sets.rows(joined) * sets.rows(1), bin(joined)
 
@@ -259,12 +259,12 @@ def test_one_row_edges_never_cross_two_larger_relations():
     # r0, da r1, fact r2, dc r3. Crossing da with dc makes 4 rows where da ⋈ fact makes 20, so
     # without the rule DPhyp would join them across r's edges alone.
     cluster, sets = one_row_sets(ONE_ROW_STAR)
-    assert cluster.one_row == 0b0001
+    assert cluster.one_row_relations == 0b0001
     assert sets.cost(0b1011) == math.inf
     assert math.isfinite(sets.cost(0b0011)) and math.isfinite(sets.cost(0b0111))
     [order] = orders(ONE_ROW_STAR)
     for join in order.joins:
-        if join.build & ~cluster.one_row and join.probe & ~cluster.one_row:
+        if join.build & ~cluster.one_row_relations and join.probe & ~cluster.one_row_relations:
             assert any(e.keys for e in joining(cluster.edges, join.build, join.probe)), join
     assert all(math.isfinite(join.cost) for join in order.joins) and math.isfinite(order.plan_cost)
     # a residual between da and dc is no key

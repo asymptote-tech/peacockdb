@@ -365,7 +365,7 @@ def test_a_one_row_cross_join_joins_the_cluster_below_it():
     [cluster] = clusters(root)
     assert cluster.root is root and cluster.relations[0].root is root.children[0]
     assert [r.root.fields.get("table") for r in cluster.relations[1:]] == ["cust", "ss"]
-    assert cluster.one_row == 0b001
+    assert cluster.one_row_relations == 0b001
     assert cluster.edges == (Edge(0b010, 0b100, ((RelColumn(1, 0), RelColumn(2, 0)),)),
                              Edge(0b001, 0b010), Edge(0b001, 0b100))
     assert cluster.output == (RelColumn(0, 0), RelColumn(2, 1), RelColumn(1, 0))
@@ -379,7 +379,7 @@ def test_a_one_row_cross_join_below_a_hash_join_is_in_its_cluster():
 {scan("t2", "b", indent=4)}"""
     [cluster] = clusters(plan(text))
     assert len(cluster.relations) == 3 and cluster.relations[1].root.kind == "GpuAggregateBatches"
-    assert cluster.one_row == 0b010
+    assert cluster.one_row_relations == 0b010
     assert cluster.edges == (Edge(0b001, 0b100, ((RelColumn(0, 0), RelColumn(2, 0)),)),
                              Edge(0b010, 0b001), Edge(0b010, 0b100))
 
@@ -408,7 +408,7 @@ def test_two_one_row_relations_crossed_in_one_after_the_other_share_one_edge():
 {_final_aggregate(indent=4, table="t2")}
 {_indented(AB, 4)}"""
     [cluster] = clusters(plan(text))
-    assert len(cluster.relations) == 4 and cluster.one_row == 0b0011
+    assert len(cluster.relations) == 4 and cluster.one_row_relations == 0b0011
     assert cluster.edges[1:] == (Edge(0b0001, 0b0010), Edge(0b0001, 0b0100), Edge(0b0001, 0b1000),
                                  Edge(0b0010, 0b0100), Edge(0b0010, 0b1000))
 
@@ -421,7 +421,7 @@ def test_a_cross_join_of_two_one_row_relations_is_one_relation():
 {_indented(AB, 2)}"""
     [cluster] = clusters(plan(text))
     assert [r.root.kind for r in cluster.relations] == ["GpuCrossJoin", "GpuLoadParquet", "GpuLoadParquet"]
-    assert cluster.one_row == 0b001
+    assert cluster.one_row_relations == 0b001
     assert cluster.edges == (Edge(0b010, 0b100, ((RelColumn(1, 0), RelColumn(2, 0)),)),
                              Edge(0b001, 0b010), Edge(0b001, 0b100))
 
@@ -446,7 +446,7 @@ def test_a_one_row_cross_join_beside_a_non_inner_join_stays_a_wall():
 {scan("ss", "sc", "q", indent=6)}""")
     join = semi.children[1].children[0]
     [cluster] = clusters(semi)
-    assert cluster.root is join and cluster.joins == (join,) and cluster.one_row == 0
+    assert cluster.root is join and cluster.joins == (join,) and cluster.one_row_relations == 0
     assert [r.root.fields["table"] for r in cluster.relations] == ["cust", "ss"]
     # under the semi join the cross join roots a relation
     above = plan(f"""GpuHashJoin: join_type=LeftSemi, on=[(a@0, b@1)], {L}, schema=[a:Int64]
@@ -456,7 +456,7 @@ def test_a_one_row_cross_join_beside_a_non_inner_join_stays_a_wall():
 {scan("t2", "b", indent=4)}""")
     [cluster] = clusters(above)
     assert [r.root.kind for r in cluster.relations] == ["GpuLoadParquet", "GpuCrossJoin"]
-    assert cluster.joins == (above,) and cluster.one_row == 0
+    assert cluster.joins == (above,) and cluster.one_row_relations == 0
     assert cluster.edges[0].keys == ((RelColumn(0, 0), RelColumn(1, 1)),)
 
 
@@ -472,11 +472,28 @@ FILTERED = f"""GpuHashJoin: join_type=Inner, on=[(c@0, sc@1)], filter=c@build:0 
 def test_a_residual_reading_a_one_row_relation_keeps_the_wall():
     root = plan(FILTERED)
     [cluster] = clusters(root)
-    assert cluster.joins == (root,) and cluster.one_row == 0
+    assert cluster.joins == (root,) and cluster.one_row_relations == 0
     assert [r.root.kind for r in cluster.relations] == ["GpuLoadParquet", "GpuCrossJoin"]
     stats = dataset(tables={"ms": pa.table({"a": [1, 2, 3]}), "cust": pa.table({"c": [1, 2, 3]}),
                             "ss": pa.table({"sc": [1, 2, 2, 5], "q": [10, 20, 30, 40]})})
     assert plan_text(ordered(root, stats, 1)[0]) == plan_text(root)
+
+
+def test_a_key_reading_a_one_row_relation_keeps_the_wall():
+    # admitted, t2 would join t1 only through the one-row count, and every order of the three
+    # would cross the two
+    root = plan(f"""GpuHashJoin: join_type=Inner, on=[(n@1, b@0)], {L}, schema=[a:Int64, n:Int64, b:Int64]
+  GpuCoalesceAllBatches: lanes=1, batches=single, schema=[a:Int64, n:Int64]
+    GpuCrossJoin: {L}, schema=[a:Int64, n:Int64]
+{scan("t1", "a", indent=6)}
+{_final_aggregate(indent=6)}
+{scan("t2", "b", indent=2)}""")
+    stats = dataset(tables={"t1": pa.table({"a": [1, 2, 3]}), "t": pa.table({"a": [1, 2]}),
+                            "t2": pa.table({"b": list(range(20))})})
+    assert plan_text(ordered(root, stats, 1)[0]) == plan_text(root)
+    [cluster] = clusters(root)
+    assert cluster.joins == (root,) and cluster.one_row_relations == 0
+    assert [r.root.kind for r in cluster.relations] == ["GpuCrossJoin", "GpuLoadParquet"]
 
 
 def test_only_the_cross_join_whose_one_row_relation_a_residual_reads_is_a_wall():
@@ -484,7 +501,7 @@ def test_only_the_cross_join_whose_one_row_relation_a_residual_reads_is_a_wall()
 {_final_aggregate(indent=2)}
 {_indented(FILTERED, 2)}""")
     [cluster] = clusters(root)
-    assert cluster.joins == (root, root.children[1]) and cluster.one_row == 0b001
+    assert cluster.joins == (root, root.children[1]) and cluster.one_row_relations == 0b001
     assert [r.root.kind for r in cluster.relations] == ["GpuAggregateBatches", "GpuLoadParquet", "GpuCrossJoin"]
 
 

@@ -22,7 +22,7 @@ from ...operators.join_types import NULL_KEY_DROPPABLE, JoinType
 from ...optimizer.disassembly import baseline, disassemble, planned_lanes, reassembled
 from ...plans.engine_nodes import build
 from ...plans.engine_plan import plan_text
-from ...optimizer.multijoin import assemble, clusters, named, replaced
+from ...optimizer.multijoin import Edge, MultiJoin, RelColumn, Relation, assemble, clusters, named, replaced
 
 FRAMES = {
     "t1": pd.DataFrame({"a": [1, 2, 3, 4]}),
@@ -313,15 +313,20 @@ def test_a_join_crossing_in_a_one_row_relation_keeps_the_lanes_the_plan_had():
 
 
 def test_a_cross_join_of_two_larger_sides_is_refused():
-    # t1 keys the one-row relation's count, so only that relation's edge joins t1 to t2
+    # t1 keys the one-row relation's count, so only that relation's edge joins t1 to t2. Assembly
+    # walls such a cross join; built by hand, the cluster admits it.
     keyed = plan(f"""GpuHashJoin: join_type=Inner, on=[(a@0, n@0)], {L}, schema=[a:Int64, n:Int64, b:Int64]
   GpuCoalesceAllBatches: lanes=1, batches=single, schema=[a:Int64]
 {scan("t1", "a", indent=4)}
   GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, b:Int64]
 {_final_aggregate(indent=4)}
 {scan("t2", "b", indent=4)}""")
-    [cluster] = clusters(keyed)
-    assert cluster.one_row == 0b010
+    cross = keyed.children[1]
+    relations = (keyed.children[0].children[0], *cross.children)
+    edges = (Edge(0b001, 0b010, ((RelColumn(0, 0), RelColumn(1, 0)),)), Edge(0b010, 0b001), Edge(0b010, 0b100))
+    cluster = MultiJoin(keyed, tuple(Relation(r) for r in relations), edges,
+                        (RelColumn(0, 0), RelColumn(1, 0), RelColumn(2, 0)), (keyed, cross), None,
+                        one_row_relations=0b010)
     with raises(ValueError, match="more than one row"):
         disassemble(cluster, ((0, 1), 2), lanes=1)
 
@@ -342,7 +347,7 @@ def test_planned_lanes_leave_one_row_relations_out():
     assert planned_lanes(cluster) == {0b110: 4}
     # crossed in below the hash join: the join keeps its four lanes under the mask without it
     [cluster] = clusters(plan(CROSSED_BELOW))
-    assert cluster.one_row == 0b010
+    assert cluster.one_row_relations == 0b010
     assert planned_lanes(cluster) == {0b101: 4}
 
 

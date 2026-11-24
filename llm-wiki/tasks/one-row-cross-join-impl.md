@@ -94,11 +94,11 @@ modes.
 
 **Interfaces:**
 - Consumes: `at_most_one_row`, `Edge.one_row` (Task 1).
-- Produces: `MultiJoin.one_row: int = 0`, the mask of its one-row relations; one `Edge(1 << r,
-  1 << o)` per one-row relation `r` and every other relation `o` (`o > r` where both are one-row,
-  so a pair has one edge); `GpuCrossJoin`s of the cluster in `MultiJoin.joins`, carrying
-  `mj` from `named`; `disassembly.planned_lanes(cluster) -> dict[int, int]` keyed by the hash
-  joins' masks with `cluster.one_row` removed, a cross join recording none.
+- Produces: `MultiJoin.one_row_relations: int = 0`, the mask of its one-row relations; one
+  `Edge(1 << r, 1 << o)` per one-row relation `r` and every other relation `o` (`o > r` where
+  both are one-row, so a pair has one edge); `GpuCrossJoin`s of the cluster in `MultiJoin.joins`,
+  carrying `mj` from `named`; `disassembly.planned_lanes(cluster) -> dict[int, int]` keyed by the
+  hash joins' masks with `cluster.one_row_relations` removed, a cross join recording none.
 
 - [ ] **Step 1: Write the failing tests.** A fixture `Q23` in `test_multijoin.py`: a
   `GpuCrossJoin` whose build is `GpuProject(GpuAggregate(group_by=[], final=..., lanes=1))` over a
@@ -106,15 +106,18 @@ modes.
   `GpuCoalesceAllBatches(scan cust(c))` and `scan ss(sc, q)`, as tpcds q23's `best_ss_customer`
   has it at tp1.
   - `test_a_one_row_cross_join_joins_the_cluster_below_it`: `clusters(plan(Q23))` is one cluster
-    rooted at the cross join; relations `[ms-root, cust, ss]` in collection order; `one_row ==
-    0b001`; edges are the key edge `cust–ss` and `Edge(0b001, 0b010)`, `Edge(0b001, 0b100)`;
-    `output` lifts the cross join's columns through it (`ms` first, then the probe's).
+    rooted at the cross join; relations `[ms-root, cust, ss]` in collection order;
+    `one_row_relations == 0b001`; edges are the key edge `cust–ss` and `Edge(0b001, 0b010)`,
+    `Edge(0b001, 0b100)`; `output` lifts the cross join's columns through it (`ms` first, then
+    the probe's).
   - `test_a_one_row_cross_join_below_a_hash_join_is_in_its_cluster`: `HashJoin(scan a, Cross(agg,
-    scan b))` on `a = b` → one cluster, three relations, `one_row` the aggregate's bit.
+    scan b))` on `a = b` → one cluster, three relations, `one_row_relations` the
+    aggregate's bit.
   - `test_cross_joins_of_one_row_relations_alone_form_no_cluster`: `Cross(agg, Cross(agg, agg))`
     over scans (q88's shape) → `clusters` returns `[]`.
   - `test_a_one_row_cross_join_beside_a_non_inner_join_stays_a_wall`: `Q23` with the hash join
-    `LeftSemi` → the cluster is the semi join alone, rooted below the cross join, `one_row == 0`.
+    `LeftSemi` → the cluster is the semi join alone, rooted below the cross join,
+    `one_row_relations == 0`.
   - `test_named_gives_the_cross_join_its_cluster_id`: `named(plan(Q23))` → the cross join and the
     hash join both carry `mj="MJ1"`.
   - In `test_disassembly.py`, `test_the_baseline_of_a_one_row_cluster_is_the_plan_order`:
@@ -127,8 +130,8 @@ modes.
 - [ ] **Step 3: Implement.**
   - `is_reorderable` admits a `GpuCrossJoin` with a child for which `at_most_one_row` holds.
   - `_Assembly._collect` on such a cross join: each child for which `at_most_one_row` holds
-    becomes a relation whole and joins `one_row`; the other child is collected as a hash join's
-    side is, with no dropped keys. No `Operator` is added for it.
+    becomes a relation whole and joins `one_row_relations`; the other child is collected as a
+    hash join's side is, with no dropped keys. No `Operator` is added for it.
   - `_Assembly.multijoin` adds the one-row edges.
   - `lift` reads a `GpuCrossJoin` as an inner join's output, through its `projection` if any.
   - `assemble` returns a cluster only where `joins` holds a `GpuHashJoin`. Where the cluster holds
@@ -147,7 +150,7 @@ modes.
 - Test: `scripts/exec_model/tests/optimizer/test_join_order.py`
 
 **Interfaces:**
-- Consumes: `MultiJoin.one_row`, `Edge.one_row`, `planned_lanes` (Task 2).
+- Consumes: `MultiJoin.one_row_relations`, `Edge.one_row`, `planned_lanes` (Task 2).
 - Produces: `SetEstimates.rows(mask)` with a set joined by one-row edges alone estimated as the
   product of its two parts' rows; `ordered` passing DPhyp every edge with keys or `one_row`.
 
@@ -161,18 +164,18 @@ modes.
   - `test_the_one_row_side_builds`: `orient` puts `0` first in its join; for a tree joining two
     one-row relations, DPhyp's left side first.
   - `test_lanes_of_a_join_ignore_its_one_row_relations`: at tp4's layout `orient`'s join over
-    `0b111` runs on 4 lanes (`planned.get(mask & ~one_row)`).
+    `0b111` runs on 4 lanes (`planned.get(mask & ~one_row_relations)`).
   - `test_one_row_edges_never_cross_two_larger_relations`: a star `a–b`, `c–b` on keys and a
     one-row `r`, `c` and `a` small → `cost` of `{r, a, c}` is `inf`, and `ordered`'s tree joins
     no two sets that are both above one row across one-row edges alone.
 - [ ] **Step 2: Run** `py scripts/exec_model/tests/optimizer/test_join_order.py one_row` — FAIL.
 - [ ] **Step 3: Implement.** `SetEstimates._join` and `_applied` estimate one-row edges alone as
   `equi_join` with no pairs: the product of rows. `SetEstimates.cost(mask)` is `inf` where the
-  relations of `mask` outside `cluster.one_row` are more than one and no key edges inside `mask`
-  connect them. `ordered`: edges
-  `if edge.keys or edge.one_row`. `_orient`: a join with only one-row edges across builds the
-  side inside `cluster.one_row`, else DPhyp's left, and runs on one lane, its probe merged, as
-  Task 4 rebuilds it. Every other `planned.get(mask, …)` reads `mask & ~cluster.one_row`.
+  relations of `mask` outside `cluster.one_row_relations` are more than one and no key edges
+  inside `mask` connect them. `ordered`: edges `if edge.keys or edge.one_row`. `_orient`: a join
+  with only one-row edges across builds the side inside `cluster.one_row_relations`, else DPhyp's
+  left, and runs on one lane, its probe merged, as Task 4 rebuilds it. Every other
+  `planned.get(mask, …)` reads `mask & ~cluster.one_row_relations`.
   `_join` takes a one-row relation off first where the rest stays connected, so `rows(S ∪ {r})
   == rows(S) × rows(r)` for every key-connected `S`.
 - [ ] **Step 4: Run** `test_join_order.py`, `test_dphyp.py`, `test_optimize.py` — PASS.
@@ -207,7 +210,10 @@ modes.
     relation and runs to the same answer as before the replan.
   - In `test_multijoin.py`, `test_a_residual_reading_a_one_row_relation_keeps_the_wall`: `Q23`
     with `filter=c@build:0 > m@probe:0` on the hash join → the cluster is the hash join alone,
-    `one_row == 0`, and `ordered` returns the plan unchanged (`assemble` walls it, Step 3).
+    `one_row_relations == 0`, and `ordered` returns the plan unchanged (`assemble` walls it, Step
+    3). `test_a_key_reading_a_one_row_relation_keeps_the_wall`: `HashJoin(Cross(scan t1, agg),
+    scan t2)` on `n = b` → the cluster is the hash join alone, and `ordered` returns the plan
+    unchanged, where admitted every order would cross `t1` and `t2`.
 - [ ] **Step 2: Run** both files — FAIL.
 - [ ] **Step 3: Implement.** In `part`: where `_predicates` gives no keys and every edge across is
   one-row, build `_cross(build, probe, need)` instead of raising: the build side merged onto one

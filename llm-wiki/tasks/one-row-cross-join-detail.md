@@ -106,6 +106,23 @@ groups, `web_sales` 6 → 1, and `store_sales#1`, `#2`, `#4` and `#5` 24 → 16 
 becomes `[customer#2] join ([p2] join store_sales#2)` both before and after the change. Every
 filter applies after the move.
 
+## A key on a one-row relation
+
+`assemble` walls a cross join whose one-row relation a key reads, as it does one a residual reads.
+Admitted, a relation keyed to the rest only through the one-row one left every full set at an
+infinite cost. The crate keeps the first plan it meets on a tie, and that plan can join two larger
+sides across one-row edges alone; `_cross` then raised. `HashJoin(Cross(t1, agg), t2)` on
+`agg.n = t2.b` is the case, `test_a_key_reading_a_one_row_relation_keeps_the_wall`. With the wall,
+each hash join's keys join larger relations on both sides, so the plan's own order is finite.
+
+- The wall is coarse: any key on the one-row relation walls its cross join, even where the larger
+  relations are key-connected without it. No corpus cluster with a one-row edge has a key or a
+  residual edge on its one-row relation, so no golden moved.
+- `_cross`'s raise stays. No assembled cluster reaches it now; a cluster built by hand does, and
+  `test_a_cross_join_of_two_larger_sides_is_refused` builds one.
+- `MultiJoin.one_row_relations` is the mask; `Edge.one_row` and `EdgeReport.one_row` say whether an
+  edge only joins a one-row relation on.
+
 ## Stale goldens on master
 
 The goldens on master before this change were written on 2026-10-20 (`f61c456b`, authored then) and

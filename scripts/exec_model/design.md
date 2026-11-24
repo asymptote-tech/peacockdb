@@ -180,15 +180,19 @@ is why each step has its shape.
   project that only reordered the hash join's columns for it folds into the hash join's
   projection, against 22.8 MB more of hash join output and build. q23's final ratio goes from 2.73
   to 2.37. Which relations count is the plan's shape, never an estimate (`at_most_one_row`;
-  `optimizer.md`, "Clusters"): a wrong "one row" is a wrong answer, a missed one only a missed
-  reorder. A partial aggregate with no group-by emits a row per input batch, even on one lane
-  (tpch q22 at tp1), and a sort keeps its `fetch` per lane and per batch; a memory source is never
-  one by shape, so a replan that keeps a one-row side walls its cross join again. In a cluster with
-  a non-inner join the cross join stays a wall: moved into a side that join pads, the padded rows
-  would read NULL for its columns, and an empty one-row relation would no longer empty the result.
-  So does one whose one-row relation a residual reads, since a `GpuCrossJoin` carries no residual;
-  the nested-loop join that would carry it is #321's. Cross joins of one-row relations alone (tpcds
-  q28, q61, q88, q90) hold no hash join and form no cluster.
+  `optimizer.md`, "Clusters"). The answer is right either way, as inner joins and cross products
+  reorder freely at any row count; the risk is cost. A relation wrongly taken for one row lets
+  DPhyp cross it into a larger relation, on one lane, which the infinite cost of a cross product
+  exists to prevent; a missed one is only a missed reorder. A partial aggregate with no group-by
+  emits a row per input batch, even on one lane (tpch q22 at tp1), and a sort keeps its `fetch` per
+  lane and per batch; a memory source is never one by shape, so a replan that keeps a one-row side
+  walls its cross join again. In a cluster with a non-inner join the cross join stays a wall: moved
+  into a side that join pads, the padded rows would read NULL for its columns, and an empty one-row
+  relation would no longer empty the result. So does one whose one-row relation a key or a residual
+  reads. A `GpuCrossJoin` carries no residual, and a relation keyed to the rest only through the
+  one-row one would leave every order crossing two larger relations; the nested-loop join that would
+  carry a residual is #321's. Cross joins of one-row relations alone (tpcds q28, q61, q88, q90) hold
+  no hash join and form no cluster.
 - **Cluster ids.** Each cluster is `MJ<n>`, numbered per query in plan order, outermost first
   (`multijoin.named`, which the pipeline does right after `names.aliased` numbers the tables read
   twice, and `join_order.ordered` does for a plan given unnamed), and every join it holds carries
@@ -206,18 +210,20 @@ is why each step has its shape.
   wired as the translator wires one, with no key to co-locate its sides on
   (`planner/translator/nodes.rs`): both sides merged onto one lane, the build one batch, the output
   on one lane and hashed on nothing, which a hash join above shuffles onto its keys. A cross join of
-  two sides of more than one row raises: the cost never chooses one. In q23 at tp4 the cross join's
-  output is the hash join's build, shuffled onto its four lanes. A new root joining on other keys is
-  shuffled back onto the plan root's hash where something reads that hash before the next exchange:
-  a hash join, a final aggregate, or an enclosing cluster whose join may take the relation as hashed
-  on its keys, since the relation declares that hash. Per-lane nodes — sorts, partial aggregates,
-  projects, a union — read none, and get no shuffle. A root the plan had on one lane comes back onto
-  one, a `GpuMergePartitions` above the new root: q23's at tp4 was its cross join. The limit: a
-  cross join rebuilt at the top of a cluster whose plan root has several lanes, its hash read by
-  nothing above, comes back on one lane; no corpus plan has it. `test_disassembly_corpus` holds
-  every cluster of every golden, rebuilt in its own order, to the layout the engine printed,
-  `test_ordered_corpus` every golden ordered to a plan that builds, no final aggregate's groups
-  split across lanes, and `test_engine_reassembled` to the answers.
+  two sides of more than one row raises. The cost never chooses one: `assemble` walls a cross join
+  whose one-row relation a key reads, so each hash join's keys join larger relations on both sides,
+  the plan's own order prices finite, and an infinite order never wins. In q23 at tp4 the cross
+  join's output is the hash join's build, shuffled onto its four lanes. A new root joining on other
+  keys is shuffled back onto the plan root's hash where something reads that hash before the next
+  exchange: a hash join, a final aggregate, or an enclosing cluster whose join may take the relation
+  as hashed on its keys, since the relation declares that hash. Per-lane nodes — sorts, partial
+  aggregates, projects, a union — read none, and get no shuffle. A root the plan had on one lane
+  comes back onto one, a `GpuMergePartitions` above the new root: q23's at tp4 was its cross join.
+  The limit: a cross join rebuilt at the top of a cluster whose plan root has several lanes, its
+  hash read by nothing above, comes back on one lane; no corpus plan has it.
+  `test_disassembly_corpus` holds every cluster of every golden, rebuilt in its own order, to the
+  layout the engine printed, `test_ordered_corpus` every golden ordered to a plan that builds, no
+  final aggregate's groups split across lanes, and `test_engine_reassembled` to the answers.
 
 ### DPhyp on C_out
 
@@ -253,15 +259,17 @@ has one estimate however DPhyp reached it.
   residual, selectivity 1, so DPhyp may cross it in anywhere. `rows(S ∪ {r}) = rows(S) × rows(r)`,
   and C_out, which counts r's columns on every join above it, crosses r in where the rows carrying
   them are fewest. The edge also connects any two relations through r, so a set holding r and
-  two larger relations no key joins is connected: such a set costs infinity, and DPhyp never makes
-  a cross product of two relations of more than one row. A set's estimate takes a one-row
-  relation off first (`SetEstimates._join`): a larger one taken off first can leave the rest a
-  product of two relations that its keys, of one class, join back as one key, and the product would
-  be estimated as a join. The edge type has room for a residual and carries none here; #321 is the
-  nested-loop join that would fill it. The limit: every set holding r is connected, so a cluster's
-  pairs grow with 2^n. A key chain of 11 relations has 220 pairs, and 20,701 with one one-row
-  relation, past `MAX_PAIRS` (10,000), where the cluster keeps the plan's order; a walled cross
-  join would have let DPhyp order the rest. q23's one-row clusters have 3 relations, 6 pairs.
+  two larger relations no key edge inside the set joins is connected: such a set costs infinity.
+  The plan's own order is finite, since no key reads r (`assemble` walls r's cross join
+  otherwise), so DPhyp never makes a cross product of two relations of more than one row. A set's
+  estimate takes a one-row relation off first (`SetEstimates._join`): a larger one taken off first
+  can leave the rest a product of two relations that its keys, of one class, join back as one key,
+  and the product would be estimated as a join. The edge type has room for a residual and carries
+  none here; #321 is the nested-loop join that would fill it. The limit: every set holding r is
+  connected, so a cluster's pairs grow with 2^n. A key chain of 11 relations has 220 pairs, and
+  20,701 with one one-row relation, past `MAX_PAIRS` (10,000), where the cluster keeps the plan's
+  order; a walled cross join would have let DPhyp order the rest. q23's one-row clusters have 3
+  relations, 6 pairs.
 - **The budget.** `MAX_PAIRS` is 10,000 connected pairs, DuckDB's. Past it the cluster keeps the
   plan's order and is only oriented again; the greedy fallback DuckDB has is not built.
 - **Why C_out in bytes.** A set's cost is its rows times the width of what the joins above and

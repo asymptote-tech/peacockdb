@@ -97,7 +97,7 @@ class _Disassembly:
         probe = self.part(probe_tree, _unique([c for c in need + read if 1 << c.relation & probe_mask]))
         build_keys = [build.columns.index(b) for b, _ in keys]
         probe_keys = [probe.columns.index(p) for _, p in keys]
-        lanes = self.planned.get((build_mask | probe_mask) & ~self.cluster.one_row, self.mode_lanes)
+        lanes = self.planned.get((build_mask | probe_mask) & ~self.cluster.one_row_relations, self.mode_lanes)
         droppable = (False, False) if null_equals_null else NULL_KEY_DROPPABLE[join_type]
         build = self._wired(build, build_keys, lanes, droppable[0])
         probe = self._wired(probe, probe_keys, lanes, droppable[1])
@@ -115,7 +115,7 @@ class _Disassembly:
         """A `GpuCrossJoin` wired as the translator wires one: no key to co-locate on, so both
         sides on one lane, the build one batch."""
         build_mask, probe_mask = mask(build_tree), mask(probe_tree)
-        if build_mask & ~self.cluster.one_row and probe_mask & ~self.cluster.one_row:
+        if build_mask & ~self.cluster.one_row_relations and probe_mask & ~self.cluster.one_row_relations:
             raise ValueError(f"only one-row edges join relations {build_mask:#b} and {probe_mask:#b}, "
                              "both of more than one row: a cross join builds a one-row side")
         build = self._wired(self.part(build_tree, [c for c in need if 1 << c.relation & build_mask]), [], 1)
@@ -276,7 +276,7 @@ def planned_lanes(cluster: MultiJoin) -> dict[int, int]:
             node = node.children[0]
         if isinstance(tree, tuple):
             if node.kind == "GpuHashJoin":
-                found[mask(tree) & ~cluster.one_row] = int(node.fields["lanes"])
+                found[mask(tree) & ~cluster.one_row_relations] = int(node.fields["lanes"])
             walk(tree[0], node.children[0])
             walk(tree[1], node.children[1])
 
