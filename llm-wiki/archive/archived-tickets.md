@@ -27,6 +27,40 @@ number in none of them, failing the report rather than emitting one that goes no
 
 ## Done
 
+<a id="t320"></a>
+### #320 (one-row cross join) a cross join with a one-row side walls the cluster, so tpcds q23 crosses its scalar onto the largest join
+A `GpuCrossJoin` roots a relation (`optimizer.md`, "Walls"), and DPhyp gets only edges with keys,
+so a relation crossed in above a cluster stays where the plan put it.
+
+tpcds q23: `best_ss_customer` reads `FROM store_sales, customer, max_store_sales` with
+`HAVING sum(...) > 0.5 * max(tpcds_cmax)`, so the one-row `max_store_sales` is crossed in below
+the group-by in both engines. The plan crosses it onto the 2.75M rows of `store_sales ⋈
+customer`: 88 MB of cross join per copy, two copies. DuckDB crosses it onto `customer`, 100k rows
+(`CROSS_PRODUCT` 2.4 MB), before the hash join with store_sales. At tp4 the translator also
+merges the 4-lane join output onto one lane for the cross join (`translator/nodes.rs`, both sides
+of a cross join on one lane). About 60 MB less per copy, q23's ratio from about 2.73 to 2.55.
+
+A relation of at most one row reorders freely among inner joins: crossed in anywhere, it adds
+its columns to every row, or empties the result wherever it is placed. A per-lane partial
+aggregate with no group-by is one row per lane, not one.
+
+Fix: a cross join whose side holds at most one row enters the cluster of inner joins beside it.
+That side becomes a relation with an edge of selectivity 1 to every other relation, priced
+`rows(S) × width(needed(S ∪ {r}))`, and a join whose only edge is that one is rebuilt as a
+`GpuCrossJoin`, the one-row side building.
+
+**Done.** A cross join with a side of at most one row, by the plan's shape
+(`multijoin.at_most_one_row`), joins the cluster of inner joins beside it; it stays a wall beside
+a non-inner join and where a residual reads its one-row relation. That relation has an edge to
+every other, `rows(S ∪ {r}) = rows(S) × rows(r)`, and a set whose larger relations no key edge
+connects costs infinity. A join only one-row edges cross is rebuilt as a `GpuCrossJoin` on one
+lane, its one-row side building. q23 crosses `max_store_sales` onto customer at every mode:
+129.6 MB less per copy at tp1, 128.8 MB at tp4, the final ratio from 2.73 to 2.37. The estimate
+left out a 66 MB project per copy that only reordered the hash join's columns for the cross join,
+now folded into the hash join's projection. q23 answers as DuckDB does at tp1 and tp4. The rules
+are `scripts/exec_model/optimizer.md`, "Clusters" to "Disassembly"; `test_multijoin.py`,
+`test_join_order.py` and `test_disassembly.py` hold them.
+
 <a id="t129"></a>
 ### #129 (26.02 CI leg image) The "26.02" CI leg builds against a 25.10a image
 Two unrelated smells in `pipeline.yml`, both found auditing the CI section of

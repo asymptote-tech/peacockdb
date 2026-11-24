@@ -79,7 +79,7 @@ rerun once at sf40, the page and `benchmarks.csv` with both clocks. H100 at most
 
 The prototype's optimizer before its port to Rust.
 
-### 1. [`one-row-cross-join.md`](one-row-cross-join.md) — closes [#320](../tickets/optimizer.md#t320) — state: new
+### 1. [`one-row-cross-join.md`](one-row-cross-join.md) — closes [#320](../archive/archived-tickets.md#t320) — state: new
 
 A cross join with a side of at most one row joins the inner-join cluster beside it: the one-row
 relation gets an edge of selectivity 1 to every other, DPhyp places it, and disassembly rebuilds a

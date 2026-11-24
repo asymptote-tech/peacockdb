@@ -163,9 +163,10 @@ Under `--out`, by default `testdata/goldens/` here, it writes per bench and mode
   pointing to the plan's diff in `.plandiff.txt`; `nothing fired` where no rule ran. A call lists
   each relation `rN` by name with its rows (exact, est or measured), bytes per row and the NDV of
   its key columns, each edge (an aggregate's output bracketed and marked, a non-inner join's kept
-  side, a residual's 0.2), the plan's order, DPhyp's and the oriented tree, each join's rows × the
-  width of what is read above it, and C_out in bytes beside the plan's order's, priced by the same
-  estimates. A filter block lists its candidates with their row-group spread, each scan by its
+  side, a residual's 0.2, a one-row relation's `one row crossed in, keeps every row`), the plan's
+  order, DPhyp's and the oriented tree, each join's rows × the width of what is read above it
+  (`join rA x rB`, a cross join's too), and C_out in bytes beside the plan's order's, priced by the
+  same estimates. A filter block lists its candidates with their row-group spread, each scan by its
   alias with its row groups before and after and the build and key that pruned it, each build run
   first with what it is, its rows, bytes and clusters, and the replans inside its probes (`probe pN
   replan K: …`, `probe pN replan refused, …`);
@@ -176,9 +177,9 @@ Under `--out`, by default `testdata/goldens/` here, it writes per bench and mode
   that changed order a table, `### <query> MJ<n>`, of the plan's order and each call that changed
   it — DPhyp before the run, a replan, a probe's replan of the part inside its build — by join tree,
   what changed it and C_out, the calls that kept the order named under it; a line per cluster that
-  kept its order; `### <query> dynamic filters`, both passes' scans by alias, the build and key
-  that pruned each, the keys and row groups. Trees are
-  in words, the build in brackets, `(f)` a filtered relation, joins as SQL names them:
+  kept its order; `### <query> dynamic filters`, both passes' scans by alias, the build and key that
+  pruned each, the keys and row groups. Trees are in words, the build in brackets, `(f)` a filtered
+  relation, joins as SQL names them, a cross join as `cross join`:
   `[[nation (f)] join customer] left join orders`. GitHub's anchors are `#<query>`,
   `#<query>-mj<n>` and `#<query>-dynamic-filters`;
 - `<bench>/<mode>.costs.txt` — the planned and the optimized run priced by the engine's cost
@@ -282,13 +283,13 @@ driver tests' mock executors.
 | `optimizer/estimator.py` | filter selectivity from NDV, min/max and nulls — equality as 1/NDV, a range as the share of evenly spaced values, bounds on one column merged, DuckDB's 20% where statistics cannot speak |
 | `optimizer/cardinality.py` | every node's row estimate over an engine plan — column lineage and NDV carried up, a join over containment and the key domain its sides share, semi / anti / outer by the share of rows that match; a memory source is `known`, `measured` from its frames — true rows, NDV clamped into what the lanes' counts bound; `certainty`, whether a node's rows are counted, measured or estimated |
 | `optimizer/cost.py` | C_out in bytes — each join's estimated rows times the width of what it passes on, a string by its mean length from the sidecar |
-| `optimizer/join_order.py` | what DPhyp is asked of a set of a cluster's relations — its rows by `cardinality`'s formulas in one canonical order, a non-inner join's by its type, and its C_out bytes — the orientation pass: each inner join's cheaper build, a non-inner join's the plan's, the build priced at 1 + `copies` × the probe's batches, which no longer prices a copy and stays because pricing the build as the session holds it measured worse (tpch q9; #294), a probe shuffled onto the join's lanes cut once per lane — and `optimize`: every cluster of a plan reordered by DPhyp on C_out, oriented and disassembled |
+| `optimizer/join_order.py` | what DPhyp is asked of a set of a cluster's relations — its rows by `cardinality`'s formulas in one canonical order, a non-inner join's by its type, a one-row relation's as a product, and its C_out bytes, infinite for a cross product of two larger relations — the orientation pass: each inner join's cheaper build, a cross join's one-row side, a non-inner join's the plan's, the build priced at 1 + `copies` × the probe's batches, which no longer prices a copy and stays because pricing the build as the session holds it measured worse (tpch q9; #294), a probe shuffled onto the join's lanes cut once per lane — and `optimize`: every cluster of a plan reordered by DPhyp on C_out, oriented and disassembled |
 | `optimizer/replan.py` | the adaptive loop: a build further than `threshold` times off its estimate stops the run, every build made so far becomes a memory source, the plan is optimized again with their sizes known and run by a new driver; a replan that would run started work again is refused. `WithMaterialized`, the tables such a plan reads its memory sources from |
 | `optimizer/call_cost.py` | the cost of one device call by kind, `fixed + slope × volume`, fitted from the benchmark's calibration record — what lanes and batch size would be chosen by where C_out sees no difference; no rule reads it yet. The record is fetched into `RECORD` (above) |
 | `optimizer/dphyp.py` | DPhyp from the `peacockdb-dphyp` crate through its C ABI (`ctypes`): the library by `PEACOCK_DPHYP_LIB`, refused without it; the tree as disassembly takes it |
-| `optimizer/multijoin.py` | a cluster of joins as DPhyp takes it in — inner ones, and non-inner ones without a residual, each then one edge on its TES — relations, edges between relation masks, every column an identity `(relation, ordinal)`; `clusters` finds them all, nested ones included, and `named` gives each its id, `MJ<n>`, on every join it holds |
+| `optimizer/multijoin.py` | a cluster of joins as DPhyp takes it in — inner and non-inner ones, each join then one edge on its TES where one is non-inner, and, where none is, the cross joins beside them whose side `at_most_one_row` holds for — relations, a one-row edge from each one-row relation to every other, edges between relation masks, every column an identity `(relation, ordinal)`; `clusters` finds them all, nested ones included, and `named` gives each its id, `MJ<n>`, on every join it holds |
 | `optimizer/conflicts.py` | conflict detection for non-inner joins: each join's TES by CD-A, from the `assoc`, `l-asscom` and `r-asscom` tables, and the edges a join of two sets applies |
-| `optimizer/disassembly.py` | a join order back into an engine plan — type, keys, residual and projection from the MultiJoin's identities, a non-inner join mirrored where its kept side probes, the root on the plan root's hash, wiring as the translator derives it; `baseline` is the order the plan already has, `join_type_of` a join's type from its two sides |
+| `optimizer/disassembly.py` | a join order back into an engine plan — type, keys, residual and projection from the MultiJoin's identities, a non-inner join mirrored where its kept side probes, a `GpuCrossJoin` where only one-row edges cross, the root on the plan root's hash or its one lane, wiring as the translator derives it; `baseline` is the order the plan already has, `join_type_of` a join's type from its two sides |
 | `optimizer/pipeline.py` | the optimizer end to end over one plan — clusters named, each table the plan reads more than once numbered, dynamic filters, DPhyp and orientation with the probes' builds known, dynamic filters again on that order, each probe plan run adaptively, then the adaptive run — and its report; each mode's lanes and batching, by name |
 | `optimizer/report.py` | what the optimizer did to a plan, as data: dynamic-filter candidates, pruned scans and the builds probed, each DPhyp call (the cluster's id, each relation's name, rows, width and key NDVs, the edges, the sets priced through the cost callback, its budget, the plan's order, the tree, the chosen joins and the plan order's C_out, the flips, the non-inner joins' types), each replan — its miss, the builds kept and what they are — and refusal, the plan text before and after; `fired`, how often each rule acted |
 | `optimizer/fired.py` | `Fired`, those counts, apart so that `cost_report.py` reads them back without pandas |
