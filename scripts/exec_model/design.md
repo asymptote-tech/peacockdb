@@ -266,10 +266,11 @@ has one estimate however DPhyp reached it.
   can leave the rest a product of two relations that its keys, of one class, join back as one key,
   and the product would be estimated as a join. The edge type has room for a residual and carries
   none here; #321 is the nested-loop join that would fill it. The limit: every set holding r is
-  connected, so a cluster's pairs grow with 2^n. A key chain of 11 relations has 220 pairs, and
-  20,701 with one one-row relation, past `MAX_PAIRS` (10,000), where the cluster keeps the plan's
-  order; a walled cross join would have let DPhyp order the rest. q23's one-row clusters have 3
-  relations, 6 pairs.
+  connected, so a cluster's pairs grow with 2^n where its keys are a chain, 3^n where they are a
+  star. A chain of 11 relations has 220 pairs and a star of 10 has 2,304; with one one-row relation
+  20,701 and 26,595, past `MAX_PAIRS` (10,000), where the cluster keeps the plan's order; a walled
+  cross join would have let DPhyp order the rest. One relation fewer fits in each. q23's one-row
+  clusters have 3 relations, 6 pairs.
 - **The budget.** `MAX_PAIRS` is 10,000 connected pairs, DuckDB's. Past it the cluster keeps the
   plan's order and is only oriented again; the greedy fallback DuckDB has is not built.
 - **Why C_out in bytes.** A set's cost is its rows times the width of what the joins above and
