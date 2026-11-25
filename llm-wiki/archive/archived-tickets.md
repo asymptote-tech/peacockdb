@@ -50,15 +50,15 @@ That side becomes a relation with an edge of selectivity 1 to every other relati
 `GpuCrossJoin`, the one-row side building.
 
 **Done.** A cross join with a side of at most one row, by the plan's shape
-(`multijoin.at_most_one_row`), joins the cluster of inner joins beside it; it stays a wall beside
-a non-inner join and where a residual reads its one-row relation. That relation has an edge to
-every other, `rows(S ∪ {r}) = rows(S) × rows(r)`, and a set whose larger relations no key edge
+(`multijoin.at_most_one_row`), joins the cluster of inner joins beside it; it stays a wall beside a
+non-inner join and where a key or a residual reads its one-row relation. That relation has an edge
+to every other, `rows(S ∪ {r}) = rows(S) × rows(r)`, and a set whose larger relations no key edge
 connects costs infinity. A join only one-row edges cross is rebuilt as a `GpuCrossJoin` on one
-lane, its one-row side building. q23 crosses `max_store_sales` onto customer at every mode:
-129.6 MB less per copy at tp1, 128.8 MB at tp4, the final ratio from 2.73 to 2.37. The estimate
-left out a 66 MB project per copy that only reordered the hash join's columns for the cross join,
-now folded into the hash join's projection. q23 answers as DuckDB does at tp1 and tp4. The rules
-are `scripts/exec_model/optimizer.md`, "Clusters" to "Disassembly"; `test_multijoin.py`,
+lane, its one-row side building. q23 crosses `max_store_sales` onto customer at every mode: 129.6
+MB less per copy at tp1, 128.8 MB at tp4, the final ratio from 2.73 to 2.37. The estimate left out
+a 66 MB project per copy that only reordered the hash join's columns for the cross join, now folded
+into the hash join's projection. q23 answers as DuckDB does at tp1 and tp4. The rules are
+`scripts/exec_model/optimizer.md`, "Clusters" to "Disassembly"; `test_multijoin.py`,
 `test_join_order.py` and `test_disassembly.py` hold them.
 
 <a id="t129"></a>
