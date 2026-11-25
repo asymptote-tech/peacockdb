@@ -1,12 +1,13 @@
 """MultiJoin: a cluster of reorderable joins, as DPhyp takes it in.
 
-A cluster is a maximal tree of the hash joins `is_reorderable` admits, through the wiring the
-translator derives from orientation and projects that only pick columns. Anything else roots a
-relation: a scan, an aggregate, a join it does not admit, a computing project, a filter — an
-`IS NULL` between joins is what makes a left join an anti join. Columns are identities, never
-positions. A cluster of inner joins has an edge per relation pair its keys join and one per
-residual; a cluster holding a non-inner join has one edge per join, its whole predicate, on its
-TES (`conflicts.py`). `design.md`, "Clusters" and "Non-inner joins: TES".
+A cluster is a maximal tree of the joins `is_reorderable` admits, at least one a hash join, through
+the wiring the translator derives from orientation and projects that only pick columns. Anything
+else roots a relation: a scan, an aggregate, a join it does not admit, a computing project, a
+filter — an `IS NULL` between joins is what makes a left join an anti join. Columns are identities,
+never positions. A cluster of inner joins has an edge per relation pair its keys join, one per
+residual, and one from each one-row relation to every other; a cluster holding a non-inner join
+walls its cross joins and has one edge per join, its whole predicate, on its TES (`conflicts.py`).
+`design.md`, "Clusters" and "Non-inner joins: TES".
 """
 
 from __future__ import annotations
@@ -60,6 +61,11 @@ class Edge:
     #: whether the plan's join built its `left` side, the side a non-inner join keeps
     builds_left: bool = True
 
+    @property
+    def one_row(self) -> bool:
+        """Whether the edge only joins a one-row relation on: no keys, no residual."""
+        return not self.keys and self.residual is None
+
 
 @dataclass(frozen=True)
 class MultiJoin:
@@ -79,11 +85,30 @@ class MultiJoin:
     #: the relation columns a null-key filter below a shuffle tested: the keys the plan shows can
     #: hold a NULL, which reassembly filters again where it shuffles them
     nullable_keys: frozenset[RelColumn] = frozenset()
+    #: the mask of the relations a cross join of the cluster crossed in, each at most one row
+    one_row_relations: int = 0
 
     @property
     def holds_non_inner(self) -> bool:
         """Whether a join of the cluster is not inner: then each edge is one join, on its TES."""
         return any(edge.kind is not JoinType.INNER for edge in self.edges)
+
+
+def at_most_one_row(node: EngineNode) -> bool:
+    """Whether `node` yields at most one row. On one lane and one batch: a final aggregate without
+    group-by (a partial one emits a row per input batch) or a `fetch` of 0 or 1 (a sort keeps its
+    `fetch` per lane and per batch). `GpuEmpty`. A cross join, when both its children do; a
+    filter, a project or wiring, when its one child does."""
+    single = node.fields.get("lanes") == "1" and node.fields.get("batches") == "single"
+    if node.kind.startswith("GpuAggregate"):
+        return single and node.fields["group_by"] == "[]" and "final" in node.fields
+    if node.fields.get("fetch") in ("0", "1"):
+        return single
+    if node.kind == "GpuEmpty":
+        return True
+    if node.kind in ("GpuFilter", "GpuProject", "GpuCrossJoin") or node.kind in _WIRING:
+        return all(at_most_one_row(child) for child in node.children)
+    return False
 
 
 def null_key_columns(node: EngineNode) -> list[int] | None:
@@ -149,9 +174,12 @@ def _read_through(node: EngineNode, keys: frozenset[int]) -> tuple[EngineNode, b
 
 
 def is_reorderable(node: EngineNode) -> bool:
-    """A hash join of any type but mark, residual or not, as the engine runs every one. A mark
-    join stays out: its mark column is no relation's. A residual on a non-inner join is read as
-    rejecting no NULL, which conflict detection takes conservatively."""
+    """A hash join of any type but mark, residual or not, as the engine runs every one, and a cross
+    join with a side of at most one row. A mark join stays out: its mark column is no relation's.
+    A residual on a non-inner join is read as rejecting no NULL, which conflict detection takes
+    conservatively."""
+    if node.kind == "GpuCrossJoin":
+        return any(at_most_one_row(child) for child in node.children)
     if node.kind != "GpuHashJoin":
         return False
     return engine_ir.join_type(node) in MIRRORED
@@ -163,8 +191,8 @@ def clusters(plan: EngineNode) -> list[MultiJoin]:
     found, stack = [], [(plan, "hashed_on" in plan.fields)]
     while stack:
         node, hash_read = stack.pop()
-        if is_reorderable(node):
-            cluster = assemble(node, hash_read)
+        cluster = assemble(node, hash_read) if is_reorderable(node) else None
+        if cluster is not None:
             found.append(cluster)
             stack.extend(reversed([(relation.root, _hash_joined_on(cluster, index))
                                    for index, relation in enumerate(cluster.relations)]))
@@ -220,14 +248,31 @@ def _labelled(node: EngineNode, ids: dict[int, str]) -> EngineNode:
                                mj=ids.get(id(node), node.mj))
 
 
-def assemble(root: EngineNode, hash_read_above: bool = False) -> MultiJoin:
-    """The cluster whose topmost join is `root`."""
-    return dataclasses.replace(_Assembly(root).multijoin(), hash_read_above=hash_read_above)
+def assemble(root: EngineNode, hash_read_above: bool = False) -> MultiJoin | None:
+    """The cluster whose topmost join is `root`; None where it holds no hash join. Beside a
+    non-inner join a cross join is a wall: in a kept or preserved side its one row would fill the
+    rows that matched nothing. So is one whose one-row relation a key or a residual reads: a cross
+    join carries no residual, and a relation keyed to the rest only through the one-row one would
+    leave every order crossing two larger relations."""
+    assembly = _Assembly(root)
+    if any(operator.kind is not JoinType.INNER for operator, _ in assembly.operators):
+        walls = frozenset(id(cross) for cross in assembly.crossing.values())
+    else:
+        walls = assembly.crossings_an_edge_reads()
+    if walls:
+        assembly = _Assembly(root, walls)
+    if not any(join.kind == "GpuHashJoin" for join in assembly.joins):
+        return None
+    return dataclasses.replace(assembly.multijoin(), hash_read_above=hash_read_above)
 
 
 class _Assembly:
-    def __init__(self, root: EngineNode):
+    def __init__(self, root: EngineNode, walls: frozenset[int] = frozenset()):
         self.root = root
+        #: the ids of the cross joins that wall the cluster whatever their sides
+        self.walls = walls
+        #: the cross join each one-row relation was crossed in by, by the relation's mask
+        self.crossing: dict[int, EngineNode] = {}
         self.relations: list[Relation] = []
         self.index: dict[int, int] = {}
         self.edges: list[Edge] = []
@@ -235,6 +280,7 @@ class _Assembly:
         #: each join, bottom up, as conflict detection reads it, and its edges' keys and residual
         self.operators: list[tuple[Operator, Edge]] = []
         self.nullable: set[RelColumn] = set()
+        self.one_row_relations = 0
         self._collect(root)
 
     def multijoin(self) -> MultiJoin:
@@ -246,8 +292,15 @@ class _Assembly:
             tes = eligibility([operator for operator, _ in self.operators])
             edges = tuple(dataclasses.replace(whole, left=left, right=right)
                           for (_, whole), (left, right) in zip(self.operators, tes))
-        return MultiJoin(self.root, tuple(self.relations), edges, output, tuple(self.joins), self.root.mj,
-                         nullable_keys=frozenset(self.nullable))
+        return MultiJoin(self.root, tuple(self.relations), edges + self._one_row_edges(), output,
+                         tuple(self.joins), self.root.mj, nullable_keys=frozenset(self.nullable),
+                         one_row_relations=self.one_row_relations)
+
+    def _one_row_edges(self) -> tuple[Edge, ...]:
+        """An edge from each one-row relation to every other relation, one per pair of them."""
+        one_row = [r for r in range(len(self.relations)) if self.one_row_relations >> r & 1]
+        return tuple(Edge(1 << r, 1 << o) for r in one_row for o in range(len(self.relations))
+                     if o != r and not (o in one_row and o < r))
 
     def _collect(self, node: EngineNode, dropped_keys: frozenset[int] = frozenset()) -> int:
         """The relations under `node`, as a mask, `node`'s joins and relations collected.
@@ -258,7 +311,9 @@ class _Assembly:
             found = self._collect(node.children[0])
             self.nullable.update(self.lift(node, k) for k in null_key_columns(node))
             return found
-        if is_reorderable(node):
+        if node.kind == "GpuCrossJoin" and self._admits(node):
+            return self._crossed(node)
+        if node.kind == "GpuHashJoin" and is_reorderable(node):
             self.joins.append(node)
             build, probe = [self._collect(child, side)
                             for child, side in zip(node.children, keys_dropping_nulls(node))]
@@ -266,6 +321,39 @@ class _Assembly:
             self.edges += edges
             self.operators.append(_operator(node, build, probe, edges))
             return build | probe
+        return self._relation(node)
+
+    def _admits(self, cross: EngineNode) -> bool:
+        """Whether the cluster takes in the cross join `cross` rather than walls at it."""
+        return id(cross) not in self.walls and is_reorderable(cross)
+
+    def _crossed(self, cross: EngineNode) -> int:
+        """The relations under a one-row cross join: each one-row side whole, the other collected as
+        a hash join's side is."""
+        self.joins.append(cross)
+        found = 0
+        for child in cross.children:
+            if at_most_one_row(child):
+                relation = self._relation(child)
+                self.one_row_relations |= relation
+                self.crossing[relation] = cross
+                found |= relation
+            else:
+                found |= self._collect(child)
+        return found
+
+    def crossings_an_edge_reads(self) -> frozenset[int]:
+        """The ids of the cross joins that crossed in a one-row relation a key or a residual reads."""
+        read = 0
+        for edge in self.edges:
+            for left, right in edge.keys:
+                read |= 1 << left.relation | 1 << right.relation
+            for column in sided_columns(edge.residual):
+                read |= 1 << column.column.relation
+        return frozenset(id(cross) for relation, cross in self.crossing.items() if relation & read)
+
+    def _relation(self, node: EngineNode) -> int:
+        """`node` as a relation of the cluster, its mask."""
         self.index[id(node)] = len(self.relations)
         self.relations.append(Relation(node))
         return 1 << self.index[id(node)]

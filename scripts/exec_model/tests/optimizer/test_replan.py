@@ -11,14 +11,20 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/optimize
     _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[4]))
     __package__ = "scripts.exec_model.tests.optimizer"
 
+import pyarrow as pa
+
 from ..corpus import ParquetTables, execute, execute_lanes
 from ..harness import main
 from .test_cardinality import dataset, scan
+from .test_multijoin import Q23, _indented
 from ...engine.adaptive import BuildDone
 from ...plans.engine_nodes import build
 from ...plans.engine_plan import parse_plans
 from ...engine.node import CpuBackendSelector
-from ...optimizer.multijoin import named
+from ...optimizer.disassembly import reassembled
+from ...optimizer.join_order import ordered
+from ...optimizer.multijoin import clusters, named, replaced
+from ...optimizer.names import sourced
 from ...optimizer.replan import WithMaterialized, kept_estimates, run_adaptive
 
 # Dates of year 5 with keys 500..599: 100 rows, which the estimator, taking the two columns as
@@ -134,6 +140,26 @@ GpuUnload
     second = execute_lanes(build(sold, WithMaterialized(tables, {"p0": first})))
     estimates = kept_estimates({"p0": (dates, first), "p1": (sold, second)}, stats)
     assert [estimates[name].rows for name in ("p0", "p1")] == [100, sum(len(frame) for frame in second)]
+
+
+def test_a_replanned_one_row_side_is_a_wall_again():
+    stats = dataset(tables={"ms": pa.table({"a": [1, 2, 3]}), "cust": pa.table({"c": [1, 2, 3]}),
+                            "ss": pa.table({"sc": [1, 2, 2, 5], "q": [10, 20, 30, 40]})})
+    tables = ParquetTables(stats.directory)
+    unload = parse_plans(f"== q\nGpuUnload\n{_indented(Q23, 2)}\n", "test")["q"]
+    before = reassembled(unload, 1, lambda cluster: ((0, 1), 2))
+    [cross] = [node for node in _nodes(before) if node.kind == "GpuCrossJoin"]
+    one_row = cross.children[0]
+    frames = execute_lanes(build(one_row, tables))
+    after = replaced(before, one_row, sourced("m0", one_row))
+    [cluster] = clusters(after)
+    assert [r.root.kind for r in cluster.relations] == ["GpuCrossJoin", "GpuLoadParquet"]
+    assert cluster.one_row_relations == 0
+    replanned, _ = ordered(after, stats, 1, known=kept_estimates({"m0": (one_row, frames)}, stats))
+    want, _ = execute(build(before, tables))
+    got, _ = execute(build(replanned, WithMaterialized(tables, {"m0": frames})))
+    assert sorted(map(tuple, got.to_numpy().tolist())) == sorted(map(tuple, want.to_numpy().tolist())) == [
+        (3, 10, 1), (3, 20, 2), (3, 30, 2)]
 
 
 def _nodes(node):

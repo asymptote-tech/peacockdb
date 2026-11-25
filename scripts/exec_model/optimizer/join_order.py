@@ -3,14 +3,18 @@ each join in its tree builds, and `optimize`, which does both for every cluster 
 
 `SetEstimates` answers DPhyp with `cardinality`'s formulas over one canonical split of each set,
 so a set has one estimate however DPhyp reached it; a non-inner join is estimated by its type, as
-`cardinality.typed` does a plan's. A residual edge keeps DuckDB's default share of the rows. A
-set's cost is its C_out term: its rows times the width of what the joins above and the cluster's
-output need of it. `design.md`, "DPhyp on C_out" and "Orientation after DPhyp".
+`cardinality.typed` does a plan's. A residual edge keeps DuckDB's default share of the rows; a
+one-row relation, split off first, multiplies the rest's. A set's cost is its C_out term: its rows
+times the width of what the joins above and the cluster's output need of it, infinite where the
+key edges among its relations but the one-row ones do not connect them. No key reads a one-row
+relation, so the plan's order is finite and DPhyp crosses no two larger relations. `design.md`,
+"DPhyp on C_out" and "Orientation after DPhyp".
 """
 
 from __future__ import annotations
 
 import json
+import math
 
 from . import dphyp
 from .cardinality import Estimate, Estimator, certainty, estimator, shaped, typed
@@ -43,7 +47,12 @@ class SetEstimates:
         return self._estimate(mask)[0].rows
 
     def cost(self, mask: int) -> float:
-        """C_out in bytes of the join producing `mask`."""
+        """C_out in bytes of the join producing `mask`; infinite where its relations but the one-row
+        ones are more than one and the key edges among them do not connect them, a cross product of
+        larger relations."""
+        larger = mask & ~self.cluster.one_row_relations
+        if larger & (larger - 1) and not self._connected(larger, keyed=True):
+            return math.inf
         estimate, at = self._estimate(mask)
         needed = self.needed(mask)
         schema = [self.cluster.relations[c.relation].root.schema[c.ordinal] for c in needed]
@@ -128,8 +137,11 @@ class SetEstimates:
         return estimate, {RelColumn(index, k): k for k in range(len(estimate.columns))}
 
     def _join(self, mask: int):
-        last = next(r for r in reversed(range(mask.bit_length()))
-                    if mask >> r & 1 and self._connected(mask & ~(1 << r)))
+        # A one-row relation first: peeling a larger one could leave the rest a cross product that
+        # the peeled one's keys, of one class, then join back as one key.
+        held = [r for r in reversed(range(mask.bit_length())) if mask >> r & 1]
+        one_row = [r for r in held if self.cluster.one_row_relations >> r & 1]
+        last = next(r for r in one_row + held if self._connected(mask & ~(1 << r)))
         rest, alone = mask & ~(1 << last), 1 << last
         (left, left_at), (right, right_at) = self._estimate(rest), self._estimate(alone)
         pairs, residual = [], 1.0
@@ -146,8 +158,8 @@ class SetEstimates:
         at = dict(left_at) | {c: k + len(left.columns) for c, k in right_at.items()}
         return shaped(joined.rows, joined.build.columns + joined.probe.columns), at
 
-    def _connected(self, mask: int) -> bool:
-        """Whether the edges inside `mask` reach all of it."""
+    def _connected(self, mask: int, keyed: bool = False) -> bool:
+        """Whether the edges inside `mask`, those with keys where `keyed`, reach all of it."""
         if mask == 0:
             return False
         reached = mask & -mask
@@ -155,7 +167,7 @@ class SetEstimates:
             grown = reached
             for edge in self.cluster.edges:
                 span = edge.left | edge.right
-                if span & ~mask == 0 and span & reached:
+                if span & ~mask == 0 and span & reached and (edge.keys or not keyed):
                     grown |= span
             if grown == reached:
                 return reached == mask
@@ -165,15 +177,15 @@ class SetEstimates:
 def orient(tree, sets: SetEstimates, copies: int = 1, lanes: int = 1,
            planned: dict[int, int] | None = None):
     """`tree` — a relation's index or a pair of trees, sides unordered — with each inner join's
-    cheaper side first, as its build, and each non-inner join building the side its plan join
-    built, so it keeps the plan's type. Bottom up, since a join's probe batches are what the
-    join below it emits. For an inner join the two configurations are priced on the build:
-    held whole, times 1 + `copies` × the probe's batches. The term no longer prices a copy, the
-    session building once; it stays because pricing the build as the session holds it measured
-    worse, and what it should price is #294's question. A
-    join runs on the lanes the plan had for its relations (`planned`, by mask), or on `lanes`; a
-    probe not already hashed onto them is shuffled first, which cuts each of its batches once per
-    lane."""
+    cheaper side first, as its build, a join only one-row edges cross building its one-row side,
+    and each non-inner join building the side its plan join built, so it keeps the plan's type.
+    Bottom up, since a join's probe batches are what the join below it emits. For an inner join
+    the two configurations are priced on the build: held whole, times 1 + `copies` × the probe's
+    batches. The term no longer prices a copy, the session building once; it stays because pricing
+    the build as the session holds it measured worse, and what it should price is #294's question.
+    A cross join runs on one lane, its probe merged; any other on the lanes the plan had for its
+    relations but the one-row ones (`planned`, by mask), or on `lanes`, a probe not already hashed
+    onto them shuffled first, which cuts each of its batches once per lane."""
     return _orient(tree, sets, copies, lanes, planned or {})[0]
 
 
@@ -186,9 +198,10 @@ def _orient(tree, sets, copies, lanes, planned):
                 estimate.rows)
     a, b = _orient(tree[0], sets, copies, lanes, planned), _orient(tree[1], sets, copies, lanes, planned)
     mask = a[1] | b[1]
-    width = planned.get(mask, lanes)
+    crossed = _one_row_builder(sets.cluster, a[1], b[1])
+    width = 1 if crossed is not None else planned.get(mask & ~sets.cluster.one_row_relations, lanes)
     fed = {a[1]: _fed(a, b[1], width, sets), b[1]: _fed(b, a[1], width, sets)}
-    builder = _plan_builder(sets.cluster, a[1], b[1])
+    builder = crossed if crossed is not None else _plan_builder(sets.cluster, a[1], b[1])
     if builder is None:
         build, probe = min((a, b), (b, a), key=lambda side: side[0][2] * (1 + copies * fed[side[1][1]]))
     else:
@@ -207,6 +220,14 @@ def _plan_builder(cluster: MultiJoin, left: int, right: int) -> int | None:
     if edge.kind is JoinType.INNER:
         return None
     return edge.left if edge.builds_left else edge.right
+
+
+def _one_row_builder(cluster: MultiJoin, left: int, right: int) -> int | None:
+    """Where only one-row edges cross the join of `left` and `right`, the side that builds: the one
+    of one-row relations alone, `left` where both or neither are; else None."""
+    if not all(edge.one_row for edge in joining(cluster.edges, left, right)):
+        return None
+    return right if right & ~cluster.one_row_relations == 0 and left & ~cluster.one_row_relations else left
 
 
 def _fed(side, other: int, lanes: int, sets: SetEstimates) -> float:
@@ -254,10 +275,11 @@ def batches(node) -> int:
 def optimize(plan: EngineNode, stats: Statistics, lanes: int, copies: int = 1,
              max_pairs: int = MAX_PAIRS, known: dict[str, Estimate] | None = None) -> EngineNode:
     """`plan` with every join cluster reordered by DPhyp on C_out and each join
-    oriented. DPhyp sees the key edges only: a hash join needs a key, and two sets that only a
-    residual connects would be a nested loop — the residual goes on the first join that has its
-    relations anyway. A cluster past `max_pairs` keeps the plan's order, oriented again: the
-    greedy fallback is not built yet. `known` are the memory sources' measured estimates."""
+    oriented. DPhyp sees the key and one-row edges only: a hash join needs a key, a cross join a
+    one-row side, and two sets that only a residual connects would be a nested loop — the residual
+    goes on the first join that has its relations anyway. A cluster past `max_pairs` keeps the
+    plan's order, oriented again: the greedy fallback is not built yet. `known` are the memory
+    sources' measured estimates."""
     return ordered(plan, stats, lanes, copies, max_pairs, known)[0]
 
 
@@ -278,7 +300,7 @@ def ordered(plan: EngineNode, stats: Statistics, lanes: int, copies: int = 1,
             priced.append(PricedSet(mask, sets.rows(mask), value))
             return value
 
-        edges = [edge for edge in cluster.edges if edge.keys]
+        edges = [edge for edge in cluster.edges if edge.keys or edge.one_row]
         unsolved = None
         try:
             pairs = [(edge.left, edge.right) for edge in edges]

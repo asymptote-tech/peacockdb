@@ -157,18 +157,42 @@ is why each step has its shape.
   matches. J equating NULLs changes none of this: what it matches differently carries k NULL or
   outside C's keys. So C's output is unchanged. `test_dynamic_filters.py` holds it to the
   unpruned answer over every type, either side, NULL keys on both, J equating NULLs or not.
-- **Clusters** (`multijoin.py`) are maximal trees of hash joins of every type but mark, a
-  residual or not, which conflict detection places (below); a residual is read as rejecting no
-  NULL. Only hash joins carry the key edges DPhyp takes. A mark join stays a wall, its mark
-  column being no relation's. A filter roots a relation even between joins, because an `IS NULL`
-  there is what turns a left join into an anti join — but not the planner's `<key> IS NOT NULL`
-  below a shuffle, which drops a NULL that can match nothing: a filter on columns alone that the
-  shuffle hashes and the join keys on, on a side the engine's `null_key_droppable` names, of a join
-  not holding NULL equal. A query's own `IS NOT NULL` can sit below a shuffle over a one-lane
-  input, and stays a filter.
+- **Clusters** (`multijoin.py`) are maximal trees of hash joins of every type but mark, a residual
+  or not (read as rejecting no NULL), which conflict detection places (below), and of cross joins
+  with a one-row side (next). Only hash joins carry the key edges DPhyp takes, and a cluster holds
+  one at least. A mark join stays a wall, its mark column being no relation's. A filter roots a
+  relation even between joins, because an `IS NULL` there is what turns a left join into an anti
+  join — but not the planner's `<key> IS NOT NULL` below a shuffle, which drops a NULL that can
+  match nothing: a filter on columns alone that the shuffle hashes and the join keys on, on a side
+  the engine's `null_key_droppable` names, of a join not holding NULL equal. A query's own `IS NOT
+  NULL` can sit below a shuffle over a one-lane input, and stays a filter.
   The planner's is wiring: tp1 and tp4 hold the same clusters, and reassembly puts it back below
   each shuffle on a key the plan's filters tested, on those sides. Columns are `(relation,
   ordinal)` identities rather than positions, since a reordered tree renumbers every position.
+- **One-row relations.** A relation of at most one row reorders freely among inner joins: crossed
+  in anywhere, it adds its columns to every row, or empties the result wherever it sits. So a
+  `GpuCrossJoin` with such a side joins the cluster of inner joins beside it, above or below; the
+  side becomes a relation, and DPhyp places it. tpcds q23 is the case. `best_ss_customer` crosses
+  the one-row `max_store_sales` in below its group-by, and the plan crossed it onto the 2.75M rows
+  of `store_sales ⋈ customer`, in each of the CTE's two inlined copies. DPhyp crosses it onto
+  `customer`, 100,000 rows, before the hash join with store_sales, as DuckDB does. Each copy costs
+  129.6 MB less at tp1 and 128.8 MB at tp4: the 88 MB cross join becomes 1.6 MB, and the 66 MB
+  project that only reordered the hash join's columns for it folds into the hash join's
+  projection, against 22.8 MB more of hash join output and build. q23's final ratio goes from 2.73
+  to 2.37. Which relations count is the plan's shape, never an estimate (`at_most_one_row`;
+  `optimizer.md`, "Clusters"). The answer is right either way, as inner joins and cross products
+  reorder freely at any row count; the risk is cost. A relation wrongly taken for one row lets
+  DPhyp cross it into a larger relation, on one lane, which the infinite cost of a cross product
+  exists to prevent; a missed one is only a missed reorder. A partial aggregate with no group-by
+  emits a row per input batch, even on one lane (tpch q22 at tp1), and a sort keeps its `fetch` per
+  lane and per batch; a memory source is never one by shape, so a replan that keeps a one-row side
+  walls its cross join again. In a cluster with a non-inner join the cross join stays a wall: moved
+  into a side that join pads, the padded rows would read NULL for its columns, and an empty one-row
+  relation would no longer empty the result. So does one whose one-row relation a key or a residual
+  reads. A `GpuCrossJoin` carries no residual, and a relation keyed to the rest only through the
+  one-row one would leave every order crossing two larger relations; the nested-loop join that would
+  carry a residual is #321's. Cross joins of one-row relations alone (tpcds q28, q61, q88, q90) hold
+  no hash join and form no cluster.
 - **Cluster ids.** Each cluster is `MJ<n>`, numbered per query in plan order, outermost first
   (`multijoin.named`, which the pipeline does right after `names.aliased` numbers the tables read
   twice, and `join_order.ordered` does for a plan given unnamed), and every join it holds carries
@@ -178,26 +202,37 @@ is why each step has its shape.
   cluster's. A replan's plan is named already and keeps its ids; a cluster read from memory
   since leaves its number unused. `.cpu.txt` shows the id as `mj=MJ<n>` on each clustered join,
   and `.optimizer.txt` heads each DPhyp call with it.
-- **Disassembly** (`disassembly.py`) derives each new join's wiring as the translator would
-  rather than carrying the old plan's exchanges, which were placed for keys the new join may not
-  use. A join over the same relations as one the plan had keeps that join's lanes — DataFusion's
-  choice to collect a small build. A new root joining on other keys is shuffled back onto the
-  plan root's hash where something reads that hash before the next exchange: a hash join, a final
-  aggregate, or an enclosing cluster whose join may take the relation as hashed on its keys, since
-  the relation declares that hash. Per-lane nodes — sorts, partial aggregates, projects, a union —
-  read none, and get no shuffle. `test_disassembly_corpus` holds every cluster of every golden,
-  rebuilt in its own order, to the layout the engine printed, `test_ordered_corpus` every golden
-  ordered to a plan that builds, no final aggregate's groups split across lanes, and
-  `test_engine_reassembled` to the answers.
+- **Disassembly** (`disassembly.py`) derives each new join's wiring as the translator would rather
+  than carrying the old plan's exchanges, which were placed for keys the new join may not use. A
+  join over the same relations as one the plan had keeps that join's lanes — DataFusion's choice to
+  collect a small build. A one-row relation changes no join's lanes, so a hash join's are looked up
+  by its relations less the one-row ones. A join that only one-row edges cross is a `GpuCrossJoin`,
+  wired as the translator wires one, with no key to co-locate its sides on
+  (`planner/translator/nodes.rs`): both sides merged onto one lane, the build one batch, the output
+  on one lane and hashed on nothing, which a hash join above shuffles onto its keys. A cross join of
+  two sides of more than one row raises. The cost never chooses one: `assemble` walls a cross join
+  whose one-row relation a key reads, so each hash join's keys join larger relations on both sides,
+  the plan's own order prices finite, and an infinite order never wins. In q23 at tp4 the cross
+  join's output is the hash join's build, shuffled onto its four lanes. A new root joining on other
+  keys is shuffled back onto the plan root's hash where something reads that hash before the next
+  exchange: a hash join, a final aggregate, or an enclosing cluster whose join may take the relation
+  as hashed on its keys, since the relation declares that hash. Per-lane nodes — sorts, partial
+  aggregates, projects, a union — read none, and get no shuffle. A root the plan had on one lane
+  comes back onto one, a `GpuMergePartitions` above the new root: q23's at tp4 was its cross join.
+  The limit: a cross join rebuilt at the top of a cluster whose plan root has several lanes, its
+  hash read by nothing above, comes back on one lane; no corpus plan has it.
+  `test_disassembly_corpus` holds every cluster of every golden, rebuilt in its own order, to the
+  layout the engine printed, `test_ordered_corpus` every golden ordered to a plan that builds, no
+  final aggregate's groups split across lanes, and `test_engine_reassembled` to the answers.
 
 ### DPhyp on C_out
 
-Each cluster goes to DPhyp (`optimizer/dphyp.py`, the `peacockdb-dphyp` crate over its C ABI)
-with its key edges only: a hash join needs a key, and two sets only a residual connects would be
-a nested loop. The residual goes on the first join that has all its relations below it. DPhyp
-asks the cost of each connected set it reaches, once; `join_order.SetEstimates` answers with
-`cardinality`'s formulas over one canonical order, so a set has one estimate however DPhyp
-reached it.
+Each cluster goes to DPhyp (`optimizer/dphyp.py`, the `peacockdb-dphyp` crate over its C ABI) with
+its key edges and one-row edges only: a hash join needs a key, a cross join a one-row side, and two
+sets only a residual connects would be a nested loop. The residual goes on the first join that has
+all its relations below it. DPhyp asks the cost of each connected set it reaches, once;
+`join_order.SetEstimates` answers with `cardinality`'s formulas over one canonical order, so a set
+has one estimate however DPhyp reached it.
 
 - **Non-inner joins: TES.** Where a cluster holds a non-inner join, each join is one hyperedge:
   its whole predicate, on its total eligibility set (`optimizer/conflicts.py`). The TES is CD-A's
@@ -214,11 +249,28 @@ reached it.
   three-relation plan of the eight join types with NULLs in every table and NULL held equal or
   not, and a sample of four-relation plans, against the plan's answer.
 - **Why DPhyp.** It is exact and enumerates each connected csg–cmp pair once, so its work is the
-  number of connected pairs, never cross products. On the prototype's key edges, which are all
-  between two relations, it enumerates exactly what DPccp would; it also takes hyperedges, which
-  is what predicates over three or more relations need. A greedy order is not optimal, and the
-  clusters here are small enough not to need one: of the 555 runs in the committed corpus that
-  called DPhyp, 5 hit the budget — tpcds q64's 18-relation clusters, at every mode.
+  number of connected pairs, never a pair no edge joins (a one-row edge joins every relation:
+  below). On the prototype's key edges, which are all between two relations, it enumerates exactly
+  what DPccp would; it also takes hyperedges, which is what predicates over three or more relations
+  need. A greedy order is not optimal, and the clusters here are small enough not to need one: of
+  the 555 runs in the committed corpus that called DPhyp, 5 hit the budget — tpcds q64's 18-relation
+  clusters, at every mode.
+- **One-row edges.** A one-row relation r has an edge to every other relation: no keys, no
+  residual, selectivity 1, so DPhyp may cross it in anywhere. `rows(S ∪ {r}) = rows(S) × rows(r)`,
+  and C_out, which counts r's columns on every join above it, crosses r in where the rows carrying
+  them are fewest. The edge also connects any two relations through r, so a set holding r and
+  two larger relations no key edge inside the set joins is connected: such a set costs infinity.
+  The plan's own order is finite, since no key reads r (`assemble` walls r's cross join
+  otherwise), so DPhyp never makes a cross product of two relations of more than one row. A set's
+  estimate takes a one-row relation off first (`SetEstimates._join`): a larger one taken off first
+  can leave the rest a product of two relations that its keys, of one class, join back as one key,
+  and the product would be estimated as a join. The edge type has room for a residual and carries
+  none here; #321 is the nested-loop join that would fill it. The limit: every set holding r is
+  connected, so a cluster's pairs grow with 2^n where its keys are a chain, 3^n where they are a
+  star. A chain of 11 relations has 220 pairs and a star of 10 has 2,304; with one one-row relation
+  20,701 and 26,595, past `MAX_PAIRS` (10,000), where the cluster keeps the plan's order; a walled
+  cross join would have let DPhyp order the rest. One relation fewer fits in each. q23's one-row
+  clusters have 3 relations, 6 pairs.
 - **The budget.** `MAX_PAIRS` is 10,000 connected pairs, DuckDB's. Past it the cluster keeps the
   plan's order and is only oriented again; the greedy fallback DuckDB has is not built.
 - **Why C_out in bytes.** A set's cost is its rows times the width of what the joins above and
@@ -255,6 +307,11 @@ one set or as a larger one after a reorder. Nothing prices a semi or anti join's
 would run it (#294), and the reorders gain from order, not flips. Disassembly reads the type off the
 tree it is given — `Left` where the preserved side builds, `Right` where it probes, the semi and
 anti pairs alike — and `orient`'s tree gives back the plan's.
+
+A cross join, a join only one-row edges cross, builds its one-row side, the least any build can
+hold; between two one-row sides DPhyp's left builds, as on any tie. It is priced on one lane, its
+probe merged, because the translator wires it there; priced on the mode's lanes, a probe on four
+lanes would count as shuffled.
 
 ### The adaptive run and replan
 

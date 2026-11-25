@@ -166,6 +166,14 @@ def test_each_edge_says_what_its_join_keeps_and_what_a_residual_beside_its_keys_
     assert "  edge r0-r1: r0.a = r1.b, then a residual on r0.x, r1.y keeping 0.2\n" in text
 
 
+def test_a_one_row_edge_reads_as_a_cross_join():
+    edges = (EdgeReport(0b001, 0b010, (), (), JoinType.INNER),)
+    text = render(OptimizerReport(FilterPass(), (JoinOrder(**{**PAIR.__dict__, "edges": edges}),), FilterPass(), (), (),
+                                  "a\n", "a\n"))
+    assert "  edge r0-r1: one row crossed in, keeps every row\n" in text, text
+    assert "not a DPhyp edge" not in text, text
+
+
 def test_a_dphyp_call_that_keeps_the_plan_s_shape_says_so():
     kept = render(OptimizerReport(FilterPass(), (STAR.__class__(**{**STAR.__dict__, "tree": ((0, 1), 2)}),),
                                   FilterPass(), (), (), "a\n", "a\n"))

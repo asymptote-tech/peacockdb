@@ -572,6 +572,8 @@ plan diff
 +    GpuLoadParquet: table=orders, projections=[o_custkey@1], partition_groups=[[[0],[1],[2],[3],[4],[5],[6],[7],[8],[9],[10],[11],[12]]], lanes=1, batches=multiple, schema=[o_custkey:Int64]
 == cross-join
 plan unchanged
+== distinct-functions
+plan unchanged
 == filter-project
 plan unchanged
 == hash-join
@@ -624,6 +626,10 @@ plan unchanged
 plan unchanged
 == nested-loop-left-join
 plan unchanged
+== rollup-distinct
+plan unchanged
+== rollup-grouping
+plan unchanged
 == rollup-over-join
 plan unchanged
 == scan-limit
@@ -656,4 +662,8 @@ plan unchanged
 == shuffle-additive-avg
 plan unchanged
 == shuffle-stddev
+plan unchanged
+== rollup-stddev
+plan unchanged
+== global-stddev
 plan unchanged

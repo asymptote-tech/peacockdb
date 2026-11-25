@@ -17,16 +17,21 @@ import pandas as pd
 
 from ..corpus import execute
 from ..harness import main, raises
-from .test_multijoin import CHAIN, F, L, SHUFFLED, plan, scan
+from .test_multijoin import CHAIN, F, L, MS, Q23, Q23_TP4, SHUFFLED, _final_aggregate, _indented, plan, scan
 from ...operators.join_types import NULL_KEY_DROPPABLE, JoinType
-from ...optimizer.disassembly import baseline, disassemble, reassembled
+from ...optimizer.disassembly import baseline, disassemble, planned_lanes, reassembled
 from ...plans.engine_nodes import build
-from ...optimizer.multijoin import assemble, clusters, replaced
+from ...plans.engine_plan import plan_text
+from ...optimizer.multijoin import Edge, MultiJoin, RelColumn, Relation, assemble, clusters, named, replaced
 
 FRAMES = {
     "t1": pd.DataFrame({"a": [1, 2, 3, 4]}),
     "t2": pd.DataFrame({"b": [1, 2, 2, 3, 9]}),
     "t3": pd.DataFrame({"c": [2, 3, 3, 4]}),
+    "ms": pd.DataFrame({"a": [1, 2, 3]}),
+    "cust": pd.DataFrame({"c": [1, 2, 3]}),
+    "ss": pd.DataFrame({"sc": [1, 2, 2, 5], "q": [10, 20, 30, 40]}),
+    "t": pd.DataFrame({"a": [5, 6]}),
 }
 
 
@@ -112,6 +117,11 @@ def test_a_join_that_only_a_residual_connects_is_refused():
     cluster = assemble(plan(text))
     with raises(ValueError, match="no key"):
         disassemble(cluster, ((0, 2), 1), lanes=1)
+
+
+def test_a_join_that_no_edge_crosses_is_refused():
+    with raises(ValueError, match="no key"):
+        disassemble(assemble(plan(CHAIN)), ((0, 2), 1), lanes=1)
 
 
 def test_at_four_lanes_each_side_is_shuffled_on_its_keys_and_the_build_coalesced():
@@ -203,6 +213,157 @@ def test_a_full_join_s_output_is_hashed_on_neither_side():
     cluster = assemble(plan(full))
     rebuilt = disassemble(cluster, baseline(cluster), lanes=4)
     assert rebuilt.fields["join_type"] == "Full" and "hashed_on" not in rebuilt.fields
+
+
+def test_the_baseline_of_a_one_row_cluster_is_the_plan_order():
+    root = plan(Q23)
+    [cluster] = clusters(root)
+    assert baseline(cluster) == (0, (1, 2))
+    # the project's pick goes on the join, as every rebuilt join takes it
+    folded = Q23.replace(f"""  GpuProject: exprs=[q@2, c@0], {L}, schema=[q:Int64, c:Int64]
+    GpuHashJoin: join_type=Inner, on=[(c@0, sc@0)], {L}, schema=[c:Int64, sc:Int64, q:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[c:Int64]
+{scan("cust", "c", indent=8)}
+{scan("ss", "sc", "q", indent=6)}""", f"""  GpuHashJoin: join_type=Inner, on=[(c@0, sc@0)], projection=[q@2, c@0], {L}, schema=[q:Int64, c:Int64]
+    GpuCoalesceAllBatches: lanes=1, batches=single, schema=[c:Int64]
+{scan("cust", "c", indent=6)}
+{scan("ss", "sc", "q", indent=4)}""")
+    assert folded != Q23
+    assert plan_text(reassembled(root, 1)) == plan_text(plan(folded))
+
+
+def _unloaded(text):
+    unload = named(plan("GpuUnload\n" + _indented(text, 2)))
+    [cluster] = clusters(unload)
+    return unload, cluster
+
+
+# (max_store_sales m, store_sales q, customer c): ms counts three rows, ss's sc 5 is no customer's
+Q23_ANSWER = [(3, 10, 1), (3, 20, 2), (3, 30, 2)]
+
+
+def test_a_cross_join_is_rebuilt_on_one_lane():
+    unload, cluster = _unloaded(Q23)
+    rebuilt = disassemble(cluster, ((0, 1), 2), lanes=1)
+    assert rebuilt.kind == "GpuHashJoin" and rebuilt.fields["on"] == "[(c@1, sc@0)]"
+    assert rebuilt.schema == cluster.root.schema
+    coalesce = rebuilt.children[0]
+    cross = coalesce.children[0]
+    assert [coalesce.kind, cross.kind] == ["GpuCoalesceAllBatches", "GpuCrossJoin"]
+    one_row = cross.children[0]
+    assert one_row is cluster.relations[0].root
+    assert (one_row.fields["lanes"], one_row.fields["batches"]) == ("1", "single")
+    assert _table(cross.children[1]) == "cust"
+    assert (cross.fields["lanes"], cross.fields["batches"]) == ("1", "multiple")
+    assert "hashed_on" not in cross.fields and "projection" not in cross.fields
+    assert cross.mj == "MJ1"
+    assert answer(replaced(unload, cluster.root, rebuilt)) == answer(unload) == Q23_ANSWER
+
+
+def test_at_four_lanes_the_cross_join_merges_and_the_root_comes_back_to_one_lane():
+    unload, cluster = _unloaded(Q23_TP4)
+    rebuilt = disassemble(cluster, ((0, 1), 2), lanes=4)
+    assert rebuilt.kind == "GpuMergePartitions" and rebuilt.fields["lanes"] == "1"
+    assert rebuilt.schema == cluster.root.schema
+    join = rebuilt.children[0]
+    assert join.kind == "GpuHashJoin" and join.fields["lanes"] == "4"
+    coalesce, emit = join.children[0], join.children[0].children[0]
+    assert [coalesce.kind, emit.kind] == ["GpuCoalesceAllBatches", "GpuEmitPartitions"]
+    assert emit.fields["hash"] == "[c@1]" and emit.fields["lanes"] == "4"
+    cross = emit.children[0]
+    assert cross.kind == "GpuCrossJoin" and cross.fields["lanes"] == "1" and "hashed_on" not in cross.fields
+    assert [side.fields["lanes"] for side in cross.children] == ["1", "1"]
+    assert answer(replaced(unload, cluster.root, rebuilt)) == answer(unload) == Q23_ANSWER
+
+
+def test_a_cross_join_merges_sides_on_more_lanes_onto_one():
+    # the one-row relation emitted onto four lanes, customer scanned on four
+    four = Q23_TP4.replace(MS, f"""  GpuEmitPartitions: hash=[m@0], {F}, hashed_on=[m@0], schema=[m:Int64]
+{_indented(MS, 2)}""").replace(
+        scan("cust", "c", indent=12),
+        f"            GpuMergePartitions: {L}, schema=[c:Int64]\n"
+        + scan("cust", "c", indent=14).replace("partition_groups=[[[0]]], lanes=1",
+                                               "partition_groups=[[[0]],[],[],[]], lanes=4"))
+    unload, cluster = _unloaded(four)
+    assert [int(r.root.fields["lanes"]) for r in cluster.relations] == [4, 4, 1]
+    rebuilt = disassemble(cluster, ((0, 1), 2), lanes=4)
+    cross = rebuilt.children[0].children[0].children[0].children[0]
+    build, probe = cross.children
+    assert [build.kind, build.children[0].kind, build.children[0].children[0].kind] == [
+        "GpuCoalesceAllBatches", "GpuMergePartitions", "GpuEmitPartitions"]
+    assert [probe.kind, probe.children[0].kind] == ["GpuMergePartitions", "GpuLoadParquet"]
+    assert answer(replaced(unload, cluster.root, rebuilt)) == Q23_ANSWER
+
+
+def test_a_key_edge_makes_a_hash_join_whatever_one_row_edges_cross():
+    unload, cluster = _unloaded(Q23)
+    rebuilt = disassemble(cluster, (1, (0, 2)), lanes=1)
+    # customer builds on c; the cross join of max_store_sales onto store_sales probes on sc
+    assert rebuilt.kind == "GpuHashJoin" and rebuilt.fields["on"] == "[(c@0, sc@2)]"
+    cross = rebuilt.children[1]
+    assert cross.kind == "GpuCrossJoin" and cross.fields["projection"] == "[m@0, q@2, sc@1]"
+    assert answer(replaced(unload, cluster.root, rebuilt)) == Q23_ANSWER
+
+
+def test_a_join_crossing_in_a_one_row_relation_keeps_the_lanes_the_plan_had():
+    # at tp4 the planner kept customer ⋈ store_sales on one lane
+    [cluster] = clusters(plan(Q23))
+    rebuilt = disassemble(cluster, ((0, 1), 2), lanes=4)
+    assert rebuilt.kind == "GpuHashJoin" and rebuilt.fields["lanes"] == "1"
+
+
+def test_a_cross_join_of_two_larger_sides_is_refused():
+    # t1 keys the one-row relation's count, so only that relation's edge joins t1 to t2. Assembly
+    # walls such a cross join; built by hand, the cluster admits it.
+    keyed = plan(f"""GpuHashJoin: join_type=Inner, on=[(a@0, n@0)], {L}, schema=[a:Int64, n:Int64, b:Int64]
+  GpuCoalesceAllBatches: lanes=1, batches=single, schema=[a:Int64]
+{scan("t1", "a", indent=4)}
+  GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, b:Int64]
+{_final_aggregate(indent=4)}
+{scan("t2", "b", indent=4)}""")
+    cross = keyed.children[1]
+    relations = (keyed.children[0].children[0], *cross.children)
+    edges = (Edge(0b001, 0b010, ((RelColumn(0, 0), RelColumn(1, 0)),)), Edge(0b010, 0b001), Edge(0b010, 0b100))
+    cluster = MultiJoin(keyed, tuple(Relation(r) for r in relations), edges,
+                        (RelColumn(0, 0), RelColumn(1, 0), RelColumn(2, 0)), (keyed, cross), None,
+                        one_row_relations=0b010)
+    with raises(ValueError, match="more than one row"):
+        disassemble(cluster, ((0, 1), 2), lanes=1)
+
+
+# a one-row relation crossed in below a hash join on four lanes, whose hash a node above reads
+CROSSED_BELOW = f"""GpuHashJoin: join_type=Inner, on=[(a@0, b@1)], {F}, hashed_on=[a@0], schema=[a:Int64, n:Int64, b:Int64]
+  GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[a@0], schema=[a:Int64]
+    GpuEmitPartitions: hash=[a@0], {F}, hashed_on=[a@0], schema=[a:Int64]
+{scan("t1", "a", indent=6)}
+  GpuEmitPartitions: hash=[b@1], {F}, hashed_on=[b@1], schema=[n:Int64, b:Int64]
+    GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, b:Int64]
+{_final_aggregate(indent=6)}
+{scan("t2", "b", indent=6)}"""
+
+
+def test_planned_lanes_leave_one_row_relations_out():
+    [cluster] = clusters(plan(Q23_TP4))
+    assert planned_lanes(cluster) == {0b110: 4}
+    # crossed in below the hash join: the join keeps its four lanes under the mask without it
+    [cluster] = clusters(plan(CROSSED_BELOW))
+    assert cluster.one_row_relations == 0b010
+    assert planned_lanes(cluster) == {0b101: 4}
+
+
+def test_a_cross_join_rebuilt_on_top_is_shuffled_back_onto_the_hash_the_root_had():
+    [cluster] = clusters(plan(CROSSED_BELOW))
+    assert cluster.hash_read_above
+    rebuilt = disassemble(cluster, (1, (0, 2)), lanes=4)
+    assert rebuilt.kind == "GpuEmitPartitions" and rebuilt.fields["hash"] == "[a@0]"
+    assert (rebuilt.fields["lanes"], rebuilt.fields["hashed_on"]) == ("4", "[a@0]")
+    assert rebuilt.children[0].kind == "GpuCrossJoin" and rebuilt.schema == cluster.root.schema
+    # run under a merge onto one lane, which reads no hash
+    merged = plan(f"GpuUnload\n  GpuMergePartitions: {L}, schema=[a:Int64, n:Int64, b:Int64]\n"
+                  + _indented(CROSSED_BELOW, 4))
+    root = merged.children[0].children[0]
+    assert answer(replaced(merged, root, rebuilt)) == answer(merged) == [
+        (1, 2, 1), (2, 2, 2), (2, 2, 2), (3, 2, 3)]
 
 
 if __name__ == "__main__":

@@ -9,10 +9,14 @@ if __package__ in (None, ""):  # allow `python scripts/exec_model/tests/optimize
     _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[4]))
     __package__ = "scripts.exec_model.tests.optimizer"
 
+import pyarrow as pa
+
 from ..harness import main
+from .test_cardinality import dataset
 from ...plans.engine_expr import Binary
-from ...plans.engine_plan import parse_plans
-from ...optimizer.multijoin import Edge, RelColumn, assemble, clusters, named
+from ...plans.engine_plan import parse_plans, plan_text
+from ...optimizer.join_order import ordered
+from ...optimizer.multijoin import Edge, RelColumn, assemble, at_most_one_row, clusters, named
 
 L = "lanes=1, batches=multiple"
 
@@ -241,6 +245,270 @@ def test_a_cross_join_a_nested_loop_join_and_a_mark_join_carry_no_id_and_a_filte
     tree = named(plan(text))
     assert [(n.kind, n.mj) for n in _walk(tree) if "Join" in n.kind] == [
         ("GpuCrossJoin", None), ("GpuNestedLoopJoin", None), ("GpuHashJoin", "MJ1"), ("GpuHashJoin", None)]
+
+
+def _one_row(text):
+    return at_most_one_row(plan(text))
+
+
+def _final_aggregate(kind="GpuAggregateBatches", group_by="[]", indent=0, lanes=1, batches="single", table="t"):
+    pad = " " * indent
+    return (f"{pad}{kind}: group_by={group_by}, aggs=[count(1) as n], final=[n@0], lanes={lanes}, "
+            f"batches={batches}, schema=[n:Int64]\n{scan(table, 'a', indent=indent + 2)}")
+
+
+def _partial_aggregate(lanes, indent=0, batches=None):
+    # q23 at tp4 has the four-lane partial aggregate single-batch, tpch q22 at tp1 the one-lane multiple
+    batches = batches or ("single" if lanes > 1 else "multiple")
+    return (f"{' ' * indent}GpuAggregate: group_by=[], aggs=[count(1) as n], lanes={lanes}, "
+            f"batches={batches}, schema=[n:Int64]\n{scan('t', 'a', indent=indent + 2)}")
+
+
+def test_a_final_aggregate_without_group_by_is_one_row():
+    assert _one_row(_final_aggregate())
+    # q23 at tp1 runs the final aggregate itself, on one lane
+    assert _one_row(_final_aggregate("GpuAggregate"))
+
+
+def test_a_partial_aggregate_is_not_one_row():
+    # a partial aggregate emits a row per input batch: tpch q22 at tp1, q23 at tp4 on four lanes
+    assert not _one_row(_partial_aggregate(lanes=4))
+    assert not _one_row(_partial_aggregate(lanes=1))
+    # only the missing `final` rules this one out: one lane, one batch
+    assert not _one_row(_partial_aggregate(lanes=1, batches="single"))
+    merged = f"GpuMergePartitions: lanes=1, batches=single, schema=[n:Int64]\n{_partial_aggregate(4, 2)}"
+    assert not _one_row(merged)
+
+
+def test_fetch_and_empty_are_at_most_one_row():
+    def limit(fetch):
+        return (f"GpuLimit: skip=0, fetch={fetch}, lanes=1, batches=single, schema=[a:Int64]\n"
+                f"{scan('t', 'a', indent=2)}")
+
+    assert _one_row(limit(1)) and _one_row(limit(0))
+    assert not _one_row(limit(2))
+    assert _one_row("GpuEmpty: lanes=1, batches=single, schema=[a:Int64]")
+
+
+def test_a_fetch_per_lane_or_per_batch_is_not_one_row():
+    def sort(layout):
+        return (f"GpuSort: by=[a@0 asc nulls_first], fetch=1, {layout}, schema=[a:Int64]\n"
+                f"{scan('t', 'a', indent=2)}")
+
+    assert not _one_row(sort("lanes=4, batches=single"))
+    assert not _one_row(sort("lanes=1, batches=multiple"))
+    assert _one_row(sort("lanes=1, batches=single"))
+    assert not _one_row(_final_aggregate(lanes=4))
+    assert not _one_row(_final_aggregate(batches="multiple"))
+
+
+def test_what_passes_one_row_on_is_one_row():
+    final = _final_aggregate(indent=2)
+    schema = "lanes=1, batches=single, schema=[n:Int64]"
+    assert _one_row(f"GpuFilter: predicate=n@0 > 1, {schema}\n{final}")
+    assert _one_row(f"GpuProject: exprs=[n@0 + 1 as n], {schema}\n{final}")
+    assert _one_row(f"GpuCoalesceAllBatches: {schema}\n{final}")
+    assert _one_row(f"GpuMergePartitions: {schema}\n{final}")
+    # tpch q15 at tp4 hashes the one row onto four lanes
+    emit = "GpuEmitPartitions: hash=[n@0], lanes=4, batches=multiple, hashed_on=[n@0], schema=[n:Int64]"
+    assert _one_row(f"{emit}\n{final}")
+    scanned = scan("t", "a", indent=2)
+    assert not _one_row(f"GpuFilter: predicate=a@0 > 1, {schema}\n{scanned}")
+    assert not _one_row(f"GpuProject: exprs=[a@0 + 1 as a], {schema}\n{scanned}")
+    cross = f"GpuCrossJoin: lanes=1, batches=single, schema=[n:Int64, a:Int64]\n{final}\n"
+    assert _one_row(cross + _final_aggregate(indent=2))
+    assert not _one_row(cross + scan("t2", "a", indent=2))
+
+
+def test_scans_joins_and_grouped_aggregates_are_not_one_row():
+    assert not _one_row(scan("t", "a", indent=0))
+    assert not _one_row(CHAIN)
+    assert not _one_row(_final_aggregate(group_by="[a@0]"))
+
+
+def test_an_edge_without_keys_or_residual_is_one_row():
+    key = (RelColumn(0, 0), RelColumn(1, 0))
+    assert Edge(0b01, 0b10).one_row
+    assert not Edge(0b01, 0b10, (key,)).one_row
+    assert not Edge(0b01, 0b10, residual=object()).one_row
+
+
+# tpcds q23's best_ss_customer at tp1: the one-row max_store_sales crossed onto customer ⋈ store_sales
+# — its final aggregate reads one batch, as q23's does, so the prototype runs it as one
+MS = f"""  GpuProject: exprs=[n@0 as m], lanes=1, batches=single, schema=[m:Int64]
+    GpuAggregate: group_by=[], aggs=[count(1) as n], final=[n@0], lanes=1, batches=single, schema=[n:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[a:Int64]
+{scan("ms", "a", indent=8)}"""
+Q23 = f"""GpuCrossJoin: lanes=1, batches=multiple, schema=[m:Int64, q:Int64, c:Int64]
+{MS}
+  GpuProject: exprs=[q@2, c@0], {L}, schema=[q:Int64, c:Int64]
+    GpuHashJoin: join_type=Inner, on=[(c@0, sc@0)], {L}, schema=[c:Int64, sc:Int64, q:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[c:Int64]
+{scan("cust", "c", indent=8)}
+{scan("ss", "sc", "q", indent=6)}"""
+# at tp4: the hash join on four lanes, merged onto one for the cross join
+Q23_TP4 = f"""GpuCrossJoin: lanes=1, batches=multiple, schema=[m:Int64, q:Int64, c:Int64]
+{MS}
+  GpuMergePartitions: {L}, schema=[q:Int64, c:Int64]
+    GpuProject: exprs=[q@2, c@0], {F}, hashed_on=[c@1], schema=[q:Int64, c:Int64]
+      GpuHashJoin: join_type=Inner, on=[(c@0, sc@0)], {F}, hashed_on=[c@0], schema=[c:Int64, sc:Int64, q:Int64]
+        GpuCoalesceAllBatches: lanes=4, batches=single, hashed_on=[c@0], schema=[c:Int64]
+          GpuEmitPartitions: hash=[c@0], {F}, hashed_on=[c@0], schema=[c:Int64]
+{scan("cust", "c", indent=12)}
+        GpuEmitPartitions: hash=[sc@0], {F}, hashed_on=[sc@0], schema=[sc:Int64, q:Int64]
+          GpuFilter: predicate=sc@0 IS NOT NULL, {L}, schema=[sc:Int64, q:Int64]
+{scan("ss", "sc", "q", indent=12)}"""
+
+
+def test_a_one_row_cross_join_joins_the_cluster_below_it():
+    root = plan(Q23)
+    [cluster] = clusters(root)
+    assert cluster.root is root and cluster.relations[0].root is root.children[0]
+    assert [r.root.fields.get("table") for r in cluster.relations[1:]] == ["cust", "ss"]
+    assert cluster.one_row_relations == 0b001
+    assert cluster.edges == (Edge(0b010, 0b100, ((RelColumn(1, 0), RelColumn(2, 0)),)),
+                             Edge(0b001, 0b010), Edge(0b001, 0b100))
+    assert cluster.output == (RelColumn(0, 0), RelColumn(2, 1), RelColumn(1, 0))
+
+
+def test_a_one_row_cross_join_below_a_hash_join_is_in_its_cluster():
+    text = f"""GpuHashJoin: join_type=Inner, on=[(a@0, b@1)], {L}, schema=[a:Int64, n:Int64, b:Int64]
+{scan("t1", "a", indent=2)}
+  GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, b:Int64]
+{_final_aggregate(indent=4)}
+{scan("t2", "b", indent=4)}"""
+    [cluster] = clusters(plan(text))
+    assert len(cluster.relations) == 3 and cluster.relations[1].root.kind == "GpuAggregateBatches"
+    assert cluster.one_row_relations == 0b010
+    assert cluster.edges == (Edge(0b001, 0b100, ((RelColumn(0, 0), RelColumn(2, 0)),)),
+                             Edge(0b010, 0b001), Edge(0b010, 0b100))
+
+
+def test_a_cross_join_s_projection_is_lifted_through():
+    text = Q23.replace("GpuCrossJoin: lanes=1, batches=multiple, schema=[m:Int64, q:Int64, c:Int64]",
+                       "GpuCrossJoin: projection=[c@2, m@0], lanes=1, batches=multiple, schema=[c:Int64, m:Int64]")
+    [cluster] = clusters(plan(text))
+    assert cluster.output == (RelColumn(1, 0), RelColumn(0, 0))
+
+
+# a key join of ta and tb under one or two one-row relations
+AB = f"""GpuHashJoin: join_type=Inner, on=[(a@0, b@0)], {L}, schema=[a:Int64, b:Int64]
+{scan("ta", "a", indent=2)}
+{scan("tb", "b", indent=2)}"""
+
+
+def _indented(text, by):
+    return "\n".join(" " * by + line for line in text.splitlines())
+
+
+def test_two_one_row_relations_crossed_in_one_after_the_other_share_one_edge():
+    text = f"""GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, n:Int64, a:Int64, b:Int64]
+{_final_aggregate(indent=2, table="t1")}
+  GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, a:Int64, b:Int64]
+{_final_aggregate(indent=4, table="t2")}
+{_indented(AB, 4)}"""
+    [cluster] = clusters(plan(text))
+    assert len(cluster.relations) == 4 and cluster.one_row_relations == 0b0011
+    assert cluster.edges[1:] == (Edge(0b0001, 0b0010), Edge(0b0001, 0b0100), Edge(0b0001, 0b1000),
+                                 Edge(0b0010, 0b0100), Edge(0b0010, 0b1000))
+
+
+def test_a_cross_join_of_two_one_row_relations_is_one_relation():
+    text = f"""GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, n:Int64, a:Int64, b:Int64]
+  GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, n:Int64]
+{_final_aggregate(indent=4, table="t1")}
+{_final_aggregate(indent=4, table="t2")}
+{_indented(AB, 2)}"""
+    [cluster] = clusters(plan(text))
+    assert [r.root.kind for r in cluster.relations] == ["GpuCrossJoin", "GpuLoadParquet", "GpuLoadParquet"]
+    assert cluster.one_row_relations == 0b001
+    assert cluster.edges == (Edge(0b010, 0b100, ((RelColumn(1, 0), RelColumn(2, 0)),)),
+                             Edge(0b001, 0b010), Edge(0b001, 0b100))
+
+
+def test_cross_joins_of_one_row_relations_alone_form_no_cluster():
+    # tpcds q88's shape: a cluster needs a hash join
+    text = f"""GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, n:Int64, n:Int64]
+{_final_aggregate(indent=2, table="t1")}
+  GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, n:Int64]
+{_final_aggregate(indent=4, table="t2")}
+{_final_aggregate(indent=4, table="t3")}"""
+    assert clusters(plan(text)) == []
+
+
+def test_a_one_row_cross_join_beside_a_non_inner_join_stays_a_wall():
+    semi = plan(f"""GpuCrossJoin: lanes=1, batches=multiple, schema=[m:Int64, c:Int64]
+{MS}
+  GpuProject: exprs=[c@0], {L}, schema=[c:Int64]
+    GpuHashJoin: join_type=LeftSemi, on=[(c@0, sc@0)], {L}, schema=[c:Int64]
+      GpuCoalesceAllBatches: lanes=1, batches=single, schema=[c:Int64]
+{scan("cust", "c", indent=8)}
+{scan("ss", "sc", "q", indent=6)}""")
+    join = semi.children[1].children[0]
+    [cluster] = clusters(semi)
+    assert cluster.root is join and cluster.joins == (join,) and cluster.one_row_relations == 0
+    assert [r.root.fields["table"] for r in cluster.relations] == ["cust", "ss"]
+    # under the semi join the cross join roots a relation
+    above = plan(f"""GpuHashJoin: join_type=LeftSemi, on=[(a@0, b@1)], {L}, schema=[a:Int64]
+{scan("t1", "a", indent=2)}
+  GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, b:Int64]
+{_final_aggregate(indent=4)}
+{scan("t2", "b", indent=4)}""")
+    [cluster] = clusters(above)
+    assert [r.root.kind for r in cluster.relations] == ["GpuLoadParquet", "GpuCrossJoin"]
+    assert cluster.joins == (above,) and cluster.one_row_relations == 0
+    assert cluster.edges[0].keys == ((RelColumn(0, 0), RelColumn(1, 1)),)
+
+
+# q23's shape with a join filter on max_store_sales' m: a cross join carries no residual
+FILTERED = f"""GpuHashJoin: join_type=Inner, on=[(c@0, sc@1)], filter=c@build:0 > m@probe:0, {L}, schema=[c:Int64, m:Int64, sc:Int64, q:Int64]
+  GpuCoalesceAllBatches: lanes=1, batches=single, schema=[c:Int64]
+{scan("cust", "c", indent=4)}
+  GpuCrossJoin: lanes=1, batches=multiple, schema=[m:Int64, sc:Int64, q:Int64]
+{_indented(MS, 2)}
+{scan("ss", "sc", "q", indent=4)}"""
+
+
+def test_a_residual_reading_a_one_row_relation_keeps_the_wall():
+    root = plan(FILTERED)
+    [cluster] = clusters(root)
+    assert cluster.joins == (root,) and cluster.one_row_relations == 0
+    assert [r.root.kind for r in cluster.relations] == ["GpuLoadParquet", "GpuCrossJoin"]
+    stats = dataset(tables={"ms": pa.table({"a": [1, 2, 3]}), "cust": pa.table({"c": [1, 2, 3]}),
+                            "ss": pa.table({"sc": [1, 2, 2, 5], "q": [10, 20, 30, 40]})})
+    assert plan_text(ordered(root, stats, 1)[0]) == plan_text(root)
+
+
+def test_a_key_reading_a_one_row_relation_keeps_the_wall():
+    # admitted, t2 would join t1 only through the one-row count, and every order of the three
+    # would cross the two
+    root = plan(f"""GpuHashJoin: join_type=Inner, on=[(n@1, b@0)], {L}, schema=[a:Int64, n:Int64, b:Int64]
+  GpuCoalesceAllBatches: lanes=1, batches=single, schema=[a:Int64, n:Int64]
+    GpuCrossJoin: {L}, schema=[a:Int64, n:Int64]
+{scan("t1", "a", indent=6)}
+{_final_aggregate(indent=6)}
+{scan("t2", "b", indent=2)}""")
+    stats = dataset(tables={"t1": pa.table({"a": [1, 2, 3]}), "t": pa.table({"a": [1, 2]}),
+                            "t2": pa.table({"b": list(range(20))})})
+    assert plan_text(ordered(root, stats, 1)[0]) == plan_text(root)
+    [cluster] = clusters(root)
+    assert cluster.joins == (root,) and cluster.one_row_relations == 0
+    assert [r.root.kind for r in cluster.relations] == ["GpuCrossJoin", "GpuLoadParquet"]
+
+
+def test_only_the_cross_join_whose_one_row_relation_a_residual_reads_is_a_wall():
+    root = plan(f"""GpuCrossJoin: lanes=1, batches=multiple, schema=[n:Int64, c:Int64, m:Int64, sc:Int64, q:Int64]
+{_final_aggregate(indent=2)}
+{_indented(FILTERED, 2)}""")
+    [cluster] = clusters(root)
+    assert cluster.joins == (root, root.children[1]) and cluster.one_row_relations == 0b001
+    assert [r.root.kind for r in cluster.relations] == ["GpuAggregateBatches", "GpuLoadParquet", "GpuCrossJoin"]
+
+
+def test_named_gives_the_cross_join_its_cluster_id():
+    tree = named(plan(Q23))
+    assert [(n.kind, n.mj) for n in _walk(tree) if "Join" in n.kind] == [
+        ("GpuCrossJoin", "MJ1"), ("GpuHashJoin", "MJ1")]
 
 
 def _walk(node):

@@ -11,11 +11,9 @@ Paths are under `scripts/exec_model/`; a constant's value is in [Constants](#con
 1. **Plan text.** `plans/engine_plan` reads the engine's `<mode>.plans.txt` into `EngineNode`s.
 2. **Names.** `names.aliased` numbers a table the plan reads twice (`date_dim#2`); `multijoin.named`
    gives each cluster its id, `MJ<n>`. Both feed the report alone: no rule reads them.
-3. **Dynamic filters, first pass**, on the plan as written (`dynamic_filters.apply`,
-   `Builds.FILTERED`).
+3. **Dynamic filters, first pass** on the written plan (`dynamic_filters.apply`, `Builds.FILTERED`).
 4. **Join order.** `join_order.ordered`, with the first pass's builds measured
-   (`replan.kept_estimates`): DPhyp on C_out for each cluster, then `orient`, then
-   `disassembly.reassembled`.
+   (`replan.kept_estimates`): DPhyp on C_out per cluster, `orient`, `disassembly.reassembled`.
 5. **Dynamic filters, second pass**, on the ordered plan (`Builds.FILTERED_OR_JOINED`). Nothing is
    ordered again before the run; only a replan orders again (step 6).
 6. **The adaptive run.** `replan.run_adaptive`; the plan reads both passes' builds from memory.
@@ -31,8 +29,7 @@ own, when all of these hold (`_join_candidates`):
 
 - **The join.** A `GpuHashJoin` whose type emits no unmatched probe row (`PRUNES_PROBE`). A
   `Left…` type keeps the build side, so `Left`, `LeftSemi`, `LeftAnti` and `LeftMark` qualify, as
-  do `Inner` and `RightSemi`. `Right`, `Full` and `RightAnti` never do; nested-loop and cross
-  joins never do.
+  do `Inner` and `RightSemi`. `Right`, `Full` and `RightAnti` never do, nor nested-loop or cross.
 - **The build side** (`_admitted`). First pass: it holds a `GpuFilter` and no join (hash,
   nested-loop or cross). Second pass: it holds a `GpuFilter`, a join, or both. A bare scan never
   qualifies, and the planner's null-key filter below the build's shuffle is not a filter here, as
@@ -43,10 +40,9 @@ own, when all of these hold (`_join_candidates`):
 - **The scan.** The probe key lifts ([below](#where-a-key-lifts)) to a `GpuLoadParquet` column,
   the scan reads at least 2 row groups, and it is ordered on the column: `Σ(max_g − min_g) / (MAX −
   MIN)` over its groups' footer ranges is below `ORDERED_BELOW` (`_clustering`). The score is 1 on
-  an ordered column and about the group count on an unordered one. A group without statistics is
-  left out of it. There is no score, so no candidate, when no group has statistics, when `MAX =
-  MIN`, or when a range is not on a number line (`as_number`: integers, floats, decimals, dates;
-  strings have none).
+  an ordered column and about the group count on an unordered one; a group without statistics is
+  left out. No score, so no candidate, where no group has statistics, `MAX = MIN`, or a range is
+  not on a number line (`as_number`: integers, floats, decimals, dates; strings have none).
 
 ### Values or a range
 
@@ -94,10 +90,9 @@ own footers. Why this keeps every answer: `design.md`, "Why a non-inner join pas
 - **Its cost.** `run.py` prices the optimized run as the final run, plus each probe plan's last
   run, plus every run a replan stopped, in a probe or in the main run (`OptimizedRun`). Reading a
   memory source costs nothing (`plans/cost_model.FREE`).
-- **Its limit.** A probe that prunes nothing still materialises its build, and the main run reads
-  it exactly, so that build gives the main run no miss of its own. The cluster around it is ordered
-  again only where another build misses. tpcds q84 is the corpus case (`design.md`, "Probe plans
-  run adaptively").
+- **Its limit.** A probe that prunes nothing still materialises its build, which the main run then
+  reads exactly and never misses: the cluster around it is ordered again only where another build
+  misses. tpcds q84 is the corpus case (`design.md`, "Probe plans run adaptively").
 - **Pruned scans are re-mapped** onto their own lanes (`remap`, after the engine's
   `scan_mapping/partition.rs`): survivors in contiguous chunks balanced by rows, then one batch per
   lane or per row group; the sized mode keeps its batches less the pruned groups (`Batching`).
@@ -113,21 +108,29 @@ longer qualify, so a pass ends. Names `p<n>` continue across rounds and passes.
 ## Clusters
 
 `optimizer/multijoin.py`. A cluster is a maximal tree of joins inside which the order may change.
+It holds one hash join at least: one-row cross joins alone form none (tpcds q28, q61, q88, q90).
 
-- **Joins that enter** (`is_reorderable`): a `GpuHashJoin` of any type but mark, with or without a
-  residual filter, as the engine runs every one. The cluster grows through `_WIRING`, through
-  projects that compute nothing (`_picks_columns`), and through the planner's null-key filter
-  (`_is_null_key_shuffle`): `IS NOT NULL` alone on columns a `GpuEmitPartitions` hashes and the join
-  keys on, on a side `NULL_KEY_DROPPABLE` names, of a join not holding NULL equal. So tp1 and tp4
-  hold the same clusters; a query's own `IS NOT NULL` there stays a filter.
+- **Joins that enter** (`is_reorderable`): a `GpuHashJoin` of any type but mark, residual or not, as
+  the engine runs every one, and a `GpuCrossJoin` with a one-row side. The cluster grows through
+  `_WIRING`, through projects that compute nothing (`_picks_columns`), and through the planner's
+  null-key filter (`_is_null_key_shuffle`): `IS NOT NULL` alone on columns a `GpuEmitPartitions`
+  hashes and the join keys on, on a side `NULL_KEY_DROPPABLE` names, of a join not holding NULL
+  equal. So tp1 and tp4 hold the same clusters; a query's own `IS NOT NULL` is a filter.
+- **One row** (`at_most_one_row`), by shape, never by estimate: on `lanes=1`, `batches=single`, a
+  final aggregate with no group-by (a partial one emits a row per input batch) or a `fetch` of 0 or
+  1 (a sort keeps it per lane and batch); `GpuEmpty`; a filter, project or `_WIRING` node over one;
+  a cross join of two. Never a memory source: a replan keeping a one-row side walls its cross join.
+  One-row sides are relations (`MultiJoin.one_row_relations`); `_crossed` reads the other side.
 - **Walls.** Anything else roots a relation, a leaf of DPhyp's hypergraph: a mark join (its mark
   column is no relation's); any other `GpuFilter`, even between joins (an `IS NULL` there makes a
-  left join an anti join); a computing project, nested-loop and cross joins, scans, aggregates,
-  unions, sorts, limits and memory sources. `clusters` finds the clusters inside relations too,
-  outermost first.
+  left join an anti join); a computing project, nested-loop and other cross joins, scans,
+  aggregates, unions, sorts, limits and memory sources; a one-row cross join in a cluster with a
+  non-inner join (its row would fill a kept side's unmatched NULLs) or whose one-row relation a key
+  or a residual reads (`assemble`). `clusters` finds clusters inside relations too, outermost first.
 - **Columns** are `(relation, ordinal)` identities (`RelColumn`), never positions.
 - **Edges, inner joins only** (`_Assembly._edges`): one per relation pair a join's keys connect,
-  and one hyperedge per residual, over the relations it reads on each side.
+  one hyperedge per residual, over the relations it reads on each side, and a one-row edge (no
+  keys, no residual: `Edge.one_row`) per one-row relation and every other one (`_one_row_edges`).
 - **Edges with a non-inner join** (`_Assembly.multijoin`): one per join, its whole predicate, keys
   and residual together. Its sides are the join's TES (`conflicts.eligibility`), the kept side on
   the left; `conflicts.logical` reads a `Right…` join as its `Left…` mirror. The TES is CD-A
@@ -141,10 +144,10 @@ longer qualify, so a pass ends. Names `p<n>` continue across rounds and passes.
 ## The cost DPhyp is given
 
 `join_order.ordered` calls `dphyp.solve`, the `peacockdb-dphyp` crate over its C ABI, once per
-cluster. DPhyp gets the relations `0..n−1` and the edges that carry keys: a set joined only by a
-residual would need a nested loop. Its callback is `cost(mask)` in `ordered`, which returns
-`SetEstimates.cost(mask)` and records the set for the report. DPhyp asks it once per connected
-set, never for one relation (which costs 0), and a tree costs the sum over its joins:
+cluster. DPhyp gets the relations `0..n−1`, the edges that carry keys and the one-row edges: a set
+joined only by a residual would need a nested loop. Its callback is `cost(mask)` in `ordered`,
+which returns `SetEstimates.cost(mask)` and records the set for the report. DPhyp asks it once per
+connected set, never for one relation (which costs 0), and a tree costs the sum over its joins:
 
     cost(S)  = rows(S) × width(needed(S))        bytes
     C_out(T) = Σ cost(S) over the joins S of tree T
@@ -158,6 +161,9 @@ set, never for one relation (which costs 0), and a tree costs the sum over its j
   share). A string the plan computed has no known length and counts its offset alone.
 - **Units** are bytes, with no calibration: every term is a join's output, so per-kind weights
   would cancel between two orders.
+- **No cross product of larger relations**: `cost(S)` is infinite where S's key edges do not connect
+  its relations but the one-row ones (`_connected(…, keyed=True)`). No key reads a one-row relation
+  (`assemble`), so the plan's own order is finite: DPhyp picks no infinite one.
 
 ### Where rows come from
 
@@ -167,10 +173,10 @@ set, never for one relation (which costs 0), and a tree costs the sum over its j
   sidecar's (`stats.py`). A filter multiplies rows by its selectivity, pins the NDV of each column
   it restricts and thins the rest by Cardenas (`Estimator._filter`). An aggregate's rows are the
   product of its key NDVs, capped at its input. A memory source is its measured estimate.
-- **A set** is estimated over one canonical split, so it has one estimate however DPhyp reached
-  it. Inner joins only: the highest relation that leaves the rest connected (`_join`). With a
-  non-inner join: the highest relation an edge joins to a set the edges make, else the first two
-  such sets (`_split`), joined as the edge's type has it (`_applied`).
+- **A set** is estimated over one canonical split, so it has one estimate however DPhyp reached it.
+  Inner joins only: the highest relation that leaves the rest connected, a one-row one first
+  (`_join`). With a non-inner join: the highest relation an edge joins to a set the edges make, else
+  the first two such sets (`_split`), joined as the edge's type has it (`_applied`).
 - **Two parts are joined** by `Estimator.equi_join`; `cardinality.typed` applies the join type.
 
 ## Which selectivities enter it
@@ -193,6 +199,7 @@ kept side in a set's. `spread = max(NDV_L, NDV_R, domain, 1)`.
 | matched shares | over the key domain: `m_L = NDV_R / spread × residual`, `m_R = NDV_L / spread × residual` | `Estimator.equi_join` |
 | non-inner types | semi keeps `rows × m` of its side, anti `rows × (1 − m)`; `Left` adds `rows_L × (1 − m_L)`, `Right` `rows_R × (1 − m_R)`, `Full` both; mark keeps every row | `cardinality.typed` |
 | residual of a join in the cluster | `DEFAULT` per residual edge the join applies, its predicate not read | `SetEstimates._join`, `_applied` |
+| one-row edge | 1: `rows(S ∪ {r}) = rows(S) × rows(r)` | `SetEstimates._join` |
 
 ### The budget
 
@@ -205,42 +212,46 @@ oriented again. There is no greedy fallback. Any other refusal raises.
 `join_order.orient`, bottom up over DPhyp's tree after it returns.
 
 - **An inner join** builds the side with the lower `bytes(build) × (1 + copies × batches(probe))`,
-  `copies` = 1. The term no longer prices a copy, since the session builds once; it stays because
-  pricing the build as the session holds it measured worse (tpch q9), and what it should price is
-  #294's question. `bytes` is a relation's rows × its whole row width, or a joined subtree's
-  `cost(S)`. `batches(probe)` (`_fed`) is what the probe emits (`batches`, off its layout) where the
-  join runs on one lane or the probe is a relation already on the join's lanes hashed exactly on its
-  keys (`_hashed_on_keys`); otherwise it is shuffled first, `min(batches × lanes, max(rows, 1))`. A
-  join's output always counts as shuffled, and a join emits one batch per probe batch. A join runs
-  on the lanes the plan's join over the same relations had (`disassembly.planned_lanes`), else on
-  the mode's (`pipeline.MODES`). On a tie DPhyp's left side builds.
-- **A non-inner join** keeps the plan's type and build side (`_plan_builder`): it builds the TES
-  side the plan's join built.
+  `copies` = 1 (why: `design.md`, "Orientation after DPhyp"; #294). `bytes` is a relation's rows ×
+  its whole row width, or a joined subtree's `cost(S)`. `batches(probe)` (`_fed`) is what the probe
+  emits (`batches`, off its layout) where the join runs on one lane or the probe is a relation
+  already on the join's lanes hashed exactly on its keys (`_hashed_on_keys`); otherwise it is
+  shuffled first, `min(batches × lanes, max(rows, 1))`. A join's output always counts as shuffled,
+  and a join emits one batch per probe batch. A join runs on the lanes the plan's hash join over its
+  relations but the one-row ones had (`disassembly.planned_lanes`), else on the mode's
+  (`pipeline.MODES`). On a tie DPhyp's left side builds.
+- **A cross join**, a join only one-row edges cross (`_one_row_builder`), builds its one-row side,
+  DPhyp's left where both are, and is priced on one lane, its probe merged.
+- **A non-inner join** builds the TES side the plan built, so its type stays (`_plan_builder`).
 
 ## Disassembly
 
-`optimizer/disassembly.py`: `disassemble` turns an oriented tree back into `GpuHashJoin`s.
+`optimizer/disassembly.py`: `disassemble` turns an oriented tree back into hash and cross joins.
 
 - **Type** (`join_type_of`): inner, or the edge's non-inner type, mirrored (`conflicts.MIRRORED`)
-  where the kept side probes. Orientation keeps the plan's build side, so the plan's type comes
-  back.
-- **Keys** from every edge between the two sides (`_predicates`); they must agree on
-  `null_equals_null`, and a join with no key is refused. A residual goes on the first join whose
-  sides hold all it reads.
-- **Projection**: what the joins above and the cluster's output need (`_join`).
-- **Wiring** as the translator derives it (`_wired`): each side onto the join's lanes and, past
-  one lane, shuffled onto its keys (`GpuMergePartitions`, then `GpuEmitPartitions`) unless hashed
-  on them already; the build one batch per lane (`GpuCoalesceAllBatches`). A shuffle on keys the
-  plan's null-key filters tested (`MultiJoin.nullable_keys`) goes through that filter again, on
-  the sides `NULL_KEY_DROPPABLE` names for the join type. Past one lane the
-  output is hashed per `_HASHED_BY`, each only where those keys are output: `Inner` on its build
-  keys, else its probe keys; `Left`, `LeftSemi`, `LeftAnti` on the build keys; `Right`,
-  `RightSemi`, `RightAnti` on the probe keys; `Full` on neither.
-- **The root** keeps the plan root's schema, names included. Where a node above reads its hash
-  before the next exchange (`_EXCHANGES`) — a hash join, a final aggregate, an enclosing
-  cluster's join whose keys cover the hash the relation declares, or what consumes a probe plan
-  (`multijoin.clusters`, `_reads_hash`, `_hash_joined_on`, `MultiJoin.hash_read_above`) — a new
-  root on another hash or lane count is shuffled back onto the plan root's.
+  where the kept side probes; orientation keeps the plan's build side, so its type comes back.
+- **Keys** from every edge between the two sides (`_predicates`), one-row edges ignored; they must
+  agree on `null_equals_null`. A join with no key is refused unless only one-row edges cross it. A
+  residual goes on the first join whose sides hold all it reads.
+- **Cross join** (`_cross`), wired as the translator wires one: the build merged onto one lane and
+  made one batch, the probe merged, the output on one lane, `batches=multiple`, hashed on nothing.
+  Both sides holding a relation of more than one row raises.
+- **Projection**: what the joins above and the cluster's output need (`_joined`), either kind.
+- **Wiring** as the translator derives it (`_wired`): each side onto the join's lanes (a hash
+  join's from `planned_lanes`, by mask less the one-row relations) and, past one lane, shuffled
+  onto its keys (`GpuMergePartitions`, then `GpuEmitPartitions`) unless hashed on them already; the
+  build one batch per lane (`GpuCoalesceAllBatches`). A shuffle on keys the plan's null-key filters
+  tested (`MultiJoin.nullable_keys`) goes through that filter again, on the sides
+  `NULL_KEY_DROPPABLE` names for the join type. Past one lane the output is hashed per
+  `_HASHED_BY`, each only where those keys are output: `Inner` on its build keys, else its probe
+  keys; `Left…` on the build keys, `Right…` on the probe keys; `Full` on neither.
+- **The root** keeps the plan root's schema, names included, and one lane where the plan root had
+  one (a `GpuMergePartitions`; tpcds q23 at tp4). Else, where a node above reads its hash before the
+  next exchange (`_EXCHANGES`) — a hash join, a final aggregate, an enclosing cluster's join whose
+  keys cover the hash the relation declares, or what consumes a probe plan (`multijoin.clusters`,
+  `_reads_hash`, `_hash_joined_on`, `MultiJoin.hash_read_above`) — a new root on another hash or
+  lane count is shuffled back onto the plan root's. Limit, in no corpus plan: a cross join ending at
+  the top, no hash read above, leaves the root on fewer lanes than a multi-lane plan root.
 
 ## When a run replans
 
@@ -248,8 +259,8 @@ oriented again. There is no greedy fallback. Any other refusal raises.
 
 - **The event.** `AdaptiveDriver._new_events` raises `BuildDone` once a join's build side has
   emitted on every lane, before the join sets its build: true rows, bytes, key NDV. Every join with
-  a build raises it: hash, nested-loop, cross. `BuildExceeds` exists too; `run_adaptive` sets no
-  caps, so it never fires.
+  a build raises it: hash, nested-loop, cross. `run_adaptive` sets no byte cap, so `BuildExceeds`
+  never fires.
 - **The trigger** (`run_adaptive`'s `stops`, `BuildMiss.q_error`): `q = max(t / e, e / t)`, `t` the
   build's true rows and `e` the estimate of the join's build child under the current plan, every
   memory source so far known, both floored at 1. The run stops where `q > DEFAULT_THRESHOLD`.
@@ -261,10 +272,8 @@ oriented again. There is no greedy fallback. Any other refusal raises.
   measured `GpuMemorySource` named `m<n>`; `join_order.ordered` runs again over the whole plan —
   every cluster, every source known, DPhyp, orientation, disassembly — and a new driver runs it.
   Dynamic filters do not run again; cluster ids are kept.
-- **It ends.** A memory source is estimated at its true size, so a build that misses holds a scan
-  or a join no source covers. The replan puts it under one, and a reorder adds no join, so the
-  scans and joins outside sources fall with every replan: a run replans at most once per scan or
-  join that no memory source covers when it starts.
+- **It ends.** A run replans at most once per scan or join no memory source covers when it starts
+  (`design.md`, "The adaptive run and replan").
 
 ## Constants
 
@@ -276,7 +285,7 @@ oriented again. There is no greedy fallback. Any other refusal raises.
 | `ORDERED_BELOW` | 1.5 | `optimizer/dynamic_filters.py` | `_join_candidates` |
 | fewest row groups | 2 | `optimizer/dynamic_filters.py` | `_join_candidates` |
 | `IN_LIMIT` | 50, DuckDB's `dynamic_or_filter_threshold` | `optimizer/dynamic_filters.py` | `summarize` |
-| `_WIRING` | Coalesce, Emit, Merge | `optimizer/multijoin.py` | `_Assembly._collect` |
+| `_WIRING` | Coalesce, Emit, Merge | `optimizer/multijoin.py` | `_Assembly._collect`, `at_most_one_row` |
 | `_EXCHANGES` | Emit, Merge, MergeSortedPartitions, Unload | `optimizer/multijoin.py` | `_reads_hash` |
 | `MIRRORED` | Inner, Full; Left↔Right, the semi and anti pairs | `optimizer/conflicts.py` | `logical`, `multijoin.is_reorderable`, `disassembly.join_type_of` |
 | `DEFAULT` | 0.2 | `optimizer/estimator.py` | `_Estimate`, `join_order.SetEstimates` |

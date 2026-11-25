@@ -28,6 +28,7 @@
 - [#294 (orientation build term) orientation picks a build by a term that prices nothing the join session does](#t294)
 - [#295 (flat residual estimate) a residual inside a cluster is estimated at a flat 0.2, where the plan's estimator reads its predicate](#t295)
 - [#297 (unpriced null-key filter) a reassembled null-key filter is priced by no order DPhyp compares, so tpcds q24 runs dearer than planned](#t297)
+- [#321 (one-row nested-loop join) a nested-loop join with a one-row side walls the cluster, so its predicate cannot move](#t321)
 
 <a id="t73"></a>
 ### #73 (CBO umbrella) Cost-based optimizer (CBO) umbrella
@@ -62,23 +63,25 @@ duplicate subtree's nodes, an estimate.
 | tpch q15 | 2.03 | `revenue0` ×2 | lineitem load 11.8 MB, filter 5.4 MB, aggregate | 36.1 MB | ≈ 18.6 MB | 25.4 MB |
 | tpcds q2 | 2.53 | `wscs` ×2 | ws ∪ cs load 34.6 MB, ⋈ date_dim 67 MB, project 67 MB | 420 MB | ≈ 210 MB | 209 MB |
 | tpcds q59 | 1.98 | `wss` ×2 | store_sales load 69 MB, ⋈ date_dim 108 MB, project 108 MB | 587 MB | ≈ 293 MB | 347 MB |
-| tpcds q23 | 2.73 | `frequent_ss_items` ×2 | ss ⋈ date_dim ⋈ item 86 MB, project 86 MB, 1.49M-group aggregate on `substr(i_item_desc)` 89 MB → 52 rows | 1.95 GB | — | 818 MB |
+| tpcds q23 | 2.37 | `frequent_ss_items` ×2 | ss ⋈ date_dim ⋈ item 86 MB, project 86 MB, 1.49M-group aggregate on `substr(i_item_desc)` 89 MB → 52 rows | 1.69 GB | ≈ 1.29 GB | 818 MB |
 
 With one copy, q15, q2 and q59 come in at or below DuckDB's cost (≈ 0.75, 1.0, 0.85). In q2
 and q59 the fact table joins only date_dim in each copy, and no dynamic filter narrows the
 fact scan (q59's month filter applies only after the aggregate). DuckDB's dynamic filters
 prune nothing there either.
 
-q23 still costs more with one copy of `frequent_ss_items`, ≈ 1.55 GB, about 1.9× DuckDB. Two
-causes outside this ticket remain:
-- `best_ss_customer` (the corpus's text) has `FROM store_sales, customer, max_store_sales` and
-  `HAVING sum(...) > 0.5 * max(tpcds_cmax)`, so the 1-row `max_store_sales` is crossed in
-  below the group-by, in both engines. Ours crosses it onto the 2.75M store_sales ⋈ customer
-  rows: 88 MB of cross join per copy, 176 MB of `cuda_join_bytes` for the two. DuckDB's join
-  order crosses it onto customer, 100k rows (`CROSS_PRODUCT` 2.4 MB), before the hash join with
-  store_sales. A cross join is a wall to our multi-join (`optimizer.md`, "Walls"), so DPhyp
-  never places it.
-- Projections charged as passthrough: 536 MB in q23. DuckDB streams projections at nothing.
+q23 still costs more with one copy of `frequent_ss_items`, ≈ 1.29 GB, about 1.6× DuckDB. The
+cause outside this ticket is projections charged as passthrough: 406 MB in q23. DuckDB streams
+projections at nothing.
+
+`best_ss_customer` (the corpus's text) has `FROM store_sales, customer, max_store_sales` and
+`HAVING sum(...) > 0.5 * max(tpcds_cmax)`, so the 1-row `max_store_sales` is crossed in below
+the group-by, in both engines. DPhyp places it (#320): onto customer, 100k rows, before the hash
+join with store_sales, as DuckDB's join order does. Each copy costs 129.6 MB less at tp1: its
+cross join's 88 MB became 1.6 MB, −86.4 MB (`cuda_join_bytes` 176 MB to 3.2 MB for the two); a
+66 MB project that only reordered the hash join's columns for it folded into the hash join,
+−66.0 MB; against 22.8 MB more of hash join output and build. At tp4 the build's shuffle adds
+0.8 MB more, 128.8 MB less per copy. The final ratio went from 2.73 to 2.37.
 
 tpcds q14 (1.83) and q31 (1.89) also have duplicated CTEs, but reuse alone does not close
 their gap. The figures below are tp1-rowgroup, the mode their final ratio comes from.
@@ -600,3 +603,34 @@ dearer, ratio 1.009. q54 at tp4 pays 10.8 MB more filter than its plan and stays
 
 Fix: price a reassembled filter in DPhyp's cost, the bytes of each side shuffled on a filtered
 key, or keep the filter where the plan had it.
+
+<a id="t321"></a>
+### #321 (one-row nested-loop join) a nested-loop join with a one-row side walls the cluster, so its predicate cannot move
+DataFusion turns a comparison with a scalar subquery into an inner `GpuNestedLoopJoin` whose
+build is a one-row aggregate. It roots a relation, so its predicate cannot move below the
+cluster beside it. In the corpus a cluster sits beside one only in tpch q22 (tpch q11, tpcds q14
+and q24 join an aggregate).
+
+tpch q22: `c_acctbal > avg(c_acctbal)` sits above `customer ▷ orders` (LeftAnti). At sf1 the anti
+join keeps 14,086 of 42,015 customers and the predicate 6,384 of those (a share of 0.45). Below
+the anti join it would keep about 19k of the 42k and the anti join 6,384: about 25.4k rows of
+join output against 20.5k now, so the plan's order is the cheaper one. A residual in a cluster is
+estimated at a flat 0.2 (#295), and a comparison with a scalar computed at run time is 0.2 even
+when the predicate is read, so DPhyp would move it below.
+
+Fix, after #295 and an estimate of a scalar aggregate's value from statistics: admit an inner
+`GpuNestedLoopJoin` with a one-row side as #320 admits a cross join, its predicate a residual on
+the one-row relation's edge, through conflict detection where the cluster holds a non-inner
+join, and rebuild it as a `GpuNestedLoopJoin`. In `scripts/exec_model/optimizer/` the fix also:
+- lifts the wall where a key or a residual reads a one-row relation (`multijoin.assemble`), and
+  prices and rebuilds such an edge: the nested-loop join carries a residual, which a `GpuCrossJoin`
+  cannot, and the cost, the estimate and orientation take the relation as joined by one-row edges
+  alone (no corpus plan has one);
+- makes one rule of "only one-row edges cross this join", now written three times:
+  `join_order._one_row_builder`, `disassembly._one_row_edges_alone`, `JoinOrder.is_cross_join`;
+- settles `conflicts.joining`, which the first and third read edges by, against
+  `disassembly._across`, which the second does: they differ on a hyperedge split across both sides;
+- reads `Edge.one_row` off the relation, not the edge's shape (no keys, no residual), once a
+  one-row edge carries a residual;
+- meets the budget: a one-row relation makes every set connected, so a cluster past `MAX_PAIRS`
+  keeps the plan's order, where a wall would let DPhyp order the rest.

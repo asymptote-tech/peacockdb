@@ -1,11 +1,12 @@
 """A join order back into an engine plan: DPhyp's tree, oriented, over a MultiJoin's relations, as
-`GpuHashJoin` nodes. Per join, bottom up: its type, keys and residuals from the edges between its
-sides — a non-inner type mirrored where its kept side probes — a residual on the first join that
-has all it reads; a projection of what the joins above and the cluster's output need; and the
-translator's wiring, a side not hashed on its keys shuffled at more than one lane, the build made
-one batch per lane, a join over the plan's relations on the plan's lanes. The root keeps the
-plan root's schema, names included, and its hash where a node above reads it. `design.md`,
-"Disassembly".
+`GpuHashJoin` nodes, and a `GpuCrossJoin` where only one-row edges cross. Per join, bottom up: its
+type, keys and residuals from the edges between its sides — a non-inner type mirrored where its
+kept side probes — a residual on the first join that has all it reads; a projection of what the
+joins above and the cluster's output need; and the translator's wiring, a side not hashed on its
+keys shuffled at more than one lane, the build made one batch per lane, a join over the plan's
+relations but the one-row ones on the plan's lanes, a cross join on one. The root keeps the plan
+root's schema, names included, its lanes where that is one, and its hash where a node above reads
+it. `design.md`, "Disassembly".
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from ..plans.engine_expr import Binary, ColumnRef, Unary, expr_text, parse_colum
 from ..plans.engine_ir import join_type_name
 from ..plans.engine_plan import EngineNode
 from .conflicts import MIRRORED
-from .multijoin import MultiJoin, RelColumn, SidedColumn, clusters, is_reorderable, replaced, sided_columns
+from .multijoin import MultiJoin, RelColumn, SidedColumn, clusters, replaced, sided_columns
 from .report import mask
 
 JoinTree = int | tuple  # a relation's index, or (build tree, probe tree)
@@ -28,9 +29,10 @@ JoinTree = int | tuple  # a relation's index, or (build tree, probe tree)
 def baseline(cluster: MultiJoin) -> JoinTree:
     """The order the plan already has."""
     roots = {id(r.root): i for i, r in enumerate(cluster.relations)}
+    joins = {id(join) for join in cluster.joins}
 
     def tree(node):
-        while id(node) not in roots and not is_reorderable(node):
+        while id(node) not in roots and id(node) not in joins:
             node = node.children[0]
         if id(node) in roots:
             return roots[id(node)]
@@ -49,11 +51,14 @@ def reassembled(plan: EngineNode, lanes: int, order=baseline) -> EngineNode:
 def disassemble(cluster: MultiJoin, tree: JoinTree, lanes: int) -> EngineNode:
     """The plan for `tree`, its root outputting `cluster.output` under the original root's schema.
     Where a hash join or a final aggregate above reads the root's hash before any exchange, a new
-    root joining on other keys is shuffled back onto it; per-lane nodes alone read none."""
+    root joining on other keys is shuffled back onto it; per-lane nodes alone read none. A root the
+    plan had on one lane — a cross join's — comes back onto one."""
     disassembly = _Disassembly(cluster, lanes, planned_lanes(cluster))
     part = disassembly.part(tree, list(cluster.output))
     root = cluster.root
-    if cluster.hash_read_above and int(root.fields["lanes"]) > 1 and "hashed_on" in root.fields:
+    if int(root.fields["lanes"]) == 1:
+        part = disassembly._wired(part, [], 1)
+    elif cluster.hash_read_above and "hashed_on" in root.fields:
         hashed = tuple(c.index for c in parse_columns(root.fields["hashed_on"]))
         if (part.lanes, part.hashed) != (int(root.fields["lanes"]), hashed):
             part = disassembly._wired(part, list(hashed), int(root.fields["lanes"]))
@@ -83,6 +88,8 @@ class _Disassembly:
         build_tree, probe_tree = tree
         build_mask, probe_mask = mask(build_tree), mask(probe_tree)
         join_type, keys, residuals, null_equals_null = self._predicates(build_mask, probe_mask)
+        if not keys and self._one_row_edges_alone(build_mask, probe_mask):
+            return self._cross(build_tree, probe_tree, need)
         if not keys:
             raise ValueError(f"no key joins relations {build_mask:#b} and {probe_mask:#b}: a hash join needs one")
         read = [c for pair in keys for c in pair] + [c.column for r in residuals for c in sided_columns(r)]
@@ -90,7 +97,7 @@ class _Disassembly:
         probe = self.part(probe_tree, _unique([c for c in need + read if 1 << c.relation & probe_mask]))
         build_keys = [build.columns.index(b) for b, _ in keys]
         probe_keys = [probe.columns.index(p) for _, p in keys]
-        lanes = self.planned.get(build_mask | probe_mask, self.mode_lanes)
+        lanes = self.planned.get((build_mask | probe_mask) & ~self.cluster.one_row_relations, self.mode_lanes)
         droppable = (False, False) if null_equals_null else NULL_KEY_DROPPABLE[join_type]
         build = self._wired(build, build_keys, lanes, droppable[0])
         probe = self._wired(probe, probe_keys, lanes, droppable[1])
@@ -98,6 +105,24 @@ class _Disassembly:
             build = self._wrap("GpuCoalesceAllBatches", build, single=True)
         return self._join(_Applied(join_type, build_keys, probe_keys, residuals, null_equals_null),
                           build, probe, keys, need)
+
+    def _one_row_edges_alone(self, build_mask: int, probe_mask: int) -> bool:
+        """Whether one-row edges, and nothing else, join the two sets."""
+        across = list(_across(self.cluster, build_mask, probe_mask))
+        return bool(across) and all(edge.one_row for edge in across)
+
+    def _cross(self, build_tree: JoinTree, probe_tree: JoinTree, need: list[RelColumn]) -> _Part:
+        """A `GpuCrossJoin` wired as the translator wires one: no key to co-locate on, so both
+        sides on one lane, the build one batch."""
+        build_mask, probe_mask = mask(build_tree), mask(probe_tree)
+        if build_mask & ~self.cluster.one_row_relations and probe_mask & ~self.cluster.one_row_relations:
+            raise ValueError(f"only one-row edges join relations {build_mask:#b} and {probe_mask:#b}, "
+                             "both of more than one row: a cross join builds a one-row side")
+        build = self._wired(self.part(build_tree, [c for c in need if 1 << c.relation & build_mask]), [], 1)
+        probe = self._wired(self.part(probe_tree, [c for c in need if 1 << c.relation & probe_mask]), [], 1)
+        if not build.single:
+            build = self._wrap("GpuCoalesceAllBatches", build, single=True)
+        return self._joined("GpuCrossJoin", {}, build, probe, list(build.columns + probe.columns), need, None)
 
     def _relation(self, index: int) -> _Part:
         root = self.cluster.relations[index].root
@@ -159,8 +184,6 @@ class _Disassembly:
     def _join(self, applied: _Applied, build: _Part, probe: _Part, keys, need) -> _Part:
         joined = build.columns + probe.columns
         own = [joined[at] for at in own_output(applied.join_type, len(build.columns), len(probe.columns))]
-        picked = [own.index(c) for c in need]
-        schema = tuple(self._column_schema(c) for c in need)
         fields = {"join_type": join_type_name(applied.join_type),
                   "on": "[" + ", ".join(f"({_ref(build, b)}, {_ref(probe, p)})"
                                         for b, p in zip(applied.build_keys, applied.probe_keys)) + "]"}
@@ -168,9 +191,6 @@ class _Disassembly:
             fields["null_equals_null"] = "true"
         if applied.residuals:
             fields["filter"] = expr_text(_conjunction([self._resided(r, build, probe) for r in applied.residuals]))
-        if picked != list(range(len(own))):
-            names = [self._column_schema(c)[0] for c in own]
-            fields["projection"] = "[" + ", ".join(f"{quoted(names[i])}@{i}" for i in picked) + "]"
         hashed = None
         if build.lanes > 1:
             at = {c: out for out, c in enumerate(need)}
@@ -179,7 +199,18 @@ class _Disassembly:
                 if None not in positions:
                     hashed = tuple(positions)
                     break
-        part = _Part(EngineNode("GpuHashJoin", {}, schema, [build.node, probe.node], mj=self.cluster.mj),
+        return self._joined("GpuHashJoin", fields, build, probe, own, need, hashed)
+
+    def _joined(self, kind: str, fields: dict, build: _Part, probe: _Part, own: list[RelColumn],
+                need: list[RelColumn], hashed) -> _Part:
+        """The join node over the wired sides, on the build's lanes, projecting `own` — the
+        columns it outputs before a projection — to `need`."""
+        picked = [own.index(c) for c in need]
+        if picked != list(range(len(own))):
+            names = [self._column_schema(c)[0] for c in own]
+            fields["projection"] = "[" + ", ".join(f"{quoted(names[i])}@{i}" for i in picked) + "]"
+        schema = tuple(self._column_schema(c) for c in need)
+        part = _Part(EngineNode(kind, {}, schema, [build.node, probe.node], mj=self.cluster.mj),
                      tuple(need), build.lanes, False, hashed)
         fields.update(_layout_fields(part, schema))
         return replace(part, node=replace(part.node, fields=fields))
@@ -236,18 +267,21 @@ def _across(cluster: MultiJoin, build_mask: int, probe_mask: int):
 
 
 def planned_lanes(cluster: MultiJoin) -> dict[int, int]:
-    """The lanes of each join the plan had, by the mask of the relations below it."""
+    """The lanes of each hash join the plan had, by the mask of the relations below it but the
+    one-row ones: a one-row relation does not change a join's lanes, wherever it is crossed in."""
     found = {}
 
     def walk(tree, node):
-        while not is_reorderable(node) and id(node) not in roots:
+        while id(node) not in joins and id(node) not in roots:
             node = node.children[0]
         if isinstance(tree, tuple):
-            found[mask(tree)] = int(node.fields["lanes"])
+            if node.kind == "GpuHashJoin":
+                found[mask(tree) & ~cluster.one_row_relations] = int(node.fields["lanes"])
             walk(tree[0], node.children[0])
             walk(tree[1], node.children[1])
 
     roots = {id(r.root) for r in cluster.relations}
+    joins = {id(join) for join in cluster.joins}
     walk(baseline(cluster), cluster.root)
     return found
 
