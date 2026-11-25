@@ -18,9 +18,13 @@
 - 2026-11-25, to 11:12 MSK, on `e5a2d0d0` (the wall where a key reads the one-row relation):
   q23 alone at all five modes in `test_engine_reassembled.py`, `test_engine_optimized.py` and
   `test_engine_dynamic_filters.py`: 15 passed, 0 failed. Before it, on the same code,
-  `test_ordered_corpus.py` 2 passed and `test_cardinality_corpus.py` 3 passed. `run.py` and the
-  engine files whole ran on `595849d0` and were not run again: no cluster of the goldens with a
-  one-row edge has a key or a residual edge on its one-row relation.
+  `test_ordered_corpus.py` 2 passed and `test_cardinality_corpus.py` 3 passed. `run.py` ran on
+  `595849d0` and was not run again: no cluster of the goldens with a one-row edge has a key or a
+  residual edge on its one-row relation. The engine files whole ran on `595849d0` and again in the
+  next line's run.
+- 2026-11-25, 15:12 to 16:02 MSK, on `91ae0150`: `exec-model-corpus.yml`, run `45611476510`, green:
+  three shards, 130 + 73 + 111 + 111 passed, 0 failed, and the per-call model on the sf40 record.
+  The PR's CI is green on the same commit, run `45575869676`.
 
 ## q23
 
